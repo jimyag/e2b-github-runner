@@ -2,7 +2,7 @@ version: "3"
 
 vars:
   BINARY: runnerd
-  IMAGE: ghcr.io/jimyag/e2b-github-runner
+  IMAGE: ghcr.io/qiniu/ci-runner
   LDFLAGS: "-s -w"
   TEMPLATE_DIR: templates/github-runner-ubuntu-24.04
   QBOX_KODO_TEMPLATE_DIR: templates/qbox-kodo-ubuntu-16.04

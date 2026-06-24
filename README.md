@@ -44,7 +44,7 @@ The container image is file-config only. Mount `runnerd.yaml` and any referenced
 docker run --rm -p 25500:25500 \
   -v "$PWD/runnerd.yaml:/etc/runnerd/runnerd.yaml:ro" \
   -v "$PWD/secrets:/etc/runnerd/secrets:ro" \
-  ghcr.io/jimyag/e2b-github-runner
+  ghcr.io/qiniu/ci-runner
 ```
 
 Open the embedded admin console at `http://127.0.0.1:25500/admin/`. The UI is built from `ui/` with the same React, Vite, Tailwind CSS, shadcn-style components, and theme tokens used by `kubevirt-console`. It stores `ADMIN_TOKEN` in browser local storage and sends it as `Authorization: Bearer $ADMIN_TOKEN` for management API calls.
