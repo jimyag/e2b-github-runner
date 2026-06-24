@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/glebarez/sqlite"
-	"github.com/jimyag/e2b-github-runner/internal/labelutil"
+	"github.com/qiniu/ci-runner/internal/labelutil"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"

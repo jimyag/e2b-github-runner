@@ -22,12 +22,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jimyag/e2b-github-runner/internal/config"
-	"github.com/jimyag/e2b-github-runner/internal/github"
-	"github.com/jimyag/e2b-github-runner/internal/metrics"
-	"github.com/jimyag/e2b-github-runner/internal/redact"
-	"github.com/jimyag/e2b-github-runner/internal/sandboxrunner"
-	"github.com/jimyag/e2b-github-runner/internal/state"
+	"github.com/qiniu/ci-runner/internal/config"
+	"github.com/qiniu/ci-runner/internal/github"
+	"github.com/qiniu/ci-runner/internal/metrics"
+	"github.com/qiniu/ci-runner/internal/redact"
+	"github.com/qiniu/ci-runner/internal/sandboxrunner"
+	"github.com/qiniu/ci-runner/internal/state"
 )
 
 type Server struct {

@@ -1,4 +1,4 @@
-module github.com/jimyag/e2b-github-runner
+module github.com/qiniu/ci-runner
 
 go 1.26.3
 

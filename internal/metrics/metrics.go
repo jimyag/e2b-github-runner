@@ -4,7 +4,7 @@ import (
 	"expvar"
 	"time"
 
-	"github.com/jimyag/e2b-github-runner/internal/state"
+	"github.com/qiniu/ci-runner/internal/state"
 )
 
 var (

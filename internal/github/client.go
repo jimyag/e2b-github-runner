@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/bradleyfalzon/ghinstallation/v2"
-	"github.com/jimyag/e2b-github-runner/internal/labelutil"
-	"github.com/jimyag/e2b-github-runner/internal/metrics"
+	"github.com/qiniu/ci-runner/internal/labelutil"
+	"github.com/qiniu/ci-runner/internal/metrics"
 )
 
 type Client struct {
