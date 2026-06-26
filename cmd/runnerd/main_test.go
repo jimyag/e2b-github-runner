@@ -8,10 +8,10 @@ import (
 
 func TestBootstrapAdminUser(t *testing.T) {
 	store := state.New(t.TempDir())
-	if err := bootstrapAdminUser(store, "github:octocat"); err != nil {
+	if err := bootstrapAdminUser(store, "github:12345"); err != nil {
 		t.Fatal(err)
 	}
-	user, err := store.GetUserByOAuthIdentity("github", "octocat")
+	user, err := store.GetUserByOAuthIdentity("github", "12345")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,10 +22,10 @@ func TestBootstrapAdminUser(t *testing.T) {
 
 func TestBootstrapAdminUserDefaultsToGitHub(t *testing.T) {
 	store := state.New(t.TempDir())
-	if err := bootstrapAdminUser(store, "octocat"); err != nil {
+	if err := bootstrapAdminUser(store, "12345"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.GetUserByOAuthIdentity("github", "octocat"); err != nil {
+	if _, err := store.GetUserByOAuthIdentity("github", "12345"); err != nil {
 		t.Fatal(err)
 	}
 }

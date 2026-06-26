@@ -93,6 +93,7 @@ type profileMatchRequest struct {
 }
 
 type adminSession struct {
+	Subject   string `json:"subject"`
 	Login     string `json:"login"`
 	Role      string `json:"role"`
 	AvatarURL string `json:"avatar_url,omitempty"`
@@ -655,6 +656,7 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 	}
 	dbUser, err := s.store.EnsureUser(state.User{
 		OAuthProvider: "github",
+		OAuthSubject:  user.Subject(),
 		OAuthLogin:    user.Login,
 		Role:          "user",
 	})
@@ -664,6 +666,7 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	session := adminSession{
+		Subject:   user.Subject(),
 		Login:     user.Login,
 		Role:      dbUser.Role,
 		AvatarURL: user.AvatarURL,
@@ -700,8 +703,16 @@ type githubOAuthTokenResponse struct {
 }
 
 type githubOAuthUser struct {
+	ID        int64  `json:"id"`
 	Login     string `json:"login"`
 	AvatarURL string `json:"avatar_url"`
+}
+
+func (u githubOAuthUser) Subject() string {
+	if u.ID <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(u.ID, 10)
 }
 
 func (s *Server) exchangeGitHubOAuthCode(ctx context.Context, code, redirectURL string) (string, error) {
@@ -767,6 +778,9 @@ func (s *Server) fetchGitHubOAuthUser(ctx context.Context, token string) (github
 	}
 	if strings.TrimSpace(user.Login) == "" {
 		return githubOAuthUser{}, fmt.Errorf("github user response missing login")
+	}
+	if user.ID <= 0 {
+		return githubOAuthUser{}, fmt.Errorf("github user response missing id")
 	}
 	return user, nil
 }
@@ -2960,7 +2974,7 @@ func (s *Server) sessionFromRequest(r *http.Request) (adminSession, bool) {
 	if time.Now().Unix() > session.ExpiresAt {
 		return adminSession{}, false
 	}
-	user, err := s.store.GetUserByOAuthIdentity("github", session.Login)
+	user, err := s.store.GetUserByOAuthIdentity("github", session.Subject)
 	if err != nil {
 		return adminSession{}, false
 	}
@@ -2995,8 +3009,8 @@ func (s *Server) decodeAdminSession(value string) (adminSession, error) {
 	if err := json.Unmarshal(payload, &session); err != nil {
 		return adminSession{}, err
 	}
-	if strings.TrimSpace(session.Login) == "" {
-		return adminSession{}, fmt.Errorf("session missing login")
+	if strings.TrimSpace(session.Subject) == "" {
+		return adminSession{}, fmt.Errorf("session missing subject")
 	}
 	if strings.TrimSpace(session.Role) == "" {
 		return adminSession{}, fmt.Errorf("session missing role")

@@ -225,18 +225,18 @@ func TestManagementEndpointsRequireAdminAuth(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/runner_requests", nil)
-	req.AddCookie(testSessionCookie("hubot", "user"))
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected non-admin session to be rejected, got %d", rec.Code)
 	}
 
-	if _, err := store.UpsertUser(state.User{OAuthProvider: "github", OAuthLogin: "hubot", Role: "admin"}); err != nil {
+	if _, err := store.UpsertUser(state.User{OAuthProvider: "github", OAuthSubject: "hubot-id", OAuthLogin: "hubot", Role: "admin"}); err != nil {
 		t.Fatal(err)
 	}
 	req = httptest.NewRequest(http.MethodGet, "/runner_requests", nil)
-	req.AddCookie(testSessionCookie("hubot", "user"))
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -266,7 +266,7 @@ func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 			w.Write([]byte(`{"access_token":"user-token"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/user":
 			gotTokenAuth = r.Header.Get("Authorization")
-			w.Write([]byte(`{"login":"octocat","avatar_url":"https://avatars.example/octocat.png"}`))
+			w.Write([]byte(`{"id":12345,"login":"octocat","avatar_url":"https://avatars.example/octocat.png"}`))
 		default:
 			t.Fatalf("unexpected github oauth request: %s %s", r.Method, r.URL.String())
 		}
@@ -369,7 +369,7 @@ func TestGitHubOAuthLoginCreatesNonAdminUser(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/login/oauth/access_token":
 			w.Write([]byte(`{"access_token":"user-token"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/user":
-			w.Write([]byte(`{"login":"newbie","avatar_url":"https://avatars.example/newbie.png"}`))
+			w.Write([]byte(`{"id":67890,"login":"newbie","avatar_url":"https://avatars.example/newbie.png"}`))
 		default:
 			t.Fatalf("unexpected github oauth request: %s %s", r.Method, r.URL.String())
 		}
@@ -433,7 +433,7 @@ func TestGitHubOAuthLoginCreatesNonAdminUser(t *testing.T) {
 	if session.Role != "user" {
 		t.Fatalf("expected default user role, got %q", session.Role)
 	}
-	dbUser, err := store.GetUserByOAuthIdentity("github", "newbie")
+	dbUser, err := store.GetUserByOAuthIdentity("github", "67890")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1921,10 +1921,10 @@ func newTestServerWithLimit(t *testing.T, store state.Store, ghURL string, fake 
 	}); err != nil {
 		panic(err)
 	}
-	if _, err := store.UpsertUser(state.User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "admin"}); err != nil {
+	if _, err := store.UpsertUser(state.User{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "octocat", Role: "admin"}); err != nil {
 		panic(err)
 	}
-	if _, err := store.UpsertUser(state.User{OAuthProvider: "github", OAuthLogin: "hubot", Role: "user"}); err != nil {
+	if _, err := store.UpsertUser(state.User{OAuthProvider: "github", OAuthSubject: "hubot-id", OAuthLogin: "hubot", Role: "user"}); err != nil {
 		panic(err)
 	}
 	gh := github.NewClient(ghURL, http.DefaultClient)
@@ -1936,12 +1936,13 @@ func newTestServerWithLimit(t *testing.T, store state.Store, ghURL string, fake 
 
 func adminRequest(method, target string, body io.Reader) *http.Request {
 	req := httptest.NewRequest(method, target, body)
-	req.AddCookie(testSessionCookie("octocat", "admin"))
+	req.AddCookie(testSessionCookie("12345", "octocat", "admin"))
 	return req
 }
 
-func testSessionCookie(login, role string) *http.Cookie {
+func testSessionCookie(subject, login, role string) *http.Cookie {
 	payload, _ := json.Marshal(adminSession{
+		Subject:   subject,
 		Login:     login,
 		Role:      role,
 		ExpiresAt: time.Now().Add(time.Hour).Unix(),

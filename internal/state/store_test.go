@@ -158,23 +158,23 @@ func TestListFailedWorkflowJobStates(t *testing.T) {
 
 func TestUpsertUserMaintainsRoleByOAuthIdentity(t *testing.T) {
 	store := New(t.TempDir())
-	user, err := store.UpsertUser(User{OAuthProvider: "GitHub", OAuthLogin: "OctoCat", Role: "ADMIN"})
+	user, err := store.UpsertUser(User{OAuthProvider: "GitHub", OAuthSubject: "12345", OAuthLogin: "OctoCat", Role: "ADMIN"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if user.OAuthProvider != "github" || user.OAuthLogin != "octocat" || user.Role != "admin" {
+	if user.OAuthProvider != "github" || user.OAuthSubject != "12345" || user.OAuthLogin != "octocat" || user.Role != "admin" {
 		t.Fatalf("unexpected created user: %#v", user)
 	}
 
-	updated, err := store.UpsertUser(User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "user"})
+	updated, err := store.UpsertUser(User{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "renamed", Role: "user"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.ID != user.ID || updated.Role != "user" {
+	if updated.ID != user.ID || updated.OAuthLogin != "renamed" || updated.Role != "user" {
 		t.Fatalf("unexpected updated user: %#v first=%#v", updated, user)
 	}
 
-	got, err := store.GetUserByOAuthIdentity("GITHUB", "OCTOCAT")
+	got, err := store.GetUserByOAuthIdentity("GITHUB", "12345")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,18 +182,26 @@ func TestUpsertUserMaintainsRoleByOAuthIdentity(t *testing.T) {
 		t.Fatalf("unexpected fetched user: %#v", got)
 	}
 
-	gitlab, err := store.UpsertUser(User{OAuthProvider: "gitlab", OAuthLogin: "octocat", Role: "admin"})
+	gitlab, err := store.UpsertUser(User{OAuthProvider: "gitlab", OAuthSubject: "12345", OAuthLogin: "octocat", Role: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if gitlab.ID == user.ID {
 		t.Fatalf("expected provider to separate oauth identities: github=%#v gitlab=%#v", user, gitlab)
 	}
+
+	reusedLogin, err := store.UpsertUser(User{OAuthProvider: "github", OAuthSubject: "67890", OAuthLogin: "renamed", Role: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reusedLogin.ID == user.ID {
+		t.Fatalf("expected stable subject to separate reused login identities: first=%#v reused=%#v", user, reusedLogin)
+	}
 }
 
 func TestEnsureUserCreatesDefaultWithoutOverwritingExistingRole(t *testing.T) {
 	store := New(t.TempDir())
-	created, err := store.EnsureUser(User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "user"})
+	created, err := store.EnsureUser(User{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "octocat", Role: "user"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,21 +209,21 @@ func TestEnsureUserCreatesDefaultWithoutOverwritingExistingRole(t *testing.T) {
 		t.Fatalf("unexpected created role: %#v", created)
 	}
 
-	if _, err := store.UpsertUser(User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "admin"}); err != nil {
+	if _, err := store.UpsertUser(User{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "octocat", Role: "admin"}); err != nil {
 		t.Fatal(err)
 	}
-	ensured, err := store.EnsureUser(User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "user"})
+	ensured, err := store.EnsureUser(User{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "renamed", Role: "user"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ensured.ID != created.ID || ensured.Role != "admin" {
+	if ensured.ID != created.ID || ensured.OAuthLogin != "renamed" || ensured.Role != "admin" {
 		t.Fatalf("ensure should preserve existing admin role, got %#v created=%#v", ensured, created)
 	}
 }
 
 func TestUpsertUserRejectsInvalidRole(t *testing.T) {
 	store := New(t.TempDir())
-	if _, err := store.UpsertUser(User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "owner"}); err == nil {
+	if _, err := store.UpsertUser(User{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "octocat", Role: "owner"}); err == nil {
 		t.Fatal("expected invalid role error")
 	}
 }

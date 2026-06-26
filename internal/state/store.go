@@ -144,6 +144,7 @@ type AuditEvent struct {
 type User struct {
 	ID            int64     `json:"id"`
 	OAuthProvider string    `json:"oauth_provider"`
+	OAuthSubject  string    `json:"oauth_subject"`
 	OAuthLogin    string    `json:"oauth_login"`
 	Role          string    `json:"role"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -183,7 +184,7 @@ type Store interface {
 	UpsertRepositoryPolicy(policy RepositoryPolicy) (RepositoryPolicy, error)
 	DeleteRepositoryPolicy(id int64) error
 	MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error)
-	GetUserByOAuthIdentity(provider, login string) (User, error)
+	GetUserByOAuthIdentity(provider, subject string) (User, error)
 	EnsureUser(user User) (User, error)
 	UpsertUser(user User) (User, error)
 	AppendAuditEvent(event AuditEvent) (AuditEvent, error)
@@ -314,6 +315,7 @@ func (auditEventRecord) TableName() string { return "audit_events" }
 type userRecord struct {
 	ID            int64     `gorm:"column:id;primaryKey;autoIncrement"`
 	OAuthProvider string    `gorm:"column:oauth_provider"`
+	OAuthSubject  string    `gorm:"column:oauth_subject"`
 	OAuthLogin    string    `gorm:"column:oauth_login"`
 	Role          string    `gorm:"column:role"`
 	CreatedAt     time.Time `gorm:"column:created_at"`
@@ -1232,18 +1234,18 @@ func (s *DBStore) MatchProfile(repositoryFullName string, labels []string) (Prof
 	return match, nil
 }
 
-func (s *DBStore) GetUserByOAuthIdentity(provider, login string) (User, error) {
+func (s *DBStore) GetUserByOAuthIdentity(provider, subject string) (User, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {
 		return User{}, err
 	}
 	provider = normalizeOAuthProvider(provider)
-	login = normalizeOAuthLogin(login)
-	if provider == "" || login == "" {
+	subject = normalizeOAuthSubject(subject)
+	if provider == "" || subject == "" {
 		return User{}, ErrNotFound
 	}
 	var record userRecord
-	if err := db.First(&record, "oauth_provider = ? AND oauth_login = ?", provider, login).Error; err != nil {
+	if err := db.First(&record, "oauth_provider = ? AND oauth_subject = ?", provider, subject).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return User{}, ErrNotFound
 		}
@@ -1266,9 +1268,13 @@ func (s *DBStore) saveUser(user User, updateExisting bool) (User, error) {
 		return User{}, err
 	}
 	provider := normalizeOAuthProvider(user.OAuthProvider)
+	subject := normalizeOAuthSubject(user.OAuthSubject)
 	login := normalizeOAuthLogin(user.OAuthLogin)
 	if provider == "" {
 		return User{}, fmt.Errorf("oauth_provider is required")
+	}
+	if subject == "" {
+		return User{}, fmt.Errorf("oauth_subject is required")
 	}
 	if login == "" {
 		return User{}, fmt.Errorf("oauth_login is required")
@@ -1280,6 +1286,7 @@ func (s *DBStore) saveUser(user User, updateExisting bool) (User, error) {
 	now := time.Now().UTC()
 	record := userRecord{
 		OAuthProvider: provider,
+		OAuthSubject:  subject,
 		OAuthLogin:    login,
 		Role:          role,
 		CreatedAt:     user.CreatedAt,
@@ -1289,20 +1296,24 @@ func (s *DBStore) saveUser(user User, updateExisting bool) (User, error) {
 		record.CreatedAt = now
 	}
 	onConflict := clause.OnConflict{
-		Columns: []clause.Column{{Name: "oauth_provider"}, {Name: "oauth_login"}},
+		Columns: []clause.Column{{Name: "oauth_provider"}, {Name: "oauth_subject"}},
 	}
 	if updateExisting {
 		onConflict.DoUpdates = clause.Assignments(map[string]any{
-			"role":       record.Role,
-			"updated_at": record.UpdatedAt,
+			"oauth_login": record.OAuthLogin,
+			"role":        record.Role,
+			"updated_at":  record.UpdatedAt,
 		})
 	} else {
-		onConflict.DoNothing = true
+		onConflict.DoUpdates = clause.Assignments(map[string]any{
+			"oauth_login": record.OAuthLogin,
+			"updated_at":  record.UpdatedAt,
+		})
 	}
 	if err := db.Clauses(onConflict).Create(&record).Error; err != nil {
 		return User{}, err
 	}
-	return s.GetUserByOAuthIdentity(provider, login)
+	return s.GetUserByOAuthIdentity(provider, subject)
 }
 
 func (s *DBStore) AppendAuditEvent(event AuditEvent) (AuditEvent, error) {
@@ -1486,10 +1497,21 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 			return err
 		}
 	}
+	if db.Migrator().HasTable(&userRecord{}) && !db.Migrator().HasColumn(&userRecord{}, "oauth_subject") {
+		if err := db.Exec(`ALTER TABLE users ADD COLUMN oauth_subject TEXT NOT NULL DEFAULT ''`).Error; err != nil {
+			return err
+		}
+		if err := db.Exec(`UPDATE users SET oauth_subject = oauth_login WHERE oauth_subject = ''`).Error; err != nil {
+			return err
+		}
+	}
 	if err := db.Exec(`DROP INDEX IF EXISTS idx_users_oauth_login;`).Error; err != nil {
 		return err
 	}
-	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_identity ON users(oauth_provider, oauth_login);`).Error; err != nil {
+	if err := db.Exec(`DROP INDEX IF EXISTS idx_users_oauth_identity;`).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_identity ON users(oauth_provider, oauth_subject);`).Error; err != nil {
 		return err
 	}
 	return nil
@@ -1821,6 +1843,10 @@ func normalizeOAuthProvider(provider string) string {
 	return strings.ToLower(strings.TrimSpace(provider))
 }
 
+func normalizeOAuthSubject(subject string) string {
+	return strings.TrimSpace(subject)
+}
+
 func normalizeOAuthLogin(login string) string {
 	return strings.ToLower(strings.TrimSpace(login))
 }
@@ -1927,6 +1953,7 @@ var sqliteMigrations = []string{
 	`CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		oauth_provider TEXT NOT NULL,
+		oauth_subject TEXT NOT NULL,
 		oauth_login TEXT NOT NULL,
 		role TEXT NOT NULL,
 		created_at TIMESTAMP NOT NULL,
@@ -1940,7 +1967,7 @@ var sqliteMigrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_runner_group_specs_spec ON runner_group_specs(spec_name);`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_repository_policies_repository_profile ON repository_policies(repository_full_name, profile_name) WHERE profile_name <> '';`,
 	`CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_identity ON users(oauth_provider, oauth_login);`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_identity ON users(oauth_provider, oauth_subject);`,
 }
 
 var postgresMigrations = []string{
@@ -2035,6 +2062,7 @@ var postgresMigrations = []string{
 	`CREATE TABLE IF NOT EXISTS users (
 		id BIGSERIAL PRIMARY KEY,
 		oauth_provider TEXT NOT NULL,
+		oauth_subject TEXT NOT NULL,
 		oauth_login TEXT NOT NULL,
 		role TEXT NOT NULL,
 		created_at TIMESTAMP NOT NULL,
@@ -2048,5 +2076,5 @@ var postgresMigrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_runner_group_specs_spec ON runner_group_specs(spec_name);`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_repository_policies_repository_profile ON repository_policies(repository_full_name, profile_name) WHERE profile_name <> '';`,
 	`CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_identity ON users(oauth_provider, oauth_login);`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_identity ON users(oauth_provider, oauth_subject);`,
 }

@@ -21,7 +21,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "runnerd.yaml", "path to runnerd config file")
-	bootstrapAdmin := flag.String("bootstrap-admin", "", "bootstrap an admin user as provider:login, for example github:octocat")
+	bootstrapAdmin := flag.String("bootstrap-admin", "", "bootstrap an admin user as provider:subject, for example github:12345678")
 	flag.Parse()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg, err := config.Load(*configPath)
@@ -99,19 +99,20 @@ func bootstrapAdminUser(store state.Store, identity string) error {
 	if identity == "" {
 		return nil
 	}
-	provider, login, ok := strings.Cut(identity, ":")
+	provider, subject, ok := strings.Cut(identity, ":")
 	if !ok {
 		provider = "github"
-		login = identity
+		subject = identity
 	}
 	provider = strings.TrimSpace(provider)
-	login = strings.TrimSpace(login)
-	if provider == "" || login == "" {
-		return fmt.Errorf("expected provider:login")
+	subject = strings.TrimSpace(subject)
+	if provider == "" || subject == "" {
+		return fmt.Errorf("expected provider:subject")
 	}
 	_, err := store.UpsertUser(state.User{
 		OAuthProvider: provider,
-		OAuthLogin:    login,
+		OAuthSubject:  subject,
+		OAuthLogin:    subject,
 		Role:          "admin",
 	})
 	return err
