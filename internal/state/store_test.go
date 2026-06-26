@@ -191,6 +191,28 @@ func TestUpsertUserMaintainsRoleByOAuthIdentity(t *testing.T) {
 	}
 }
 
+func TestEnsureUserCreatesDefaultWithoutOverwritingExistingRole(t *testing.T) {
+	store := New(t.TempDir())
+	created, err := store.EnsureUser(User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Role != "user" {
+		t.Fatalf("unexpected created role: %#v", created)
+	}
+
+	if _, err := store.UpsertUser(User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	ensured, err := store.EnsureUser(User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ensured.ID != created.ID || ensured.Role != "admin" {
+		t.Fatalf("ensure should preserve existing admin role, got %#v created=%#v", ensured, created)
+	}
+}
+
 func TestUpsertUserRejectsInvalidRole(t *testing.T) {
 	store := New(t.TempDir())
 	if _, err := store.UpsertUser(User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "owner"}); err == nil {

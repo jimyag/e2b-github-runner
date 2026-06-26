@@ -632,10 +632,10 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusUnauthorized, "github oauth rejected: "+problem)
 		return
 	}
-	state := r.URL.Query().Get("state")
+	oauthState := r.URL.Query().Get("state")
 	code := r.URL.Query().Get("code")
 	cookie, err := r.Cookie(oauthStateCookieName)
-	if err != nil || state == "" || code == "" || subtle.ConstantTimeCompare([]byte(state), []byte(cookie.Value)) != 1 {
+	if err != nil || oauthState == "" || code == "" || subtle.ConstantTimeCompare([]byte(oauthState), []byte(cookie.Value)) != 1 {
 		writeError(w, http.StatusUnauthorized, "invalid github oauth state")
 		return
 	}
@@ -653,10 +653,14 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusUnauthorized, "github oauth user fetch failed")
 		return
 	}
-	dbUser, err := s.store.GetUserByOAuthIdentity("github", user.Login)
+	dbUser, err := s.store.EnsureUser(state.User{
+		OAuthProvider: "github",
+		OAuthLogin:    user.Login,
+		Role:          "user",
+	})
 	if err != nil {
-		s.logger.Warn("github oauth user rejected", "login", user.Login)
-		writeError(w, http.StatusForbidden, "github user is not allowed")
+		s.logger.Warn("github oauth user save failed", "login", user.Login, "error", err)
+		writeError(w, http.StatusInternalServerError, "save github oauth user")
 		return
 	}
 	session := adminSession{

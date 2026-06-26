@@ -184,6 +184,7 @@ type Store interface {
 	DeleteRepositoryPolicy(id int64) error
 	MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error)
 	GetUserByOAuthIdentity(provider, login string) (User, error)
+	EnsureUser(user User) (User, error)
 	UpsertUser(user User) (User, error)
 	AppendAuditEvent(event AuditEvent) (AuditEvent, error)
 	ListAuditEvents(limit int) ([]AuditEvent, error)
@@ -1252,6 +1253,14 @@ func (s *DBStore) GetUserByOAuthIdentity(provider, login string) (User, error) {
 }
 
 func (s *DBStore) UpsertUser(user User) (User, error) {
+	return s.saveUser(user, true)
+}
+
+func (s *DBStore) EnsureUser(user User) (User, error) {
+	return s.saveUser(user, false)
+}
+
+func (s *DBStore) saveUser(user User, updateExisting bool) (User, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {
 		return User{}, err
@@ -1279,13 +1288,18 @@ func (s *DBStore) UpsertUser(user User) (User, error) {
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = now
 	}
-	if err := db.Clauses(clause.OnConflict{
+	onConflict := clause.OnConflict{
 		Columns: []clause.Column{{Name: "oauth_provider"}, {Name: "oauth_login"}},
-		DoUpdates: clause.Assignments(map[string]any{
+	}
+	if updateExisting {
+		onConflict.DoUpdates = clause.Assignments(map[string]any{
 			"role":       record.Role,
 			"updated_at": record.UpdatedAt,
-		}),
-	}).Create(&record).Error; err != nil {
+		})
+	} else {
+		onConflict.DoNothing = true
+	}
+	if err := db.Clauses(onConflict).Create(&record).Error; err != nil {
 		return User{}, err
 	}
 	return s.GetUserByOAuthIdentity(provider, login)

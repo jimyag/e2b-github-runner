@@ -350,6 +350,101 @@ func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 	}
 }
 
+func TestGitHubOAuthLoginCreatesNonAdminUser(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/login/oauth/access_token":
+			w.Write([]byte(`{"access_token":"user-token"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/user":
+			w.Write([]byte(`{"login":"newbie","avatar_url":"https://avatars.example/newbie.png"}`))
+		default:
+			t.Fatalf("unexpected github oauth request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer ghServer.Close()
+
+	oldAuthorizeURL := githubOAuthAuthorizeURL
+	oldTokenURL := githubOAuthTokenURL
+	githubOAuthAuthorizeURL = "https://github.example/login/oauth/authorize"
+	githubOAuthTokenURL = ghServer.URL + "/login/oauth/access_token"
+	defer func() {
+		githubOAuthAuthorizeURL = oldAuthorizeURL
+		githubOAuthTokenURL = oldTokenURL
+	}()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	srv.cfg.GitHubOAuthClientID = "Iv1.test"
+	srv.cfg.GitHubOAuthClientSecret = "client-secret"
+	srv.cfg.GitHubOAuthSessionTTL = time.Hour
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/login", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected login redirect, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var stateCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == oauthStateCookieName {
+			stateCookie = cookie
+			break
+		}
+	}
+	if stateCookie == nil || stateCookie.Value == "" {
+		t.Fatal("expected oauth state cookie")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=oauth-code&state="+stateCookie.Value, nil)
+	req.AddCookie(stateCookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected callback redirect, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var sessionCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == adminSessionCookieName {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil || sessionCookie.Value == "" {
+		t.Fatal("expected session cookie")
+	}
+	session, err := srv.decodeAdminSession(sessionCookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Role != "user" {
+		t.Fatalf("expected default user role, got %q", session.Role)
+	}
+	dbUser, err := store.GetUserByOAuthIdentity("github", "newbie")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dbUser.Role != "user" {
+		t.Fatalf("expected stored user role, got %#v", dbUser)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/runner_requests", nil)
+	req.AddCookie(sessionCookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected non-admin oauth session to be rejected, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/auth/session", nil)
+	req.AddCookie(sessionCookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"role":"user"`) {
+		t.Fatalf("expected user session response, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestListRunnerRequestsIsPaginated(t *testing.T) {
 	store := state.New(t.TempDir())
 	for i := 0; i < 105; i++ {
