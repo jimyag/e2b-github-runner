@@ -148,6 +148,7 @@ type AuthSession = {
   authenticated: boolean
   oauth_enabled: boolean
   login?: string
+  role?: string
   avatar_url?: string
   expires_at?: string
 }
@@ -278,7 +279,7 @@ function App() {
     [runnerRepositoryFilter, runnerSpecFilter, runnerStatusFilter, runners]
   )
 
-  const hasAccess = authSession.authenticated
+  const hasAccess = authSession.authenticated && authSession.role === "admin"
 
   const groupNamesForSpec = useCallback(
     (specName: string) =>
@@ -307,7 +308,7 @@ function App() {
       const headers = new Headers(options.headers)
       const response = await fetch(url, { ...options, headers, credentials: "same-origin" })
       if (response.status === 401) {
-        setAuthSession((current) => ({ ...current, authenticated: false, login: undefined, avatar_url: undefined, expires_at: undefined }))
+        setAuthSession((current) => ({ ...current, authenticated: false, login: undefined, role: undefined, avatar_url: undefined, expires_at: undefined }))
         setConnected(false)
         throw new Error("Admin session expired")
       }
@@ -429,7 +430,7 @@ function App() {
 
   const signOut = () => {
     void fetch("/auth/logout", { method: "POST", credentials: "same-origin" }).finally(() => {
-      setAuthSession((current) => ({ ...current, authenticated: false, login: undefined, avatar_url: undefined, expires_at: undefined }))
+      setAuthSession((current) => ({ ...current, authenticated: false, login: undefined, role: undefined, avatar_url: undefined, expires_at: undefined }))
     })
     setRunners([])
     setRunnerSpecs([])
@@ -750,6 +751,8 @@ function App() {
       <>
         <LoginPage
           oauthEnabled={authSession.oauth_enabled}
+          currentLogin={authSession.login}
+          currentRole={authSession.role}
         />
         <Toaster richColors />
       </>
@@ -1813,8 +1816,12 @@ function App() {
 
 function LoginPage({
   oauthEnabled,
+  currentLogin,
+  currentRole,
 }: {
   oauthEnabled: boolean
+  currentLogin?: string
+  currentRole?: string
 }) {
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -1852,6 +1859,11 @@ function LoginPage({
                 <CardDescription>Use your allowed GitHub account to access runnerd.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
+                {currentLogin && currentRole !== "admin" ? (
+                  <div className="rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
+                    @{currentLogin} is signed in as {currentRole || "user"} and does not have admin access.
+                  </div>
+                ) : null}
                 {oauthEnabled ? (
                   <Button
                     type="button"

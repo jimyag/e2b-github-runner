@@ -156,6 +156,48 @@ func TestListFailedWorkflowJobStates(t *testing.T) {
 	}
 }
 
+func TestUpsertUserMaintainsRoleByOAuthIdentity(t *testing.T) {
+	store := New(t.TempDir())
+	user, err := store.UpsertUser(User{OAuthProvider: "GitHub", OAuthLogin: "OctoCat", Role: "ADMIN"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.OAuthProvider != "github" || user.OAuthLogin != "octocat" || user.Role != "admin" {
+		t.Fatalf("unexpected created user: %#v", user)
+	}
+
+	updated, err := store.UpsertUser(User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "user"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != user.ID || updated.Role != "user" {
+		t.Fatalf("unexpected updated user: %#v first=%#v", updated, user)
+	}
+
+	got, err := store.GetUserByOAuthIdentity("GITHUB", "OCTOCAT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != user.ID || got.Role != "user" {
+		t.Fatalf("unexpected fetched user: %#v", got)
+	}
+
+	gitlab, err := store.UpsertUser(User{OAuthProvider: "gitlab", OAuthLogin: "octocat", Role: "admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gitlab.ID == user.ID {
+		t.Fatalf("expected provider to separate oauth identities: github=%#v gitlab=%#v", user, gitlab)
+	}
+}
+
+func TestUpsertUserRejectsInvalidRole(t *testing.T) {
+	store := New(t.TempDir())
+	if _, err := store.UpsertUser(User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "owner"}); err == nil {
+		t.Fatal("expected invalid role error")
+	}
+}
+
 func TestWriteStateUsesVersionCAS(t *testing.T) {
 	store := New(t.TempDir())
 	_, st, err := store.CreateRequest(RunnerRequest{

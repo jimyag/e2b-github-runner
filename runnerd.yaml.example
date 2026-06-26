@@ -36,8 +36,6 @@ github:
     client_secret: your-github-app-client-secret
     # Optional when runnerd can infer the public URL from the request.
     redirect_url: https://runner.example.com/auth/github/callback
-    allowed_users:
-      - your-github-login
     session_ttl_hours: 12
   # Optional repository allowlist. Empty means all repositories that installed the App are allowed.
   # allowed_repositories:

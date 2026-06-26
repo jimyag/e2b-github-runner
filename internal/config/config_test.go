@@ -32,8 +32,6 @@ github:
   oauth:
     client_id: Iv1.test
     client_secret: secret
-    allowed_users:
-      - octocat
 worker:
   max_concurrent_runners: 5
 `), 0o644); err != nil {
@@ -87,8 +85,6 @@ github:
   oauth:
     client_id: Iv1.test
     client_secret: secret
-    allowed_users:
-      - octocat
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +122,6 @@ github:
     client_id: Iv1.test
     client_secret: secret
     redirect_url: https://runner.example.com/auth/github/callback
-    allowed_users:
-      - octocat
     session_ttl_hours: 24
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -142,9 +136,6 @@ github:
 	}
 	if cfg.GitHubOAuthRedirectURL != "https://runner.example.com/auth/github/callback" {
 		t.Fatalf("unexpected redirect url: %s", cfg.GitHubOAuthRedirectURL)
-	}
-	if !cfg.GitHubOAuthUserAllowed("OctoCat") || cfg.GitHubOAuthUserAllowed("other") {
-		t.Fatalf("unexpected oauth allowed user behavior: %#v", cfg.GitHubOAuthAllowedUsers)
 	}
 }
 
@@ -175,7 +166,7 @@ github:
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
-	if !strings.Contains(err.Error(), "github.oauth.client_secret") || !strings.Contains(err.Error(), "github.oauth.allowed_users") {
+	if !strings.Contains(err.Error(), "github.oauth.client_secret") {
 		t.Fatalf("expected oauth missing error, got %v", err)
 	}
 }
@@ -203,7 +194,7 @@ github:
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
-	for _, want := range []string{"github.oauth.client_id", "github.oauth.client_secret", "github.oauth.allowed_users"} {
+	for _, want := range []string{"github.oauth.client_id", "github.oauth.client_secret"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected oauth missing error to mention %s, got %v", want, err)
 		}
@@ -232,8 +223,6 @@ github:
   oauth:
     client_id: Iv1.test
     client_secret: secret
-    allowed_users:
-      - octocat
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -269,8 +258,6 @@ github:
   oauth:
     client_id: Iv1.test
     client_secret: secret
-    allowed_users:
-      - octocat
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -330,8 +317,6 @@ github:
   oauth:
     client_id: Iv1.test
     client_secret: secret
-    allowed_users:
-      - octocat
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -365,8 +350,6 @@ github:
   oauth:
     client_id: Iv1.test
     client_secret: secret
-    allowed_users:
-      - octocat
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}

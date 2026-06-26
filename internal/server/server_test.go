@@ -224,6 +224,14 @@ func TestManagementEndpointsRequireAdminAuth(t *testing.T) {
 		t.Fatalf("expected wrong auth to be rejected, got %d", rec.Code)
 	}
 
+	req = httptest.NewRequest(http.MethodGet, "/runner_requests", nil)
+	req.AddCookie(testSessionCookie("hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected non-admin session to be rejected, got %d", rec.Code)
+	}
+
 	req = adminRequest(http.MethodGet, "/runner_requests", nil)
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -267,7 +275,6 @@ func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
 	srv.cfg.GitHubOAuthClientID = "Iv1.test"
 	srv.cfg.GitHubOAuthClientSecret = "client-secret"
-	srv.cfg.GitHubOAuthAllowedUsers = []string{"octocat"}
 	srv.cfg.GitHubOAuthSessionTTL = time.Hour
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
@@ -318,6 +325,13 @@ func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 	if sessionCookie == nil || sessionCookie.Value == "" {
 		t.Fatal("expected admin session cookie")
 	}
+	session, err := srv.decodeAdminSession(sessionCookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Role != "admin" {
+		t.Fatalf("expected admin session role, got %q", session.Role)
+	}
 
 	req = httptest.NewRequest(http.MethodGet, "/runner_requests", nil)
 	req.AddCookie(sessionCookie)
@@ -325,6 +339,14 @@ func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected oauth session to authorize admin API, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/auth/session", nil)
+	req.AddCookie(sessionCookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"role":"admin"`) {
+		t.Fatalf("expected session role response, status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1736,7 +1758,6 @@ func newTestServerWithLimit(t *testing.T, store state.Store, ghURL string, fake 
 		GitHubWebhookSecret:     "secret",
 		GitHubOAuthClientID:     "Iv1.test",
 		GitHubOAuthClientSecret: "oauth-secret",
-		GitHubOAuthAllowedUsers: []string{"octocat"},
 		GitHubOAuthSessionTTL:   time.Hour,
 		SandboxTimeout:          time.Hour,
 		SandboxCreateTimeout:    time.Second,
@@ -1765,6 +1786,12 @@ func newTestServerWithLimit(t *testing.T, store state.Store, ghURL string, fake 
 	}); err != nil {
 		panic(err)
 	}
+	if _, err := store.UpsertUser(state.User{OAuthProvider: "github", OAuthLogin: "octocat", Role: "admin"}); err != nil {
+		panic(err)
+	}
+	if _, err := store.UpsertUser(state.User{OAuthProvider: "github", OAuthLogin: "hubot", Role: "user"}); err != nil {
+		panic(err)
+	}
 	gh := github.NewClient(ghURL, http.DefaultClient)
 	srv := New(cfg, store, gh, fake, nil)
 	srv.Start()
@@ -1774,13 +1801,14 @@ func newTestServerWithLimit(t *testing.T, store state.Store, ghURL string, fake 
 
 func adminRequest(method, target string, body io.Reader) *http.Request {
 	req := httptest.NewRequest(method, target, body)
-	req.AddCookie(testAdminSessionCookie("octocat"))
+	req.AddCookie(testSessionCookie("octocat", "admin"))
 	return req
 }
 
-func testAdminSessionCookie(login string) *http.Cookie {
+func testSessionCookie(login, role string) *http.Cookie {
 	payload, _ := json.Marshal(adminSession{
 		Login:     login,
+		Role:      role,
 		ExpiresAt: time.Now().Add(time.Hour).Unix(),
 	})
 	payloadValue := base64.RawURLEncoding.EncodeToString(payload)

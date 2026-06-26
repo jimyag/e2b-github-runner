@@ -26,7 +26,7 @@ GitHub Enterprise Server is not currently supported; configure a GitHub.com App 
 Configure exactly one GitHub auth method: `github.app`, `github.token`, or `github.basic_auth`. For GitHub App auth, `github.app.installation_id` is optional. When it is omitted, runnerd resolves the installation from each job repository and caches installation transports, allowing one GitHub App to serve multiple installed accounts.
 `github.allowed_repositories` is an optional allowlist of `owner/repo` or `owner/*` patterns. Empty means all repositories that can deliver valid webhooks and match runner labels/policies are allowed.
 
-`github.oauth` enables GitHub App OAuth login for the embedded admin console. Use the GitHub App's Client ID and Client secret, configure the app callback URL as `/auth/github/callback` on your runnerd origin, and list allowed GitHub usernames in `github.oauth.allowed_users`. OAuth sessions are stored as signed HttpOnly cookies.
+`github.oauth` enables GitHub App OAuth login for the embedded admin console. Use the GitHub App's Client ID and Client secret, and configure the app callback URL as `/auth/github/callback` on your runnerd origin. Users and roles are maintained in the database by OAuth provider/login; only users with `role: admin` can access the admin console and management API. OAuth sessions are stored as signed HttpOnly cookies.
 
 `/webhooks/github` uses GitHub HMAC signature verification. The manual management API under `/runner_requests` requires a valid GitHub OAuth admin session cookie.
 

@@ -140,6 +140,16 @@ type AuditEvent struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// User represents a platform user authenticated through an OAuth provider.
+type User struct {
+	ID            int64     `json:"id"`
+	OAuthProvider string    `json:"oauth_provider"`
+	OAuthLogin    string    `json:"oauth_login"`
+	Role          string    `json:"role"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 type Store interface {
 	Ensure() error
 	CreateRequest(req RunnerRequest, payload []byte) (bool, RunnerState, error)
@@ -173,6 +183,8 @@ type Store interface {
 	UpsertRepositoryPolicy(policy RepositoryPolicy) (RepositoryPolicy, error)
 	DeleteRepositoryPolicy(id int64) error
 	MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error)
+	GetUserByOAuthIdentity(provider, login string) (User, error)
+	UpsertUser(user User) (User, error)
 	AppendAuditEvent(event AuditEvent) (AuditEvent, error)
 	ListAuditEvents(limit int) ([]AuditEvent, error)
 }
@@ -297,6 +309,17 @@ type auditEventRecord struct {
 }
 
 func (auditEventRecord) TableName() string { return "audit_events" }
+
+type userRecord struct {
+	ID            int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	OAuthProvider string    `gorm:"column:oauth_provider"`
+	OAuthLogin    string    `gorm:"column:oauth_login"`
+	Role          string    `gorm:"column:role"`
+	CreatedAt     time.Time `gorm:"column:created_at"`
+	UpdatedAt     time.Time `gorm:"column:updated_at"`
+}
+
+func (userRecord) TableName() string { return "users" }
 
 func New(dir string) Store {
 	return NewWithOptions(Options{
@@ -1208,6 +1231,66 @@ func (s *DBStore) MatchProfile(repositoryFullName string, labels []string) (Prof
 	return match, nil
 }
 
+func (s *DBStore) GetUserByOAuthIdentity(provider, login string) (User, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return User{}, err
+	}
+	provider = normalizeOAuthProvider(provider)
+	login = normalizeOAuthLogin(login)
+	if provider == "" || login == "" {
+		return User{}, ErrNotFound
+	}
+	var record userRecord
+	if err := db.First(&record, "oauth_provider = ? AND oauth_login = ?", provider, login).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return User{}, ErrNotFound
+		}
+		return User{}, err
+	}
+	return recordToUser(record), nil
+}
+
+func (s *DBStore) UpsertUser(user User) (User, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return User{}, err
+	}
+	provider := normalizeOAuthProvider(user.OAuthProvider)
+	login := normalizeOAuthLogin(user.OAuthLogin)
+	if provider == "" {
+		return User{}, fmt.Errorf("oauth_provider is required")
+	}
+	if login == "" {
+		return User{}, fmt.Errorf("oauth_login is required")
+	}
+	role := normalizePlatformRole(user.Role)
+	if role == "" {
+		return User{}, fmt.Errorf("role must be admin or user")
+	}
+	now := time.Now().UTC()
+	record := userRecord{
+		OAuthProvider: provider,
+		OAuthLogin:    login,
+		Role:          role,
+		CreatedAt:     user.CreatedAt,
+		UpdatedAt:     now,
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = now
+	}
+	if err := db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "oauth_provider"}, {Name: "oauth_login"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"role":       record.Role,
+			"updated_at": record.UpdatedAt,
+		}),
+	}).Create(&record).Error; err != nil {
+		return User{}, err
+	}
+	return s.GetUserByOAuthIdentity(provider, login)
+}
+
 func (s *DBStore) AppendAuditEvent(event AuditEvent) (AuditEvent, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {
@@ -1384,6 +1467,17 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_repository_policies_repository_group ON repository_policies(repository_full_name, runner_group_name) WHERE runner_group_name <> '';`).Error; err != nil {
 		return err
 	}
+	if db.Migrator().HasTable(&userRecord{}) && !db.Migrator().HasColumn(&userRecord{}, "oauth_provider") {
+		if err := db.Exec(`ALTER TABLE users ADD COLUMN oauth_provider TEXT NOT NULL DEFAULT 'github'`).Error; err != nil {
+			return err
+		}
+	}
+	if err := db.Exec(`DROP INDEX IF EXISTS idx_users_oauth_login;`).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_identity ON users(oauth_provider, oauth_login);`).Error; err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1481,6 +1575,17 @@ func recordToState(record runnerRequestRecord) RunnerState {
 		LeaseOwner:         record.LeaseOwner,
 		LeaseExpiresAt:     pointerToTime(record.LeaseExpiresAt),
 		Version:            record.Version,
+	}
+}
+
+func recordToUser(record userRecord) User {
+	return User{
+		ID:            record.ID,
+		OAuthProvider: record.OAuthProvider,
+		OAuthLogin:    record.OAuthLogin,
+		Role:          record.Role,
+		CreatedAt:     record.CreatedAt,
+		UpdatedAt:     record.UpdatedAt,
 	}
 }
 
@@ -1705,6 +1810,24 @@ func sanitizeRunnerName(name string) string {
 	return name
 }
 
+func normalizeOAuthProvider(provider string) string {
+	return strings.ToLower(strings.TrimSpace(provider))
+}
+
+func normalizeOAuthLogin(login string) string {
+	return strings.ToLower(strings.TrimSpace(login))
+}
+
+func normalizePlatformRole(role string) string {
+	role = strings.ToLower(strings.TrimSpace(role))
+	switch role {
+	case "admin", "user":
+		return role
+	default:
+		return ""
+	}
+}
+
 var sqliteMigrations = []string{
 	`CREATE TABLE IF NOT EXISTS runner_requests (
 		id TEXT PRIMARY KEY,
@@ -1794,6 +1917,14 @@ var sqliteMigrations = []string{
 		payload_json TEXT,
 		created_at TIMESTAMP NOT NULL
 	);`,
+	`CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		oauth_provider TEXT NOT NULL,
+		oauth_login TEXT NOT NULL,
+		role TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_runner_requests_workflow_job_id ON runner_requests(workflow_job_id);`,
 	`CREATE INDEX IF NOT EXISTS idx_runner_requests_status_updated ON runner_requests(status, updated_at, queued_at);`,
 	`CREATE INDEX IF NOT EXISTS idx_runner_requests_status_retry_queue ON runner_requests(status, next_retry_at, queued_at);`,
@@ -1802,6 +1933,7 @@ var sqliteMigrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_runner_group_specs_spec ON runner_group_specs(spec_name);`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_repository_policies_repository_profile ON repository_policies(repository_full_name, profile_name) WHERE profile_name <> '';`,
 	`CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_identity ON users(oauth_provider, oauth_login);`,
 }
 
 var postgresMigrations = []string{
@@ -1893,6 +2025,14 @@ var postgresMigrations = []string{
 		payload_json TEXT,
 		created_at TIMESTAMP NOT NULL
 	);`,
+	`CREATE TABLE IF NOT EXISTS users (
+		id BIGSERIAL PRIMARY KEY,
+		oauth_provider TEXT NOT NULL,
+		oauth_login TEXT NOT NULL,
+		role TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_runner_requests_workflow_job_id ON runner_requests(workflow_job_id);`,
 	`CREATE INDEX IF NOT EXISTS idx_runner_requests_status_updated ON runner_requests(status, updated_at, queued_at);`,
 	`CREATE INDEX IF NOT EXISTS idx_runner_requests_status_retry_queue ON runner_requests(status, next_retry_at, queued_at);`,
@@ -1901,4 +2041,5 @@ var postgresMigrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_runner_group_specs_spec ON runner_group_specs(spec_name);`,
 	`CREATE UNIQUE INDEX IF NOT EXISTS idx_repository_policies_repository_profile ON repository_policies(repository_full_name, profile_name) WHERE profile_name <> '';`,
 	`CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_oauth_identity ON users(oauth_provider, oauth_login);`,
 }

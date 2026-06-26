@@ -94,6 +94,7 @@ type profileMatchRequest struct {
 
 type adminSession struct {
 	Login     string `json:"login"`
+	Role      string `json:"role"`
 	AvatarURL string `json:"avatar_url,omitempty"`
 	ExpiresAt int64  `json:"expires_at"`
 }
@@ -582,13 +583,14 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
-	session, ok := s.adminSessionFromRequest(r)
+	session, ok := s.sessionFromRequest(r)
 	response := map[string]any{
 		"authenticated": ok,
 		"oauth_enabled": s.cfg.GitHubOAuthEnabled(),
 	}
 	if ok {
 		response["login"] = session.Login
+		response["role"] = session.Role
 		response["avatar_url"] = session.AvatarURL
 		response["expires_at"] = time.Unix(session.ExpiresAt, 0).UTC().Format(time.RFC3339)
 	}
@@ -651,13 +653,15 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusUnauthorized, "github oauth user fetch failed")
 		return
 	}
-	if !s.cfg.GitHubOAuthUserAllowed(user.Login) {
+	dbUser, err := s.store.GetUserByOAuthIdentity("github", user.Login)
+	if err != nil {
 		s.logger.Warn("github oauth user rejected", "login", user.Login)
 		writeError(w, http.StatusForbidden, "github user is not allowed")
 		return
 	}
 	session := adminSession{
 		Login:     user.Login,
+		Role:      dbUser.Role,
 		AvatarURL: user.AvatarURL,
 		ExpiresAt: time.Now().Add(s.cfg.GitHubOAuthSessionTTL).Unix(),
 	}
@@ -2930,6 +2934,14 @@ func (s *Server) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) adminSessionFromRequest(r *http.Request) (adminSession, bool) {
+	session, ok := s.sessionFromRequest(r)
+	if !ok || session.Role != "admin" {
+		return adminSession{}, false
+	}
+	return session, true
+}
+
+func (s *Server) sessionFromRequest(r *http.Request) (adminSession, bool) {
 	cookie, err := r.Cookie(adminSessionCookieName)
 	if err != nil {
 		return adminSession{}, false
@@ -2942,7 +2954,8 @@ func (s *Server) adminSessionFromRequest(r *http.Request) (adminSession, bool) {
 	if time.Now().Unix() > session.ExpiresAt {
 		return adminSession{}, false
 	}
-	if !s.cfg.GitHubOAuthUserAllowed(session.Login) {
+	user, err := s.store.GetUserByOAuthIdentity("github", session.Login)
+	if err != nil || user.Role != session.Role {
 		return adminSession{}, false
 	}
 	return session, true
@@ -2977,6 +2990,9 @@ func (s *Server) decodeAdminSession(value string) (adminSession, error) {
 	}
 	if strings.TrimSpace(session.Login) == "" {
 		return adminSession{}, fmt.Errorf("session missing login")
+	}
+	if strings.TrimSpace(session.Role) == "" {
+		return adminSession{}, fmt.Errorf("session missing role")
 	}
 	return session, nil
 }

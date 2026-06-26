@@ -31,7 +31,6 @@ type Config struct {
 	GitHubOAuthClientID       string
 	GitHubOAuthClientSecret   string
 	GitHubOAuthRedirectURL    string
-	GitHubOAuthAllowedUsers   []string
 	GitHubOAuthSessionTTL     time.Duration
 	SandboxTimeout            time.Duration
 	SandboxAPITimeout         time.Duration
@@ -84,11 +83,10 @@ type fileConfig struct {
 			PrivateKeyFile string `yaml:"private_key_file"`
 		} `yaml:"app"`
 		OAuth struct {
-			ClientID        string   `yaml:"client_id"`
-			ClientSecret    string   `yaml:"client_secret"`
-			RedirectURL     string   `yaml:"redirect_url"`
-			AllowedUsers    []string `yaml:"allowed_users"`
-			SessionTTLHours int      `yaml:"session_ttl_hours"`
+			ClientID        string `yaml:"client_id"`
+			ClientSecret    string `yaml:"client_secret"`
+			RedirectURL     string `yaml:"redirect_url"`
+			SessionTTLHours int    `yaml:"session_ttl_hours"`
 		} `yaml:"oauth"`
 	} `yaml:"github"`
 	Worker struct {
@@ -145,7 +143,6 @@ func LoadFile(path string) (Config, error) {
 		GitHubOAuthClientID:       strings.TrimSpace(raw.GitHub.OAuth.ClientID),
 		GitHubOAuthClientSecret:   strings.TrimSpace(raw.GitHub.OAuth.ClientSecret),
 		GitHubOAuthRedirectURL:    strings.TrimSpace(raw.GitHub.OAuth.RedirectURL),
-		GitHubOAuthAllowedUsers:   normalizePatterns(raw.GitHub.OAuth.AllowedUsers),
 		GitHubOAuthSessionTTL:     durationHours(raw.GitHub.OAuth.SessionTTLHours, 12),
 		SandboxTimeout:            durationSeconds(raw.E2B.TimeoutSec, 3600),
 		SandboxAPITimeout:         durationSeconds(raw.E2B.APITimeoutSec, 60),
@@ -246,9 +243,6 @@ func (c Config) validate() error {
 	if strings.TrimSpace(c.GitHubOAuthClientSecret) == "" {
 		oauthMissing = append(oauthMissing, "github.oauth.client_secret")
 	}
-	if len(c.GitHubOAuthAllowedUsers) == 0 {
-		oauthMissing = append(oauthMissing, "github.oauth.allowed_users")
-	}
 	if len(oauthMissing) > 0 {
 		return fmt.Errorf("missing required config: %s", strings.Join(oauthMissing, ", "))
 	}
@@ -263,22 +257,7 @@ func (c Config) validate() error {
 
 func (c Config) GitHubOAuthEnabled() bool {
 	return strings.TrimSpace(c.GitHubOAuthClientID) != "" &&
-		strings.TrimSpace(c.GitHubOAuthClientSecret) != "" &&
-		len(c.GitHubOAuthAllowedUsers) > 0
-}
-
-func (c Config) GitHubOAuthUserAllowed(login string) bool {
-	login = strings.ToLower(strings.TrimSpace(login))
-	if login == "" {
-		return false
-	}
-	for _, allowed := range c.GitHubOAuthAllowedUsers {
-		allowed = strings.ToLower(strings.TrimSpace(allowed))
-		if allowed == "*" || allowed == login {
-			return true
-		}
-	}
-	return false
+		strings.TrimSpace(c.GitHubOAuthClientSecret) != ""
 }
 
 func (c Config) RepositoryAllowed(repository string) bool {
