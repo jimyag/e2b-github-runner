@@ -23,8 +23,9 @@ database:
   backend: sqlite
   url: ./var/runnerd.db
 
-admin:
-  token: <random admin token>
+auth:
+  session_secret: <random session signing secret>
+  session_ttl_hours: 12
 
 e2b:
   api_key: <e2b api key>
@@ -37,6 +38,10 @@ github:
     # 可选。不填时会按 webhook 里的 repository 动态解析 installation。
     # installation_id: <installation id>
     private_key_file: ./secrets/github-app.pem
+  oauth:
+    client_id: <github app client id>
+    client_secret: <github app client secret>
+    redirect_url: http://127.0.0.1:25500/auth/github/callback
   # 可选。不填表示允许所有已安装 App 且能通过 runner policy/spec 匹配的仓库。
   # allowed_repositories:
   #   - <repo owner>/*
@@ -130,7 +135,17 @@ curl -fsS http://127.0.0.1:25500/healthz
 http://127.0.0.1:25500/admin/
 ```
 
-页面会要求输入 `runnerd.yaml` 里的 `admin.token`，之后在浏览器 local storage 中保存 token，并对 `/runner_requests` 管理接口自动携带 `Authorization: Bearer <admin.token>`。
+页面会跳转到 GitHub OAuth 登录。首次登录会在数据库中创建 `role=user` 的用户；首个管理员需要在启动时显式 bootstrap：
+
+```bash
+go run ./cmd/runnerd --config ./runnerd.yaml --bootstrap-admin github:<your-github-login>
+```
+
+管理员登录后，浏览器会保存 signed HttpOnly session cookie，并自动带上该 cookie 访问 `/runner_requests` 等管理接口。需要用 `curl` 调管理 API 时，可以从浏览器或 OAuth 调试流程导出 cookie 到 `COOKIE_JAR`，后续示例统一使用：
+
+```bash
+export COOKIE_JAR=./runnerd.cookies
+```
 
 后台页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/admin/` 后再编译 `runnerd`。管理面现在包含 runners、runner specs、runner policies、retry、audit、label match test 和 diagnostics 页面。
 
@@ -138,7 +153,7 @@ http://127.0.0.1:25500/admin/
 
 ```bash
 curl -fsS -X POST http://127.0.0.1:25500/runner_specs \
-  -H "authorization: Bearer ${ADMIN_TOKEN}" \
+  -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
   -d '{"name":"ubuntu-24-04","labels":["self-hosted","e2b"],"template_id":"<template id>","max_concurrency":100,"enabled":true,"default_available":true}' | jq
 ```
@@ -147,7 +162,7 @@ curl -fsS -X POST http://127.0.0.1:25500/runner_specs \
 
 ```bash
 curl -fsS -X POST http://127.0.0.1:25500/runner_requests \
-  -H "authorization: Bearer ${ADMIN_TOKEN}" \
+  -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
   -d '{"id":"manual-001","repository_full_name":"<owner>/<repo>","runner_spec_name":"ubuntu-24-04"}' | jq
 ```
@@ -155,14 +170,14 @@ curl -fsS -X POST http://127.0.0.1:25500/runner_requests \
 查看状态：
 
 ```bash
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" http://127.0.0.1:25500/runner_requests | jq
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" http://127.0.0.1:25500/runner_requests/manual-001 | jq
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/runner_requests | jq
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/runner_requests/manual-001 | jq
 ```
 
 停止 runner：
 
 ```bash
-curl -fsS -X DELETE -H "authorization: Bearer ${ADMIN_TOKEN}" http://127.0.0.1:25500/runner_requests/manual-001 | jq
+curl -fsS -X DELETE -b "$COOKIE_JAR" http://127.0.0.1:25500/runner_requests/manual-001 | jq
 ```
 
 状态库默认会写到：
@@ -174,11 +189,11 @@ var/runnerd.db
 runner 的 control/stdout/stderr 日志存放在 DB-backed event store 里，仍然通过管理 API 读取：
 
 ```bash
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/manual-001/logs/control.log
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/manual-001/logs/stdout.log
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/manual-001/logs/stderr.log
 ```
 
@@ -187,7 +202,7 @@ curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
 建议先确认 runnerd 已经正确读到 GitHub App 配置：
 
 ```bash
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" http://127.0.0.1:25500/diagnostics/pprof | jq
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/pprof | jq
 ```
 
 重点看：
@@ -220,7 +235,7 @@ https://<public-host>/webhooks/github
 
 这里的 `runner.example.com` 换成你自己的域名；不要把临时 quick tunnel 的随机 `trycloudflare.com` 地址写死到 GitHub 配置里。
 
-公网部署时只需要把 `/webhooks/github` 暴露给 GitHub。`/runner_requests` 管理接口也可以在同一个服务上访问，但必须带 `Authorization: Bearer $ADMIN_TOKEN`；生产环境建议放在 HTTPS 反向代理后面，并限制管理接口来源 IP。
+公网部署时只需要把 `/webhooks/github` 暴露给 GitHub。`/runner_requests` 管理接口也可以在同一个服务上访问，但必须携带有效的 OAuth admin session cookie；生产环境建议放在 HTTPS 反向代理后面，并限制管理接口来源 IP。
 
 ## 6. 配置 GitHub Repository Webhook
 
@@ -276,19 +291,19 @@ jobs:
 先看服务状态：
 
 ```bash
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" http://127.0.0.1:25500/runner_requests | jq
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/runner_requests | jq
 ```
 
 再看 request 状态和日志：
 
 ```bash
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/<request_id> | jq
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/<request_id>/logs/control.log
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/<request_id>/logs/stdout.log
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/<request_id>/logs/stderr.log
 ```
 
@@ -323,13 +338,13 @@ Repository -> Actions -> 选择 workflow run -> 选择 job
 这些控制面日志看本服务管理 API：
 
 ```bash
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/<request_id> | jq
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/<request_id>/logs/control.log
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/<request_id>/logs/stdout.log
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
+curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/<request_id>/logs/stderr.log
 ```
 
@@ -340,8 +355,8 @@ curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" \
 服务导入了 `github.com/jimmicro/pprof`，启动后会在 binary 所在目录生成 `.pprof` 地址文件和 dump 脚本。管理 API 可以直接查看 diagnostics：
 
 ```bash
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" http://127.0.0.1:25500/diagnostics/pprof | jq
-curl -fsS -H "authorization: Bearer ${ADMIN_TOKEN}" http://127.0.0.1:25500/diagnostics/vars | jq
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/pprof | jq
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
 ```
 
 `/diagnostics/pprof` 会返回：

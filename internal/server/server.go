@@ -667,7 +667,7 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		Login:     user.Login,
 		Role:      dbUser.Role,
 		AvatarURL: user.AvatarURL,
-		ExpiresAt: time.Now().Add(s.cfg.GitHubOAuthSessionTTL).Unix(),
+		ExpiresAt: time.Now().Add(s.cfg.AuthSessionTTL).Unix(),
 	}
 	value, err := s.encodeAdminSession(session)
 	if err != nil {
@@ -682,7 +682,7 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
 		Secure:   requestIsSecure(r),
-		MaxAge:   int(s.cfg.GitHubOAuthSessionTTL.Seconds()),
+		MaxAge:   int(s.cfg.AuthSessionTTL.Seconds()),
 	})
 	http.Redirect(w, r, "/admin/", http.StatusFound)
 }
@@ -724,15 +724,17 @@ func (s *Server) exchangeGitHubOAuthCode(ctx context.Context, code, redirectURL 
 		return "", err
 	}
 	defer resp.Body.Close()
-	var decoded githubOAuthTokenResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&decoded); err != nil {
-		return "", err
-	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		var decoded githubOAuthTokenResponse
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<10)).Decode(&decoded)
 		if decoded.Error != "" {
 			return "", fmt.Errorf("github oauth token status %d: %s", resp.StatusCode, decoded.Error)
 		}
 		return "", fmt.Errorf("github oauth token status %d", resp.StatusCode)
+	}
+	var decoded githubOAuthTokenResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&decoded); err != nil {
+		return "", err
 	}
 	if decoded.Error != "" {
 		return "", fmt.Errorf("github oauth token error: %s", decoded.Error)
@@ -756,12 +758,12 @@ func (s *Server) fetchGitHubOAuthUser(ctx context.Context, token string) (github
 		return githubOAuthUser{}, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return githubOAuthUser{}, fmt.Errorf("github user status %d", resp.StatusCode)
+	}
 	var user githubOAuthUser
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&user); err != nil {
 		return githubOAuthUser{}, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return githubOAuthUser{}, fmt.Errorf("github user status %d", resp.StatusCode)
 	}
 	if strings.TrimSpace(user.Login) == "" {
 		return githubOAuthUser{}, fmt.Errorf("github user response missing login")
@@ -3003,7 +3005,7 @@ func (s *Server) decodeAdminSession(value string) (adminSession, error) {
 }
 
 func (s *Server) signAdminSession(payload string) string {
-	mac := hmac.New(sha256.New, []byte(s.cfg.GitHubOAuthClientSecret))
+	mac := hmac.New(sha256.New, []byte(s.cfg.AuthSessionSecret))
 	_, _ = mac.Write([]byte(payload))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }

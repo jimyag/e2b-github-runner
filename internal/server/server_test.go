@@ -286,7 +286,8 @@ func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
 	srv.cfg.GitHubOAuthClientID = "Iv1.test"
 	srv.cfg.GitHubOAuthClientSecret = "client-secret"
-	srv.cfg.GitHubOAuthSessionTTL = time.Hour
+	srv.cfg.AuthSessionSecret = "session-secret"
+	srv.cfg.AuthSessionTTL = time.Hour
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
 	rec := httptest.NewRecorder()
@@ -388,7 +389,8 @@ func TestGitHubOAuthLoginCreatesNonAdminUser(t *testing.T) {
 	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
 	srv.cfg.GitHubOAuthClientID = "Iv1.test"
 	srv.cfg.GitHubOAuthClientSecret = "client-secret"
-	srv.cfg.GitHubOAuthSessionTTL = time.Hour
+	srv.cfg.AuthSessionSecret = "session-secret"
+	srv.cfg.AuthSessionTTL = time.Hour
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/github/login", nil)
 	rec := httptest.NewRecorder()
@@ -453,6 +455,32 @@ func TestGitHubOAuthLoginCreatesNonAdminUser(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"role":"user"`) {
 		t.Fatalf("expected user session response, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGitHubOAuthNonJSONErrorsIncludeStatus(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	srv.cfg.GitHubOAuthClientID = "Iv1.test"
+	srv.cfg.GitHubOAuthClientSecret = "client-secret"
+	srv.cfg.AuthSessionSecret = "session-secret"
+
+	oldTokenURL := githubOAuthTokenURL
+	githubOAuthTokenURL = ghServer.URL + "/login/oauth/access_token"
+	defer func() {
+		githubOAuthTokenURL = oldTokenURL
+	}()
+
+	if _, err := srv.exchangeGitHubOAuthCode(context.Background(), "code", ""); err == nil || !strings.Contains(err.Error(), "github oauth token status 502") {
+		t.Fatalf("expected token status error, got %v", err)
+	}
+	if _, err := srv.fetchGitHubOAuthUser(context.Background(), "token"); err == nil || !strings.Contains(err.Error(), "github user status 502") {
+		t.Fatalf("expected user status error, got %v", err)
 	}
 }
 
@@ -1864,7 +1892,8 @@ func newTestServerWithLimit(t *testing.T, store state.Store, ghURL string, fake 
 		GitHubWebhookSecret:     "secret",
 		GitHubOAuthClientID:     "Iv1.test",
 		GitHubOAuthClientSecret: "oauth-secret",
-		GitHubOAuthSessionTTL:   time.Hour,
+		AuthSessionSecret:       "session-secret",
+		AuthSessionTTL:          time.Hour,
 		SandboxTimeout:          time.Hour,
 		SandboxCreateTimeout:    time.Second,
 		SandboxStopTimeout:      time.Second,
@@ -1918,7 +1947,7 @@ func testSessionCookie(login, role string) *http.Cookie {
 		ExpiresAt: time.Now().Add(time.Hour).Unix(),
 	})
 	payloadValue := base64.RawURLEncoding.EncodeToString(payload)
-	mac := hmac.New(sha256.New, []byte("oauth-secret"))
+	mac := hmac.New(sha256.New, []byte("session-secret"))
 	_, _ = mac.Write([]byte(payloadValue))
 	return &http.Cookie{
 		Name:  adminSessionCookieName,

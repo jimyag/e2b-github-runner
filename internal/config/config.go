@@ -28,10 +28,11 @@ type Config struct {
 	GitHubBasicAuthPassword   string
 	GitHubWebhookSecret       string
 	GitHubAllowedRepositories []string
+	AuthSessionSecret         string
+	AuthSessionTTL            time.Duration
 	GitHubOAuthClientID       string
 	GitHubOAuthClientSecret   string
 	GitHubOAuthRedirectURL    string
-	GitHubOAuthSessionTTL     time.Duration
 	SandboxTimeout            time.Duration
 	SandboxAPITimeout         time.Duration
 	SandboxCreateTimeout      time.Duration
@@ -58,6 +59,10 @@ type fileConfig struct {
 		Backend string `yaml:"backend"`
 		URL     string `yaml:"url"`
 	} `yaml:"database"`
+	Auth struct {
+		SessionSecret   string `yaml:"session_secret"`
+		SessionTTLHours int    `yaml:"session_ttl_hours"`
+	} `yaml:"auth"`
 	E2B struct {
 		APIKey           string `yaml:"api_key"`
 		APIURL           string `yaml:"api_url"`
@@ -83,10 +88,9 @@ type fileConfig struct {
 			PrivateKeyFile string `yaml:"private_key_file"`
 		} `yaml:"app"`
 		OAuth struct {
-			ClientID        string `yaml:"client_id"`
-			ClientSecret    string `yaml:"client_secret"`
-			RedirectURL     string `yaml:"redirect_url"`
-			SessionTTLHours int    `yaml:"session_ttl_hours"`
+			ClientID     string `yaml:"client_id"`
+			ClientSecret string `yaml:"client_secret"`
+			RedirectURL  string `yaml:"redirect_url"`
 		} `yaml:"oauth"`
 	} `yaml:"github"`
 	Worker struct {
@@ -140,10 +144,11 @@ func LoadFile(path string) (Config, error) {
 		GitHubBasicAuthPassword:   raw.GitHub.BasicAuth.Password,
 		GitHubWebhookSecret:       raw.GitHub.WebhookSecret,
 		GitHubAllowedRepositories: normalizePatterns(raw.GitHub.AllowedRepositories),
+		AuthSessionSecret:         strings.TrimSpace(raw.Auth.SessionSecret),
+		AuthSessionTTL:            durationHours(raw.Auth.SessionTTLHours, 12),
 		GitHubOAuthClientID:       strings.TrimSpace(raw.GitHub.OAuth.ClientID),
 		GitHubOAuthClientSecret:   strings.TrimSpace(raw.GitHub.OAuth.ClientSecret),
 		GitHubOAuthRedirectURL:    strings.TrimSpace(raw.GitHub.OAuth.RedirectURL),
-		GitHubOAuthSessionTTL:     durationHours(raw.GitHub.OAuth.SessionTTLHours, 12),
 		SandboxTimeout:            durationSeconds(raw.E2B.TimeoutSec, 3600),
 		SandboxAPITimeout:         durationSeconds(raw.E2B.APITimeoutSec, 60),
 		SandboxCreateTimeout:      durationSeconds(raw.E2B.CreateTimeoutSec, 120),
@@ -243,6 +248,9 @@ func (c Config) validate() error {
 	if strings.TrimSpace(c.GitHubOAuthClientSecret) == "" {
 		oauthMissing = append(oauthMissing, "github.oauth.client_secret")
 	}
+	if strings.TrimSpace(c.AuthSessionSecret) == "" {
+		oauthMissing = append(oauthMissing, "auth.session_secret")
+	}
 	if len(oauthMissing) > 0 {
 		return fmt.Errorf("missing required config: %s", strings.Join(oauthMissing, ", "))
 	}
@@ -257,7 +265,8 @@ func (c Config) validate() error {
 
 func (c Config) GitHubOAuthEnabled() bool {
 	return strings.TrimSpace(c.GitHubOAuthClientID) != "" &&
-		strings.TrimSpace(c.GitHubOAuthClientSecret) != ""
+		strings.TrimSpace(c.GitHubOAuthClientSecret) != "" &&
+		strings.TrimSpace(c.AuthSessionSecret) != ""
 }
 
 func (c Config) RepositoryAllowed(repository string) bool {

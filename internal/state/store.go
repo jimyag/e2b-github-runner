@@ -1593,14 +1593,7 @@ func recordToState(record runnerRequestRecord) RunnerState {
 }
 
 func recordToUser(record userRecord) User {
-	return User{
-		ID:            record.ID,
-		OAuthProvider: record.OAuthProvider,
-		OAuthLogin:    record.OAuthLogin,
-		Role:          record.Role,
-		CreatedAt:     record.CreatedAt,
-		UpdatedAt:     record.UpdatedAt,
-	}
+	return User(record)
 }
 
 type githubPayloadLinks struct {

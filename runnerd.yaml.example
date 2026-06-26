@@ -9,6 +9,10 @@ database:
   # Relative sqlite paths are resolved from the directory containing runnerd.yaml.
   url: ./var/runnerd.db
 
+auth:
+  session_secret: change-me-to-a-random-session-secret
+  session_ttl_hours: 12
+
 e2b:
   api_key: your-e2b-api-key
   api_url: https://api.e2b.dev
@@ -36,7 +40,6 @@ github:
     client_secret: your-github-app-client-secret
     # Optional when runnerd can infer the public URL from the request.
     redirect_url: https://runner.example.com/auth/github/callback
-    session_ttl_hours: 12
   # Optional repository allowlist. Empty means all repositories that installed the App are allowed.
   # allowed_repositories:
   #   - your-org/*

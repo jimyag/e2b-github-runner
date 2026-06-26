@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	_ "github.com/jimmicro/pprof"
@@ -19,6 +21,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "runnerd.yaml", "path to runnerd config file")
+	bootstrapAdmin := flag.String("bootstrap-admin", "", "bootstrap an admin user as provider:login, for example github:octocat")
 	flag.Parse()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg, err := config.Load(*configPath)
@@ -33,6 +36,10 @@ func main() {
 	})
 	if err := store.Ensure(); err != nil {
 		logger.Error("ensure state store", "error", err)
+		os.Exit(1)
+	}
+	if err := bootstrapAdminUser(store, *bootstrapAdmin); err != nil {
+		logger.Error("bootstrap admin user", "error", err)
 		os.Exit(1)
 	}
 	githubHTTPClient := &http.Client{Timeout: 30 * time.Second}
@@ -85,4 +92,27 @@ func main() {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func bootstrapAdminUser(store state.Store, identity string) error {
+	identity = strings.TrimSpace(identity)
+	if identity == "" {
+		return nil
+	}
+	provider, login, ok := strings.Cut(identity, ":")
+	if !ok {
+		provider = "github"
+		login = identity
+	}
+	provider = strings.TrimSpace(provider)
+	login = strings.TrimSpace(login)
+	if provider == "" || login == "" {
+		return fmt.Errorf("expected provider:login")
+	}
+	_, err := store.UpsertUser(state.User{
+		OAuthProvider: provider,
+		OAuthLogin:    login,
+		Role:          "admin",
+	})
+	return err
 }

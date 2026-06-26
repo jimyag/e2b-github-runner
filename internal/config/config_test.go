@@ -16,6 +16,8 @@ server:
 database:
   backend: sqlite
   url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
 admin:
   token: admin-token
 e2b:
@@ -72,6 +74,8 @@ func TestLoadFileSupportsDynamicGitHubAppInstallation(t *testing.T) {
 database:
   backend: sqlite
   url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
 admin:
   token: admin-token
 e2b:
@@ -108,6 +112,8 @@ func TestLoadFileSupportsGitHubOAuthLogin(t *testing.T) {
 database:
   backend: sqlite
   url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
 admin:
   token: admin-token
 e2b:
@@ -122,7 +128,6 @@ github:
     client_id: Iv1.test
     client_secret: secret
     redirect_url: https://runner.example.com/auth/github/callback
-    session_ttl_hours: 24
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +151,8 @@ func TestLoadFileRejectsPartialGitHubOAuthLogin(t *testing.T) {
 database:
   backend: sqlite
   url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
 admin:
   token: admin-token
 e2b:
@@ -178,6 +185,8 @@ func TestLoadFileRejectsMissingGitHubOAuthLogin(t *testing.T) {
 database:
   backend: sqlite
   url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
 e2b:
   api_key: test-key
   api_url: https://api.e2b.dev
@@ -208,6 +217,8 @@ func TestLoadFileRejectsDeprecatedGitHubDefaultRepository(t *testing.T) {
 database:
   backend: sqlite
   url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
 admin:
   token: admin-token
 e2b:
@@ -243,6 +254,8 @@ func TestLoadFileAllowsEmptyDeprecatedGitHubDefaultRepository(t *testing.T) {
 database:
   backend: sqlite
   url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
 admin:
   token: admin-token
 e2b:
@@ -274,6 +287,8 @@ func TestLoadFileRejectsUnsupportedGitHubAPIBaseURL(t *testing.T) {
 database:
   backend: sqlite
   url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
 admin:
   token: admin-token
 e2b:
@@ -306,6 +321,8 @@ func TestLoadFileSupportsGitHubTokenAuth(t *testing.T) {
 database:
   backend: sqlite
   url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
 admin:
   token: admin-token
 e2b:
@@ -337,6 +354,8 @@ func TestLoadFileSupportsGitHubBasicAuth(t *testing.T) {
 database:
   backend: sqlite
   url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
 admin:
   token: admin-token
 e2b:
@@ -403,6 +422,8 @@ func TestLoadFileRejectsMultipleGitHubAuthModes(t *testing.T) {
 database:
   backend: sqlite
   url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
 admin:
   token: admin-token
 e2b:

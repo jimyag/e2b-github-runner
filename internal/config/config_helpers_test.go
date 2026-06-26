@@ -203,6 +203,8 @@ func writeMinimalConfig(t *testing.T, dir, name string) string {
 	content := `
 admin:
   token: test-token
+auth:
+  session_secret: test-session-secret
 e2b:
   api_key: test-key
   api_url: https://api.e2b.dev
