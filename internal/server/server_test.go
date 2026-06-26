@@ -232,6 +232,17 @@ func TestManagementEndpointsRequireAdminAuth(t *testing.T) {
 		t.Fatalf("expected non-admin session to be rejected, got %d", rec.Code)
 	}
 
+	if _, err := store.UpsertUser(state.User{OAuthProvider: "github", OAuthLogin: "hubot", Role: "admin"}); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/runner_requests", nil)
+	req.AddCookie(testSessionCookie("hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected promoted user session to authorize admin API, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
 	req = adminRequest(http.MethodGet, "/runner_requests", nil)
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)

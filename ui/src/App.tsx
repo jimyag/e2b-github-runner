@@ -308,9 +308,16 @@ function App() {
       const headers = new Headers(options.headers)
       const response = await fetch(url, { ...options, headers, credentials: "same-origin" })
       if (response.status === 401) {
-        setAuthSession((current) => ({ ...current, authenticated: false, login: undefined, role: undefined, avatar_url: undefined, expires_at: undefined }))
+        try {
+          const sessionResponse = await fetch("/auth/session", { credentials: "same-origin" })
+          if (sessionResponse.ok) {
+            setAuthSession((await sessionResponse.json()) as AuthSession)
+          }
+        } catch {
+          setAuthSession((current) => ({ ...current, authenticated: false, login: undefined, role: undefined, avatar_url: undefined, expires_at: undefined }))
+        }
         setConnected(false)
-        throw new Error("Admin session expired")
+        throw new Error("You do not have admin access")
       }
       if (!response.ok) {
         const text = await response.text()
@@ -1859,12 +1866,11 @@ function LoginPage({
                 <CardDescription>Use your allowed GitHub account to access runnerd.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
-                {currentLogin && currentRole !== "admin" ? (
+                {currentLogin ? (
                   <div className="rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
                     @{currentLogin} is signed in as {currentRole || "user"} and does not have admin access.
                   </div>
-                ) : null}
-                {oauthEnabled ? (
+                ) : oauthEnabled ? (
                   <Button
                     type="button"
                     size="lg"

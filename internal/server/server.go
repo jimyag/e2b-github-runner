@@ -2959,9 +2959,10 @@ func (s *Server) sessionFromRequest(r *http.Request) (adminSession, bool) {
 		return adminSession{}, false
 	}
 	user, err := s.store.GetUserByOAuthIdentity("github", session.Login)
-	if err != nil || user.Role != session.Role {
+	if err != nil {
 		return adminSession{}, false
 	}
+	session.Role = user.Role
 	return session, true
 }
 
