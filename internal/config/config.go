@@ -18,7 +18,6 @@ type Config struct {
 	StateDir                  string
 	StateBackend              string
 	StateDatabaseURL          string
-	AdminToken                string
 	E2BAPIKey                 string
 	E2BAPIURL                 string
 	GitHubAppID               int64
@@ -29,6 +28,11 @@ type Config struct {
 	GitHubBasicAuthPassword   string
 	GitHubWebhookSecret       string
 	GitHubAllowedRepositories []string
+	GitHubOAuthClientID       string
+	GitHubOAuthClientSecret   string
+	GitHubOAuthRedirectURL    string
+	GitHubOAuthAllowedUsers   []string
+	GitHubOAuthSessionTTL     time.Duration
 	SandboxTimeout            time.Duration
 	SandboxAPITimeout         time.Duration
 	SandboxCreateTimeout      time.Duration
@@ -55,9 +59,6 @@ type fileConfig struct {
 		Backend string `yaml:"backend"`
 		URL     string `yaml:"url"`
 	} `yaml:"database"`
-	Admin struct {
-		Token string `yaml:"token"`
-	} `yaml:"admin"`
 	E2B struct {
 		APIKey           string `yaml:"api_key"`
 		APIURL           string `yaml:"api_url"`
@@ -82,6 +83,13 @@ type fileConfig struct {
 			InstallationID int64  `yaml:"installation_id"`
 			PrivateKeyFile string `yaml:"private_key_file"`
 		} `yaml:"app"`
+		OAuth struct {
+			ClientID        string   `yaml:"client_id"`
+			ClientSecret    string   `yaml:"client_secret"`
+			RedirectURL     string   `yaml:"redirect_url"`
+			AllowedUsers    []string `yaml:"allowed_users"`
+			SessionTTLHours int      `yaml:"session_ttl_hours"`
+		} `yaml:"oauth"`
 	} `yaml:"github"`
 	Worker struct {
 		MaxConcurrentRunners int `yaml:"max_concurrent_runners"`
@@ -124,7 +132,6 @@ func LoadFile(path string) (Config, error) {
 		HTTPIdleTimeout:           durationSeconds(raw.Server.IdleTimeoutSec, 120),
 		StateBackend:              strings.ToLower(defaultString(raw.Database.Backend, "sqlite")),
 		StateDatabaseURL:          raw.Database.URL,
-		AdminToken:                raw.Admin.Token,
 		E2BAPIKey:                 raw.E2B.APIKey,
 		E2BAPIURL:                 raw.E2B.APIURL,
 		GitHubAppID:               raw.GitHub.App.ID,
@@ -135,6 +142,11 @@ func LoadFile(path string) (Config, error) {
 		GitHubBasicAuthPassword:   raw.GitHub.BasicAuth.Password,
 		GitHubWebhookSecret:       raw.GitHub.WebhookSecret,
 		GitHubAllowedRepositories: normalizePatterns(raw.GitHub.AllowedRepositories),
+		GitHubOAuthClientID:       strings.TrimSpace(raw.GitHub.OAuth.ClientID),
+		GitHubOAuthClientSecret:   strings.TrimSpace(raw.GitHub.OAuth.ClientSecret),
+		GitHubOAuthRedirectURL:    strings.TrimSpace(raw.GitHub.OAuth.RedirectURL),
+		GitHubOAuthAllowedUsers:   normalizePatterns(raw.GitHub.OAuth.AllowedUsers),
+		GitHubOAuthSessionTTL:     durationHours(raw.GitHub.OAuth.SessionTTLHours, 12),
 		SandboxTimeout:            durationSeconds(raw.E2B.TimeoutSec, 3600),
 		SandboxAPITimeout:         durationSeconds(raw.E2B.APITimeoutSec, 60),
 		SandboxCreateTimeout:      durationSeconds(raw.E2B.CreateTimeoutSec, 120),
@@ -179,7 +191,6 @@ func (c Config) GitHubAuthMode() string {
 func (c Config) validate() error {
 	var missing []string
 	for path, value := range map[string]string{
-		"admin.token":           c.AdminToken,
 		"e2b.api_key":           c.E2BAPIKey,
 		"e2b.api_url":           c.E2BAPIURL,
 		"github.webhook_secret": c.GitHubWebhookSecret,
@@ -228,6 +239,19 @@ func (c Config) validate() error {
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))
 	}
+	var oauthMissing []string
+	if strings.TrimSpace(c.GitHubOAuthClientID) == "" {
+		oauthMissing = append(oauthMissing, "github.oauth.client_id")
+	}
+	if strings.TrimSpace(c.GitHubOAuthClientSecret) == "" {
+		oauthMissing = append(oauthMissing, "github.oauth.client_secret")
+	}
+	if len(c.GitHubOAuthAllowedUsers) == 0 {
+		oauthMissing = append(oauthMissing, "github.oauth.allowed_users")
+	}
+	if len(oauthMissing) > 0 {
+		return fmt.Errorf("missing required config: %s", strings.Join(oauthMissing, ", "))
+	}
 	if c.MaxConcurrentRunners < 1 {
 		return fmt.Errorf("invalid config worker.max_concurrent_runners: must be >= 1")
 	}
@@ -235,6 +259,26 @@ func (c Config) validate() error {
 		return fmt.Errorf("invalid config worker.retry_max_attempts: must be >= 1")
 	}
 	return nil
+}
+
+func (c Config) GitHubOAuthEnabled() bool {
+	return strings.TrimSpace(c.GitHubOAuthClientID) != "" &&
+		strings.TrimSpace(c.GitHubOAuthClientSecret) != "" &&
+		len(c.GitHubOAuthAllowedUsers) > 0
+}
+
+func (c Config) GitHubOAuthUserAllowed(login string) bool {
+	login = strings.ToLower(strings.TrimSpace(login))
+	if login == "" {
+		return false
+	}
+	for _, allowed := range c.GitHubOAuthAllowedUsers {
+		allowed = strings.ToLower(strings.TrimSpace(allowed))
+		if allowed == "*" || allowed == login {
+			return true
+		}
+	}
+	return false
 }
 
 func (c Config) RepositoryAllowed(repository string) bool {
@@ -272,6 +316,13 @@ func durationSeconds(value, fallback int) time.Duration {
 		value = fallback
 	}
 	return time.Duration(value) * time.Second
+}
+
+func durationHours(value, fallback int) time.Duration {
+	if value <= 0 {
+		value = fallback
+	}
+	return time.Duration(value) * time.Hour
 }
 
 func normalizePatterns(values []string) []string {

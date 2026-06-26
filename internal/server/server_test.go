@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -228,6 +229,102 @@ func TestManagementEndpointsRequireAdminAuth(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected authorized request, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
+	var gotTokenAuth string
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/login/oauth/access_token":
+			if err := r.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if r.Form.Get("client_id") != "Iv1.test" || r.Form.Get("client_secret") != "client-secret" || r.Form.Get("code") != "oauth-code" {
+				t.Fatalf("unexpected oauth token form: %#v", r.Form)
+			}
+			w.Write([]byte(`{"access_token":"user-token"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/user":
+			gotTokenAuth = r.Header.Get("Authorization")
+			w.Write([]byte(`{"login":"octocat","avatar_url":"https://avatars.example/octocat.png"}`))
+		default:
+			t.Fatalf("unexpected github oauth request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer ghServer.Close()
+
+	oldAuthorizeURL := githubOAuthAuthorizeURL
+	oldTokenURL := githubOAuthTokenURL
+	githubOAuthAuthorizeURL = "https://github.example/login/oauth/authorize"
+	githubOAuthTokenURL = ghServer.URL + "/login/oauth/access_token"
+	defer func() {
+		githubOAuthAuthorizeURL = oldAuthorizeURL
+		githubOAuthTokenURL = oldTokenURL
+	}()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	srv.cfg.GitHubOAuthClientID = "Iv1.test"
+	srv.cfg.GitHubOAuthClientSecret = "client-secret"
+	srv.cfg.GitHubOAuthAllowedUsers = []string{"octocat"}
+	srv.cfg.GitHubOAuthSessionTTL = time.Hour
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"oauth_enabled":true`) {
+		t.Fatalf("expected oauth-enabled session response, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/auth/github/login", nil)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected login redirect, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	location := rec.Header().Get("Location")
+	if !strings.Contains(location, "client_id=Iv1.test") || !strings.Contains(location, "state=") {
+		t.Fatalf("unexpected login redirect location: %s", location)
+	}
+	var stateCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == oauthStateCookieName {
+			stateCookie = cookie
+			break
+		}
+	}
+	if stateCookie == nil || stateCookie.Value == "" {
+		t.Fatal("expected oauth state cookie")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=oauth-code&state="+stateCookie.Value, nil)
+	req.AddCookie(stateCookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("expected callback redirect, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if gotTokenAuth != "Bearer user-token" {
+		t.Fatalf("expected user fetch bearer token, got %q", gotTokenAuth)
+	}
+	var sessionCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == adminSessionCookieName {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil || sessionCookie.Value == "" {
+		t.Fatal("expected admin session cookie")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/runner_requests", nil)
+	req.AddCookie(sessionCookie)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected oauth session to authorize admin API, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1633,21 +1730,24 @@ func newTestServer(t *testing.T, store state.Store, ghURL string, fake *fakeSand
 func newTestServerWithLimit(t *testing.T, store state.Store, ghURL string, fake *fakeSandbox, limit int) *Server {
 	t.Helper()
 	cfg := config.Config{
-		StateDir:             "./var/runner_requests",
-		StateBackend:         "sqlite",
-		StateDatabaseURL:     "./var/runnerd.db",
-		AdminToken:           "admin-token",
-		GitHubWebhookSecret:  "secret",
-		SandboxTimeout:       time.Hour,
-		SandboxCreateTimeout: time.Second,
-		SandboxStopTimeout:   time.Second,
-		RunnerIdleTimeout:    5 * time.Minute,
-		WorkerLeaseTTL:       5 * time.Second,
-		RetryBaseDelay:       50 * time.Millisecond,
-		RetryMaxDelay:        time.Second,
-		RetryMaxAttempts:     3,
-		MaxConcurrentRunners: limit,
-		GitHubAPIBaseURL:     ghURL,
+		StateDir:                "./var/runner_requests",
+		StateBackend:            "sqlite",
+		StateDatabaseURL:        "./var/runnerd.db",
+		GitHubWebhookSecret:     "secret",
+		GitHubOAuthClientID:     "Iv1.test",
+		GitHubOAuthClientSecret: "oauth-secret",
+		GitHubOAuthAllowedUsers: []string{"octocat"},
+		GitHubOAuthSessionTTL:   time.Hour,
+		SandboxTimeout:          time.Hour,
+		SandboxCreateTimeout:    time.Second,
+		SandboxStopTimeout:      time.Second,
+		RunnerIdleTimeout:       5 * time.Minute,
+		WorkerLeaseTTL:          5 * time.Second,
+		RetryBaseDelay:          50 * time.Millisecond,
+		RetryMaxDelay:           time.Second,
+		RetryMaxAttempts:        3,
+		MaxConcurrentRunners:    limit,
+		GitHubAPIBaseURL:        ghURL,
 	}
 	if _, err := store.UpsertProfile(state.RunnerProfile{
 		Name:           "default",
@@ -1674,8 +1774,23 @@ func newTestServerWithLimit(t *testing.T, store state.Store, ghURL string, fake 
 
 func adminRequest(method, target string, body io.Reader) *http.Request {
 	req := httptest.NewRequest(method, target, body)
-	req.Header.Set("Authorization", "Bearer admin-token")
+	req.AddCookie(testAdminSessionCookie("octocat"))
 	return req
+}
+
+func testAdminSessionCookie(login string) *http.Cookie {
+	payload, _ := json.Marshal(adminSession{
+		Login:     login,
+		ExpiresAt: time.Now().Add(time.Hour).Unix(),
+	})
+	payloadValue := base64.RawURLEncoding.EncodeToString(payload)
+	mac := hmac.New(sha256.New, []byte("oauth-secret"))
+	_, _ = mac.Write([]byte(payloadValue))
+	return &http.Cookie{
+		Name:  adminSessionCookieName,
+		Value: payloadValue + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)),
+		Path:  "/",
+	}
 }
 
 func waitForState(t *testing.T, store state.Store, id, want string) {

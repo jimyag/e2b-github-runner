@@ -14,6 +14,7 @@ export default defineConfig({
       "/runner_policies": "http://127.0.0.1:25500",
       "/audit-events": "http://127.0.0.1:25500",
       "/diagnostics": "http://127.0.0.1:25500",
+      "/auth": "http://127.0.0.1:25500",
     },
   },
   resolve: {

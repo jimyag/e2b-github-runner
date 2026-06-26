@@ -16,9 +16,9 @@ The config file covers:
 
 - server listen address and timeouts
 - database backend and DSN/path
-- admin auth token
 - E2B API settings and template
 - GitHub webhook settings plus GitHub App, PAT, or basic auth
+- GitHub App OAuth login for the admin console
 - worker lease / retry / concurrency settings
 
 Relative sqlite `database.url` and `github.app.private_key_file` paths are resolved from the directory containing `runnerd.yaml`.
@@ -26,7 +26,9 @@ GitHub Enterprise Server is not currently supported; configure a GitHub.com App 
 Configure exactly one GitHub auth method: `github.app`, `github.token`, or `github.basic_auth`. For GitHub App auth, `github.app.installation_id` is optional. When it is omitted, runnerd resolves the installation from each job repository and caches installation transports, allowing one GitHub App to serve multiple installed accounts.
 `github.allowed_repositories` is an optional allowlist of `owner/repo` or `owner/*` patterns. Empty means all repositories that can deliver valid webhooks and match runner labels/policies are allowed.
 
-`/webhooks/github` uses GitHub HMAC signature verification. The manual management API under `/runner_requests` requires `Authorization: Bearer $ADMIN_TOKEN`.
+`github.oauth` enables GitHub App OAuth login for the embedded admin console. Use the GitHub App's Client ID and Client secret, configure the app callback URL as `/auth/github/callback` on your runnerd origin, and list allowed GitHub usernames in `github.oauth.allowed_users`. OAuth sessions are stored as signed HttpOnly cookies.
+
+`/webhooks/github` uses GitHub HMAC signature verification. The manual management API under `/runner_requests` requires a valid GitHub OAuth admin session cookie.
 
 Runner state is persisted in a DB-backed store instead of per-request JSON directories. Control/stdout/stderr logs are kept as runner events and remain available from the admin API and UI.
 
@@ -47,7 +49,7 @@ docker run --rm -p 25500:25500 \
   ghcr.io/qiniu/ci-runner
 ```
 
-Open the embedded admin console at `http://127.0.0.1:25500/admin/`. The UI is built from `ui/` with the same React, Vite, Tailwind CSS, shadcn-style components, and theme tokens used by `kubevirt-console`. It stores `ADMIN_TOKEN` in browser local storage and sends it as `Authorization: Bearer $ADMIN_TOKEN` for management API calls.
+Open the embedded admin console at `http://127.0.0.1:25500/admin/`. The UI is built from `ui/` with the same React, Vite, Tailwind CSS, shadcn-style components, and theme tokens used by `kubevirt-console`. The console offers GitHub sign-in and uses a signed HttpOnly cookie for management API calls.
 
 The admin console manages runner requests, runner specs, runner groups, runner policies, retry actions, audit history, runner-spec match tests, and diagnostics. Runner specs, groups, and repository policies are created through the admin API/UI rather than `runnerd.yaml`. runnerd creates repository runners by default; when a matched runner spec has a GitHub runner group, it creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
 

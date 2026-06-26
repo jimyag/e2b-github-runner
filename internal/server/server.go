@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,6 +17,7 @@ import (
 	"log/slog"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -38,6 +42,7 @@ type Server struct {
 	logger  *slog.Logger
 	mux     *http.ServeMux
 	slots   chan struct{}
+	oauth   *http.Client
 
 	admissionMu sync.Mutex
 	locks       [64]sync.Mutex
@@ -87,6 +92,12 @@ type profileMatchRequest struct {
 	Labels             []string `json:"labels"`
 }
 
+type adminSession struct {
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
 //go:embed admin/*
 var adminAssets embed.FS
 
@@ -95,6 +106,13 @@ const runnerJobStartedMarker = "__runner_job_started__"
 const (
 	defaultRunnerRequestListLimit = 100
 	maxRunnerRequestListLimit     = 500
+	oauthStateCookieName          = "runnerd_oauth_state"
+	adminSessionCookieName        = "runnerd_admin_session"
+)
+
+var (
+	githubOAuthAuthorizeURL = "https://github.com/login/oauth/authorize"
+	githubOAuthTokenURL     = "https://github.com/login/oauth/access_token"
 )
 
 func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandboxrunner.Service, logger *slog.Logger) *Server {
@@ -110,6 +128,7 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		mux:         http.NewServeMux(),
 		slots:       make(chan struct{}, cfg.MaxConcurrentRunners),
 		queueNotify: make(chan struct{}, 1),
+		oauth:       &http.Client{Timeout: 10 * time.Second},
 	}
 	hostname, _ := os.Hostname()
 	s.workerID = fmt.Sprintf("%s-%d", hostname, os.Getpid())
@@ -186,6 +205,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /admin", s.handleAdminRedirect)
 	s.mux.HandleFunc("GET /admin/", s.handleAdmin)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("GET /auth/session", s.handleAuthSession)
+	s.mux.HandleFunc("GET /auth/github/login", s.handleGitHubOAuthLogin)
+	s.mux.HandleFunc("GET /auth/github/callback", s.handleGitHubOAuthCallback)
+	s.mux.HandleFunc("POST /auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("POST /webhooks/github", s.handleGitHubWebhook)
 	s.mux.HandleFunc("POST /runner_requests", s.handleCreateRunner)
 	s.mux.HandleFunc("GET /runner_requests", s.handleListRunners)
@@ -556,6 +579,186 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleAuthSession(w http.ResponseWriter, r *http.Request) {
+	session, ok := s.adminSessionFromRequest(r)
+	response := map[string]any{
+		"authenticated": ok,
+		"oauth_enabled": s.cfg.GitHubOAuthEnabled(),
+	}
+	if ok {
+		response["login"] = session.Login
+		response["avatar_url"] = session.AvatarURL
+		response["expires_at"] = time.Unix(session.ExpiresAt, 0).UTC().Format(time.RFC3339)
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleGitHubOAuthLogin(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.GitHubOAuthEnabled() {
+		http.NotFound(w, r)
+		return
+	}
+	state := newID()
+	http.SetCookie(w, &http.Cookie{
+		Name:     oauthStateCookieName,
+		Value:    state,
+		Path:     "/auth/github",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   requestIsSecure(r),
+		MaxAge:   int((10 * time.Minute).Seconds()),
+	})
+	values := url.Values{
+		"client_id":    {s.cfg.GitHubOAuthClientID},
+		"state":        {state},
+		"allow_signup": {"false"},
+	}
+	if redirectURL := s.githubOAuthRedirectURL(r); redirectURL != "" {
+		values.Set("redirect_uri", redirectURL)
+	}
+	http.Redirect(w, r, githubOAuthAuthorizeURL+"?"+values.Encode(), http.StatusFound)
+}
+
+func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.GitHubOAuthEnabled() {
+		http.NotFound(w, r)
+		return
+	}
+	if problem := strings.TrimSpace(r.URL.Query().Get("error")); problem != "" {
+		writeError(w, http.StatusUnauthorized, "github oauth rejected: "+problem)
+		return
+	}
+	state := r.URL.Query().Get("state")
+	code := r.URL.Query().Get("code")
+	cookie, err := r.Cookie(oauthStateCookieName)
+	if err != nil || state == "" || code == "" || subtle.ConstantTimeCompare([]byte(state), []byte(cookie.Value)) != 1 {
+		writeError(w, http.StatusUnauthorized, "invalid github oauth state")
+		return
+	}
+	clearCookie(w, oauthStateCookieName, "/auth/github", requestIsSecure(r))
+
+	token, err := s.exchangeGitHubOAuthCode(r.Context(), code, s.githubOAuthRedirectURL(r))
+	if err != nil {
+		s.logger.Warn("github oauth token exchange failed", "error", err)
+		writeError(w, http.StatusUnauthorized, "github oauth token exchange failed")
+		return
+	}
+	user, err := s.fetchGitHubOAuthUser(r.Context(), token)
+	if err != nil {
+		s.logger.Warn("github oauth user fetch failed", "error", err)
+		writeError(w, http.StatusUnauthorized, "github oauth user fetch failed")
+		return
+	}
+	if !s.cfg.GitHubOAuthUserAllowed(user.Login) {
+		s.logger.Warn("github oauth user rejected", "login", user.Login)
+		writeError(w, http.StatusForbidden, "github user is not allowed")
+		return
+	}
+	session := adminSession{
+		Login:     user.Login,
+		AvatarURL: user.AvatarURL,
+		ExpiresAt: time.Now().Add(s.cfg.GitHubOAuthSessionTTL).Unix(),
+	}
+	value, err := s.encodeAdminSession(session)
+	if err != nil {
+		s.logger.Error("encode admin session failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "create admin session")
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     adminSessionCookieName,
+		Value:    value,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   requestIsSecure(r),
+		MaxAge:   int(s.cfg.GitHubOAuthSessionTTL.Seconds()),
+	})
+	http.Redirect(w, r, "/admin/", http.StatusFound)
+}
+
+func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
+	clearCookie(w, adminSessionCookieName, "/", requestIsSecure(r))
+	clearCookie(w, oauthStateCookieName, "/auth/github", requestIsSecure(r))
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+type githubOAuthTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	Error       string `json:"error"`
+	Description string `json:"error_description"`
+}
+
+type githubOAuthUser struct {
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+func (s *Server) exchangeGitHubOAuthCode(ctx context.Context, code, redirectURL string) (string, error) {
+	values := url.Values{
+		"client_id":     {s.cfg.GitHubOAuthClientID},
+		"client_secret": {s.cfg.GitHubOAuthClientSecret},
+		"code":          {code},
+	}
+	if redirectURL != "" {
+		values.Set("redirect_uri", redirectURL)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, githubOAuthTokenURL, strings.NewReader(values.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := s.oauth.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var decoded githubOAuthTokenResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&decoded); err != nil {
+		return "", err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		if decoded.Error != "" {
+			return "", fmt.Errorf("github oauth token status %d: %s", resp.StatusCode, decoded.Error)
+		}
+		return "", fmt.Errorf("github oauth token status %d", resp.StatusCode)
+	}
+	if decoded.Error != "" {
+		return "", fmt.Errorf("github oauth token error: %s", decoded.Error)
+	}
+	if strings.TrimSpace(decoded.AccessToken) == "" {
+		return "", fmt.Errorf("github oauth token response missing access_token")
+	}
+	return decoded.AccessToken, nil
+}
+
+func (s *Server) fetchGitHubOAuthUser(ctx context.Context, token string) (githubOAuthUser, error) {
+	endpoint := strings.TrimRight(s.cfg.GitHubAPIBaseURL, "/") + "/user"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return githubOAuthUser{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := s.oauth.Do(req)
+	if err != nil {
+		return githubOAuthUser{}, err
+	}
+	defer resp.Body.Close()
+	var user githubOAuthUser
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&user); err != nil {
+		return githubOAuthUser{}, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return githubOAuthUser{}, fmt.Errorf("github user status %d", resp.StatusCode)
+	}
+	if strings.TrimSpace(user.Login) == "" {
+		return githubOAuthUser{}, fmt.Errorf("github user response missing login")
+	}
+	return user, nil
 }
 
 func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
@@ -2718,18 +2921,104 @@ func (s *Server) stopSandboxWithTimeout(ctx context.Context, sandboxID string, p
 }
 
 func (s *Server) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
-	auth := r.Header.Get("Authorization")
-	token := ""
-	if strings.HasPrefix(auth, "Bearer ") {
-		token = strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
-	}
-	if token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(s.cfg.AdminToken)) == 1 {
+	if _, ok := s.adminSessionFromRequest(r); ok {
 		return true
 	}
-	s.logger.Warn("admin auth rejected", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr, "has_authorization", auth != "")
-	w.Header().Set("WWW-Authenticate", `Bearer realm="runnerd"`)
-	writeError(w, http.StatusUnauthorized, "missing or invalid admin token")
+	s.logger.Warn("admin auth rejected", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr, "has_authorization", r.Header.Get("Authorization") != "")
+	writeError(w, http.StatusUnauthorized, "missing or invalid github oauth session")
 	return false
+}
+
+func (s *Server) adminSessionFromRequest(r *http.Request) (adminSession, bool) {
+	cookie, err := r.Cookie(adminSessionCookieName)
+	if err != nil {
+		return adminSession{}, false
+	}
+	session, err := s.decodeAdminSession(cookie.Value)
+	if err != nil {
+		s.logger.Warn("admin session rejected", "path", r.URL.Path, "error", err)
+		return adminSession{}, false
+	}
+	if time.Now().Unix() > session.ExpiresAt {
+		return adminSession{}, false
+	}
+	if !s.cfg.GitHubOAuthUserAllowed(session.Login) {
+		return adminSession{}, false
+	}
+	return session, true
+}
+
+func (s *Server) encodeAdminSession(session adminSession) (string, error) {
+	payload, err := json.Marshal(session)
+	if err != nil {
+		return "", err
+	}
+	payloadValue := base64.RawURLEncoding.EncodeToString(payload)
+	signature := s.signAdminSession(payloadValue)
+	return payloadValue + "." + signature, nil
+}
+
+func (s *Server) decodeAdminSession(value string) (adminSession, error) {
+	payloadValue, signature, ok := strings.Cut(value, ".")
+	if !ok || payloadValue == "" || signature == "" {
+		return adminSession{}, fmt.Errorf("malformed session")
+	}
+	want := s.signAdminSession(payloadValue)
+	if subtle.ConstantTimeCompare([]byte(signature), []byte(want)) != 1 {
+		return adminSession{}, fmt.Errorf("invalid signature")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(payloadValue)
+	if err != nil {
+		return adminSession{}, err
+	}
+	var session adminSession
+	if err := json.Unmarshal(payload, &session); err != nil {
+		return adminSession{}, err
+	}
+	if strings.TrimSpace(session.Login) == "" {
+		return adminSession{}, fmt.Errorf("session missing login")
+	}
+	return session, nil
+}
+
+func (s *Server) signAdminSession(payload string) string {
+	mac := hmac.New(sha256.New, []byte(s.cfg.GitHubOAuthClientSecret))
+	_, _ = mac.Write([]byte(payload))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func (s *Server) githubOAuthRedirectURL(r *http.Request) string {
+	if redirectURL := strings.TrimSpace(s.cfg.GitHubOAuthRedirectURL); redirectURL != "" {
+		return redirectURL
+	}
+	scheme := "http"
+	if requestIsSecure(r) {
+		scheme = "https"
+	}
+	host := r.Host
+	if forwardedHost := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwardedHost != "" {
+		host = forwardedHost
+	}
+	return scheme + "://" + host + "/auth/github/callback"
+}
+
+func requestIsSecure(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	return strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+func clearCookie(w http.ResponseWriter, name, cookiePath string, secure bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Path:     cookiePath,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		MaxAge:   -1,
+	})
 }
 
 func isSandboxGone(err error) bool {

@@ -5,10 +5,12 @@ import {
   Clock3,
   Copy,
   ExternalLink,
+  Github,
   Loader2,
   Play,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Square,
   Trash2,
 } from "lucide-react"
@@ -142,13 +144,20 @@ type AuditEvent = {
   created_at: string
 }
 
+type AuthSession = {
+  authenticated: boolean
+  oauth_enabled: boolean
+  login?: string
+  avatar_url?: string
+  expires_at?: string
+}
+
 type Metric = {
   label: string
   value: number
   description: string
 }
 
-const tokenKey = "runnerd-admin-token"
 const activeStatuses = new Set<RunnerStatus>(["queued", "creating", "running", "stopping"])
 const logNames = ["control.log", "stdout.log", "stderr.log"] as const
 const adminSections = [
@@ -170,8 +179,7 @@ function sectionFromPath(): AdminSection {
 }
 
 function App() {
-  const [token, setTokenState] = useState(() => localStorage.getItem(tokenKey) || "")
-  const [tokenInput, setTokenInput] = useState("")
+  const [authSession, setAuthSession] = useState<AuthSession>({ authenticated: false, oauth_enabled: false })
   const [section, setSectionState] = useState<AdminSection>(() => sectionFromPath())
   const [runners, setRunners] = useState<RunnerState[]>([])
   const [runnerSpecs, setRunnerSpecs] = useState<RunnerSpec[]>([])
@@ -270,6 +278,8 @@ function App() {
     [runnerRepositoryFilter, runnerSpecFilter, runnerStatusFilter, runners]
   )
 
+  const hasAccess = authSession.authenticated
+
   const groupNamesForSpec = useCallback(
     (specName: string) =>
       runnerGroups
@@ -292,22 +302,14 @@ function App() {
     ]
   }, [runnerSpecs.length, runners])
 
-  const setToken = useCallback((value: string) => {
-    const next = value.trim()
-    setTokenState(next)
-    if (next) localStorage.setItem(tokenKey, next)
-    else localStorage.removeItem(tokenKey)
-  }, [])
-
   const request = useCallback(
     async (url: string, options: RequestInit = {}) => {
       const headers = new Headers(options.headers)
-      headers.set("Authorization", `Bearer ${token}`)
-      const response = await fetch(url, { ...options, headers })
+      const response = await fetch(url, { ...options, headers, credentials: "same-origin" })
       if (response.status === 401) {
-        setToken("")
+        setAuthSession((current) => ({ ...current, authenticated: false, login: undefined, avatar_url: undefined, expires_at: undefined }))
         setConnected(false)
-        throw new Error("Invalid ADMIN_TOKEN")
+        throw new Error("Admin session expired")
       }
       if (!response.ok) {
         const text = await response.text()
@@ -317,7 +319,7 @@ function App() {
       if (contentType.includes("application/json")) return response.json()
       return response.text()
     },
-    [setToken, token]
+    []
   )
 
   const parseLabels = (value: string) =>
@@ -328,7 +330,7 @@ function App() {
 
   const loadLog = useCallback(
     async (id: string, name: (typeof logNames)[number]) => {
-      if (!token || !id) {
+      if (!hasAccess || !id) {
         setLogText("No runner selected")
         return
       }
@@ -342,11 +344,11 @@ function App() {
         setLogText(error instanceof Error ? error.message : "Failed to load log")
       }
     },
-    [request, token]
+    [hasAccess, request]
   )
 
   const loadAll = useCallback(async () => {
-    if (!token) {
+    if (!hasAccess) {
       setConnected(false)
       return
     }
@@ -376,10 +378,21 @@ function App() {
     } finally {
       setLoading(false)
     }
-  }, [request, selectedID, token])
+  }, [hasAccess, request, selectedID])
 
   useEffect(() => {
     void fetch("/healthz").catch(() => setConnected(false))
+  }, [])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/auth/session", { credentials: "same-origin" })
+        if (response.ok) setAuthSession((await response.json()) as AuthSession)
+      } catch {
+        setAuthSession({ authenticated: false, oauth_enabled: false })
+      }
+    })()
   }, [])
 
   useEffect(() => {
@@ -399,7 +412,7 @@ function App() {
   }, [loadLog, selectedID, selectedLog])
 
   useEffect(() => {
-    if (section !== "diagnostics" || !token) return
+    if (section !== "diagnostics" || !hasAccess) return
     void (async () => {
       try {
         const [summary, vars] = await Promise.all([
@@ -412,17 +425,12 @@ function App() {
         toast.error(error instanceof Error ? error.message : "Failed to load diagnostics")
       }
     })()
-  }, [request, section, token])
+  }, [hasAccess, request, section])
 
-  const submitToken = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setToken(tokenInput)
-    setTokenInput("")
-    toast.success("Admin token saved")
-  }
-
-  const clearToken = () => {
-    setToken("")
+  const signOut = () => {
+    void fetch("/auth/logout", { method: "POST", credentials: "same-origin" }).finally(() => {
+      setAuthSession((current) => ({ ...current, authenticated: false, login: undefined, avatar_url: undefined, expires_at: undefined }))
+    })
     setRunners([])
     setRunnerSpecs([])
     setRunnerGroups([])
@@ -464,8 +472,8 @@ function App() {
 
   const createRunner = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (!token) {
-      toast.error("ADMIN_TOKEN required")
+    if (!hasAccess) {
+      toast.error("Admin access required")
       return
     }
     const body: {
@@ -737,39 +745,30 @@ function App() {
     toast.success("Runner ID copied")
   }
 
+  if (!hasAccess) {
+    return (
+      <>
+        <LoginPage
+          oauthEnabled={authSession.oauth_enabled}
+        />
+        <Toaster richColors />
+      </>
+    )
+  }
+
   return (
     <SidebarProvider>
       <AppSidebar
         section={section}
         connected={connected}
         activeCount={metrics[0]?.value || 0}
+        authLabel={authSession.authenticated ? `@${authSession.login}` : "Locked"}
         onSectionChange={setSection}
-        onClearToken={clearToken}
+        onSignOut={signOut}
       />
       <SidebarInset className="min-h-0 overflow-hidden">
         <SiteHeader />
         <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 lg:gap-6 lg:p-6">
-          {!token ? (
-            <Card className="max-w-xl">
-              <CardHeader>
-                <CardTitle>Admin access</CardTitle>
-                <CardDescription>Use the runnerd ADMIN_TOKEN.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <form className="flex flex-col gap-3 sm:flex-row" onSubmit={submitToken}>
-                  <Input
-                    type="password"
-                    value={tokenInput}
-                    onChange={(event) => setTokenInput(event.target.value)}
-                    placeholder="ADMIN_TOKEN"
-                    autoComplete="current-password"
-                  />
-                  <Button type="submit">Connect</Button>
-                </form>
-              </CardContent>
-            </Card>
-          ) : null}
-
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             {metrics.map((metric) => (
               <Card key={metric.label} className="gap-3 py-5">
@@ -866,7 +865,7 @@ function App() {
                             resetCreateRunnerForm()
                             setCreateRunnerOpen(true)
                           }}
-                          disabled={!token}
+                          disabled={!hasAccess}
                         >
                           <Plus />
                           Create
@@ -917,7 +916,7 @@ function App() {
                             <Button type="button" variant="outline" onClick={() => setCreateRunnerOpen(false)}>
                               Cancel
                             </Button>
-                            <Button type="submit" disabled={!token}>
+                            <Button type="submit" disabled={!hasAccess}>
                               Create
                             </Button>
                           </DialogFooter>
@@ -1809,6 +1808,91 @@ function App() {
       </SidebarInset>
       <Toaster richColors />
     </SidebarProvider>
+  )
+}
+
+function LoginPage({
+  oauthEnabled,
+}: {
+  oauthEnabled: boolean
+}) {
+  return (
+    <main className="min-h-screen bg-background text-foreground">
+      <div className="min-h-screen">
+        <section className="relative flex min-h-screen overflow-hidden bg-[radial-gradient(circle_at_30%_20%,oklch(0.92_0.08_195),transparent_34%),linear-gradient(135deg,oklch(0.98_0.02_180),oklch(0.94_0.03_250))] p-6 sm:p-10">
+          <div className="absolute inset-x-10 top-1/2 h-px bg-foreground/10" />
+          <div className="absolute bottom-28 left-10 right-20 grid grid-cols-6 gap-2 opacity-70">
+            {Array.from({ length: 36 }).map((_, index) => (
+              <span
+                key={index}
+                className={cn(
+                  "h-2 rounded-full",
+                  index % 7 === 0 ? "bg-primary" : index % 5 === 0 ? "bg-emerald-500" : "bg-foreground/15"
+                )}
+              />
+            ))}
+          </div>
+          <div className="relative z-10 flex h-fit items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
+              <Play className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="text-sm font-semibold tracking-wide">E2B Runner Console</div>
+              <div className="text-xs text-muted-foreground">Ephemeral Actions control plane</div>
+            </div>
+          </div>
+
+          <div className="absolute inset-0 z-20 flex items-center justify-center px-5">
+            <Card className="rounded-lg shadow-sm">
+              <CardHeader className="gap-2">
+                <div className="flex h-11 w-11 items-center justify-center rounded-lg border bg-muted">
+                  <ShieldCheck className="h-5 w-5 text-primary" />
+                </div>
+                <CardTitle className="text-2xl">Sign in</CardTitle>
+                <CardDescription>Use your allowed GitHub account to access runnerd.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {oauthEnabled ? (
+                  <Button
+                    type="button"
+                    size="lg"
+                    className="w-full justify-center"
+                    onClick={() => {
+                      window.location.href = "/auth/github/login"
+                    }}
+                  >
+                    <Github className="h-4 w-4" />
+                    Continue with GitHub
+                  </Button>
+                ) : (
+                  <div className="rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
+                    GitHub OAuth is required but not configured on this runnerd instance.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="absolute bottom-10 left-6 right-6 z-10 max-w-2xl sm:left-10 sm:right-auto">
+            <h1 className="max-w-lg text-3xl font-semibold leading-tight text-foreground sm:text-4xl">
+              Sign in before touching live runner capacity.
+            </h1>
+            <div className="mt-5 grid max-w-xl gap-3 sm:grid-cols-3">
+              {[
+                ["Isolated", "E2B sandboxes per job"],
+                ["Scoped", "GitHub allowlists and policies"],
+                ["Audited", "Admin actions are traceable"],
+              ].map(([label, detail]) => (
+                <div key={label} className="rounded-lg border bg-background/70 p-3 shadow-sm backdrop-blur">
+                  <div className="text-sm font-semibold">{label}</div>
+                  <div className="mt-1 text-xs leading-relaxed text-muted-foreground">{detail}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
   )
 }
 

@@ -7,3 +7,5 @@ node_modules/
 ui/node_modules/
 internal/server/admin/
 templates/*/node_modules/
+*.local.yaml
+secrets/

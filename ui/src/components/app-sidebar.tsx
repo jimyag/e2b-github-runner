@@ -17,16 +17,18 @@ type AppSidebarProps = {
   section: string
   connected: boolean
   activeCount: number
+  authLabel: string
   onSectionChange: (section: string) => void
-  onClearToken: () => void
+  onSignOut: () => void
 }
 
 export function AppSidebar({
   section,
   connected,
   activeCount,
+  authLabel,
   onSectionChange,
-  onClearToken,
+  onSignOut,
 }: AppSidebarProps) {
   const items = [
     { id: "overview", label: "Overview", icon: Activity },
@@ -92,7 +94,7 @@ export function AppSidebar({
           <div className="mb-2 flex items-center gap-2 px-1">
             <span className={connected ? "h-2 w-2 rounded-full bg-green-500" : "h-2 w-2 rounded-full bg-muted-foreground"} />
             <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
-              {connected ? "Connected" : "Locked"}
+              {connected ? "Connected" : authLabel}
             </span>
           </div>
           <div className="grid gap-2 rounded-md bg-background p-2 text-xs">
@@ -113,9 +115,9 @@ export function AppSidebar({
             <div className="flex items-center justify-between gap-2">
               <span className="inline-flex items-center gap-1 text-muted-foreground">
                 <Github className="h-3.5 w-3.5" />
-                Actions
+                Admin
               </span>
-              <span className="font-semibold">ephemeral</span>
+              <span className="min-w-0 truncate font-semibold">{authLabel}</span>
             </div>
           </div>
           <Button
@@ -123,9 +125,9 @@ export function AppSidebar({
             variant="outline"
             size="sm"
             className="mt-2 w-full"
-            onClick={onClearToken}
+            onClick={onSignOut}
           >
-            Clear token
+            Sign out
           </Button>
         </div>
       </SidebarFooter>

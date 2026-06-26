@@ -9,9 +9,6 @@ database:
   # Relative sqlite paths are resolved from the directory containing runnerd.yaml.
   url: ./var/runnerd.db
 
-admin:
-  token: change-me
-
 e2b:
   api_key: your-e2b-api-key
   api_url: https://api.e2b.dev
@@ -30,6 +27,18 @@ github:
     # installation_id: 12345678
     # Relative paths are resolved from the directory containing runnerd.yaml.
     private_key_file: ./secrets/github-app.pem
+  # Admin-console login uses the same GitHub App's OAuth settings.
+  # Configure the GitHub App callback URL as:
+  #   http://127.0.0.1:25500/auth/github/callback
+  # or the public HTTPS URL used by your deployment.
+  oauth:
+    client_id: Iv1.your-github-app-client-id
+    client_secret: your-github-app-client-secret
+    # Optional when runnerd can infer the public URL from the request.
+    redirect_url: https://runner.example.com/auth/github/callback
+    allowed_users:
+      - your-github-login
+    session_ttl_hours: 12
   # Optional repository allowlist. Empty means all repositories that installed the App are allowed.
   # allowed_repositories:
   #   - your-org/*
