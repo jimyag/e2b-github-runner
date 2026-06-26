@@ -760,6 +760,7 @@ function App() {
           oauthEnabled={authSession.oauth_enabled}
           currentLogin={authSession.login}
           currentRole={authSession.role}
+          onSignOut={signOut}
         />
         <Toaster richColors />
       </>
@@ -1825,10 +1826,12 @@ function LoginPage({
   oauthEnabled,
   currentLogin,
   currentRole,
+  onSignOut,
 }: {
   oauthEnabled: boolean
   currentLogin?: string
   currentRole?: string
+  onSignOut: () => void
 }) {
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -1867,8 +1870,19 @@ function LoginPage({
               </CardHeader>
               <CardContent className="space-y-5">
                 {currentLogin ? (
-                  <div className="rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
-                    @{currentLogin} is signed in as {currentRole || "user"} and does not have admin access.
+                  <div className="space-y-3">
+                    <div className="rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
+                      @{currentLogin} is signed in as {currentRole || "user"} and does not have admin access.
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="lg"
+                      className="w-full justify-center"
+                      onClick={onSignOut}
+                    >
+                      Sign out
+                    </Button>
                   </div>
                 ) : oauthEnabled ? (
                   <Button
