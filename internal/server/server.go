@@ -18,14 +18,15 @@ import (
 )
 
 type Server struct {
-	cfg     config.Config
-	store   state.Store
-	gh      *github.Client
-	sandbox sandboxrunner.Service
-	logger  *slog.Logger
-	mux     *http.ServeMux
-	slots   chan struct{}
-	oauth   *http.Client
+	cfg         config.Config
+	store       state.Store
+	gh          *github.Client
+	sandbox     sandboxrunner.Service
+	logger      *slog.Logger
+	mux         *http.ServeMux
+	slots       chan struct{}
+	oauth       *http.Client
+	diagnostics *http.Client
 
 	admissionMu sync.Mutex
 	locks       [64]sync.Mutex
@@ -112,6 +113,7 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		slots:       make(chan struct{}, cfg.MaxConcurrentRunners),
 		queueNotify: make(chan struct{}, 1),
 		oauth:       &http.Client{Timeout: 10 * time.Second},
+		diagnostics: &http.Client{Timeout: 5 * time.Second},
 	}
 	hostname, _ := os.Hostname()
 	s.workerID = fmt.Sprintf("%s-%d", hostname, os.Getpid())

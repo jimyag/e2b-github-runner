@@ -25,12 +25,14 @@ func (s *Server) startBackgroundLoops() {
 
 func (s *Server) workerLoop(ctx context.Context) {
 	defer s.loopWG.Done()
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-s.queueNotify:
-		case <-time.After(500 * time.Millisecond):
+		case <-ticker.C:
 		}
 		s.processQueuedRequests(ctx)
 	}

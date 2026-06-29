@@ -209,7 +209,7 @@ func writeError(w http.ResponseWriter, status int, message string) {
 func newID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
 	}
 	return strings.ToLower(hex.EncodeToString(b[:]))
 }

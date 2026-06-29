@@ -443,7 +443,7 @@ func (s *Server) runnerExited(id string, result sandboxrunner.ExitResult, err er
 		s.logger.Error("read state after runner exit", "id", id, "error", readErr)
 		return
 	}
-	if st.Status == state.StatusCompleted || st.Status == state.StatusStopping {
+	if st.Status != state.StatusCreating && st.Status != state.StatusRunning {
 		return
 	}
 	if err != nil {

@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/qiniu/ci-runner/internal/redact"
 	"github.com/qiniu/ci-runner/internal/state"
@@ -20,7 +19,11 @@ func (s *Server) handleDiagnosticsPprof(w http.ResponseWriter, r *http.Request) 
 		DumpScript  string `json:"dump_script"`
 	}
 	addresses, scripts := discoverPprofArtifacts()
-	states, _ := s.store.ListStates()
+	states, err := s.store.ListStates()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	failures := make([]state.RunnerState, 0, 5)
 	for _, st := range states {
 		if st.Status == state.StatusFailed {
@@ -72,8 +75,7 @@ func (s *Server) handleDiagnosticsVars(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "pprof endpoint not discovered")
 		return
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(strings.TrimRight(addresses[0].Address, "/") + "/debug/vars")
+	resp, err := s.diagnostics.Get(strings.TrimRight(addresses[0].Address, "/") + "/debug/vars")
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
