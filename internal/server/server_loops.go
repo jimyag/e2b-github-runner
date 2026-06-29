@@ -194,7 +194,24 @@ func (s *Server) reconcileMismatchedCompletedJobs(ctx context.Context) {
 			continue
 		}
 		observed := github.WorkflowJob{ID: current.AssignedJobID, Name: current.AssignedJobName}
-		requeued, next, requeueErr := s.requeueMismatchedWorkflowJob(ctx, current, observed)
+		unlock()
+		queued, queueErr := s.originalWorkflowJobQueued(ctx, current)
+		if queueErr != nil {
+			s.logger.Warn("original workflow job status check failed; requeueing mismatched request for retry", "id", current.ID, "workflow_job_id", current.WorkflowJobID, "assigned_job_id", observed.ID, "error", queueErr)
+			queued = true
+		}
+		unlock = s.lockRunner(current.ID)
+		latest, readErr := s.store.ReadState(current.ID)
+		if readErr != nil {
+			unlock()
+			s.logger.Error("read mismatched completed state after workflow job check", "id", current.ID, "error", readErr)
+			continue
+		}
+		if latest.Status != state.StatusCompleted || latest.WorkflowJobID != current.WorkflowJobID || latest.AssignedJobID != current.AssignedJobID {
+			unlock()
+			continue
+		}
+		requeued, next, requeueErr := s.requeueMismatchedWorkflowJob(latest, observed, queued)
 		unlock()
 		if requeueErr != nil {
 			s.logger.Error("requeue mismatched completed workflow job", "id", st.ID, "workflow_job_id", current.WorkflowJobID, "assigned_job_id", current.AssignedJobID, "error", requeueErr)
@@ -207,12 +224,7 @@ func (s *Server) reconcileMismatchedCompletedJobs(ctx context.Context) {
 	}
 }
 
-func (s *Server) requeueMismatchedWorkflowJob(ctx context.Context, st state.RunnerState, observed github.WorkflowJob) (bool, state.RunnerState, error) {
-	queued, err := s.originalWorkflowJobQueued(ctx, st)
-	if err != nil {
-		s.logger.Warn("original workflow job status check failed; requeueing mismatched request for retry", "id", st.ID, "workflow_job_id", st.WorkflowJobID, "assigned_job_id", observed.ID, "error", err)
-		queued = true
-	}
+func (s *Server) requeueMismatchedWorkflowJob(st state.RunnerState, observed github.WorkflowJob, queued bool) (bool, state.RunnerState, error) {
 	if !queued {
 		next := st
 		next.AssignedJobID = 0

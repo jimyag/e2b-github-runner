@@ -681,7 +681,12 @@ func (s *Server) stopRunner(ctx context.Context, id string, job github.WorkflowJ
 		return st, false, cleanupErr
 	}
 	if workflowJobMismatch(st, job) {
-		requeued, next, err := s.requeueMismatchedWorkflowJob(ctx, st, job)
+		queued, queueErr := s.originalWorkflowJobQueued(ctx, st)
+		if queueErr != nil {
+			s.logger.Warn("original workflow job status check failed; requeueing mismatched request for retry", "id", st.ID, "workflow_job_id", st.WorkflowJobID, "assigned_job_id", job.ID, "error", queueErr)
+			queued = true
+		}
+		requeued, next, err := s.requeueMismatchedWorkflowJob(st, job, queued)
 		if err != nil {
 			return state.RunnerState{}, false, err
 		}
@@ -1108,6 +1113,14 @@ func (s *Server) ensureRepositoryAllowsProfile(repositoryFullName string, profil
 	if err != nil {
 		return err
 	}
+	groups, err := s.store.ListRunnerGroups()
+	if err != nil {
+		return err
+	}
+	groupsByName := make(map[string]state.RunnerGroup, len(groups))
+	for _, group := range groups {
+		groupsByName[group.Name] = group
+	}
 	allowed := profile.DefaultAvailable
 	for _, policy := range policies {
 		if !policy.Enabled || !repositoryPatternMatches(policy.RepositoryFullName, repositoryFullName) {
@@ -1118,8 +1131,8 @@ func (s *Server) ensureRepositoryAllowsProfile(repositoryFullName string, profil
 			break
 		}
 		if policy.RunnerGroupName != "" {
-			group, err := s.store.GetRunnerGroup(policy.RunnerGroupName)
-			if err != nil || !group.Enabled {
+			group, ok := groupsByName[policy.RunnerGroupName]
+			if !ok || !group.Enabled {
 				continue
 			}
 			for _, specName := range group.SpecNames {
@@ -1244,6 +1257,8 @@ func (s *Server) cleanupStartedSandbox(id string, result sandboxrunner.StartResu
 func (s *Server) stopSandboxWithTimeout(ctx context.Context, sandboxID string, pid uint32) error {
 	if ctx == nil {
 		ctx = context.Background()
+	} else {
+		ctx = context.WithoutCancel(ctx)
 	}
 	s.logger.Info("stopping sandbox", "sandbox_id", sandboxID, "pid", pid, "timeout", s.cfg.SandboxStopTimeout.String())
 	stopCtx, cancel := context.WithTimeout(ctx, s.cfg.SandboxStopTimeout)

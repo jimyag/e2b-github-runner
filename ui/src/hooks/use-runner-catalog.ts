@@ -136,6 +136,9 @@ export function useRunnerCatalog({
         runnerGroups.map((group) => {
           const shouldContain = runnerSpecForm.group_names.includes(group.name)
           const currentSpecs = new Set(group.spec_names)
+          if (shouldContain === currentSpecs.has(payload.name)) {
+            return Promise.resolve()
+          }
           if (shouldContain) currentSpecs.add(payload.name)
           else currentSpecs.delete(payload.name)
           return request(`/runner_groups/${encodeURIComponent(group.name)}`, {
