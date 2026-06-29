@@ -231,129 +231,142 @@ type DBStore struct {
 
 type runnerRequestRecord struct {
 	ID                  string     `gorm:"column:id;primaryKey"`
-	Source              string     `gorm:"column:source"`
-	WorkflowJobID       *int64     `gorm:"column:workflow_job_id"`
+	Source              string     `gorm:"column:source;not null"`
+	WorkflowJobID       *int64     `gorm:"column:workflow_job_id;uniqueIndex:idx_runner_requests_workflow_job_id"`
 	RepositoryFullName  string     `gorm:"column:repository_full_name"`
 	RequestedLabelsJSON string     `gorm:"column:requested_labels_json"`
-	LabelsJSON          string     `gorm:"column:labels_json"`
+	LabelsJSON          string     `gorm:"column:labels_json;not null"`
 	ProfileName         string     `gorm:"column:profile_name"`
 	RunnerGroup         string     `gorm:"column:runner_group"`
-	RunnerName          string     `gorm:"column:runner_name"`
-	Status              string     `gorm:"column:status"`
+	RunnerName          string     `gorm:"column:runner_name;not null"`
+	Status              string     `gorm:"column:status;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_status_retry_queue;index:idx_runner_requests_lease_expiry"`
 	FailureStage        string     `gorm:"column:failure_stage"`
 	FailureReason       string     `gorm:"column:failure_reason"`
 	LastErrorCode       string     `gorm:"column:last_error_code"`
 	LastErrorMessage    string     `gorm:"column:last_error_message"`
-	LastErrorRetryable  bool       `gorm:"column:last_error_retryable"`
-	RetryCount          int        `gorm:"column:retry_count"`
+	LastErrorRetryable  bool       `gorm:"column:last_error_retryable;not null;default:false"`
+	RetryCount          int        `gorm:"column:retry_count;not null;default:0"`
 	SandboxID           string     `gorm:"column:sandbox_id"`
 	ProcessPID          uint32     `gorm:"column:process_pid"`
 	AssignedJobID       int64      `gorm:"column:assigned_job_id"`
 	AssignedJobName     string     `gorm:"column:assigned_job_name"`
 	Error               string     `gorm:"column:error"`
 	GitHubPayloadJSON   string     `gorm:"column:github_payload_json"`
-	QueuedAt            time.Time  `gorm:"column:queued_at"`
+	QueuedAt            time.Time  `gorm:"column:queued_at;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_status_retry_queue"`
 	LastAttemptAt       *time.Time `gorm:"column:last_attempt_at"`
-	NextRetryAt         *time.Time `gorm:"column:next_retry_at"`
+	NextRetryAt         *time.Time `gorm:"column:next_retry_at;index:idx_runner_requests_status_retry_queue"`
 	CreatingAt          *time.Time `gorm:"column:creating_at"`
 	RunningAt           *time.Time `gorm:"column:running_at"`
 	StoppingAt          *time.Time `gorm:"column:stopping_at"`
 	CompletedAt         *time.Time `gorm:"column:completed_at"`
 	FailedAt            *time.Time `gorm:"column:failed_at"`
 	LeaseOwner          string     `gorm:"column:lease_owner"`
-	LeaseExpiresAt      *time.Time `gorm:"column:lease_expires_at"`
-	UpdatedAt           time.Time  `gorm:"column:updated_at"`
-	Version             int64      `gorm:"column:version"`
+	LeaseExpiresAt      *time.Time `gorm:"column:lease_expires_at;index:idx_runner_requests_lease_expiry"`
+	UpdatedAt           time.Time  `gorm:"column:updated_at;not null;index:idx_runner_requests_status_updated"`
+	Version             int64      `gorm:"column:version;not null;default:0"`
 }
 
 func (runnerRequestRecord) TableName() string { return "runner_requests" }
 
 type runnerEventRecord struct {
 	ID          int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	RequestID   string    `gorm:"column:request_id"`
-	EventType   string    `gorm:"column:event_type"`
+	RequestID   string    `gorm:"column:request_id;not null;index:idx_runner_events_request_created"`
+	EventType   string    `gorm:"column:event_type;not null"`
 	Stage       string    `gorm:"column:stage"`
 	Message     string    `gorm:"column:message"`
 	PayloadJSON string    `gorm:"column:payload_json"`
-	CreatedAt   time.Time `gorm:"column:created_at"`
+	CreatedAt   time.Time `gorm:"column:created_at;not null;index:idx_runner_events_request_created"`
 }
 
 func (runnerEventRecord) TableName() string { return "runner_events" }
 
 type runnerProfileRecord struct {
 	Name             string    `gorm:"column:name;primaryKey"`
-	LabelsJSON       string    `gorm:"column:labels_json"`
-	TemplateID       string    `gorm:"column:template_id"`
+	LabelsJSON       string    `gorm:"column:labels_json;not null"`
+	TemplateID       string    `gorm:"column:template_id;not null"`
 	RunnerGroup      string    `gorm:"column:runner_group"`
-	MaxConcurrency   int       `gorm:"column:max_concurrency"`
-	MinIdle          int       `gorm:"column:min_idle"`
-	Priority         int       `gorm:"column:priority"`
-	Enabled          bool      `gorm:"column:enabled"`
-	DefaultAvailable bool      `gorm:"column:default_available"`
-	CreatedAt        time.Time `gorm:"column:created_at"`
-	UpdatedAt        time.Time `gorm:"column:updated_at"`
+	MaxConcurrency   int       `gorm:"column:max_concurrency;not null"`
+	MinIdle          int       `gorm:"column:min_idle;not null;default:0"`
+	Priority         int       `gorm:"column:priority;not null;default:0"`
+	Enabled          bool      `gorm:"column:enabled;not null"`
+	DefaultAvailable bool      `gorm:"column:default_available;not null"`
+	CreatedAt        time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt        time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (runnerProfileRecord) TableName() string { return "runner_profiles" }
 
+type legacyRunnerProfileDefaultAvailableColumn struct {
+	DefaultAvailable bool `gorm:"column:default_available;not null;default:true"`
+}
+
+func (legacyRunnerProfileDefaultAvailableColumn) TableName() string { return "runner_profiles" }
+
 type runnerGroupRecord struct {
 	Name        string    `gorm:"column:name;primaryKey"`
 	Description string    `gorm:"column:description"`
-	Enabled     bool      `gorm:"column:enabled"`
-	CreatedAt   time.Time `gorm:"column:created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at"`
+	Enabled     bool      `gorm:"column:enabled;not null"`
+	CreatedAt   time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt   time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (runnerGroupRecord) TableName() string { return "runner_groups" }
 
 type runnerGroupSpecRecord struct {
 	GroupName string    `gorm:"column:group_name;primaryKey"`
-	SpecName  string    `gorm:"column:spec_name;primaryKey"`
-	CreatedAt time.Time `gorm:"column:created_at"`
+	SpecName  string    `gorm:"column:spec_name;primaryKey;index:idx_runner_group_specs_spec"`
+	CreatedAt time.Time `gorm:"column:created_at;not null"`
 }
 
 func (runnerGroupSpecRecord) TableName() string { return "runner_group_specs" }
 
 type repositoryPolicyRecord struct {
 	ID                 int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	RepositoryFullName string    `gorm:"column:repository_full_name"`
-	ProfileName        string    `gorm:"column:profile_name"`
-	RunnerGroupName    string    `gorm:"column:runner_group_name"`
-	Enabled            bool      `gorm:"column:enabled"`
-	CreatedAt          time.Time `gorm:"column:created_at"`
+	RepositoryFullName string    `gorm:"column:repository_full_name;not null;uniqueIndex:idx_repository_policies_repository_profile,where:profile_name <> '';uniqueIndex:idx_repository_policies_repository_group,where:runner_group_name <> ''"`
+	ProfileName        string    `gorm:"column:profile_name;not null;uniqueIndex:idx_repository_policies_repository_profile,where:profile_name <> ''"`
+	RunnerGroupName    string    `gorm:"column:runner_group_name;not null;default:'';uniqueIndex:idx_repository_policies_repository_group,where:runner_group_name <> ''"`
+	Enabled            bool      `gorm:"column:enabled;not null"`
+	CreatedAt          time.Time `gorm:"column:created_at;not null"`
 }
 
 func (repositoryPolicyRecord) TableName() string { return "repository_policies" }
 
+type legacyRepositoryPolicyRunnerGroupNameColumn struct {
+	RunnerGroupName string `gorm:"column:runner_group_name;not null;default:''"`
+}
+
+func (legacyRepositoryPolicyRunnerGroupNameColumn) TableName() string { return "repository_policies" }
+
 type auditEventRecord struct {
 	ID           int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	Actor        string    `gorm:"column:actor"`
-	Action       string    `gorm:"column:action"`
-	ResourceType string    `gorm:"column:resource_type"`
-	ResourceID   string    `gorm:"column:resource_id"`
+	Actor        string    `gorm:"column:actor;not null"`
+	Action       string    `gorm:"column:action;not null"`
+	ResourceType string    `gorm:"column:resource_type;not null"`
+	ResourceID   string    `gorm:"column:resource_id;not null"`
 	PayloadJSON  string    `gorm:"column:payload_json"`
-	CreatedAt    time.Time `gorm:"column:created_at"`
+	CreatedAt    time.Time `gorm:"column:created_at;not null;index:idx_audit_events_created"`
 }
 
 func (auditEventRecord) TableName() string { return "audit_events" }
 
 type accountRecord struct {
 	ID        int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	Role      string    `gorm:"column:role"`
-	CreatedAt time.Time `gorm:"column:created_at"`
-	UpdatedAt time.Time `gorm:"column:updated_at"`
+	Role      string    `gorm:"column:role;not null"`
+	CreatedAt time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (accountRecord) TableName() string { return "accounts" }
 
 type oauthIdentityRecord struct {
-	ID            int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	AccountID     int64     `gorm:"column:account_id"`
-	OAuthProvider string    `gorm:"column:oauth_provider"`
-	OAuthSubject  string    `gorm:"column:oauth_subject"`
-	OAuthLogin    string    `gorm:"column:oauth_login"`
-	CreatedAt     time.Time `gorm:"column:created_at"`
-	UpdatedAt     time.Time `gorm:"column:updated_at"`
+	ID            int64         `gorm:"column:id;primaryKey;autoIncrement"`
+	AccountID     int64         `gorm:"column:account_id;not null;index:idx_oauth_identities_account"`
+	Account       accountRecord `gorm:"foreignKey:AccountID;constraint:OnDelete:CASCADE"`
+	OAuthProvider string        `gorm:"column:oauth_provider;not null;uniqueIndex:idx_oauth_identities_provider_subject"`
+	OAuthSubject  string        `gorm:"column:oauth_subject;not null;uniqueIndex:idx_oauth_identities_provider_subject"`
+	OAuthLogin    string        `gorm:"column:oauth_login;not null"`
+	CreatedAt     time.Time     `gorm:"column:created_at;not null"`
+	UpdatedAt     time.Time     `gorm:"column:updated_at;not null"`
 }
 
 func (oauthIdentityRecord) TableName() string { return "oauth_identities" }
@@ -1587,103 +1600,35 @@ func configureSQLite(db *gorm.DB) error {
 }
 
 func (s *DBStore) migrate(db *gorm.DB) error {
-	statements := sqliteMigrations
-	if s.opts.Backend == BackendPostgres {
-		statements = postgresMigrations
-	}
-	for _, stmt := range statements {
-		if strings.TrimSpace(stmt) == "" {
-			continue
-		}
-		if err := db.Exec(stmt).Error; err != nil {
-			return err
-		}
-	}
-	for column, columnType := range map[string]string{
-		"repository_full_name":  "TEXT",
-		"profile_name":          "TEXT",
-		"runner_group":          "TEXT",
-		"requested_labels_json": "TEXT",
-		"last_error_code":       "TEXT",
-		"last_error_message":    "TEXT",
-		"last_error_retryable":  "BOOLEAN NOT NULL DEFAULT FALSE",
-		"retry_count":           "INTEGER NOT NULL DEFAULT 0",
-		"last_attempt_at":       "TIMESTAMP",
-		"next_retry_at":         "TIMESTAMP",
-		"lease_owner":           "TEXT",
-		"lease_expires_at":      "TIMESTAMP",
-	} {
-		if !db.Migrator().HasColumn(&runnerRequestRecord{}, column) {
-			if err := db.Exec(fmt.Sprintf("ALTER TABLE runner_requests ADD COLUMN %s %s", column, columnType)).Error; err != nil {
-				return err
-			}
-		}
-	}
-	for column, columnType := range map[string]string{
-		"default_available": "BOOLEAN NOT NULL DEFAULT TRUE",
-	} {
-		if !db.Migrator().HasColumn(&runnerProfileRecord{}, column) {
-			if err := db.Exec(fmt.Sprintf("ALTER TABLE runner_profiles ADD COLUMN %s %s", column, columnType)).Error; err != nil {
-				return err
-			}
-		}
-	}
-	for column, columnType := range map[string]string{
-		"runner_group_name": "TEXT NOT NULL DEFAULT ''",
-	} {
-		if !db.Migrator().HasColumn(&repositoryPolicyRecord{}, column) {
-			if err := db.Exec(fmt.Sprintf("ALTER TABLE repository_policies ADD COLUMN %s %s", column, columnType)).Error; err != nil {
-				return err
-			}
-		}
-	}
-	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_repository_policies_repository_group ON repository_policies(repository_full_name, runner_group_name) WHERE runner_group_name <> '';`).Error; err != nil {
+	if err := migrateLegacySchemaColumns(db); err != nil {
 		return err
 	}
-	if err := s.migrateLegacyUsers(db); err != nil {
-		return err
-	}
-	return nil
+	return db.AutoMigrate(
+		&runnerRequestRecord{},
+		&runnerEventRecord{},
+		&runnerProfileRecord{},
+		&runnerGroupRecord{},
+		&runnerGroupSpecRecord{},
+		&repositoryPolicyRecord{},
+		&auditEventRecord{},
+		&accountRecord{},
+		&oauthIdentityRecord{},
+	)
 }
 
-func (s *DBStore) migrateLegacyUsers(db *gorm.DB) error {
-	if !db.Migrator().HasTable("users") {
-		return nil
-	}
-	if !db.Migrator().HasColumn("users", "oauth_provider") {
-		if err := db.Exec(`ALTER TABLE users ADD COLUMN oauth_provider TEXT NOT NULL DEFAULT 'github'`).Error; err != nil {
+func migrateLegacySchemaColumns(db *gorm.DB) error {
+	migrator := db.Migrator()
+	if migrator.HasTable(&runnerProfileRecord{}) && !migrator.HasColumn(&runnerProfileRecord{}, "default_available") {
+		if err := migrator.AddColumn(&legacyRunnerProfileDefaultAvailableColumn{}, "DefaultAvailable"); err != nil {
 			return err
 		}
 	}
-	if !db.Migrator().HasColumn("users", "oauth_subject") {
-		if err := db.Exec(`ALTER TABLE users ADD COLUMN oauth_subject TEXT NOT NULL DEFAULT ''`).Error; err != nil {
-			return err
-		}
-		if err := db.Exec(`UPDATE users SET oauth_subject = oauth_login WHERE oauth_subject = ''`).Error; err != nil {
+	if migrator.HasTable(&repositoryPolicyRecord{}) && !migrator.HasColumn(&repositoryPolicyRecord{}, "runner_group_name") {
+		if err := migrator.AddColumn(&legacyRepositoryPolicyRunnerGroupNameColumn{}, "RunnerGroupName"); err != nil {
 			return err
 		}
 	}
-	return db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(`INSERT INTO accounts (id, role, created_at, updated_at)
-			SELECT id, role, created_at, updated_at FROM users WHERE TRUE
-			ON CONFLICT(id) DO UPDATE SET role = excluded.role, updated_at = excluded.updated_at`).Error; err != nil {
-			return err
-		}
-		if err := tx.Exec(`INSERT INTO oauth_identities (account_id, oauth_provider, oauth_subject, oauth_login, created_at, updated_at)
-			SELECT id, oauth_provider, oauth_subject, oauth_login, created_at, updated_at FROM users WHERE TRUE
-			ON CONFLICT(oauth_provider, oauth_subject) DO UPDATE SET
-				account_id = excluded.account_id,
-				oauth_login = excluded.oauth_login,
-				updated_at = excluded.updated_at`).Error; err != nil {
-			return err
-		}
-		if s.opts.Backend == BackendPostgres {
-			if err := tx.Exec(`SELECT setval(pg_get_serial_sequence('accounts', 'id'), COALESCE((SELECT MAX(id) FROM accounts), 1), true)`).Error; err != nil {
-				return err
-			}
-		}
-		return tx.Migrator().DropTable("users")
-	})
+	return nil
 }
 
 func applyStateTimestamps(st *RunnerState, now time.Time) {
@@ -1791,7 +1736,19 @@ func (s *DBStore) accountFromIdentity(db *gorm.DB, identity oauthIdentityRecord)
 		}
 		return Account{}, OAuthIdentity{}, err
 	}
-	return Account(account), OAuthIdentity(identity), nil
+	return Account(account), recordToOAuthIdentity(identity), nil
+}
+
+func recordToOAuthIdentity(record oauthIdentityRecord) OAuthIdentity {
+	return OAuthIdentity{
+		ID:            record.ID,
+		AccountID:     record.AccountID,
+		OAuthProvider: record.OAuthProvider,
+		OAuthSubject:  record.OAuthSubject,
+		OAuthLogin:    record.OAuthLogin,
+		CreatedAt:     record.CreatedAt,
+		UpdatedAt:     record.UpdatedAt,
+	}
 }
 
 type githubPayloadLinks struct {
@@ -2035,238 +1992,4 @@ func normalizePlatformRole(role string) string {
 	default:
 		return ""
 	}
-}
-
-var sqliteMigrations = []string{
-	`CREATE TABLE IF NOT EXISTS runner_requests (
-		id TEXT PRIMARY KEY,
-		source TEXT NOT NULL,
-		workflow_job_id INTEGER,
-		repository_full_name TEXT,
-		requested_labels_json TEXT,
-		labels_json TEXT NOT NULL,
-		profile_name TEXT,
-		runner_group TEXT,
-		runner_name TEXT NOT NULL,
-		status TEXT NOT NULL,
-		failure_stage TEXT,
-		failure_reason TEXT,
-		last_error_code TEXT,
-		last_error_message TEXT,
-		last_error_retryable BOOLEAN NOT NULL DEFAULT FALSE,
-		retry_count INTEGER NOT NULL DEFAULT 0,
-		sandbox_id TEXT,
-		process_pid INTEGER,
-		assigned_job_id INTEGER,
-		assigned_job_name TEXT,
-		error TEXT,
-		github_payload_json TEXT,
-		queued_at TIMESTAMP NOT NULL,
-		last_attempt_at TIMESTAMP,
-		next_retry_at TIMESTAMP,
-		creating_at TIMESTAMP,
-		running_at TIMESTAMP,
-		stopping_at TIMESTAMP,
-		completed_at TIMESTAMP,
-		failed_at TIMESTAMP,
-		lease_owner TEXT,
-		lease_expires_at TIMESTAMP,
-		updated_at TIMESTAMP NOT NULL,
-		version INTEGER NOT NULL DEFAULT 0
-	);`,
-	`CREATE TABLE IF NOT EXISTS runner_events (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		request_id TEXT NOT NULL,
-		event_type TEXT NOT NULL,
-		stage TEXT,
-		message TEXT,
-		payload_json TEXT,
-		created_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS runner_profiles (
-		name TEXT PRIMARY KEY,
-		labels_json TEXT NOT NULL,
-		template_id TEXT NOT NULL,
-		runner_group TEXT,
-		max_concurrency INTEGER NOT NULL,
-		min_idle INTEGER NOT NULL DEFAULT 0,
-		priority INTEGER NOT NULL DEFAULT 0,
-		enabled BOOLEAN NOT NULL DEFAULT TRUE,
-		default_available BOOLEAN NOT NULL DEFAULT TRUE,
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS runner_groups (
-		name TEXT PRIMARY KEY,
-		description TEXT,
-		enabled BOOLEAN NOT NULL DEFAULT TRUE,
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS runner_group_specs (
-		group_name TEXT NOT NULL,
-		spec_name TEXT NOT NULL,
-		created_at TIMESTAMP NOT NULL,
-		PRIMARY KEY (group_name, spec_name)
-	);`,
-	`CREATE TABLE IF NOT EXISTS repository_policies (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		repository_full_name TEXT NOT NULL,
-		profile_name TEXT NOT NULL,
-		runner_group_name TEXT NOT NULL DEFAULT '',
-		enabled BOOLEAN NOT NULL DEFAULT TRUE,
-		created_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS audit_events (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		actor TEXT NOT NULL,
-		action TEXT NOT NULL,
-		resource_type TEXT NOT NULL,
-		resource_id TEXT NOT NULL,
-		payload_json TEXT,
-		created_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS accounts (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		role TEXT NOT NULL,
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS oauth_identities (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		account_id INTEGER NOT NULL,
-		oauth_provider TEXT NOT NULL,
-		oauth_subject TEXT NOT NULL,
-		oauth_login TEXT NOT NULL,
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL,
-		FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-	);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_runner_requests_workflow_job_id ON runner_requests(workflow_job_id);`,
-	`CREATE INDEX IF NOT EXISTS idx_runner_requests_status_updated ON runner_requests(status, updated_at, queued_at);`,
-	`CREATE INDEX IF NOT EXISTS idx_runner_requests_status_retry_queue ON runner_requests(status, next_retry_at, queued_at);`,
-	`CREATE INDEX IF NOT EXISTS idx_runner_requests_lease_expiry ON runner_requests(status, lease_expires_at);`,
-	`CREATE INDEX IF NOT EXISTS idx_runner_events_request_created ON runner_events(request_id, created_at);`,
-	`CREATE INDEX IF NOT EXISTS idx_runner_group_specs_spec ON runner_group_specs(spec_name);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_repository_policies_repository_profile ON repository_policies(repository_full_name, profile_name) WHERE profile_name <> '';`,
-	`CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_identities_provider_subject ON oauth_identities(oauth_provider, oauth_subject);`,
-	`CREATE INDEX IF NOT EXISTS idx_oauth_identities_account ON oauth_identities(account_id);`,
-}
-
-var postgresMigrations = []string{
-	`CREATE TABLE IF NOT EXISTS runner_requests (
-		id TEXT PRIMARY KEY,
-		source TEXT NOT NULL,
-		workflow_job_id BIGINT,
-		repository_full_name TEXT,
-		requested_labels_json TEXT,
-		labels_json TEXT NOT NULL,
-		profile_name TEXT,
-		runner_group TEXT,
-		runner_name TEXT NOT NULL,
-		status TEXT NOT NULL,
-		failure_stage TEXT,
-		failure_reason TEXT,
-		last_error_code TEXT,
-		last_error_message TEXT,
-		last_error_retryable BOOLEAN NOT NULL DEFAULT FALSE,
-		retry_count INTEGER NOT NULL DEFAULT 0,
-		sandbox_id TEXT,
-		process_pid BIGINT,
-		assigned_job_id BIGINT,
-		assigned_job_name TEXT,
-		error TEXT,
-		github_payload_json TEXT,
-		queued_at TIMESTAMP NOT NULL,
-		last_attempt_at TIMESTAMP,
-		next_retry_at TIMESTAMP,
-		creating_at TIMESTAMP,
-		running_at TIMESTAMP,
-		stopping_at TIMESTAMP,
-		completed_at TIMESTAMP,
-		failed_at TIMESTAMP,
-		lease_owner TEXT,
-		lease_expires_at TIMESTAMP,
-		updated_at TIMESTAMP NOT NULL,
-		version BIGINT NOT NULL DEFAULT 0
-	);`,
-	`CREATE TABLE IF NOT EXISTS runner_events (
-		id BIGSERIAL PRIMARY KEY,
-		request_id TEXT NOT NULL,
-		event_type TEXT NOT NULL,
-		stage TEXT,
-		message TEXT,
-		payload_json TEXT,
-		created_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS runner_profiles (
-		name TEXT PRIMARY KEY,
-		labels_json TEXT NOT NULL,
-		template_id TEXT NOT NULL,
-		runner_group TEXT,
-		max_concurrency INTEGER NOT NULL,
-		min_idle INTEGER NOT NULL DEFAULT 0,
-		priority INTEGER NOT NULL DEFAULT 0,
-		enabled BOOLEAN NOT NULL DEFAULT TRUE,
-		default_available BOOLEAN NOT NULL DEFAULT TRUE,
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS runner_groups (
-		name TEXT PRIMARY KEY,
-		description TEXT,
-		enabled BOOLEAN NOT NULL DEFAULT TRUE,
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS runner_group_specs (
-		group_name TEXT NOT NULL,
-		spec_name TEXT NOT NULL,
-		created_at TIMESTAMP NOT NULL,
-		PRIMARY KEY (group_name, spec_name)
-	);`,
-	`CREATE TABLE IF NOT EXISTS repository_policies (
-		id BIGSERIAL PRIMARY KEY,
-		repository_full_name TEXT NOT NULL,
-		profile_name TEXT NOT NULL,
-		runner_group_name TEXT NOT NULL DEFAULT '',
-		enabled BOOLEAN NOT NULL DEFAULT TRUE,
-		created_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS audit_events (
-		id BIGSERIAL PRIMARY KEY,
-		actor TEXT NOT NULL,
-		action TEXT NOT NULL,
-		resource_type TEXT NOT NULL,
-		resource_id TEXT NOT NULL,
-		payload_json TEXT,
-		created_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS accounts (
-		id BIGSERIAL PRIMARY KEY,
-		role TEXT NOT NULL,
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS oauth_identities (
-		id BIGSERIAL PRIMARY KEY,
-		account_id BIGINT NOT NULL,
-		oauth_provider TEXT NOT NULL,
-		oauth_subject TEXT NOT NULL,
-		oauth_login TEXT NOT NULL,
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL,
-		FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
-	);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_runner_requests_workflow_job_id ON runner_requests(workflow_job_id);`,
-	`CREATE INDEX IF NOT EXISTS idx_runner_requests_status_updated ON runner_requests(status, updated_at, queued_at);`,
-	`CREATE INDEX IF NOT EXISTS idx_runner_requests_status_retry_queue ON runner_requests(status, next_retry_at, queued_at);`,
-	`CREATE INDEX IF NOT EXISTS idx_runner_requests_lease_expiry ON runner_requests(status, lease_expires_at);`,
-	`CREATE INDEX IF NOT EXISTS idx_runner_events_request_created ON runner_events(request_id, created_at);`,
-	`CREATE INDEX IF NOT EXISTS idx_runner_group_specs_spec ON runner_group_specs(spec_name);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_repository_policies_repository_profile ON repository_policies(repository_full_name, profile_name) WHERE profile_name <> '';`,
-	`CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at);`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS idx_oauth_identities_provider_subject ON oauth_identities(oauth_provider, oauth_subject);`,
-	`CREATE INDEX IF NOT EXISTS idx_oauth_identities_account ON oauth_identities(account_id);`,
 }

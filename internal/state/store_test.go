@@ -6,7 +6,20 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 )
+
+func closeTestDB(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestSQLiteStoreUsesWALAndBusyTimeout(t *testing.T) {
 	store := NewWithOptions(Options{
@@ -290,7 +303,7 @@ func TestOAuthIdentityRequiresExistingAccount(t *testing.T) {
 	}
 }
 
-func TestMigrateLegacyUsersToAccountsAndOAuthIdentities(t *testing.T) {
+func TestMigrateDoesNotHandleLegacyUsers(t *testing.T) {
 	dir := t.TempDir()
 	databaseURL := dir + "/runnerd.db"
 	store := NewWithOptions(Options{
@@ -305,8 +318,6 @@ func TestMigrateLegacyUsersToAccountsAndOAuthIdentities(t *testing.T) {
 	now := time.Now().UTC()
 	if err := db.Exec(`CREATE TABLE users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		oauth_provider TEXT NOT NULL,
-		oauth_subject TEXT NOT NULL,
 		oauth_login TEXT NOT NULL,
 		role TEXT NOT NULL,
 		created_at TIMESTAMP NOT NULL,
@@ -314,8 +325,8 @@ func TestMigrateLegacyUsersToAccountsAndOAuthIdentities(t *testing.T) {
 	);`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec(`INSERT INTO users (id, oauth_provider, oauth_subject, oauth_login, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		42, "github", "12345", "octocat", "admin", now, now).Error; err != nil {
+	if err := db.Exec(`INSERT INTO users (id, oauth_login, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		42, "octocat", "admin", now, now).Error; err != nil {
 		t.Fatal(err)
 	}
 	sqlDB, err := db.DB()
@@ -331,26 +342,23 @@ func TestMigrateLegacyUsersToAccountsAndOAuthIdentities(t *testing.T) {
 		DatabaseURL:    databaseURL,
 		MigrateOnStart: true,
 	}).(*DBStore)
-	account, identity, err := migrated.GetAccountByOAuthIdentity("github", "12345")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if account.ID != 42 || account.Role != "admin" {
-		t.Fatalf("expected legacy admin account to migrate, got %#v", account)
-	}
-	if identity.AccountID != account.ID || identity.OAuthLogin != "octocat" {
-		t.Fatalf("expected legacy oauth identity to migrate, got account=%#v identity=%#v", account, identity)
-	}
 	db, err = migrated.dbOrEnsure()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if db.Migrator().HasTable("users") {
-		t.Fatal("expected legacy users table to be removed after migration")
+	if !db.Migrator().HasTable("users") {
+		t.Fatal("expected legacy users table to be left untouched")
+	}
+	var count int64
+	if err := db.Table("users").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected legacy users row to remain untouched, got %d", count)
 	}
 }
 
-func TestMigrateLegacyUsersIsIdempotentAfterPartialBackfill(t *testing.T) {
+func TestMigrateBackfillsLegacyRunnerProfileDefaultAvailable(t *testing.T) {
 	dir := t.TempDir()
 	databaseURL := dir + "/runnerd.db"
 	store := NewWithOptions(Options{
@@ -363,54 +371,82 @@ func TestMigrateLegacyUsersIsIdempotentAfterPartialBackfill(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	if err := db.Exec(`CREATE TABLE users (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		oauth_provider TEXT NOT NULL,
-		oauth_subject TEXT NOT NULL,
-		oauth_login TEXT NOT NULL,
-		role TEXT NOT NULL,
+	if err := db.Exec(`CREATE TABLE runner_profiles (
+		name TEXT PRIMARY KEY,
+		labels_json TEXT NOT NULL,
+		template_id TEXT NOT NULL,
+		runner_group TEXT,
+		max_concurrency INTEGER NOT NULL,
+		min_idle INTEGER NOT NULL DEFAULT 0,
+		priority INTEGER NOT NULL DEFAULT 0,
+		enabled BOOLEAN NOT NULL,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec(`INSERT INTO users (id, oauth_provider, oauth_subject, oauth_login, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		42, "github", "12345", "octocat", "admin", now, now).Error; err != nil {
+	if err := db.Exec(`INSERT INTO runner_profiles (name, labels_json, template_id, runner_group, max_concurrency, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"default", `["self-hosted"]`, "base", "default", 1, true, now, now).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&accountRecord{}, &oauthIdentityRecord{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Exec(`INSERT INTO accounts (id, role, created_at, updated_at)
-		SELECT id, role, created_at, updated_at FROM users`).Error; err != nil {
-		t.Fatal(err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sqlDB.Close(); err != nil {
-		t.Fatal(err)
-	}
+	closeTestDB(t, db)
 
 	migrated := NewWithOptions(Options{
 		Backend:        BackendSQLite,
 		DatabaseURL:    databaseURL,
 		MigrateOnStart: true,
 	}).(*DBStore)
-	account, identity, err := migrated.GetAccountByOAuthIdentity("github", "12345")
+	profile, err := migrated.GetProfile("default")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if account.ID != 42 || account.Role != "admin" || identity.AccountID != account.ID || identity.OAuthLogin != "octocat" {
-		t.Fatalf("expected partial legacy backfill to complete, got account=%#v identity=%#v", account, identity)
+	if !profile.DefaultAvailable {
+		t.Fatal("expected legacy runner profile to default to globally available")
 	}
-	db, err = migrated.dbOrEnsure()
+}
+
+func TestMigrateBackfillsLegacyRepositoryPolicyRunnerGroupName(t *testing.T) {
+	dir := t.TempDir()
+	databaseURL := dir + "/runnerd.db"
+	store := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseURL:    databaseURL,
+		MigrateOnStart: false,
+	}).(*DBStore)
+	db, err := store.open()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if db.Migrator().HasTable("users") {
-		t.Fatal("expected legacy users table to be removed after idempotent migration")
+	now := time.Now().UTC()
+	if err := db.Exec(`CREATE TABLE repository_policies (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		repository_full_name TEXT NOT NULL,
+		profile_name TEXT NOT NULL,
+		enabled BOOLEAN NOT NULL,
+		created_at TIMESTAMP NOT NULL
+	);`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO repository_policies (repository_full_name, profile_name, enabled, created_at) VALUES (?, ?, ?, ?)`,
+		"owner/repo", "default", true, now).Error; err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	migrated := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseURL:    databaseURL,
+		MigrateOnStart: true,
+	}).(*DBStore)
+	policies, err := migrated.ListRepositoryPolicies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(policies) != 1 {
+		t.Fatalf("expected one repository policy, got %d", len(policies))
+	}
+	if policies[0].RunnerGroupName != "" {
+		t.Fatalf("expected legacy repository policy runner group to default empty, got %q", policies[0].RunnerGroupName)
 	}
 }
 
