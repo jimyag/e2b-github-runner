@@ -6,6 +6,7 @@ import { formatTime } from "@/admin-format"
 import { AppSidebar } from "@/components/app-sidebar"
 import { AuditSection, DiagnosticsSection, MatchSection, OverviewSection } from "@/components/admin-sections"
 import { LoginPage } from "@/components/login-page"
+import { RunnerGroupsSection, type RunnerGroupFormState } from "@/components/runner-groups-section"
 import { RunnerRequestsSection } from "@/components/runner-requests-section"
 import { RunnerSpecsSection, type RunnerSpecFormState } from "@/components/runner-specs-section"
 import { SiteHeader } from "@/components/site-header"
@@ -105,7 +106,7 @@ function App() {
     runner_group_name: "",
     enabled: true,
   })
-  const [runnerGroupForm, setRunnerGroupForm] = useState({
+  const [runnerGroupForm, setRunnerGroupForm] = useState<RunnerGroupFormState>({
     name: "",
     description: "",
     spec_names: [] as string[],
@@ -746,125 +747,20 @@ function App() {
           ) : null}
 
           {section === "runner_groups" ? (
-            <div className="grid gap-4">
-              <Card className="min-w-0">
-                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <CardTitle>Runner groups</CardTitle>
-                    <CardDescription>Click a group row to edit its runner specs.</CardDescription>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        resetRunnerGroupForm()
-                        setRunnerGroupOpen(true)
-                      }}
-                    >
-                      <Plus />
-                      Create
-                    </Button>
-                    <Button type="button" variant="outline" size="icon" onClick={() => void loadAll()} disabled={loading} title="Refresh">
-                      <RefreshCw className={cn(loading && "animate-spin")} />
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Specs</TableHead>
-                        <TableHead>Enabled</TableHead>
-                        <TableHead>Updated</TableHead>
-                        <TableHead className="w-24" />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {runnerGroups.map((group) => (
-                        <TableRow key={group.name} className="cursor-pointer" onClick={() => loadRunnerGroupIntoForm(group)}>
-                          <TableCell>{group.name}</TableCell>
-                          <TableCell className="max-w-[420px] truncate">{group.spec_names.join(", ") || "-"}</TableCell>
-                          <TableCell>{group.enabled ? "yes" : "no"}</TableCell>
-                          <TableCell>{formatTime(group.updated_at)}</TableCell>
-                          <TableCell>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                void deleteRunnerGroup(group.name)
-                              }}
-                            >
-                              <Trash2 />
-                              Delete
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-              <Dialog open={runnerGroupOpen} onOpenChange={setRunnerGroupOpen}>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>{runnerGroupForm.name ? "Edit runner group" : "Create runner group"}</DialogTitle>
-                    <DialogDescription>Group runner specs so repositories can allow a named set.</DialogDescription>
-                  </DialogHeader>
-                  <form className="grid gap-3" onSubmit={saveRunnerGroup}>
-                    <Input
-                      value={runnerGroupForm.name}
-                      onChange={(event) => setRunnerGroupForm((current) => ({ ...current, name: event.target.value }))}
-                      placeholder="runner group name"
-                    />
-                    <Input
-                      value={runnerGroupForm.description}
-                      onChange={(event) => setRunnerGroupForm((current) => ({ ...current, description: event.target.value }))}
-                      placeholder="description"
-                    />
-                    <div className="grid gap-2 rounded-md border p-3">
-                      {runnerSpecs.length === 0 ? (
-                        <div className="text-sm text-muted-foreground">Create a runner spec before adding specs to a group.</div>
-                      ) : (
-                        runnerSpecs.map((runnerSpec) => (
-                          <label key={runnerSpec.name} className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={runnerGroupForm.spec_names.includes(runnerSpec.name)}
-                              onChange={(event) =>
-                                setRunnerGroupForm((current) => ({
-                                  ...current,
-                                  spec_names: event.target.checked
-                                    ? [...current.spec_names, runnerSpec.name]
-                                    : current.spec_names.filter((name) => name !== runnerSpec.name),
-                                }))
-                              }
-                            />
-                            {runnerSpec.name}
-                          </label>
-                        ))
-                      )}
-                    </div>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={runnerGroupForm.enabled}
-                        onChange={(event) => setRunnerGroupForm((current) => ({ ...current, enabled: event.target.checked }))}
-                      />
-                      enabled
-                    </label>
-                    <DialogFooter>
-                      <Button type="button" variant="outline" onClick={() => setRunnerGroupOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button type="submit">Save runner group</Button>
-                    </DialogFooter>
-                  </form>
-                </DialogContent>
-              </Dialog>
-            </div>
+            <RunnerGroupsSection
+              loading={loading}
+              runnerGroups={runnerGroups}
+              runnerSpecs={runnerSpecs}
+              runnerGroupOpen={runnerGroupOpen}
+              runnerGroupForm={runnerGroupForm}
+              onRefresh={() => void loadAll()}
+              onResetRunnerGroupForm={resetRunnerGroupForm}
+              onRunnerGroupOpenChange={setRunnerGroupOpen}
+              onRunnerGroupFormChange={setRunnerGroupForm}
+              onSubmitRunnerGroup={saveRunnerGroup}
+              onEditRunnerGroup={loadRunnerGroupIntoForm}
+              onDeleteRunnerGroup={(name) => void deleteRunnerGroup(name)}
+            />
           ) : null}
 
           {section === "runner_policies" ? (
