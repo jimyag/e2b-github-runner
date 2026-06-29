@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Plus, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
-import { formatTime } from "@/admin-format"
 import { AppSidebar } from "@/components/app-sidebar"
 import { AuditSection, DiagnosticsSection, MatchSection, OverviewSection } from "@/components/admin-sections"
 import { LoginPage } from "@/components/login-page"
 import { RunnerGroupsSection, type RunnerGroupFormState } from "@/components/runner-groups-section"
+import { RunnerPoliciesSection, type RunnerPolicyFormState } from "@/components/runner-policies-section"
 import { RunnerRequestsSection } from "@/components/runner-requests-section"
 import { RunnerSpecsSection, type RunnerSpecFormState } from "@/components/runner-specs-section"
 import { SiteHeader } from "@/components/site-header"
-import { Button } from "@/components/ui/button"
 import {
   Card,
   CardContent,
@@ -18,31 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { Toaster } from "@/components/ui/sonner"
 import {
   activeStatuses,
@@ -61,7 +35,6 @@ import {
   type RunnerState,
   type RunnerStatus,
 } from "@/admin-types"
-import { cn } from "@/lib/utils"
 
 function App() {
   const [authSession, setAuthSession] = useState<AuthSession>({ authenticated: false, oauth_enabled: false })
@@ -98,7 +71,7 @@ function App() {
     enabled: true,
     default_available: true,
   })
-  const [runnerPolicyForm, setPolicyForm] = useState({
+  const [runnerPolicyForm, setPolicyForm] = useState<RunnerPolicyFormState>({
     id: 0,
     repository_full_name: "",
     target_type: "spec",
@@ -360,6 +333,23 @@ function App() {
 
   const resetRunnerGroupForm = () => {
     setRunnerGroupForm({ name: "", description: "", spec_names: [], enabled: true })
+  }
+
+  const createRunnerPolicy = () => {
+    if (runnerSpecs.length === 0 && runnerGroups.length === 0) {
+      toast.error("Create a runner spec or runner group before adding policies")
+      setSection("runner_specs")
+      return
+    }
+    setPolicyForm({
+      id: 0,
+      repository_full_name: "",
+      target_type: runnerGroups.length > 0 ? "group" : "spec",
+      runner_spec_name: runnerSpecs[0]?.name || "",
+      runner_group_name: runnerGroups[0]?.name || "",
+      enabled: true,
+    })
+    setRunnerPolicyOpen(true)
   }
 
   const createRunner = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -764,183 +754,21 @@ function App() {
           ) : null}
 
           {section === "runner_policies" ? (
-            <div className="grid gap-4">
-              <Card className="min-w-0">
-                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <CardTitle>Runner policies</CardTitle>
-                    <CardDescription>Click a policy row to edit it.</CardDescription>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        if (runnerSpecs.length === 0 && runnerGroups.length === 0) {
-                          toast.error("Create a runner spec or runner group before adding policies")
-                          setSection("runner_specs")
-                          return
-                        }
-                        setPolicyForm({
-                          id: 0,
-                          repository_full_name: "",
-                          target_type: runnerGroups.length > 0 ? "group" : "spec",
-                          runner_spec_name: runnerSpecs[0]?.name || "",
-                          runner_group_name: runnerGroups[0]?.name || "",
-                          enabled: true,
-                        })
-                        setRunnerPolicyOpen(true)
-                      }}
-                    >
-                      <Plus />
-                      Create
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => void loadAll()}
-                      disabled={loading}
-                      title="Refresh"
-                    >
-                      <RefreshCw className={cn(loading && "animate-spin")} />
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Repository</TableHead>
-                        <TableHead>Target</TableHead>
-                        <TableHead>Enabled</TableHead>
-                        <TableHead>Created</TableHead>
-                        <TableHead className="w-24" />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {runnerPolicies.map((policy) => (
-                        <TableRow key={policy.id} className="cursor-pointer" onClick={() => loadPolicyIntoForm(policy)}>
-                          <TableCell>{policy.repository_full_name}</TableCell>
-                          <TableCell>
-                            {policy.runner_group_name
-                              ? `group:${policy.runner_group_name}`
-                              : `spec:${policy.runner_spec_name || "-"}`}
-                          </TableCell>
-                          <TableCell>{policy.enabled ? "yes" : "no"}</TableCell>
-                          <TableCell>{formatTime(policy.created_at)}</TableCell>
-                          <TableCell>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                void deletePolicy(policy.id)
-                              }}
-                            >
-                              <Trash2 />
-                              Delete
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-              <Dialog open={runnerPolicyOpen} onOpenChange={setRunnerPolicyOpen}>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>{runnerPolicyForm.id > 0 ? "Edit runner policy" : "Create runner policy"}</DialogTitle>
-                    <DialogDescription>Bind a repository pattern to an allowed runner spec or group.</DialogDescription>
-                  </DialogHeader>
-                  <form className="grid gap-3" onSubmit={savePolicy}>
-                    <Input
-                      value={runnerPolicyForm.repository_full_name}
-                      onChange={(event) =>
-                        setPolicyForm((current) => ({ ...current, repository_full_name: event.target.value }))
-                      }
-                      placeholder="owner/repo or owner/*"
-                    />
-                    <Select
-                      value={runnerPolicyForm.target_type}
-                      onValueChange={(value) =>
-                        setPolicyForm((current) => ({ ...current, target_type: value }))
-                      }
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="target type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="group">Runner group</SelectItem>
-                        <SelectItem value="spec">Runner spec</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {runnerPolicyForm.target_type === "group" ? (
-                      runnerGroups.length === 0 ? (
-                        <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                          Create a runner group before adding group policies.
-                        </div>
-                      ) : (
-                        <Select
-                          value={runnerPolicyForm.runner_group_name}
-                          onValueChange={(value) =>
-                            setPolicyForm((current) => ({ ...current, runner_group_name: value }))
-                          }
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder="runner group" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {runnerGroups.map((group) => (
-                              <SelectItem key={group.name} value={group.name}>
-                                {group.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )
-                    ) : runnerSpecs.length === 0 ? (
-                      <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                        Create a runner spec before adding runner policies.
-                      </div>
-                    ) : (
-                      <Select
-                        value={runnerPolicyForm.runner_spec_name}
-                        onValueChange={(value) =>
-                          setPolicyForm((current) => ({ ...current, runner_spec_name: value }))
-                        }
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="runner spec" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {runnerSpecs.map((runnerSpec) => (
-                            <SelectItem key={runnerSpec.name} value={runnerSpec.name}>
-                              {runnerSpec.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={runnerPolicyForm.enabled}
-                        onChange={(event) => setPolicyForm((current) => ({ ...current, enabled: event.target.checked }))}
-                      />
-                      enabled
-                    </label>
-                    <DialogFooter>
-                      <Button type="button" variant="outline" onClick={() => setRunnerPolicyOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button type="submit">Save policy</Button>
-                    </DialogFooter>
-                  </form>
-                </DialogContent>
-              </Dialog>
-            </div>
+            <RunnerPoliciesSection
+              loading={loading}
+              runnerPolicies={runnerPolicies}
+              runnerSpecs={runnerSpecs}
+              runnerGroups={runnerGroups}
+              runnerPolicyOpen={runnerPolicyOpen}
+              runnerPolicyForm={runnerPolicyForm}
+              onRefresh={() => void loadAll()}
+              onCreateRunnerPolicy={createRunnerPolicy}
+              onRunnerPolicyOpenChange={setRunnerPolicyOpen}
+              onRunnerPolicyFormChange={setPolicyForm}
+              onSubmitRunnerPolicy={savePolicy}
+              onEditRunnerPolicy={loadPolicyIntoForm}
+              onDeleteRunnerPolicy={(id) => void deletePolicy(id)}
+            />
           ) : null}
 
           {section === "match" ? (
