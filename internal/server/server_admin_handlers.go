@@ -35,7 +35,7 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 	labels := input.Labels
 	requestedLabels := append([]string(nil), labels...)
 	repositoryFullName := strings.TrimSpace(input.RepositoryFullName)
-	if strings.TrimSpace(repositoryFullName) == "" || strings.Contains(repositoryFullName, "*") {
+	if repositoryFullName == "" || strings.Contains(repositoryFullName, "*") {
 		s.logger.Info("manual runner repository missing", "id", id, "repository", repositoryFullName)
 		writeError(w, http.StatusBadRequest, "repository_full_name is required for manual runner creation")
 		return

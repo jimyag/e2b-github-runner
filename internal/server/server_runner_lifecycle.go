@@ -176,6 +176,7 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 	if err := s.store.WriteState(st); err != nil {
 		s.admissionMu.Unlock()
 		unlock()
+		_ = s.store.ReleaseLease(id, workerID)
 		s.logger.Error("write creating state", "id", id, "error", err)
 		return
 	}
@@ -658,6 +659,7 @@ func (s *Server) stopRunner(ctx context.Context, id string, job github.WorkflowJ
 					if writeErr := s.store.WriteState(st); writeErr != nil {
 						return state.RunnerState{}, false, fmt.Errorf("schedule stop retry: %v; write stopping state: %w", err, writeErr)
 					}
+					st.Version++
 					s.store.AppendLog(id, "control.log", []byte(fmt.Sprintf("stop retry scheduled for %s: %s\n", st.NextRetryAt.Format(time.RFC3339), err)))
 					s.logger.Info("runner stop retry scheduled", "id", id, "sandbox_id", st.SandboxID, "next_retry_at", st.NextRetryAt, "error", err)
 					s.refreshMetrics()
@@ -1253,7 +1255,7 @@ func discoverPprofArtifacts() ([]pprofAddress, []string) {
 func (s *Server) lockRunner(id string) func() {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(id))
-	mu := &s.locks[int(h.Sum32())%len(s.locks)]
+	mu := &s.locks[int(h.Sum32()%uint32(len(s.locks)))]
 	mu.Lock()
 	return func() {
 		mu.Unlock()

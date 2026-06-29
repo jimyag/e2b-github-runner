@@ -211,5 +211,5 @@ func newID() string {
 	if _, err := rand.Read(b[:]); err != nil {
 		panic(fmt.Sprintf("crypto/rand failed: %v", err))
 	}
-	return strings.ToLower(hex.EncodeToString(b[:]))
+	return hex.EncodeToString(b[:])
 }
