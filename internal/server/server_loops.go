@@ -289,43 +289,62 @@ func (s *Server) reconcileCompletedWorkflowJobs(ctx context.Context) {
 
 func (s *Server) completeIfWorkflowJobCompleted(ctx context.Context, id string) error {
 	unlock := s.lockRunner(id)
-	defer unlock()
-
 	st, err := s.store.ReadState(id)
 	if err != nil {
+		unlock()
 		return err
 	}
 	if st.WorkflowJobID == 0 || st.RepositoryFullName == "" {
+		unlock()
 		return nil
 	}
 	if st.Status != state.StatusFailed || (st.FailureStage != "recovery" && st.FailureStage != "cleanup") {
+		unlock()
 		return nil
 	}
-	job, err := s.gh.GetWorkflowJob(ctx, st.RepositoryFullName, st.WorkflowJobID)
+	repositoryFullName := st.RepositoryFullName
+	workflowJobID := st.WorkflowJobID
+	stateVersion := st.Version
+	unlock()
+
+	job, err := s.gh.GetWorkflowJob(ctx, repositoryFullName, workflowJobID)
 	if err != nil {
 		return err
 	}
 	if !strings.EqualFold(strings.TrimSpace(job.Status), "completed") {
 		return nil
 	}
-	st.Status = state.StatusCompleted
-	st.AssignedJobID = 0
-	st.AssignedJobName = ""
-	st.Error = ""
-	st.FailureStage = ""
-	st.FailureReason = ""
-	st.LastErrorCode = ""
-	st.LastErrorMessage = ""
-	st.LastErrorRetryable = false
-	st.NextRetryAt = time.Time{}
-	st.LeaseOwner = ""
-	st.LeaseExpiresAt = time.Time{}
-	st.CompletedAt = time.Now().UTC()
-	if err := s.store.WriteState(st); err != nil {
+
+	unlock = s.lockRunner(id)
+	defer unlock()
+	latest, err := s.store.ReadState(id)
+	if err != nil {
 		return err
 	}
-	s.store.AppendLog(id, "control.log", []byte(fmt.Sprintf("workflow job %d is completed on GitHub; marked request completed\n", st.WorkflowJobID)))
-	s.logger.Info("marked failed request completed because workflow job is completed on GitHub", "id", id, "workflow_job_id", st.WorkflowJobID, "repository", st.RepositoryFullName, "conclusion", job.Conclusion)
+	if latest.Version != stateVersion || latest.WorkflowJobID != workflowJobID || latest.RepositoryFullName != repositoryFullName {
+		return nil
+	}
+	if latest.Status != state.StatusFailed || (latest.FailureStage != "recovery" && latest.FailureStage != "cleanup") {
+		return nil
+	}
+	latest.Status = state.StatusCompleted
+	latest.AssignedJobID = 0
+	latest.AssignedJobName = ""
+	latest.Error = ""
+	latest.FailureStage = ""
+	latest.FailureReason = ""
+	latest.LastErrorCode = ""
+	latest.LastErrorMessage = ""
+	latest.LastErrorRetryable = false
+	latest.NextRetryAt = time.Time{}
+	latest.LeaseOwner = ""
+	latest.LeaseExpiresAt = time.Time{}
+	latest.CompletedAt = time.Now().UTC()
+	if err := s.store.WriteState(latest); err != nil {
+		return err
+	}
+	s.store.AppendLog(id, "control.log", []byte(fmt.Sprintf("workflow job %d is completed on GitHub; marked request completed\n", workflowJobID)))
+	s.logger.Info("marked failed request completed because workflow job is completed on GitHub", "id", id, "workflow_job_id", workflowJobID, "repository", repositoryFullName, "conclusion", job.Conclusion)
 	s.refreshMetrics()
 	return nil
 }

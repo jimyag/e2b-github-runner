@@ -245,6 +245,7 @@ func (s *Server) handleWorkflowRunWebhook(w http.ResponseWriter, r *http.Request
 	created := 0
 	existing := 0
 	skipped := 0
+	failed := 0
 	for _, job := range jobs {
 		if job.ID == 0 || job.Status != "queued" {
 			s.logger.Info("workflow_run job skipped", "run_id", event.WorkflowRun.ID, "job_id", job.ID, "job_name", job.Name, "status", job.Status, "repository", event.Repository.FullName)
@@ -254,8 +255,8 @@ func (s *Server) handleWorkflowRunWebhook(w http.ResponseWriter, r *http.Request
 		st, wasCreated, err := s.enqueueWorkflowJob(event.Repository.FullName, event.WorkflowRun.Name, job, body)
 		if err != nil {
 			s.logger.Error("enqueue workflow_run job", "run_id", event.WorkflowRun.ID, "job_id", job.ID, "error", err)
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
+			failed++
+			continue
 		}
 		if wasCreated {
 			created++
@@ -265,6 +266,6 @@ func (s *Server) handleWorkflowRunWebhook(w http.ResponseWriter, r *http.Request
 			existing++
 		}
 	}
-	s.logger.Info("workflow_run webhook reconciled jobs", "action", event.Action, "run_id", event.WorkflowRun.ID, "repository", event.Repository.FullName, "created", created, "existing", existing, "skipped", skipped)
-	writeJSON(w, http.StatusAccepted, map[string]int{"created": created, "existing": existing, "skipped": skipped})
+	s.logger.Info("workflow_run webhook reconciled jobs", "action", event.Action, "run_id", event.WorkflowRun.ID, "repository", event.Repository.FullName, "created", created, "existing", existing, "skipped", skipped, "failed", failed)
+	writeJSON(w, http.StatusAccepted, map[string]int{"created": created, "existing": existing, "skipped": skipped, "failed": failed})
 }

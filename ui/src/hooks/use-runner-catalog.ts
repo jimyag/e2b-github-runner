@@ -132,25 +132,23 @@ export function useRunnerCatalog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-      await Promise.all(
-        runnerGroups.map((group) => {
-          const shouldContain = runnerSpecForm.group_names.includes(group.name)
-          const currentSpecs = new Set(group.spec_names)
-          if (shouldContain === currentSpecs.has(payload.name)) {
-            return Promise.resolve()
-          }
-          if (shouldContain) currentSpecs.add(payload.name)
-          else currentSpecs.delete(payload.name)
-          return request(`/runner_groups/${encodeURIComponent(group.name)}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              spec_names: Array.from(currentSpecs).sort(),
-              enabled: group.enabled,
-            }),
-          })
+      for (const group of runnerGroups) {
+        const shouldContain = runnerSpecForm.group_names.includes(group.name)
+        const currentSpecs = new Set(group.spec_names)
+        if (shouldContain === currentSpecs.has(payload.name)) {
+          continue
+        }
+        if (shouldContain) currentSpecs.add(payload.name)
+        else currentSpecs.delete(payload.name)
+        await request(`/runner_groups/${encodeURIComponent(group.name)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            spec_names: Array.from(currentSpecs).sort(),
+            enabled: group.enabled,
+          }),
         })
-      )
+      }
       toast.success(`Runner spec ${payload.name} saved`)
       setRunnerSpecOpen(false)
       await loadAll()

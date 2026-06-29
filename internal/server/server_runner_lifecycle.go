@@ -525,58 +525,77 @@ func (s *Server) cleanupSandboxAfterExit(id string, st state.RunnerState) error 
 
 func (s *Server) recoverRunner(ctx context.Context, id string) error {
 	unlock := s.lockRunner(id)
-	defer unlock()
-
 	st, err := s.store.ReadState(id)
 	if err != nil {
+		unlock()
 		return err
 	}
 	if !isActiveStatus(st.Status) {
+		unlock()
 		return nil
 	}
 	s.logger.Info("recovering runner after restart", "id", id, "status", st.Status, "sandbox_id", st.SandboxID)
 	s.store.AppendLog(id, "control.log", []byte("recovering runner after service restart\n"))
+	stateVersion := st.Version
+	unlock()
+
+	var sandboxErr error
 	if st.SandboxID != "" {
-		if err := s.stopSandboxWithTimeout(ctx, st.SandboxID, st.ProcessPID); err != nil {
-			if isSandboxGone(err) {
-				s.logger.Info("sandbox already gone during recovery", "id", id, "sandbox_id", st.SandboxID, "error", err)
-				s.store.AppendLog(id, "control.log", []byte("sandbox already gone during recovery: "+err.Error()+"\n"))
-			} else {
-				st.Status = state.StatusFailed
-				st.FailureStage = "recovery"
-				st.FailureReason = "cleanup_failed"
-				st.Error = "recover cleanup sandbox: " + err.Error()
-				s.recordAudit("recovery", "runner.recovery_failed", "runner_request", st.ID, map[string]any{"error": st.Error})
-				return s.store.WriteState(st)
-			}
+		sandboxErr = s.stopSandboxWithTimeout(ctx, st.SandboxID, st.ProcessPID)
+		if sandboxErr != nil && isSandboxGone(sandboxErr) {
+			s.logger.Info("sandbox already gone during recovery", "id", id, "sandbox_id", st.SandboxID, "error", sandboxErr)
+			s.store.AppendLog(id, "control.log", []byte("sandbox already gone during recovery: "+sandboxErr.Error()+"\n"))
+			sandboxErr = nil
 		}
 	}
-	if cleanupErr := s.cleanupGitHubRunner(ctx, st); cleanupErr != nil {
-		if s.scheduleCleanupRetry(&st, cleanupErr) {
-			s.recordAudit("recovery", "runner.cleanup_retry_scheduled", "runner_request", st.ID, map[string]any{"error": cleanupErr.Error(), "next_retry_at": st.NextRetryAt})
-			return s.store.WriteState(st)
-		}
-		st.Status = state.StatusFailed
-		st.FailureStage = "recovery"
-		st.FailureReason = "cleanup_failed"
-		st.Error = "recover cleanup github runner: " + cleanupErr.Error()
-		s.recordAudit("recovery", "runner.recovery_failed", "runner_request", st.ID, map[string]any{"error": st.Error})
-		return s.store.WriteState(st)
+	var cleanupErr error
+	if sandboxErr == nil {
+		cleanupErr = s.cleanupGitHubRunner(ctx, st)
 	}
-	st.Status = state.StatusFailed
-	st.FailureStage = "recovery"
-	st.FailureReason = "interrupted_runner"
-	st.Error = "runner interrupted by runnerd restart"
-	st.LeaseOwner = ""
-	st.LeaseExpiresAt = time.Time{}
-	st.CompletedAt = time.Time{}
-	if err := s.store.WriteState(st); err != nil {
+
+	unlock = s.lockRunner(id)
+	defer unlock()
+	latest, err := s.store.ReadState(id)
+	if err != nil {
+		return err
+	}
+	if !isActiveStatus(latest.Status) || latest.Version != stateVersion {
+		return nil
+	}
+	if sandboxErr != nil {
+		latest.Status = state.StatusFailed
+		latest.FailureStage = "recovery"
+		latest.FailureReason = "cleanup_failed"
+		latest.Error = "recover cleanup sandbox: " + sandboxErr.Error()
+		s.recordAudit("recovery", "runner.recovery_failed", "runner_request", latest.ID, map[string]any{"error": latest.Error})
+		return s.store.WriteState(latest)
+	}
+	if cleanupErr != nil {
+		if s.scheduleCleanupRetry(&latest, cleanupErr) {
+			s.recordAudit("recovery", "runner.cleanup_retry_scheduled", "runner_request", latest.ID, map[string]any{"error": cleanupErr.Error(), "next_retry_at": latest.NextRetryAt})
+			return s.store.WriteState(latest)
+		}
+		latest.Status = state.StatusFailed
+		latest.FailureStage = "recovery"
+		latest.FailureReason = "cleanup_failed"
+		latest.Error = "recover cleanup github runner: " + cleanupErr.Error()
+		s.recordAudit("recovery", "runner.recovery_failed", "runner_request", latest.ID, map[string]any{"error": latest.Error})
+		return s.store.WriteState(latest)
+	}
+	latest.Status = state.StatusFailed
+	latest.FailureStage = "recovery"
+	latest.FailureReason = "interrupted_runner"
+	latest.Error = "runner interrupted by runnerd restart"
+	latest.LeaseOwner = ""
+	latest.LeaseExpiresAt = time.Time{}
+	latest.CompletedAt = time.Time{}
+	if err := s.store.WriteState(latest); err != nil {
 		return err
 	}
 	s.store.AppendLog(id, "control.log", []byte("runner marked failed during recovery\n"))
-	s.recordAudit("recovery", "runner.recovered", "runner_request", st.ID, map[string]any{
-		"status":         st.Status,
-		"failure_reason": st.FailureReason,
+	s.recordAudit("recovery", "runner.recovered", "runner_request", latest.ID, map[string]any{
+		"status":         latest.Status,
+		"failure_reason": latest.FailureReason,
 	})
 	s.refreshMetrics()
 	return nil
