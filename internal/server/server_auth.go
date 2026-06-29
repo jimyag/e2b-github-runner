@@ -35,10 +35,10 @@ func (s *Server) handleGitHubOAuthLogin(w http.ResponseWriter, r *http.Request) 
 		http.NotFound(w, r)
 		return
 	}
-	state := newID()
+	stateToken := newID()
 	http.SetCookie(w, &http.Cookie{
 		Name:     oauthStateCookieName,
-		Value:    state,
+		Value:    stateToken,
 		Path:     "/auth/github",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
@@ -47,7 +47,7 @@ func (s *Server) handleGitHubOAuthLogin(w http.ResponseWriter, r *http.Request) 
 	})
 	values := url.Values{
 		"client_id":    {s.cfg.GitHubOAuthClientID},
-		"state":        {state},
+		"state":        {stateToken},
 		"allow_signup": {"false"},
 	}
 	if redirectURL := s.githubOAuthRedirectURL(r); redirectURL != "" {

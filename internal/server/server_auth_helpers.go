@@ -108,9 +108,6 @@ func (s *Server) githubOAuthRedirectURL(r *http.Request) string {
 		scheme = "https"
 	}
 	host := r.Host
-	if forwardedHost := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwardedHost != "" {
-		host = forwardedHost
-	}
 	return scheme + "://" + host + "/auth/github/callback"
 }
 

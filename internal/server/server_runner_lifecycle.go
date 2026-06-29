@@ -249,9 +249,9 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		s.cleanupStartedSandbox(id, result)
 		return
 	}
-	if current.Status == state.StatusFailed || current.Status == state.StatusCompleted || current.Status == state.StatusStopping {
+	if current.Status != state.StatusCreating {
 		unlock()
-		s.logger.Info("runner exited before running update", "id", id, "status", current.Status)
+		s.logger.Info("runner status changed before running update", "id", id, "status", current.Status)
 		s.cleanupStartedSandbox(id, result)
 		return
 	}
