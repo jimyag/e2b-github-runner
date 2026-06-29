@@ -1,23 +1,13 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
-import {
-  AlertCircle,
-  CheckCircle2,
-  Clock3,
-  Copy,
-  ExternalLink,
-  Loader2,
-  Play,
-  Plus,
-  RefreshCw,
-  Square,
-  Trash2,
-} from "lucide-react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { Copy, ExternalLink, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { formatTime } from "@/admin-format"
 import { AppSidebar } from "@/components/app-sidebar"
+import { AuditSection, DiagnosticsSection, MatchSection, OverviewSection } from "@/components/admin-sections"
+import { Detail, StatusBadge } from "@/components/admin-shared"
 import { LoginPage } from "@/components/login-page"
 import { SiteHeader } from "@/components/site-header"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -688,66 +678,13 @@ function App() {
           </div>
 
           {section === "overview" ? (
-            <div className="grid gap-4 xl:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Recent runner requests</CardTitle>
-                  <CardDescription>Newest requests and their matched runner specs.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {runners.slice(0, 8).map((runner) => (
-                    <div key={runner.id} className="flex items-center justify-between gap-3 rounded-md border p-3">
-                      <div className="min-w-0">
-                        <div className="truncate font-medium">{runner.repository_full_name || runner.id}</div>
-                        <div className="truncate text-xs text-muted-foreground">
-                          {runner.runner_spec_name || "-"} · {runner.runner_name}
-                        </div>
-                      </div>
-                      <StatusBadge status={runner.status} />
-                    </div>
-                  ))}
-                  {runners.length === 0 ? (
-                    <div className="text-sm text-muted-foreground">No runner requests yet.</div>
-                  ) : null}
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Runner specs and runner policies</CardTitle>
-                  <CardDescription>Current seeded and runtime-managed routing rules.</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 lg:grid-cols-2">
-                  <div className="space-y-3">
-                    <div className="text-sm font-medium">Runner specs</div>
-                    {runnerSpecs.map((runnerSpec) => (
-                      <div
-                        key={runnerSpec.name}
-                        className="rounded-md border p-3 text-sm"
-                        onClick={() => loadRunnerSpecIntoForm(runnerSpec)}
-                      >
-                        <div className="font-medium">{runnerSpec.name}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {runnerSpec.labels.join(", ")} · template {runnerSpec.template_id}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="space-y-3">
-                    <div className="text-sm font-medium">Runner policies</div>
-                    {runnerPolicies.map((policy) => (
-                      <div
-                        key={policy.id}
-                        className="rounded-md border p-3 text-sm"
-                        onClick={() => loadPolicyIntoForm(policy)}
-                      >
-                        <div className="font-medium">{policy.repository_full_name}</div>
-                        <div className="text-xs text-muted-foreground">{policy.runner_spec_name}</div>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            <OverviewSection
+              runners={runners}
+              runnerSpecs={runnerSpecs}
+              runnerPolicies={runnerPolicies}
+              onEditRunnerSpec={loadRunnerSpecIntoForm}
+              onEditPolicy={loadPolicyIntoForm}
+            />
           ) : null}
 
           {section === "runner_requests" ? (
@@ -1562,222 +1499,26 @@ function App() {
           ) : null}
 
           {section === "match" ? (
-            <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Label matching test</CardTitle>
-                  <CardDescription>Preview which runner spec a repository and label set would use.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <form className="grid gap-3" onSubmit={runMatchTest}>
-                    <Input
-                      value={matchRepository}
-                      onChange={(event) => setMatchRepository(event.target.value)}
-                      placeholder="owner/repo"
-                    />
-                    <Input
-                      value={matchLabels}
-                      onChange={(event) => setMatchLabels(event.target.value)}
-                      placeholder="self-hosted,e2b"
-                    />
-                    <Button type="submit">Run match</Button>
-                  </form>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Match result</CardTitle>
-                  <CardDescription>Runner policy + label coverage resolution.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {matchResult ? (
-                    <>
-                      <Detail label="Repository" value={matchResult.repository_full_name || "-"} />
-                      <Detail label="Labels" value={matchResult.labels.join(", ") || "-"} />
-                      <Detail label="Runner spec" value={matchResult.runner_spec?.name || "-"} />
-                      <Detail label="Reason" value={matchResult.reason || "matched"} />
-                    </>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">No match run yet.</div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
+            <MatchSection
+              matchRepository={matchRepository}
+              matchLabels={matchLabels}
+              matchResult={matchResult}
+              onRepositoryChange={setMatchRepository}
+              onLabelsChange={setMatchLabels}
+              onSubmit={runMatchTest}
+            />
           ) : null}
 
-          {section === "audit" ? (
-            <Card className="min-w-0">
-              <CardHeader>
-                <CardTitle>Audit events</CardTitle>
-                <CardDescription>Recent admin and recovery control-plane actions.</CardDescription>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Time</TableHead>
-                      <TableHead>Actor</TableHead>
-                      <TableHead>Action</TableHead>
-                      <TableHead>Resource</TableHead>
-                      <TableHead>Payload</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {auditEvents.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
-                          No audit events yet
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      auditEvents.map((event) => (
-                        <TableRow key={event.id}>
-                          <TableCell>{formatTime(event.created_at)}</TableCell>
-                          <TableCell>{event.actor}</TableCell>
-                          <TableCell>{event.action}</TableCell>
-                          <TableCell>
-                            {event.resource_type} · {event.resource_id}
-                          </TableCell>
-                          <TableCell className="max-w-[420px] truncate text-xs text-muted-foreground">
-                            {event.payload_json || "-"}
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          ) : null}
+          {section === "audit" ? <AuditSection auditEvents={auditEvents} /> : null}
 
           {section === "diagnostics" ? (
-            <div className="grid gap-4 xl:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Diagnostics summary</CardTitle>
-                  <CardDescription>DB, GitHub auth, sandbox API, and pprof discovery.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <Detail label="State backend" value={diagnostics?.state.backend || "-"} />
-                  <Detail label="Database" value={diagnostics?.state.database || "-"} />
-                  <Detail label="GitHub auth" value={diagnostics?.github.auth_mode || "-"} />
-                  <Detail label="Installation" value={diagnostics?.github.installation_id || "-"} />
-                  <Detail label="GitHub API" value={diagnostics?.github.api_base_url || "-"} />
-                  <Detail label="Sandbox API" value={diagnostics?.sandbox.api_url || "-"} />
-                  <div className="space-y-2">
-                    <div className="text-sm font-medium">pprof endpoints</div>
-                    {diagnostics?.pprof?.length ? (
-                      diagnostics.pprof.map((item) => (
-                        <div key={item.address_file} className="rounded-md border p-3 text-xs">
-                          <div className="font-medium">{item.address}</div>
-                          <div className="text-muted-foreground">{item.address_file}</div>
-                          <div className="text-muted-foreground">{item.dump_script}</div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-sm text-muted-foreground">No pprof artifact discovered yet.</div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Recent failures</CardTitle>
-                  <CardDescription>Latest failed requests plus the current /debug/vars snapshot.</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    {diagnostics?.recent_failures?.length ? (
-                      diagnostics.recent_failures.map((failure) => (
-                        <div key={failure.id} className="rounded-md border p-3 text-sm">
-                          <div className="font-medium">{failure.id}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {failure.repository_full_name || "-"} · {failure.runner_spec_name || "-"} ·{" "}
-                            {failure.failure_reason || failure.error || "-"}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-sm text-muted-foreground">No recent failures.</div>
-                    )}
-                  </div>
-                  <pre className="max-h-[48vh] min-h-72 overflow-auto rounded-lg border bg-muted/50 p-3 text-xs leading-relaxed whitespace-pre-wrap">
-                    {diagnosticsVars || "No /debug/vars data available"}
-                  </pre>
-                </CardContent>
-              </Card>
-            </div>
+            <DiagnosticsSection diagnostics={diagnostics} diagnosticsVars={diagnosticsVars} />
           ) : null}
         </main>
       </SidebarInset>
       <Toaster richColors />
     </SidebarProvider>
   )
-}
-
-function StatusBadge({ status }: { status: RunnerStatus }) {
-  if (status === "running") {
-    return (
-      <Badge variant="success">
-        <Play />
-        running
-      </Badge>
-    )
-  }
-  if (status === "failed") {
-    return (
-      <Badge variant="danger">
-        <AlertCircle />
-        failed
-      </Badge>
-    )
-  }
-  if (status === "completed") {
-    return (
-      <Badge variant="outline">
-        <Square />
-        completed
-      </Badge>
-    )
-  }
-  if (status === "creating") {
-    return (
-      <Badge variant="warning">
-        <Loader2 className="animate-spin" />
-        creating
-      </Badge>
-    )
-  }
-  if (status === "stopping") {
-    return (
-      <Badge variant="warning">
-        <Clock3 />
-        stopping
-      </Badge>
-    )
-  }
-  return (
-    <Badge variant="secondary">
-      <CheckCircle2 />
-      queued
-    </Badge>
-  )
-}
-
-function Detail({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[110px_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
-      <div className="text-muted-foreground">{label}</div>
-      <div className="min-w-0 break-words font-medium">{value}</div>
-    </div>
-  )
-}
-
-function formatTime(value?: string) {
-  if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
 }
 
 export default App
