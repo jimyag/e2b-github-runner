@@ -208,33 +208,35 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		return
 	}
 	exitCh := make(chan struct{})
-	createCtx, cancel := context.WithTimeout(ctx, s.cfg.SandboxCreateTimeout)
-	repositoryURL, err := s.gh.RunnerURL(req.RepositoryFullName, req.RunnerGroup)
+	startStage := "sandbox_start"
+	result, err := func() (sandboxrunner.StartResult, error) {
+		createCtx, cancel := context.WithTimeout(ctx, s.cfg.SandboxCreateTimeout)
+		defer cancel()
+		repositoryURL, err := s.gh.RunnerURL(req.RepositoryFullName, req.RunnerGroup)
+		if err != nil {
+			startStage = "github_runner_url"
+			return sandboxrunner.StartResult{}, err
+		}
+		return s.sandbox.StartRunner(createCtx, sandboxrunner.StartInput{
+			RequestID:         req.ID,
+			RunnerName:        req.RunnerName,
+			RepositoryURL:     repositoryURL,
+			RegistrationToken: token.Token,
+			Labels:            req.Labels,
+			RunnerGroup:       strings.TrimSpace(req.RunnerGroup),
+			TemplateID:        profile.TemplateID,
+			Timeout:           s.cfg.SandboxTimeout,
+			CommandContext:    ctx,
+			OnStdout:          func(data []byte) { s.appendRunnerStdout(id, data) },
+			OnStderr:          func(data []byte) { s.store.AppendLog(id, "stderr.log", data) },
+			OnExit: func(result sandboxrunner.ExitResult, err error) {
+				defer close(exitCh)
+				s.runnerExited(id, result, err)
+			},
+		})
+	}()
 	if err != nil {
-		cancel()
-		s.failStart(id, st, "github_runner_url", err)
-		return
-	}
-	result, err := s.sandbox.StartRunner(createCtx, sandboxrunner.StartInput{
-		RequestID:         req.ID,
-		RunnerName:        req.RunnerName,
-		RepositoryURL:     repositoryURL,
-		RegistrationToken: token.Token,
-		Labels:            req.Labels,
-		RunnerGroup:       strings.TrimSpace(req.RunnerGroup),
-		TemplateID:        profile.TemplateID,
-		Timeout:           s.cfg.SandboxTimeout,
-		CommandContext:    ctx,
-		OnStdout:          func(data []byte) { s.appendRunnerStdout(id, data) },
-		OnStderr:          func(data []byte) { s.store.AppendLog(id, "stderr.log", data) },
-		OnExit: func(result sandboxrunner.ExitResult, err error) {
-			defer close(exitCh)
-			s.runnerExited(id, result, err)
-		},
-	})
-	cancel()
-	if err != nil {
-		s.failStart(id, st, "sandbox_start", err)
+		s.failStart(id, st, startStage, err)
 		return
 	}
 

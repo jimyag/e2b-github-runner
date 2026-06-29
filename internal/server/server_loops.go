@@ -11,6 +11,8 @@ import (
 	"github.com/qiniu/ci-runner/internal/state"
 )
 
+const workflowJobLookupTimeout = 5 * time.Second
+
 func (s *Server) startBackgroundLoops() {
 	s.startOnce.Do(func() {
 		s.logger.Info("starting background loops", "worker_id", s.workerID, "max_concurrent_runners", s.cfg.MaxConcurrentRunners)
@@ -267,7 +269,9 @@ func (s *Server) originalWorkflowJobQueued(ctx context.Context, st state.RunnerS
 	if st.WorkflowJobID == 0 || strings.TrimSpace(st.RepositoryFullName) == "" {
 		return false, nil
 	}
-	job, err := s.gh.GetWorkflowJob(ctx, st.RepositoryFullName, st.WorkflowJobID)
+	jobCtx, cancel := context.WithTimeout(ctx, workflowJobLookupTimeout)
+	defer cancel()
+	job, err := s.gh.GetWorkflowJob(jobCtx, st.RepositoryFullName, st.WorkflowJobID)
 	if err != nil {
 		return false, err
 	}
@@ -307,7 +311,9 @@ func (s *Server) completeIfWorkflowJobCompleted(ctx context.Context, id string) 
 	stateVersion := st.Version
 	unlock()
 
-	job, err := s.gh.GetWorkflowJob(ctx, repositoryFullName, workflowJobID)
+	jobCtx, cancel := context.WithTimeout(ctx, workflowJobLookupTimeout)
+	defer cancel()
+	job, err := s.gh.GetWorkflowJob(jobCtx, repositoryFullName, workflowJobID)
 	if err != nil {
 		return err
 	}
