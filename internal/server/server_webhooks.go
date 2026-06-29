@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -267,5 +268,9 @@ func (s *Server) handleWorkflowRunWebhook(w http.ResponseWriter, r *http.Request
 		}
 	}
 	s.logger.Info("workflow_run webhook reconciled jobs", "action", event.Action, "run_id", event.WorkflowRun.ID, "repository", event.Repository.FullName, "created", created, "existing", existing, "skipped", skipped, "failed", failed)
+	if failed > 0 {
+		writeError(w, http.StatusBadGateway, fmt.Sprintf("failed to enqueue %d workflow_run jobs", failed))
+		return
+	}
 	writeJSON(w, http.StatusAccepted, map[string]int{"created": created, "existing": existing, "skipped": skipped, "failed": failed})
 }
