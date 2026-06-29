@@ -1,10 +1,10 @@
 # Runnerd Implementation Review
 
-Date: 2026-06-28
+Date: 2026-06-29
 
 Scope:
 
-- Current branch: `refactor/dev`
+- Current branch at refresh time: `main`
 - Review target: implementation status after file-based config, DB-backed runner state, retry/lease/audit handling, admin console, embedded UI assets, and local development workflow updates.
 - Local references still useful for future comparison: actions-runner-controller style reconciliation and fireactions style pool/config modeling.
 
@@ -43,7 +43,7 @@ Runtime config is file-first, but the admin console does not yet provide an effe
 
 ### 4. Deployment Smoke
 
-Local build/lint/test coverage validates the code path, but production readiness still depends on a real GitHub App installation, real E2B templates, webhook delivery, and sandbox runner execution. Keep a deployment smoke checklist that verifies webhook signature handling, installation resolution, runner spec matching, sandbox creation, GitHub job pickup, cleanup, and diagnostics.
+Local build/lint/test coverage validates the code path, but production readiness still depends on a real GitHub App installation, real E2B templates, webhook delivery, and sandbox runner execution. Use `docs/deployment-smoke.md` for the real-deployment checklist covering webhook signature handling, installation resolution, runner spec matching, sandbox creation, GitHub job pickup, cleanup, and diagnostics.
 
 ### 5. Multi-Instance And Operations
 
@@ -52,7 +52,7 @@ The DB lease model is in place, but multi-process behavior should be verified wi
 ## Suggested Next Order
 
 1. Keep `task dev`, `task build`, `task lint`, and `task test` green on every branch that touches backend/UI boundaries.
-2. Add or update a deployment smoke checklist using a real GitHub App, one repository, and one E2B template.
+2. Run and maintain the deployment smoke checklist using a real GitHub App, one repository, and one E2B template.
 3. Decide whether token/basic auth remain supported modes.
 4. Define the non-admin UI route and permission model before adding ordinary-user screens.
 5. Add an effective-config diagnostics view only after the desired config operations model is clear.

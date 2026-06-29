@@ -15,13 +15,14 @@ cp runnerd.yaml.example runnerd.yaml
 The config file covers:
 
 - server listen address and timeouts
-- database backend and DSN/path
+- sqlite or Postgres database backend and DSN/path
 - E2B API settings and template
 - GitHub webhook settings plus GitHub App, PAT, or basic auth
 - GitHub App OAuth login for the admin console
 - worker lease / retry / concurrency settings
 
 Relative sqlite `database.url` and `github.app.private_key_file` paths are resolved from the directory containing `runnerd.yaml`.
+Use sqlite for local and small single-node deployments. Postgres is supported by the state store, but shared-database multi-instance operation should be verified in your deployment before advertising it as supported.
 GitHub Enterprise Server is not currently supported; configure a GitHub.com App installation.
 Configure exactly one GitHub auth method: `github.app`, `github.token`, or `github.basic_auth`. For GitHub App auth, `github.app.installation_id` is optional. When it is omitted, runnerd resolves the installation from each job repository and caches installation transports, allowing one GitHub App to serve multiple installed accounts.
 `github.allowed_repositories` is an optional allowlist of `owner/repo` or `owner/*` patterns. Empty means all repositories that can deliver valid webhooks and match runner labels/policies are allowed.
@@ -115,3 +116,5 @@ task release-check
 ```
 
 Use `runs-on: [self-hosted, e2b]` in the target workflow. Configure a GitHub webhook for `workflow_job` events pointing at `POST /webhooks/github`; runnerd handles `queued`, `in_progress`, and `completed` actions. You can also include `workflow_run` events as a compensating signal; runnerd lists all queued jobs in the run and enqueues any matching jobs not already seen from `workflow_job`.
+
+For a production-style readiness pass, use [docs/deployment-smoke.md](docs/deployment-smoke.md).

@@ -10,6 +10,9 @@ Use this guide for future Codex or agent work in this repository.
 - Production UI assets are generated into `internal/server/ui/` by `task ui-build` and embedded by `internal/server/ui_assets_production.go`.
 - Development UI assets are proxied to Vite by `internal/server/ui_assets_development.go`.
 - Current browser entry for the admin console is `/admin/`; the `ui/` tree may also host ordinary-user UI later.
+- Runtime state can use sqlite or Postgres. Do not document multi-instance support until two runnerd processes have been verified against the same database.
+- Runner specs, runner groups, and repository policies are admin API/UI data, not `runnerd.yaml` fields.
+- The recommended production GitHub auth path is GitHub App auth plus GitHub App OAuth admin login. Token and basic auth still exist as compatibility modes, but their long-term product status is undecided.
 
 ## Common Commands
 
@@ -37,4 +40,5 @@ Use `task build` when verifying production embedded UI behavior because it rebui
 - Do not commit `.smee-url`; it is per-developer local webhook state.
 - Do not hand-edit generated files in `internal/server/ui/`; edit `ui/` and rebuild.
 - Keep `README.md`, `docs/testing.md`, and `TODO.md` aligned when changing config, build, development, or deployment workflows.
+- Keep `docs/README.md` and `docs/deployment-smoke.md` aligned when adding or removing docs or deployment verification steps.
 - If adding non-admin UI, keep admin routes and role-gated APIs explicit instead of assuming everything under `ui/` is admin-only.
