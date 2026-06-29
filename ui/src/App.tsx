@@ -5,18 +5,17 @@ import {
   Clock3,
   Copy,
   ExternalLink,
-  Github,
   Loader2,
   Play,
   Plus,
   RefreshCw,
-  ShieldCheck,
   Square,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { AppSidebar } from "@/components/app-sidebar"
+import { LoginPage } from "@/components/login-page"
 import { SiteHeader } from "@/components/site-header"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,130 +53,24 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Toaster } from "@/components/ui/sonner"
+import {
+  activeStatuses,
+  adminSections,
+  logNames,
+  sectionFromPath,
+  type AdminSection,
+  type AuditEvent,
+  type AuthSession,
+  type DiagnosticsSummary,
+  type Metric,
+  type RunnerGroup,
+  type RunnerPolicy,
+  type RunnerSpec,
+  type RunnerSpecMatch,
+  type RunnerState,
+  type RunnerStatus,
+} from "@/admin-types"
 import { cn } from "@/lib/utils"
-
-type RunnerStatus = "queued" | "creating" | "running" | "stopping" | "completed" | "failed"
-
-type RunnerState = {
-  id: string
-  status: RunnerStatus
-  repository_full_name?: string
-  requested_labels?: string[]
-  runner_spec_name?: string
-  runner_group?: string
-  runner_name: string
-  sandbox_id?: string
-  process_pid?: number
-  workflow_job_id?: number
-  workflow_run_id?: number
-  github_job_url?: string
-  pull_request_number?: number
-  assigned_job_id?: number
-  assigned_job_name?: string
-  error?: string
-  failure_stage?: string
-  failure_reason?: string
-  last_error_code?: string
-  last_error_message?: string
-  last_error_retryable?: boolean
-  retry_count?: number
-  updated_at: string
-  created_at: string
-  next_retry_at?: string
-  completed_at?: string
-}
-
-type RunnerSpec = {
-  name: string
-  labels: string[]
-  template_id: string
-  runner_group?: string
-  max_concurrency: number
-  min_idle: number
-  priority: number
-  enabled: boolean
-  default_available: boolean
-  created_at: string
-  updated_at: string
-}
-
-type RunnerPolicy = {
-  id: number
-  repository_full_name: string
-  runner_spec_name?: string
-  runner_group_name?: string
-  enabled: boolean
-  created_at: string
-}
-
-type RunnerGroup = {
-  name: string
-  description?: string
-  spec_names: string[]
-  enabled: boolean
-  created_at: string
-  updated_at: string
-}
-
-type RunnerSpecMatch = {
-  repository_full_name: string
-  labels: string[]
-  runner_spec?: RunnerSpec
-  reason?: string
-}
-
-type DiagnosticsSummary = {
-  pprof: Array<{ address: string; address_file: string; dump_script: string }>
-  state: { backend: string; database: string }
-  github: { auth_mode: string; installation_id?: number; api_base_url: string }
-  sandbox: { api_url: string }
-  recent_failures: RunnerState[]
-}
-
-type AuditEvent = {
-  id: number
-  actor: string
-  action: string
-  resource_type: string
-  resource_id: string
-  payload_json?: string
-  created_at: string
-}
-
-type AuthSession = {
-  authenticated: boolean
-  oauth_enabled: boolean
-  login?: string
-  role?: string
-  avatar_url?: string
-  expires_at?: string
-}
-
-type Metric = {
-  label: string
-  value: number
-  description: string
-}
-
-const activeStatuses = new Set<RunnerStatus>(["queued", "creating", "running", "stopping"])
-const logNames = ["control.log", "stdout.log", "stderr.log"] as const
-const adminSections = [
-  "overview",
-  "runner_requests",
-  "runner_specs",
-  "runner_groups",
-  "runner_policies",
-  "match",
-  "audit",
-  "diagnostics",
-] as const
-
-type AdminSection = (typeof adminSections)[number]
-
-function sectionFromPath(): AdminSection {
-  const slug = window.location.pathname.replace(/^\/admin\/?/, "") || "overview"
-  return adminSections.includes(slug as AdminSection) ? (slug as AdminSection) : "overview"
-}
 
 function App() {
   const [authSession, setAuthSession] = useState<AuthSession>({ authenticated: false, oauth_enabled: false })
@@ -1819,112 +1712,6 @@ function App() {
       </SidebarInset>
       <Toaster richColors />
     </SidebarProvider>
-  )
-}
-
-function LoginPage({
-  oauthEnabled,
-  currentLogin,
-  currentRole,
-  onSignOut,
-}: {
-  oauthEnabled: boolean
-  currentLogin?: string
-  currentRole?: string
-  onSignOut: () => void
-}) {
-  return (
-    <main className="min-h-screen bg-background text-foreground">
-      <div className="min-h-screen">
-        <section className="relative flex min-h-screen overflow-hidden bg-[radial-gradient(circle_at_30%_20%,oklch(0.92_0.08_195),transparent_34%),linear-gradient(135deg,oklch(0.98_0.02_180),oklch(0.94_0.03_250))] p-6 sm:p-10">
-          <div className="absolute inset-x-10 top-1/2 h-px bg-foreground/10" />
-          <div className="absolute bottom-28 left-10 right-20 grid grid-cols-6 gap-2 opacity-70">
-            {Array.from({ length: 36 }).map((_, index) => (
-              <span
-                key={index}
-                className={cn(
-                  "h-2 rounded-full",
-                  index % 7 === 0 ? "bg-primary" : index % 5 === 0 ? "bg-emerald-500" : "bg-foreground/15"
-                )}
-              />
-            ))}
-          </div>
-          <div className="relative z-10 flex h-fit items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-foreground text-background shadow-sm">
-              <Play className="h-5 w-5" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold tracking-wide">E2B Runner Console</div>
-              <div className="text-xs text-muted-foreground">Ephemeral Actions control plane</div>
-            </div>
-          </div>
-
-          <div className="absolute inset-0 z-20 flex items-center justify-center px-5">
-            <Card className="rounded-lg shadow-sm">
-              <CardHeader className="gap-2">
-                <div className="flex h-11 w-11 items-center justify-center rounded-lg border bg-muted">
-                  <ShieldCheck className="h-5 w-5 text-primary" />
-                </div>
-                <CardTitle className="text-2xl">Sign in</CardTitle>
-                <CardDescription>Use your allowed GitHub account to access runnerd.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                {currentLogin ? (
-                  <div className="space-y-3">
-                    <div className="rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
-                      @{currentLogin} is signed in as {currentRole || "user"} and does not have admin access.
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="lg"
-                      className="w-full justify-center"
-                      onClick={onSignOut}
-                    >
-                      Sign out
-                    </Button>
-                  </div>
-                ) : oauthEnabled ? (
-                  <Button
-                    type="button"
-                    size="lg"
-                    className="w-full justify-center"
-                    onClick={() => {
-                      window.location.href = "/auth/github/login"
-                    }}
-                  >
-                    <Github className="h-4 w-4" />
-                    Continue with GitHub
-                  </Button>
-                ) : (
-                  <div className="rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
-                    GitHub OAuth is required but not configured on this runnerd instance.
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="absolute bottom-10 left-6 right-6 z-10 max-w-2xl sm:left-10 sm:right-auto">
-            <h1 className="max-w-lg text-3xl font-semibold leading-tight text-foreground sm:text-4xl">
-              Sign in before touching live runner capacity.
-            </h1>
-            <div className="mt-5 grid max-w-xl gap-3 sm:grid-cols-3">
-              {[
-                ["Isolated", "E2B sandboxes per job"],
-                ["Scoped", "GitHub allowlists and policies"],
-                ["Audited", "Admin actions are traceable"],
-              ].map(([label, detail]) => (
-                <div key={label} className="rounded-lg border bg-background/70 p-3 shadow-sm backdrop-blur">
-                  <div className="text-sm font-semibold">{label}</div>
-                  <div className="mt-1 text-xs leading-relaxed text-muted-foreground">{detail}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-      </div>
-    </main>
   )
 }
 

@@ -159,7 +159,7 @@ type OAuthIdentity struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-type Store interface {
+type RunnerRequestStore interface {
 	Ensure() error
 	CreateRequest(req RunnerRequest, payload []byte) (bool, RunnerState, error)
 	ReadRequest(id string) (RunnerRequest, error)
@@ -179,6 +179,9 @@ type Store interface {
 	RetryRequest(id string, now time.Time) (RunnerState, error)
 	AppendLog(id, name string, data []byte)
 	ReadLog(id, name string, maxBytes int64) ([]byte, error)
+}
+
+type RunnerCatalogStore interface {
 	ListProfiles() ([]RunnerProfile, error)
 	GetProfile(name string) (RunnerProfile, error)
 	UpsertProfile(profile RunnerProfile) (RunnerProfile, error)
@@ -192,12 +195,25 @@ type Store interface {
 	UpsertRepositoryPolicy(policy RepositoryPolicy) (RepositoryPolicy, error)
 	DeleteRepositoryPolicy(id int64) error
 	MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error)
+}
+
+type IdentityStore interface {
 	GetAccountByOAuthIdentity(provider, subject string) (Account, OAuthIdentity, error)
 	EnsureAccountForOAuthIdentity(identity OAuthIdentity, role string) (Account, OAuthIdentity, error)
 	UpsertAccountForOAuthIdentity(identity OAuthIdentity, role string) (Account, OAuthIdentity, error)
 	LinkOAuthIdentityToAccount(accountID int64, identity OAuthIdentity) (Account, OAuthIdentity, error)
+}
+
+type AuditStore interface {
 	AppendAuditEvent(event AuditEvent) (AuditEvent, error)
 	ListAuditEvents(limit int) ([]AuditEvent, error)
+}
+
+type Store interface {
+	RunnerRequestStore
+	RunnerCatalogStore
+	IdentityStore
+	AuditStore
 }
 
 type Options struct {
