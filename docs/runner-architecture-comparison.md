@@ -48,11 +48,11 @@ Admission uses the GitHub webhook payload repository and labels. A runner reques
 - the webhook HMAC signature is valid;
 - `github.allowed_repositories` permits the repository, if configured;
 - a runner spec or runner group/policy can satisfy the job labels;
-- the matched spec is enabled and has capacity.
+- the matched spec is enabled.
 
 `runner_specs.default_available: true` makes a spec globally available to allowed installed repositories. Repository policies can grant additional specs or groups to specific repositories or repository patterns. When a spec includes a GitHub runner group, runnerd creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
 
-Requests above global or per-spec concurrency limits remain `queued` and are retried later. Transient placement/rate-limit signals are treated as queue deferrals instead of hard failures.
+Capacity is checked later when the worker starts a queued request. Requests above global or per-spec concurrency limits remain `queued` and are retried later. Transient placement/rate-limit signals are treated as queue deferrals instead of hard failures.
 
 ## State And Recovery
 
