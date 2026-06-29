@@ -7,6 +7,7 @@ import { AppSidebar } from "@/components/app-sidebar"
 import { AuditSection, DiagnosticsSection, MatchSection, OverviewSection } from "@/components/admin-sections"
 import { LoginPage } from "@/components/login-page"
 import { RunnerRequestsSection } from "@/components/runner-requests-section"
+import { RunnerSpecsSection, type RunnerSpecFormState } from "@/components/runner-specs-section"
 import { SiteHeader } from "@/components/site-header"
 import { Button } from "@/components/ui/button"
 import {
@@ -84,7 +85,7 @@ function App() {
   const [runnerSpecOpen, setRunnerSpecOpen] = useState(false)
   const [runnerGroupOpen, setRunnerGroupOpen] = useState(false)
   const [runnerPolicyOpen, setRunnerPolicyOpen] = useState(false)
-  const [runnerSpecForm, setRunnerSpecForm] = useState({
+  const [runnerSpecForm, setRunnerSpecForm] = useState<RunnerSpecFormState>({
     name: "",
     labels: "self-hosted,e2b",
     template_id: "",
@@ -727,177 +728,21 @@ function App() {
           ) : null}
 
           {section === "runner_specs" ? (
-            <div className="grid gap-4">
-              <Card className="min-w-0">
-                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div>
-                    <CardTitle>Runner specs</CardTitle>
-                    <CardDescription>Click a runner spec row to edit it.</CardDescription>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        resetRunnerSpecForm()
-                        setRunnerSpecOpen(true)
-                      }}
-                    >
-                      <Plus />
-                      Create
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => void loadAll()}
-                      disabled={loading}
-                      title="Refresh"
-                    >
-                      <RefreshCw className={cn(loading && "animate-spin")} />
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-0">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Labels</TableHead>
-                        <TableHead>Template</TableHead>
-                        <TableHead>GitHub group</TableHead>
-                        <TableHead>Runner groups</TableHead>
-                        <TableHead>Default</TableHead>
-                        <TableHead>Limit</TableHead>
-                        <TableHead className="w-24" />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {runnerSpecs.map((runnerSpec) => (
-                        <TableRow key={runnerSpec.name} className="cursor-pointer" onClick={() => loadRunnerSpecIntoForm(runnerSpec)}>
-                          <TableCell>{runnerSpec.name}</TableCell>
-                          <TableCell className="max-w-[260px] truncate">{runnerSpec.labels.join(", ")}</TableCell>
-                          <TableCell>{runnerSpec.template_id}</TableCell>
-                          <TableCell>{runnerSpec.runner_group || "-"}</TableCell>
-                          <TableCell>{groupNamesForSpec(runnerSpec.name).join(", ") || "-"}</TableCell>
-                          <TableCell>{runnerSpec.default_available ? "yes" : "no"}</TableCell>
-                          <TableCell>{runnerSpec.max_concurrency}</TableCell>
-                          <TableCell>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={(event) => {
-                                event.stopPropagation()
-                                void deleteRunnerSpec(runnerSpec.name)
-                              }}
-                            >
-                              <Trash2 />
-                              Delete
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-              <Dialog open={runnerSpecOpen} onOpenChange={setRunnerSpecOpen}>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>{runnerSpecForm.name ? "Edit runner spec" : "Create runner spec"}</DialogTitle>
-                    <DialogDescription>Define labels, template, group membership, and capacity.</DialogDescription>
-                  </DialogHeader>
-                  <form className="grid gap-3" onSubmit={saveRunnerSpec}>
-                    <Input
-                      value={runnerSpecForm.name}
-                      onChange={(event) => setRunnerSpecForm((current) => ({ ...current, name: event.target.value }))}
-                      placeholder="runner spec name"
-                    />
-                    <Input
-                      value={runnerSpecForm.labels}
-                      onChange={(event) => setRunnerSpecForm((current) => ({ ...current, labels: event.target.value }))}
-                      placeholder="self-hosted,e2b"
-                    />
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      <Input
-                        value={runnerSpecForm.template_id}
-                        onChange={(event) => setRunnerSpecForm((current) => ({ ...current, template_id: event.target.value }))}
-                        placeholder="template id"
-                      />
-                      <Input
-                        value={runnerSpecForm.runner_group}
-                        onChange={(event) => setRunnerSpecForm((current) => ({ ...current, runner_group: event.target.value }))}
-                        placeholder="optional GitHub runner group"
-                      />
-                    </div>
-                    <div className="grid gap-2 rounded-md border p-3">
-                      {runnerGroups.length === 0 ? (
-                        <div className="text-sm text-muted-foreground">No internal runner groups configured.</div>
-                      ) : (
-                        runnerGroups.map((group) => (
-                          <label key={group.name} className="flex items-center gap-2 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={runnerSpecForm.group_names.includes(group.name)}
-                              onChange={(event) =>
-                                setRunnerSpecForm((current) => ({
-                                  ...current,
-                                  group_names: event.target.checked
-                                    ? [...current.group_names, group.name]
-                                    : current.group_names.filter((name) => name !== group.name),
-                                }))
-                              }
-                            />
-                            {group.name}
-                          </label>
-                        ))
-                      )}
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <Input
-                        value={runnerSpecForm.max_concurrency}
-                        onChange={(event) => setRunnerSpecForm((current) => ({ ...current, max_concurrency: event.target.value }))}
-                        placeholder="max concurrency"
-                      />
-                      <Input
-                        value={runnerSpecForm.min_idle}
-                        onChange={(event) => setRunnerSpecForm((current) => ({ ...current, min_idle: event.target.value }))}
-                        placeholder="min idle"
-                      />
-                      <Input
-                        value={runnerSpecForm.priority}
-                        onChange={(event) => setRunnerSpecForm((current) => ({ ...current, priority: event.target.value }))}
-                        placeholder="priority"
-                      />
-                    </div>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={runnerSpecForm.enabled}
-                        onChange={(event) => setRunnerSpecForm((current) => ({ ...current, enabled: event.target.checked }))}
-                      />
-                      enabled
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={runnerSpecForm.default_available}
-                        onChange={(event) =>
-                          setRunnerSpecForm((current) => ({ ...current, default_available: event.target.checked }))
-                        }
-                      />
-                      globally available by default
-                    </label>
-                    <DialogFooter>
-                      <Button type="button" variant="outline" onClick={() => setRunnerSpecOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button type="submit">Save runner spec</Button>
-                    </DialogFooter>
-                  </form>
-                </DialogContent>
-              </Dialog>
-            </div>
+            <RunnerSpecsSection
+              loading={loading}
+              runnerSpecs={runnerSpecs}
+              runnerGroups={runnerGroups}
+              runnerSpecOpen={runnerSpecOpen}
+              runnerSpecForm={runnerSpecForm}
+              onRefresh={() => void loadAll()}
+              onResetRunnerSpecForm={resetRunnerSpecForm}
+              onRunnerSpecOpenChange={setRunnerSpecOpen}
+              onRunnerSpecFormChange={setRunnerSpecForm}
+              onSubmitRunnerSpec={saveRunnerSpec}
+              onEditRunnerSpec={loadRunnerSpecIntoForm}
+              onDeleteRunnerSpec={(name) => void deleteRunnerSpec(name)}
+              groupNamesForSpec={groupNamesForSpec}
+            />
           ) : null}
 
           {section === "runner_groups" ? (
