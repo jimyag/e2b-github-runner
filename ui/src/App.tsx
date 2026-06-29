@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { Copy, ExternalLink, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { Plus, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { formatTime } from "@/admin-format"
 import { AppSidebar } from "@/components/app-sidebar"
 import { AuditSection, DiagnosticsSection, MatchSection, OverviewSection } from "@/components/admin-sections"
-import { Detail, StatusBadge } from "@/components/admin-shared"
 import { LoginPage } from "@/components/login-page"
+import { RunnerRequestsSection } from "@/components/runner-requests-section"
 import { SiteHeader } from "@/components/site-header"
 import { Button } from "@/components/ui/button"
 import {
@@ -41,7 +41,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Toaster } from "@/components/ui/sonner"
 import {
   activeStatuses,
@@ -688,338 +687,43 @@ function App() {
           ) : null}
 
           {section === "runner_requests" ? (
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(520px,640px)]">
-              <Card className="min-w-0 gap-0 py-0">
-                <CardHeader className="border-b px-5 py-4">
-                  <div className="flex flex-col gap-3">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div>
-                        <CardTitle>Runner Requests</CardTitle>
-                        <CardDescription>
-                          Webhook and manual requests with matched runner policy context.
-                        </CardDescription>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button
-                          type="button"
-                          onClick={() => {
-                            resetCreateRunnerForm()
-                            setCreateRunnerOpen(true)
-                          }}
-                          disabled={!hasAccess}
-                        >
-                          <Plus />
-                          Create
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          onClick={() => void loadAll()}
-                          disabled={loading}
-                          title="Refresh"
-                        >
-                          <RefreshCw className={cn(loading && "animate-spin")} />
-                        </Button>
-                      </div>
-                    </div>
-                    <Dialog open={createRunnerOpen} onOpenChange={setCreateRunnerOpen}>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Create runner request</DialogTitle>
-                          <DialogDescription>
-                            Manually enqueue a one-off runner request.
-                          </DialogDescription>
-                        </DialogHeader>
-                        <form className="grid gap-3" onSubmit={createRunner}>
-                          <Input
-                            value={createID}
-                            onChange={(event) => setCreateID(event.target.value)}
-                            placeholder="optional id"
-                          />
-                          <Input
-                            value={createRepository}
-                            onChange={(event) => setCreateRepository(event.target.value)}
-                            placeholder="owner/repo"
-                            required
-                          />
-                          <Input
-                            value={createRunnerSpec}
-                            onChange={(event) => setCreateRunnerSpec(event.target.value)}
-                            placeholder="optional runner spec"
-                          />
-                          <Input
-                            value={createLabels}
-                            onChange={(event) => setCreateLabels(event.target.value)}
-                            placeholder="self-hosted,e2b"
-                          />
-                          <DialogFooter>
-                            <Button type="button" variant="outline" onClick={() => setCreateRunnerOpen(false)}>
-                              Cancel
-                            </Button>
-                            <Button type="submit" disabled={!hasAccess}>
-                              Create
-                            </Button>
-                          </DialogFooter>
-                        </form>
-                      </DialogContent>
-                    </Dialog>
-                    <div className="grid gap-2 md:grid-cols-[minmax(160px,220px)_minmax(180px,1fr)_minmax(180px,1fr)]">
-                      <Select value={runnerStatusFilter} onValueChange={(value) => setRunnerStatusFilter(value as RunnerStatus | "all")}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All statuses</SelectItem>
-                          {(["queued", "creating", "running", "stopping", "completed", "failed"] as RunnerStatus[]).map((status) => (
-                            <SelectItem key={status} value={status}>
-                              {status}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Select value={runnerRepositoryFilter} onValueChange={setRunnerRepositoryFilter}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Repository" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All repositories</SelectItem>
-                          {runnerRepositories.map((repository) => (
-                            <SelectItem key={repository} value={repository}>
-                              {repository}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Select value={runnerSpecFilter} onValueChange={setRunnerSpecFilter}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Runner spec" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All runner specs</SelectItem>
-                          {runnerSpecNames.map((runnerSpecName) => (
-                            <SelectItem key={runnerSpecName} value={runnerSpecName}>
-                              {runnerSpecName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Showing {filteredRunners.length} of {runners.length} runner requests.
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="max-h-[calc(100vh-18rem)] overflow-auto p-0">
-                  <Table>
-                    <TableHeader className="sticky top-0 z-10 bg-background">
-                      <TableRow>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Repository</TableHead>
-                        <TableHead>Runner spec</TableHead>
-                        <TableHead>Runner</TableHead>
-                        <TableHead>Sandbox</TableHead>
-                        <TableHead>GitHub</TableHead>
-                        <TableHead>Updated</TableHead>
-                        <TableHead className="w-36" />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredRunners.length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
-                            No runner requests found
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        filteredRunners.map((runner) => (
-                          <TableRow
-                            key={runner.id}
-                            data-state={runner.id === selectedID ? "selected" : undefined}
-                            className="cursor-pointer"
-                            onClick={() => setSelectedID(runner.id)}
-                          >
-                            <TableCell>
-                              <StatusBadge status={runner.status} />
-                            </TableCell>
-                            <TableCell className="max-w-[220px] truncate">
-                              {runner.repository_full_name || "-"}
-                            </TableCell>
-                            <TableCell>{runner.runner_spec_name || "-"}</TableCell>
-                            <TableCell>
-                              <div className="font-medium">{runner.runner_name || runner.id}</div>
-                              <div className="text-xs text-muted-foreground">{runner.id}</div>
-                            </TableCell>
-                            <TableCell className="max-w-[180px] truncate">
-                              {runner.sandbox_id || "-"}
-                            </TableCell>
-                            <TableCell>
-                              {runner.github_job_url ? (
-                                <Button
-                                  asChild
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={(event) => event.stopPropagation()}
-                                >
-                                  <a href={runner.github_job_url} target="_blank" rel="noreferrer">
-                                    <ExternalLink />
-                                    Job
-                                  </a>
-                                </Button>
-                              ) : (
-                                <span className="text-muted-foreground">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell>{formatTime(runner.updated_at)}</TableCell>
-                            <TableCell>
-                              <div className="flex gap-2">
-                                {runner.status === "failed" ? (
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={(event) => {
-                                      event.stopPropagation()
-                                      void retryRunner(runner.id)
-                                    }}
-                                  >
-                                    <RefreshCw />
-                                    Retry
-                                  </Button>
-                                ) : null}
-                                {activeStatuses.has(runner.status) ? (
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={(event) => {
-                                      event.stopPropagation()
-                                      void stopRunner(runner.id)
-                                    }}
-                                  >
-                                    <Trash2 />
-                                    Stop
-                                  </Button>
-                                ) : null}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-
-              <Card className="min-w-0 gap-0 py-0">
-                <CardHeader className="border-b px-5 py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <CardTitle>Request details</CardTitle>
-                      <CardDescription>{selected?.runner_name || "Select a request"}</CardDescription>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => void copySelectedID()}
-                      disabled={!selected}
-                      title="Copy runner ID"
-                    >
-                      <Copy />
-                    </Button>
-                  </div>
-                </CardHeader>
-                {selected ? (
-                  <CardContent className="grid gap-5 p-5">
-                    <div className="space-y-2">
-                      <Detail label="ID" value={selected.id} />
-                      <Detail label="Status" value={selected.status} />
-                      <Detail label="Repository" value={selected.repository_full_name || "-"} />
-                      <Detail label="Runner spec" value={selected.runner_spec_name || "-"} />
-                      <Detail label="Sandbox" value={selected.sandbox_id || "-"} />
-                      <Detail label="PID" value={selected.process_pid || "-"} />
-                      <Detail
-                        label="Job"
-                        value={selected.assigned_job_name || selected.assigned_job_id || "-"}
-                      />
-                      <Detail
-                        label="GitHub job"
-                        value={
-                          selected.github_job_url ? (
-                            <a
-                              className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-                              href={selected.github_job_url}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              Open job
-                              <ExternalLink className="size-3.5" />
-                            </a>
-                          ) : (
-                            "-"
-                          )
-                        }
-                      />
-                      <Detail label="Workflow run" value={selected.workflow_run_id || "-"} />
-                      <Detail label="Pull request" value={selected.pull_request_number || "-"} />
-                      <Detail label="Created" value={formatTime(selected.created_at)} />
-                      <Detail label="Updated" value={formatTime(selected.updated_at)} />
-                      <Detail label="Completed" value={formatTime(selected.completed_at)} />
-                      <Detail label="Retry count" value={selected.retry_count || "-"} />
-                      <Detail label="Next retry" value={formatTime(selected.next_retry_at)} />
-                      <Detail label="Requested labels" value={selected.requested_labels?.join(", ") || "-"} />
-                      <Detail label="Failure" value={selected.failure_reason || "-"} />
-                      <Detail label="Last error code" value={selected.last_error_code || "-"} />
-                      <Detail label="Error" value={selected.error || "-"} />
-                    </div>
-                    {selected.status === "failed" ? (
-                      <Button type="button" variant="outline" onClick={() => void retryRunner(selected.id)}>
-                        <RefreshCw />
-                        Retry request
-                      </Button>
-                    ) : null}
-                    <div className="space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-medium">Logs</div>
-                          <div className="text-xs text-muted-foreground">control, stdout, and stderr captured by runnerd.</div>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => void loadLog(selected.id, selectedLog)}
-                        >
-                          <RefreshCw />
-                          Refresh
-                        </Button>
-                      </div>
-                      <Tabs
-                        value={selectedLog}
-                        onValueChange={(value) => setSelectedLog(value as (typeof logNames)[number])}
-                      >
-                        <TabsList>
-                          {logNames.map((name) => (
-                            <TabsTrigger key={name} value={name}>
-                              {name.replace(".log", "")}
-                            </TabsTrigger>
-                          ))}
-                        </TabsList>
-                      </Tabs>
-                      <pre className="max-h-[52vh] min-h-80 overflow-auto rounded-lg border bg-muted/50 p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap">
-                        {logText}
-                      </pre>
-                    </div>
-                  </CardContent>
-                ) : (
-                  <CardContent className="p-8 text-sm text-muted-foreground">
-                    No runner request selected
-                  </CardContent>
-                )}
-              </Card>
-            </div>
+            <RunnerRequestsSection
+              hasAccess={hasAccess}
+              loading={loading}
+              runners={runners}
+              filteredRunners={filteredRunners}
+              selected={selected}
+              selectedID={selectedID}
+              selectedLog={selectedLog}
+              logText={logText}
+              createID={createID}
+              createRepository={createRepository}
+              createRunnerSpec={createRunnerSpec}
+              createLabels={createLabels}
+              createRunnerOpen={createRunnerOpen}
+              runnerStatusFilter={runnerStatusFilter}
+              runnerRepositoryFilter={runnerRepositoryFilter}
+              runnerSpecFilter={runnerSpecFilter}
+              runnerRepositories={runnerRepositories}
+              runnerSpecNames={runnerSpecNames}
+              onRefresh={() => void loadAll()}
+              onResetCreateRunnerForm={resetCreateRunnerForm}
+              onCreateRunnerOpenChange={setCreateRunnerOpen}
+              onCreateRunnerSubmit={createRunner}
+              onCreateIDChange={setCreateID}
+              onCreateRepositoryChange={setCreateRepository}
+              onCreateRunnerSpecChange={setCreateRunnerSpec}
+              onCreateLabelsChange={setCreateLabels}
+              onStatusFilterChange={setRunnerStatusFilter}
+              onRepositoryFilterChange={setRunnerRepositoryFilter}
+              onRunnerSpecFilterChange={setRunnerSpecFilter}
+              onSelectRunner={setSelectedID}
+              onRetryRunner={(id) => void retryRunner(id)}
+              onStopRunner={(id) => void stopRunner(id)}
+              onCopySelectedID={() => void copySelectedID()}
+              onLoadLog={(id, name) => void loadLog(id, name)}
+              onSelectedLogChange={setSelectedLog}
+            />
           ) : null}
 
           {section === "runner_specs" ? (
