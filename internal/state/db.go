@@ -8,7 +8,8 @@ import (
 	"sync"
 
 	"github.com/glebarez/sqlite"
-	"gorm.io/driver/mysql"
+	mysqldriver "github.com/go-sql-driver/mysql"
+	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -58,6 +59,11 @@ func (s *DBStore) Ensure() error {
 		}
 		s.migrated = true
 	}
+	if s.opts.Backend == BackendSQLite {
+		if err := enableSQLiteForeignKeys(db); err != nil {
+			return err
+		}
+	}
 	s.db = db
 	return nil
 }
@@ -95,7 +101,11 @@ func (s *DBStore) open() (*gorm.DB, error) {
 	case BackendPostgres:
 		return gorm.Open(postgres.Open(s.opts.DatabaseDSN), cfg)
 	case BackendMySQL:
-		return gorm.Open(mysql.Open(s.opts.DatabaseDSN), cfg)
+		dsn, err := mysqlDSNWithParseTime(s.opts.DatabaseDSN)
+		if err != nil {
+			return nil, err
+		}
+		return gorm.Open(gormmysql.Open(dsn), cfg)
 	default:
 		return nil, fmt.Errorf("unsupported state backend: %s", s.opts.Backend)
 	}
@@ -109,7 +119,6 @@ func configureSQLite(db *gorm.DB) error {
 	sqlDB.SetMaxOpenConns(1)
 	sqlDB.SetMaxIdleConns(1)
 	pragmas := []string{
-		"PRAGMA foreign_keys = ON",
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = NORMAL",
 		"PRAGMA busy_timeout = 15000",
@@ -120,6 +129,22 @@ func configureSQLite(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+func enableSQLiteForeignKeys(db *gorm.DB) error {
+	if err := db.Exec("PRAGMA foreign_keys = ON").Error; err != nil {
+		return fmt.Errorf("PRAGMA foreign_keys = ON: %w", err)
+	}
+	return nil
+}
+
+func mysqlDSNWithParseTime(dsn string) (string, error) {
+	cfg, err := mysqldriver.ParseDSN(dsn)
+	if err != nil {
+		return "", err
+	}
+	cfg.ParseTime = true
+	return cfg.FormatDSN(), nil
 }
 
 func (s *DBStore) migrate(db *gorm.DB) error {

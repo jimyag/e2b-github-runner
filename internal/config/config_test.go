@@ -420,7 +420,7 @@ github:
 	}
 }
 
-func TestLoadFileRejectsLegacyDatabaseURL(t *testing.T) {
+func TestLoadFileSupportsLegacyDatabaseURLAlias(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "runnerd.yaml")
 	if err := os.WriteFile(configPath, []byte(`
@@ -442,12 +442,13 @@ github:
 		t.Fatal(err)
 	}
 
-	_, err := LoadFile(configPath)
-	if err == nil {
-		t.Fatal("expected validation error")
+	cfg, err := LoadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "database.dsn") {
-		t.Fatalf("expected missing dsn error, got %v", err)
+	want := filepath.Join(dir, "runnerd.db")
+	if cfg.StateDatabaseDSN != want {
+		t.Fatalf("unexpected database dsn: %s, want %s", cfg.StateDatabaseDSN, want)
 	}
 }
 

@@ -68,6 +68,16 @@ func (s *DBStore) CreateRequest(req RunnerRequest, payload []byte) (bool, Runner
 	}
 	if result.RowsAffected == 0 {
 		st, err := s.ReadState(req.ID)
+		if errors.Is(err, gorm.ErrRecordNotFound) && req.JobID != 0 {
+			var conflicting runnerRequestRecord
+			conflictErr := db.First(&conflicting, "workflow_job_id = ?", req.JobID).Error
+			if conflictErr == nil {
+				return false, recordToState(conflicting), ErrConflict
+			}
+			if !errors.Is(conflictErr, gorm.ErrRecordNotFound) {
+				return false, RunnerState{}, conflictErr
+			}
+		}
 		return false, st, err
 	}
 	return true, recordToState(record), nil

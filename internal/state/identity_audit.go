@@ -224,7 +224,7 @@ func (s *DBStore) AppendAuditEvent(event AuditEvent) (AuditEvent, error) {
 	if err := db.Create(&record).Error; err != nil {
 		return AuditEvent{}, err
 	}
-	return AuditEvent(record), nil
+	return auditEventFromRecord(record), nil
 }
 
 func (s *DBStore) ListAuditEvents(limit int) ([]AuditEvent, error) {
@@ -241,9 +241,21 @@ func (s *DBStore) ListAuditEvents(limit int) ([]AuditEvent, error) {
 	}
 	events := make([]AuditEvent, 0, len(records))
 	for _, record := range records {
-		events = append(events, AuditEvent(record))
+		events = append(events, auditEventFromRecord(record))
 	}
 	return events, nil
+}
+
+func auditEventFromRecord(record auditEventRecord) AuditEvent {
+	return AuditEvent{
+		ID:           record.ID,
+		Actor:        record.Actor,
+		Action:       record.Action,
+		ResourceType: record.ResourceType,
+		ResourceID:   record.ResourceID,
+		PayloadJSON:  record.PayloadJSON,
+		CreatedAt:    record.CreatedAt,
+	}
 }
 
 func (s *DBStore) accountFromIdentity(db *gorm.DB, identity oauthIdentityRecord) (Account, OAuthIdentity, error) {

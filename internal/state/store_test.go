@@ -58,6 +58,14 @@ func TestSQLiteStoreUsesWALAndBusyTimeout(t *testing.T) {
 	if busyTimeout != 15000 {
 		t.Fatalf("busy_timeout = %d, want 15000", busyTimeout)
 	}
+
+	var foreignKeys int
+	if err := db.Raw("PRAGMA foreign_keys").Scan(&foreignKeys).Error; err != nil {
+		t.Fatal(err)
+	}
+	if foreignKeys != 1 {
+		t.Fatalf("foreign_keys = %d, want 1", foreignKeys)
+	}
 }
 
 func TestMySQLStoreBackendIsRecognized(t *testing.T) {
@@ -73,6 +81,24 @@ func TestMySQLStoreBackendIsRecognized(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "unsupported state backend") {
 		t.Fatalf("mysql backend should be recognized, got %v", err)
+	}
+}
+
+func TestMySQLDSNWithParseTime(t *testing.T) {
+	dsn, err := mysqlDSNWithParseTime("runner:secret@tcp(mysql.example:3306)/runnerd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dsn, "parseTime=true") {
+		t.Fatalf("expected parseTime=true in DSN, got %q", dsn)
+	}
+
+	dsn, err = mysqlDSNWithParseTime("runner:secret@tcp(mysql.example:3306)/runnerd?parseTime=false&charset=utf8mb4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dsn, "parseTime=true") || !strings.Contains(dsn, "charset=utf8mb4") {
+		t.Fatalf("expected parseTime=true with existing params preserved, got %q", dsn)
 	}
 }
 
@@ -96,6 +122,37 @@ func TestCreateRequestIsIdempotent(t *testing.T) {
 	}
 	if st.ID != "123" {
 		t.Fatalf("unexpected state id: %q", st.ID)
+	}
+}
+
+func TestCreateRequestConflictingWorkflowJobReturnsExistingState(t *testing.T) {
+	store := New(t.TempDir())
+	_, st, err := store.CreateRequest(RunnerRequest{
+		ID:         "first",
+		Source:     "test",
+		JobID:      12345,
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-first",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, conflict, err := store.CreateRequest(RunnerRequest{
+		ID:         "second",
+		Source:     "test",
+		JobID:      12345,
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-second",
+	}, nil)
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected ErrConflict, got %v", err)
+	}
+	if created {
+		t.Fatal("expected conflicting workflow job to reuse existing row")
+	}
+	if conflict.ID != st.ID || conflict.WorkflowJobID != 12345 {
+		t.Fatalf("unexpected conflicting state: %#v", conflict)
 	}
 }
 
@@ -538,6 +595,24 @@ func TestMigrateBackfillsLegacyRepositoryPolicyRunnerGroupName(t *testing.T) {
 	}
 	if policies[0].RunnerGroupName != "" {
 		t.Fatalf("expected legacy repository policy runner group to default empty, got %q", policies[0].RunnerGroupName)
+	}
+}
+
+func TestRepositoryPolicyIndexesArePortable(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var indexSQL []string
+	if err := db.Raw(`SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'repository_policies' AND sql IS NOT NULL`).Scan(&indexSQL).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, sql := range indexSQL {
+		if strings.Contains(strings.ToUpper(sql), " WHERE ") {
+			t.Fatalf("repository policy index should not use a partial WHERE clause: %s", sql)
+		}
 	}
 }
 

@@ -11,7 +11,7 @@ cp runnerd.yaml.example runnerd.yaml
 mkdir -p ./secrets
 ```
 
-相对 sqlite `database.dsn` 和 `github.app.private_key_file` 都相对 `runnerd.yaml` 所在目录解析。当前只支持 GitHub.com，不支持 GitHub Enterprise Server。GitHub 鉴权可以使用 GitHub App、PAT token 或 basic auth，但只能三选一。
+相对 sqlite `database.dsn` 和 `github.app.private_key_file` 都相对 `runnerd.yaml` 所在目录解析。旧版 `database.url` 在 `database.dsn` 为空时仍作为 deprecated alias 兼容读取。当前只支持 GitHub.com，不支持 GitHub Enterprise Server。GitHub 鉴权可以使用 GitHub App、PAT token 或 basic auth，但只能三选一。
 
 最小可用配置示例：
 

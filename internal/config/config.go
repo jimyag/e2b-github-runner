@@ -127,9 +127,6 @@ func LoadFile(path string) (Config, error) {
 	if strings.TrimSpace(raw.GitHub.Owner) != "" || strings.TrimSpace(raw.GitHub.Repo) != "" {
 		return Config{}, fmt.Errorf("invalid config github.owner/github.repo: no longer supported; pass repository_full_name on manual runner requests")
 	}
-	if strings.TrimSpace(raw.Database.LegacyURL) != "" {
-		return Config{}, fmt.Errorf("invalid config database.url: use database.dsn")
-	}
 	configDir := filepath.Dir(path)
 	cfg := Config{
 		HTTPAddr:                  defaultString(raw.Server.HTTPAddr, ":25500"),
@@ -137,7 +134,7 @@ func LoadFile(path string) (Config, error) {
 		HTTPWriteTimeout:          durationSeconds(raw.Server.WriteTimeoutSec, 60),
 		HTTPIdleTimeout:           durationSeconds(raw.Server.IdleTimeoutSec, 120),
 		StateBackend:              strings.ToLower(defaultString(raw.Database.Backend, "sqlite")),
-		StateDatabaseDSN:          raw.Database.DSN,
+		StateDatabaseDSN:          defaultString(raw.Database.DSN, raw.Database.LegacyURL),
 		E2BAPIKey:                 raw.E2B.APIKey,
 		E2BAPIURL:                 raw.E2B.APIURL,
 		GitHubAppID:               raw.GitHub.App.ID,

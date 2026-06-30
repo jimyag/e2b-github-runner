@@ -21,7 +21,7 @@ The config file covers:
 - GitHub App OAuth login for the admin console
 - worker lease / retry / concurrency settings
 
-Relative sqlite `database.dsn` and `github.app.private_key_file` paths are resolved from the directory containing `runnerd.yaml`.
+Relative sqlite `database.dsn` and `github.app.private_key_file` paths are resolved from the directory containing `runnerd.yaml`. Legacy `database.url` is still accepted as a deprecated alias when `database.dsn` is empty.
 Use sqlite for local and small single-node deployments. Postgres and MySQL are supported by the state store, but shared-database multi-instance operation should be verified in your deployment before advertising it as supported.
 GitHub Enterprise Server is not currently supported; configure a GitHub.com App installation.
 Configure exactly one GitHub auth method: `github.app`, `github.token`, or `github.basic_auth`. For GitHub App auth, `github.app.installation_id` is optional. When it is omitted, runnerd resolves the installation from each job repository and caches installation transports, allowing one GitHub App to serve multiple installed accounts.

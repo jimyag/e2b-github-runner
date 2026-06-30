@@ -95,9 +95,9 @@ func (runnerGroupSpecRecord) TableName() string { return "runner_group_specs" }
 
 type repositoryPolicyRecord struct {
 	ID                 int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	RepositoryFullName string    `gorm:"column:repository_full_name;not null;uniqueIndex:idx_repository_policies_repository_profile,where:profile_name <> '';uniqueIndex:idx_repository_policies_repository_group,where:runner_group_name <> ''"`
-	ProfileName        string    `gorm:"column:profile_name;not null;uniqueIndex:idx_repository_policies_repository_profile,where:profile_name <> ''"`
-	RunnerGroupName    string    `gorm:"column:runner_group_name;not null;default:'';uniqueIndex:idx_repository_policies_repository_group,where:runner_group_name <> ''"`
+	RepositoryFullName string    `gorm:"column:repository_full_name;not null;index:idx_repository_policies_repository_profile;index:idx_repository_policies_repository_group"`
+	ProfileName        string    `gorm:"column:profile_name;not null;index:idx_repository_policies_repository_profile"`
+	RunnerGroupName    string    `gorm:"column:runner_group_name;not null;default:'';index:idx_repository_policies_repository_group"`
 	Enabled            bool      `gorm:"column:enabled;not null"`
 	CreatedAt          time.Time `gorm:"column:created_at;not null"`
 }

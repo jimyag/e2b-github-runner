@@ -139,6 +139,10 @@ tasks:
             lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
             return $?
           fi
+          if command -v ss >/dev/null 2>&1; then
+            ss -tln | grep -q ":$1 "
+            return $?
+          fi
           curl -fsS "http://${VITE_HOST}:$1" >/dev/null 2>&1
         }
 
