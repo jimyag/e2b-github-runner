@@ -151,13 +151,19 @@ func (s *DBStore) UpsertRunnerGroup(group RunnerGroup) (RunnerGroup, error) {
 		record.CreatedAt = now
 	}
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		for _, specName := range specNames {
-			var count int64
-			if err := tx.Model(&runnerProfileRecord{}).Where("name = ?", specName).Count(&count).Error; err != nil {
+		if len(specNames) > 0 {
+			var existingNames []string
+			if err := tx.Model(&runnerProfileRecord{}).Where("name IN ?", specNames).Pluck("name", &existingNames).Error; err != nil {
 				return err
 			}
-			if count == 0 {
-				return fmt.Errorf("runner spec %q does not exist", specName)
+			existing := make(map[string]bool, len(existingNames))
+			for _, name := range existingNames {
+				existing[name] = true
+			}
+			for _, specName := range specNames {
+				if !existing[specName] {
+					return fmt.Errorf("runner spec %q does not exist", specName)
+				}
 			}
 		}
 		if err := tx.Clauses(clause.OnConflict{
@@ -259,45 +265,20 @@ func (s *DBStore) UpsertRepositoryPolicy(policy RepositoryPolicy) (RepositoryPol
 			Enabled:            policy.Enabled,
 			CreatedAt:          now,
 		}
-		if record.ProfileName != "" {
-			var saved repositoryPolicyRecord
-			err := db.First(&saved, "repository_full_name = ? AND profile_name = ?", record.RepositoryFullName, record.ProfileName).Error
-			if err == nil {
-				saved.Enabled = record.Enabled
-				saved.RunnerGroupName = ""
-				if err := db.Save(&saved).Error; err != nil {
-					return RepositoryPolicy{}, err
-				}
-				return recordToRepositoryPolicy(saved), nil
-			}
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return RepositoryPolicy{}, err
-			}
-			if err := db.Create(&record).Error; err != nil {
-				return RepositoryPolicy{}, err
-			}
-			if err := db.First(&saved, "repository_full_name = ? AND profile_name = ?", record.RepositoryFullName, record.ProfileName).Error; err != nil {
-				return RepositoryPolicy{}, err
-			}
-			return recordToRepositoryPolicy(saved), nil
+		if err := db.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "repository_full_name"},
+				{Name: "profile_name"},
+				{Name: "runner_group_name"},
+			},
+			DoUpdates: clause.Assignments(map[string]any{
+				"enabled": record.Enabled,
+			}),
+		}).Create(&record).Error; err != nil {
+			return RepositoryPolicy{}, err
 		}
 		var saved repositoryPolicyRecord
-		err := db.First(&saved, "repository_full_name = ? AND runner_group_name = ?", record.RepositoryFullName, record.RunnerGroupName).Error
-		if err == nil {
-			saved.Enabled = record.Enabled
-			saved.ProfileName = ""
-			if err := db.Save(&saved).Error; err != nil {
-				return RepositoryPolicy{}, err
-			}
-			return recordToRepositoryPolicy(saved), nil
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return RepositoryPolicy{}, err
-		}
-		if err := db.Create(&record).Error; err != nil {
-			return RepositoryPolicy{}, err
-		}
-		if err := db.First(&saved, "repository_full_name = ? AND runner_group_name = ?", record.RepositoryFullName, record.RunnerGroupName).Error; err != nil {
+		if err := db.First(&saved, "repository_full_name = ? AND profile_name = ? AND runner_group_name = ?", record.RepositoryFullName, record.ProfileName, record.RunnerGroupName).Error; err != nil {
 			return RepositoryPolicy{}, err
 		}
 		return recordToRepositoryPolicy(saved), nil
@@ -335,6 +316,14 @@ func (s *DBStore) MatchProfile(repositoryFullName string, labels []string) (Prof
 	if err != nil {
 		return ProfileMatch{}, err
 	}
+	groups, err := s.ListRunnerGroups()
+	if err != nil {
+		return ProfileMatch{}, err
+	}
+	groupsByName := make(map[string]RunnerGroup, len(groups))
+	for _, group := range groups {
+		groupsByName[group.Name] = group
+	}
 	match := ProfileMatch{
 		RepositoryFullName: repositoryFullName,
 		Labels:             append([]string(nil), labels...),
@@ -354,10 +343,7 @@ func (s *DBStore) MatchProfile(repositoryFullName string, labels []string) (Prof
 				allowed[policy.ProfileName] = true
 			}
 			if policy.RunnerGroupName != "" {
-				group, err := s.GetRunnerGroup(policy.RunnerGroupName)
-				if err != nil {
-					continue
-				}
+				group := groupsByName[policy.RunnerGroupName]
 				if !group.Enabled {
 					continue
 				}

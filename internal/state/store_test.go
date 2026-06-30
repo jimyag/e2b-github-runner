@@ -636,6 +636,46 @@ func TestRepositoryPolicyIndexesArePortable(t *testing.T) {
 	}
 }
 
+func TestUpsertRepositoryPolicyConcurrentCreateIsIdempotent(t *testing.T) {
+	store := New(t.TempDir())
+	const workers = 12
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(enabled bool) {
+			defer wg.Done()
+			_, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
+				RepositoryFullName: "owner/repo",
+				ProfileName:        "default",
+				Enabled:            enabled,
+			})
+			errs <- err
+		}(i%2 == 0)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("expected concurrent policy upsert to be idempotent, got %v", err)
+		}
+	}
+
+	policies, err := store.ListRepositoryPolicies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var matches int
+	for _, policy := range policies {
+		if policy.RepositoryFullName == "owner/repo" && policy.ProfileName == "default" {
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("expected one repository policy after concurrent upsert, got %d", matches)
+	}
+}
+
 func TestLargePayloadColumnsUseTextType(t *testing.T) {
 	store := New(t.TempDir()).(*DBStore)
 	db, err := store.dbOrEnsure()
