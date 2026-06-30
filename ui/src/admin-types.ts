@@ -95,6 +95,28 @@ export type AuthSession = {
   expires_at?: string
 }
 
+export type GitHubInstallation = {
+  id: number
+  account_id: number
+  installation_id: number
+  account_login?: string
+  repositories: string[]
+  created_at: string
+  updated_at: string
+}
+
+export type GitHubAppConfig = {
+  app_slug?: string
+  install_url?: string
+  setup_url: string
+  installations: GitHubInstallation[]
+}
+
+export type AuthorizedRepositories = {
+  installation_id: number
+  repositories: string[]
+}
+
 export type Metric = {
   label: string
   value: number

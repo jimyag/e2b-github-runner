@@ -151,7 +151,7 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 	if err := migrateLegacySchemaColumns(db); err != nil {
 		return err
 	}
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&runnerRequestRecord{},
 		&runnerEventRecord{},
 		&runnerProfileRecord{},
@@ -161,7 +161,11 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 		&auditEventRecord{},
 		&accountRecord{},
 		&oauthIdentityRecord{},
-	)
+		&githubInstallationRecord{},
+	); err != nil {
+		return err
+	}
+	return nil
 }
 
 func migrateLegacySchemaColumns(db *gorm.DB) error {

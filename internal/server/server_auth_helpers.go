@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/qiniu/ci-runner/internal/state"
 )
 
 func (s *Server) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
@@ -22,6 +24,26 @@ func (s *Server) requireAdminAuth(w http.ResponseWriter, r *http.Request) bool {
 	s.logger.Warn("admin auth rejected", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr, "has_authorization", r.Header.Get("Authorization") != "")
 	writeError(w, http.StatusUnauthorized, "missing or invalid github oauth session")
 	return false
+}
+
+func (s *Server) requireUserSession(w http.ResponseWriter, r *http.Request) (adminSession, state.Account, bool) {
+	session, ok := s.sessionFromRequest(r)
+	if !ok {
+		s.logger.Warn("user auth rejected", "method", r.Method, "path", r.URL.Path, "remote_addr", r.RemoteAddr)
+		writeError(w, http.StatusUnauthorized, "missing or invalid github oauth session")
+		return adminSession{}, state.Account{}, false
+	}
+	provider := strings.TrimSpace(session.Provider)
+	if provider == "" {
+		provider = "github"
+	}
+	account, _, err := s.store.GetAccountByOAuthIdentity(provider, session.Subject)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "missing or invalid github oauth session")
+		return adminSession{}, state.Account{}, false
+	}
+	session.Role = account.Role
+	return session, account, true
 }
 
 func (s *Server) adminSessionFromRequest(r *http.Request) (adminSession, bool) {

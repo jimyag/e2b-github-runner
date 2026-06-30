@@ -49,13 +49,14 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	switch event.Action {
 	case "queued":
 		req := state.RunnerRequest{
-			ID:                 id,
-			Source:             "github_webhook",
-			JobID:              event.WorkflowJob.ID,
-			RepositoryFullName: event.Repository.FullName,
-			RequestedLabels:    append([]string(nil), event.WorkflowJob.Labels...),
-			Labels:             []string(event.WorkflowJob.Labels),
-			RunnerName:         "e2b-" + id,
+			ID:                   id,
+			Source:               "github_webhook",
+			JobID:                event.WorkflowJob.ID,
+			GitHubInstallationID: event.Installation.ID,
+			RepositoryFullName:   event.Repository.FullName,
+			RequestedLabels:      append([]string(nil), event.WorkflowJob.Labels...),
+			Labels:               []string(event.WorkflowJob.Labels),
+			RunnerName:           "e2b-" + id,
 		}
 		if !s.cfg.RepositoryAllowed(event.Repository.FullName) {
 			s.logger.Info("workflow_job repository rejected by allowlist", "job_id", id, "repository", event.Repository.FullName)
@@ -253,7 +254,7 @@ func (s *Server) handleWorkflowRunWebhook(w http.ResponseWriter, r *http.Request
 			skipped++
 			continue
 		}
-		st, wasCreated, err := s.enqueueWorkflowJob(event.Repository.FullName, event.WorkflowRun.Name, job, body)
+		st, wasCreated, err := s.enqueueWorkflowJob(event.Repository.FullName, event.Installation.ID, event.WorkflowRun.Name, job, body)
 		if err != nil {
 			s.logger.Error("enqueue workflow_run job", "run_id", event.WorkflowRun.ID, "job_id", job.ID, "error", err)
 			failed++

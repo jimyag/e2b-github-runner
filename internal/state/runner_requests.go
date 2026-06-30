@@ -45,19 +45,20 @@ func (s *DBStore) CreateRequest(req RunnerRequest, payload []byte) (bool, Runner
 		return false, RunnerState{}, err
 	}
 	record := runnerRequestRecord{
-		ID:                  req.ID,
-		Source:              req.Source,
-		RepositoryFullName:  req.RepositoryFullName,
-		RequestedLabelsJSON: string(requestedLabelsJSON),
-		LabelsJSON:          string(labelsJSON),
-		ProfileName:         req.ProfileName,
-		RunnerGroup:         req.RunnerGroup,
-		RunnerName:          req.RunnerName,
-		Status:              StatusQueued,
-		GitHubPayloadJSON:   string(payload),
-		QueuedAt:            req.CreatedAt,
-		UpdatedAt:           now,
-		Version:             0,
+		ID:                   req.ID,
+		Source:               req.Source,
+		GitHubInstallationID: req.GitHubInstallationID,
+		RepositoryFullName:   req.RepositoryFullName,
+		RequestedLabelsJSON:  string(requestedLabelsJSON),
+		LabelsJSON:           string(labelsJSON),
+		ProfileName:          req.ProfileName,
+		RunnerGroup:          req.RunnerGroup,
+		RunnerName:           req.RunnerName,
+		Status:               StatusQueued,
+		GitHubPayloadJSON:    string(payload),
+		QueuedAt:             req.CreatedAt,
+		UpdatedAt:            now,
+		Version:              0,
 	}
 	if req.JobID != 0 {
 		record.WorkflowJobID = &req.JobID
@@ -262,6 +263,60 @@ func (s *DBStore) ListStatesPage(limit, offset int) ([]RunnerState, int64, error
 		states = append(states, recordToState(record))
 	}
 	return states, total, nil
+}
+
+func (s *DBStore) ListStatesForRepositories(repositories []string, limit int) ([]RunnerState, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, err
+	}
+	repositories = uniqueTrimmed(repositories)
+	if len(repositories) == 0 {
+		return []RunnerState{}, nil
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	var records []runnerRequestRecord
+	if err := db.
+		Where("repository_full_name IN ?", repositories).
+		Order("queued_at DESC").
+		Limit(limit).
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	states := make([]RunnerState, 0, len(records))
+	for _, record := range records {
+		states = append(states, recordToState(record))
+	}
+	return states, nil
+}
+
+func (s *DBStore) ListStatesForGitHubInstallations(installationIDs []int64, limit int) ([]RunnerState, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, err
+	}
+	installationIDs = uniquePositiveInt64s(installationIDs)
+	if len(installationIDs) == 0 {
+		return []RunnerState{}, nil
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	var records []runnerRequestRecord
+	if err := db.
+		Where("github_installation_id IN ?", installationIDs).
+		Order("queued_at DESC").
+		Limit(limit).
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	states := make([]RunnerState, 0, len(records))
+	for _, record := range records {
+		states = append(states, recordToState(record))
+	}
+	return states, nil
 }
 
 func activeStatuses() []string {

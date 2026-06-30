@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -869,6 +870,135 @@ func TestListStatesPage(t *testing.T) {
 	}
 	if paged[0].ID != "runner-3" || paged[1].ID != "runner-2" {
 		t.Fatalf("unexpected page order: %#v", []string{paged[0].ID, paged[1].ID})
+	}
+}
+
+func TestGitHubInstallationsAndRepositoryRunnerList(t *testing.T) {
+	store := New(t.TempDir())
+	account, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "octocat"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation, err := store.UpsertGitHubInstallation(GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+		Repositories:   []string{"o/r", "o/another", "bad*", "missing-slash"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installation.Repositories) != 0 {
+		t.Fatalf("upsert should not persist the full installation repository scope, got %#v", installation.Repositories)
+	}
+	if _, err := store.UpsertGitHubInstallation(GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "renamed",
+		Repositories:   []string{"o/r"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CreateRequest(RunnerRequest{
+		ID:                   "visible",
+		Source:               "test",
+		GitHubInstallationID: 987,
+		RepositoryFullName:   "o/r",
+		Labels:               []string{"self-hosted"},
+		RunnerName:           "e2b-visible",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CreateRequest(RunnerRequest{
+		ID:                   "hidden",
+		Source:               "test",
+		GitHubInstallationID: 456,
+		RepositoryFullName:   "other/r",
+		Labels:               []string{"self-hosted"},
+		RunnerName:           "e2b-hidden",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	states, err := store.ListStatesForRepositories([]string{"o/r"}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 || states[0].ID != "visible" {
+		t.Fatalf("unexpected filtered states: %#v", states)
+	}
+	states, err = store.ListStatesForGitHubInstallations([]int64{987}, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 || states[0].ID != "visible" {
+		t.Fatalf("unexpected installation-filtered states: %#v", states)
+	}
+	installations, err := store.ListGitHubInstallations(account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installations) != 1 || installations[0].AccountLogin != "renamed" || !reflect.DeepEqual(installations[0].Repositories, []string{"o/r"}) {
+		t.Fatalf("unexpected installations: %#v", installations)
+	}
+	if err := store.DeleteGitHubInstallation(account.ID, installations[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	installations, err = store.ListGitHubInstallations(account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installations) != 0 {
+		t.Fatalf("expected installation to be deleted, got %#v", installations)
+	}
+}
+
+func TestGitHubInstallationsAllowSharedOrgInstallationAcrossAccounts(t *testing.T) {
+	store := New(t.TempDir())
+	first, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "200", OAuthLogin: "bob"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range []Account{first, second} {
+		if _, err := store.UpsertGitHubInstallation(GitHubInstallation{
+			AccountID:      account.ID,
+			InstallationID: 987,
+			AccountLogin:   "shared-org",
+			Repositories:   []string{"shared-org/repo"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstInstallations, err := store.ListGitHubInstallations(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondInstallations, err := store.ListGitHubInstallations(second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(firstInstallations) != 1 || len(secondInstallations) != 1 {
+		t.Fatalf("expected both users to keep their own installation link, first=%#v second=%#v", firstInstallations, secondInstallations)
+	}
+	if firstInstallations[0].ID == secondInstallations[0].ID {
+		t.Fatalf("expected separate local installation rows for shared GitHub installation, got %#v", firstInstallations[0])
+	}
+	if err := store.DeleteGitHubInstallation(first.ID, firstInstallations[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	firstInstallations, err = store.ListGitHubInstallations(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondInstallations, err = store.ListGitHubInstallations(second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(firstInstallations) != 0 || len(secondInstallations) != 1 {
+		t.Fatalf("expected deleting one user's link to preserve collaborator link, first=%#v second=%#v", firstInstallations, secondInstallations)
 	}
 }
 

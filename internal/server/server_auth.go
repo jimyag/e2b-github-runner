@@ -61,6 +61,10 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		http.NotFound(w, r)
 		return
 	}
+	if s.isGitHubAppSetupCallback(r) {
+		s.handleGitHubAppSetupRedirect(w, r)
+		return
+	}
 	if problem := strings.TrimSpace(r.URL.Query().Get("error")); problem != "" {
 		writeError(w, http.StatusUnauthorized, "github oauth rejected: "+problem)
 		return
@@ -119,7 +123,11 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		Secure:   requestIsSecure(r),
 		MaxAge:   int(s.cfg.AuthSessionTTL.Seconds()),
 	})
-	http.Redirect(w, r, "/admin/", http.StatusFound)
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func (s *Server) isGitHubAppSetupCallback(r *http.Request) bool {
+	return strings.TrimSpace(r.URL.Query().Get("installation_id")) != ""
 }
 
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {

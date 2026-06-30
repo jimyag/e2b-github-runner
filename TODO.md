@@ -5,7 +5,7 @@ This file tracks active project work. Completed behavior should move into `READM
 ## Active Roadmap
 
 - Decide whether GitHub token and basic auth remain supported compatibility modes or should be removed in favor of GitHub App-only operation.
-- Define the ordinary-user UI surface before adding non-admin screens under `ui/`; include routes, navigation visibility, and API permissions.
+- Decide whether ordinary-user Activity repositories should include repository-policy configuration rows in addition to repositories observed from runner jobs.
 - Add an effective-config diagnostics view or config validation workflow if operators need to inspect runtime config from the UI.
 - Verify DB lease behavior with two runnerd processes sharing the same database before documenting multi-instance support.
 - Decide whether expvar diagnostics need a Prometheus/export adapter or histogram-style latency views for deployment observability.

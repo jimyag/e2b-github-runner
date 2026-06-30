@@ -3,40 +3,41 @@ package state
 import "time"
 
 type runnerRequestRecord struct {
-	ID                  string     `gorm:"column:id;primaryKey"`
-	Source              string     `gorm:"column:source;not null"`
-	WorkflowJobID       *int64     `gorm:"column:workflow_job_id;uniqueIndex:idx_runner_requests_workflow_job_id"`
-	RepositoryFullName  string     `gorm:"column:repository_full_name"`
-	RequestedLabelsJSON string     `gorm:"column:requested_labels_json"`
-	LabelsJSON          string     `gorm:"column:labels_json;not null"`
-	ProfileName         string     `gorm:"column:profile_name"`
-	RunnerGroup         string     `gorm:"column:runner_group"`
-	RunnerName          string     `gorm:"column:runner_name;not null"`
-	Status              string     `gorm:"column:status;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_status_retry_queue;index:idx_runner_requests_lease_expiry"`
-	FailureStage        string     `gorm:"column:failure_stage"`
-	FailureReason       string     `gorm:"column:failure_reason"`
-	LastErrorCode       string     `gorm:"column:last_error_code"`
-	LastErrorMessage    string     `gorm:"column:last_error_message"`
-	LastErrorRetryable  bool       `gorm:"column:last_error_retryable;not null;default:false"`
-	RetryCount          int        `gorm:"column:retry_count;not null;default:0"`
-	SandboxID           string     `gorm:"column:sandbox_id"`
-	ProcessPID          uint32     `gorm:"column:process_pid"`
-	AssignedJobID       int64      `gorm:"column:assigned_job_id"`
-	AssignedJobName     string     `gorm:"column:assigned_job_name"`
-	Error               string     `gorm:"column:error"`
-	GitHubPayloadJSON   string     `gorm:"column:github_payload_json;type:text"`
-	QueuedAt            time.Time  `gorm:"column:queued_at;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_status_retry_queue"`
-	LastAttemptAt       *time.Time `gorm:"column:last_attempt_at"`
-	NextRetryAt         *time.Time `gorm:"column:next_retry_at;index:idx_runner_requests_status_retry_queue"`
-	CreatingAt          *time.Time `gorm:"column:creating_at"`
-	RunningAt           *time.Time `gorm:"column:running_at"`
-	StoppingAt          *time.Time `gorm:"column:stopping_at"`
-	CompletedAt         *time.Time `gorm:"column:completed_at"`
-	FailedAt            *time.Time `gorm:"column:failed_at"`
-	LeaseOwner          string     `gorm:"column:lease_owner"`
-	LeaseExpiresAt      *time.Time `gorm:"column:lease_expires_at;index:idx_runner_requests_lease_expiry"`
-	UpdatedAt           time.Time  `gorm:"column:updated_at;not null;index:idx_runner_requests_status_updated"`
-	Version             int64      `gorm:"column:version;not null;default:0"`
+	ID                   string     `gorm:"column:id;primaryKey"`
+	Source               string     `gorm:"column:source;not null"`
+	WorkflowJobID        *int64     `gorm:"column:workflow_job_id;uniqueIndex:idx_runner_requests_workflow_job_id"`
+	GitHubInstallationID int64      `gorm:"column:github_installation_id;index:idx_runner_requests_github_installation_updated"`
+	RepositoryFullName   string     `gorm:"column:repository_full_name"`
+	RequestedLabelsJSON  string     `gorm:"column:requested_labels_json"`
+	LabelsJSON           string     `gorm:"column:labels_json;not null"`
+	ProfileName          string     `gorm:"column:profile_name"`
+	RunnerGroup          string     `gorm:"column:runner_group"`
+	RunnerName           string     `gorm:"column:runner_name;not null"`
+	Status               string     `gorm:"column:status;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_status_retry_queue;index:idx_runner_requests_lease_expiry"`
+	FailureStage         string     `gorm:"column:failure_stage"`
+	FailureReason        string     `gorm:"column:failure_reason"`
+	LastErrorCode        string     `gorm:"column:last_error_code"`
+	LastErrorMessage     string     `gorm:"column:last_error_message"`
+	LastErrorRetryable   bool       `gorm:"column:last_error_retryable;not null;default:false"`
+	RetryCount           int        `gorm:"column:retry_count;not null;default:0"`
+	SandboxID            string     `gorm:"column:sandbox_id"`
+	ProcessPID           uint32     `gorm:"column:process_pid"`
+	AssignedJobID        int64      `gorm:"column:assigned_job_id"`
+	AssignedJobName      string     `gorm:"column:assigned_job_name"`
+	Error                string     `gorm:"column:error"`
+	GitHubPayloadJSON    string     `gorm:"column:github_payload_json;type:text"`
+	QueuedAt             time.Time  `gorm:"column:queued_at;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_status_retry_queue"`
+	LastAttemptAt        *time.Time `gorm:"column:last_attempt_at"`
+	NextRetryAt          *time.Time `gorm:"column:next_retry_at;index:idx_runner_requests_status_retry_queue"`
+	CreatingAt           *time.Time `gorm:"column:creating_at"`
+	RunningAt            *time.Time `gorm:"column:running_at"`
+	StoppingAt           *time.Time `gorm:"column:stopping_at"`
+	CompletedAt          *time.Time `gorm:"column:completed_at"`
+	FailedAt             *time.Time `gorm:"column:failed_at"`
+	LeaseOwner           string     `gorm:"column:lease_owner"`
+	LeaseExpiresAt       *time.Time `gorm:"column:lease_expires_at;index:idx_runner_requests_lease_expiry"`
+	UpdatedAt            time.Time  `gorm:"column:updated_at;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_github_installation_updated"`
+	Version              int64      `gorm:"column:version;not null;default:0"`
 }
 
 func (runnerRequestRecord) TableName() string { return "runner_requests" }
@@ -143,3 +144,15 @@ type oauthIdentityRecord struct {
 }
 
 func (oauthIdentityRecord) TableName() string { return "oauth_identities" }
+
+type githubInstallationRecord struct {
+	ID             int64         `gorm:"column:id;primaryKey;autoIncrement"`
+	AccountID      int64         `gorm:"column:account_id;not null;uniqueIndex:idx_github_installations_account_installation;index:idx_github_installations_account"`
+	Account        accountRecord `gorm:"foreignKey:AccountID"`
+	InstallationID int64         `gorm:"column:installation_id;not null;uniqueIndex:idx_github_installations_account_installation"`
+	AccountLogin   string        `gorm:"column:account_login;not null"`
+	CreatedAt      time.Time     `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time     `gorm:"column:updated_at;not null"`
+}
+
+func (githubInstallationRecord) TableName() string { return "github_installations" }

@@ -500,6 +500,22 @@ func TestAdminRedirectReturns301(t *testing.T) {
 	}
 }
 
+func TestUserRedirectReturns301(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+
+	req := httptest.NewRequest(http.MethodGet, "/user", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMovedPermanently {
+		t.Fatalf("GET /user: expected 301, got %d", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "/" {
+		t.Errorf("GET /user: Location = %q, want /", loc)
+	}
+}
+
 // ---------- handleGetRunner ----------
 
 func TestGetRunnerReturnsStateAfterCreate(t *testing.T) {

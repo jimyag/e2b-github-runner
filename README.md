@@ -25,9 +25,10 @@ Relative sqlite `database.dsn` and `github.app.private_key_file` paths are resol
 Use sqlite for local and small single-node deployments. Postgres and MySQL are supported by the state store, but shared-database multi-instance operation should be verified in your deployment before advertising it as supported.
 GitHub Enterprise Server is not currently supported; configure a GitHub.com App installation.
 Configure exactly one GitHub auth method: `github.app`, `github.token`, or `github.basic_auth`. For GitHub App auth, `github.app.installation_id` is optional. When it is omitted, runnerd resolves the installation from each job repository and caches installation transports, allowing one GitHub App to serve multiple installed accounts.
+Set `github.app.slug` to the GitHub App URL slug when you want the ordinary-user UI to show an Install GitHub App link.
 `github.allowed_repositories` is an optional allowlist of `owner/repo` or `owner/*` patterns. Empty means all repositories that can deliver valid webhooks and match runner labels/policies are allowed.
 
-`github.oauth` enables GitHub App OAuth login for the embedded admin console. Use the GitHub App's Client ID and Client secret, set a separate `auth.session_secret`, and configure the app callback URL as `/auth/github/callback` on your runnerd origin. Local accounts carry roles, while OAuth identities are matched by provider and stable subject; for GitHub this is the numeric user ID, while login is stored as display metadata. The first OAuth callback creates an account with `role: user` and links the GitHub identity when none exists, and only accounts with `role: admin` can access the admin console and management API. Bootstrap the first admin with `runnerd --bootstrap-admin github:<github-user-id>`. OAuth sessions are stored as signed HttpOnly cookies.
+`github.oauth` enables GitHub App OAuth login for the embedded console. Use the GitHub App's Client ID and Client secret, set a separate `auth.session_secret`, and configure the app callback URL as `/auth/github/callback` on your runnerd origin. Local accounts carry roles, while OAuth identities are matched by provider and stable subject; for GitHub this is the numeric user ID, while login is stored as display metadata. The first OAuth callback creates an account with `role: user` and links the GitHub identity when none exists. Ordinary users install the configured GitHub App; runnerd records the returned installation id and uses workflow job installation ids to decide which jobs the user can see. It does not copy the full GitHub App repository authorization scope into state. Only accounts with `role: admin` can access management APIs. Bootstrap the first admin with `runnerd --bootstrap-admin github:<github-user-id>`. OAuth sessions are stored as signed HttpOnly cookies.
 
 `/webhooks/github` uses GitHub HMAC signature verification. The manual management API under `/runner_requests` requires a valid GitHub OAuth admin session cookie.
 
@@ -56,7 +57,7 @@ cp runnerd.yaml.example runnerd.local.yaml
 task dev
 ```
 
-`task dev` starts the Vite UI dev server on the first available localhost port at or after `5173`, starts the smee webhook forwarder when `.smee-url` exists, and runs `runnerd` with the `development` build tag. The Go server still listens on the address from `runnerd.local.yaml`, commonly `:25500`, and proxies embedded UI assets to Vite. Open `http://127.0.0.1:25500/admin/` while developing.
+`task dev` starts the Vite UI dev server on the first available localhost port at or after `5173`, starts the smee webhook forwarder when `.smee-url` exists, and runs `runnerd` with the `development` build tag. The Go server still listens on the address from `runnerd.local.yaml`, commonly `:25500`, and proxies embedded UI assets to Vite. Open `http://127.0.0.1:25500/` for the ordinary-user PR/job view, `http://127.0.0.1:25500/repositories` for ordinary-user activity repositories, `http://127.0.0.1:25500/accounts` for GitHub App accounts and authorized repositories, or `http://127.0.0.1:25500/admin/` for the admin console while developing.
 
 Set `RUNNERD_CONFIG` to use another config file, or `RUNNERD_VITE_PORT` to require a specific Vite port.
 
@@ -79,7 +80,7 @@ docker run --rm -p 25500:25500 \
   ghcr.io/qiniu/ci-runner
 ```
 
-Open the embedded admin console at `http://127.0.0.1:25500/admin/`. The UI is built from `ui/` with the same React, Vite, Tailwind CSS, shadcn-style components, and theme tokens used by `kubevirt-console`. The console offers GitHub sign-in and uses a signed HttpOnly cookie for management API calls.
+Open the ordinary-user console at `http://127.0.0.1:25500/` or the admin console at `http://127.0.0.1:25500/admin/`. The UI is built from `ui/` with the same React, Vite, Tailwind CSS, shadcn-style components, and theme tokens used by `kubevirt-console`. The console offers GitHub sign-in and uses a signed HttpOnly cookie for API calls. Ordinary users see a two-column repository/PR job view at `/`, local activity repositories at `/repositories`, and GitHub App accounts plus on-demand authorized repositories at `/accounts`. Admin users see the management console.
 
 The admin console manages runner requests, runner specs, runner groups, runner policies, retry actions, audit history, runner-spec match tests, and diagnostics. Runner specs, groups, and repository policies are created through the admin API/UI rather than `runnerd.yaml`. runnerd creates repository runners by default; when a matched runner spec has a GitHub runner group, it creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
 

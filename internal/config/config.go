@@ -22,6 +22,7 @@ type Config struct {
 	E2BAPIURL                 string
 	GitHubAppID               int64
 	GitHubAppInstallationID   int64
+	GitHubAppSlug             string
 	GitHubAppPrivateKeyFile   string
 	GitHubToken               string
 	GitHubBasicAuthUsername   string
@@ -86,6 +87,7 @@ type fileConfig struct {
 		App struct {
 			ID             int64  `yaml:"id"`
 			InstallationID int64  `yaml:"installation_id"`
+			Slug           string `yaml:"slug"`
 			PrivateKeyFile string `yaml:"private_key_file"`
 		} `yaml:"app"`
 		OAuth struct {
@@ -139,6 +141,7 @@ func LoadFile(path string) (Config, error) {
 		E2BAPIURL:                 raw.E2B.APIURL,
 		GitHubAppID:               raw.GitHub.App.ID,
 		GitHubAppInstallationID:   raw.GitHub.App.InstallationID,
+		GitHubAppSlug:             strings.TrimSpace(raw.GitHub.App.Slug),
 		GitHubAppPrivateKeyFile:   resolveConfigPath(configDir, raw.GitHub.App.PrivateKeyFile),
 		GitHubToken:               raw.GitHub.Token,
 		GitHubBasicAuthUsername:   raw.GitHub.BasicAuth.Username,

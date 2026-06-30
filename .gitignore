@@ -10,3 +10,4 @@ templates/*/node_modules/
 *.local.yaml
 secrets/
 .smee-url
+tmp/

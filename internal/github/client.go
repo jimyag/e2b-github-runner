@@ -58,11 +58,100 @@ type Runner struct {
 	Busy   bool   `json:"busy"`
 }
 
+type Installation struct {
+	ID           int64    `json:"id"`
+	AccountLogin string   `json:"account_login,omitempty"`
+	Repositories []string `json:"repositories"`
+}
+
 type runnerTarget struct {
 	repositoryFullName string
 	apiPath            string
 	webURL             string
 	cacheKey           string
+}
+
+func (c *Client) GetInstallation(ctx context.Context, installationID int64) (Installation, error) {
+	if c.appAuth == nil {
+		return Installation{}, fmt.Errorf("github app auth is required")
+	}
+	if installationID <= 0 {
+		return Installation{}, fmt.Errorf("installation id is required")
+	}
+	url := fmt.Sprintf("%s/app/installations/%d", c.baseURL, installationID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return Installation{}, err
+	}
+	setGitHubHeaders(req)
+	resp, err := c.appAuth.appHTTP.Do(req)
+	if err != nil {
+		return Installation{}, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return Installation{}, fmt.Errorf("github installation: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var out struct {
+		ID      int64 `json:"id"`
+		Account struct {
+			Login string `json:"login"`
+		} `json:"account"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return Installation{}, err
+	}
+	if out.ID == 0 {
+		return Installation{}, fmt.Errorf("github installation response missing id")
+	}
+	return Installation{ID: out.ID, AccountLogin: out.Account.Login}, nil
+}
+
+func (c *Client) ListInstallationRepositories(ctx context.Context, installationID int64) ([]string, error) {
+	if c.appAuth == nil {
+		return nil, fmt.Errorf("github app auth is required")
+	}
+	if installationID <= 0 {
+		return nil, fmt.Errorf("installation id is required")
+	}
+	client, err := c.appAuth.clientForInstallation(ctx, installationID)
+	if err != nil {
+		return nil, err
+	}
+	nextURL := fmt.Sprintf("%s/installation/repositories?per_page=100", c.baseURL)
+	var repositories []string
+	for nextURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		setGitHubHeaders(req)
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		_ = resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("github installation repositories: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+		var out struct {
+			Repositories []struct {
+				FullName string `json:"full_name"`
+			} `json:"repositories"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, err
+		}
+		for _, repo := range out.Repositories {
+			if fullName := strings.TrimSpace(repo.FullName); fullName != "" {
+				repositories = append(repositories, fullName)
+			}
+		}
+		nextURL = nextLink(resp.Header.Get("Link"))
+	}
+	return repositories, nil
 }
 
 func NewClient(baseURL string, httpClient *http.Client) *Client {
@@ -349,6 +438,13 @@ func (a *appAuthenticator) clientForRepository(ctx context.Context, repositoryFu
 	if err != nil {
 		return nil, err
 	}
+	return a.clientForInstallation(ctx, installationID)
+}
+
+func (a *appAuthenticator) clientForInstallation(_ context.Context, installationID int64) (*http.Client, error) {
+	if installationID <= 0 {
+		return nil, fmt.Errorf("installation id is required")
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	transport, ok := a.transports[installationID]
@@ -558,16 +654,18 @@ func VerifyWebhookSignature(secret string, body []byte, signature string) bool {
 }
 
 type WorkflowJobEvent struct {
-	Action      string      `json:"action"`
-	WorkflowJob WorkflowJob `json:"workflow_job"`
-	Repository  Repository  `json:"repository"`
-	WorkflowRun WorkflowRun `json:"workflow_run"`
+	Action       string          `json:"action"`
+	WorkflowJob  WorkflowJob     `json:"workflow_job"`
+	Repository   Repository      `json:"repository"`
+	WorkflowRun  WorkflowRun     `json:"workflow_run"`
+	Installation InstallationRef `json:"installation"`
 }
 
 type WorkflowRunEvent struct {
-	Action      string      `json:"action"`
-	WorkflowRun WorkflowRun `json:"workflow_run"`
-	Repository  Repository  `json:"repository"`
+	Action       string          `json:"action"`
+	WorkflowRun  WorkflowRun     `json:"workflow_run"`
+	Repository   Repository      `json:"repository"`
+	Installation InstallationRef `json:"installation"`
 }
 
 type WorkflowJob struct {
@@ -590,6 +688,10 @@ type WorkflowRun struct {
 	ID         int64  `json:"id"`
 	Name       string `json:"name"`
 	HeadBranch string `json:"head_branch"`
+}
+
+type InstallationRef struct {
+	ID int64 `json:"id"`
 }
 
 type Labels []string

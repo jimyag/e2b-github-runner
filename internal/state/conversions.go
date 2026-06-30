@@ -23,16 +23,17 @@ func recordToRequest(record runnerRequestRecord) (RunnerRequest, error) {
 		}
 	}
 	return RunnerRequest{
-		ID:                 record.ID,
-		Source:             record.Source,
-		JobID:              pointerToInt64(record.WorkflowJobID),
-		RepositoryFullName: record.RepositoryFullName,
-		RequestedLabels:    requestedLabels,
-		Labels:             labels,
-		ProfileName:        record.ProfileName,
-		RunnerGroup:        record.RunnerGroup,
-		RunnerName:         record.RunnerName,
-		CreatedAt:          record.QueuedAt,
+		ID:                   record.ID,
+		Source:               record.Source,
+		JobID:                pointerToInt64(record.WorkflowJobID),
+		GitHubInstallationID: record.GitHubInstallationID,
+		RepositoryFullName:   record.RepositoryFullName,
+		RequestedLabels:      requestedLabels,
+		Labels:               labels,
+		ProfileName:          record.ProfileName,
+		RunnerGroup:          record.RunnerGroup,
+		RunnerName:           record.RunnerName,
+		CreatedAt:            record.QueuedAt,
 	}, nil
 }
 
@@ -40,40 +41,41 @@ func recordToState(record runnerRequestRecord) RunnerState {
 	requestedLabels, _ := labelsFromJSON(record.RequestedLabelsJSON)
 	githubLinks := githubLinksFromPayload(record)
 	return RunnerState{
-		ID:                 record.ID,
-		Status:             record.Status,
-		RepositoryFullName: record.RepositoryFullName,
-		RequestedLabels:    requestedLabels,
-		ProfileName:        record.ProfileName,
-		RunnerGroup:        record.RunnerGroup,
-		RunnerName:         record.RunnerName,
-		SandboxID:          record.SandboxID,
-		ProcessPID:         record.ProcessPID,
-		WorkflowJobID:      pointerToInt64(record.WorkflowJobID),
-		WorkflowRunID:      githubLinks.workflowRunID,
-		GitHubJobURL:       githubLinks.jobURL,
-		PullRequestNumber:  githubLinks.pullRequestNumber,
-		AssignedJobID:      record.AssignedJobID,
-		AssignedJobName:    record.AssignedJobName,
-		Error:              record.Error,
-		FailureStage:       record.FailureStage,
-		FailureReason:      record.FailureReason,
-		LastErrorCode:      record.LastErrorCode,
-		LastErrorMessage:   record.LastErrorMessage,
-		LastErrorRetryable: record.LastErrorRetryable,
-		RetryCount:         record.RetryCount,
-		UpdatedAt:          record.UpdatedAt,
-		CreatedAt:          record.QueuedAt,
-		LastAttemptAt:      pointerToTime(record.LastAttemptAt),
-		NextRetryAt:        pointerToTime(record.NextRetryAt),
-		CreatingAt:         pointerToTime(record.CreatingAt),
-		RunningAt:          pointerToTime(record.RunningAt),
-		StoppingAt:         pointerToTime(record.StoppingAt),
-		CompletedAt:        pointerToTime(record.CompletedAt),
-		FailedAt:           pointerToTime(record.FailedAt),
-		LeaseOwner:         record.LeaseOwner,
-		LeaseExpiresAt:     pointerToTime(record.LeaseExpiresAt),
-		Version:            record.Version,
+		ID:                   record.ID,
+		Status:               record.Status,
+		GitHubInstallationID: record.GitHubInstallationID,
+		RepositoryFullName:   record.RepositoryFullName,
+		RequestedLabels:      requestedLabels,
+		ProfileName:          record.ProfileName,
+		RunnerGroup:          record.RunnerGroup,
+		RunnerName:           record.RunnerName,
+		SandboxID:            record.SandboxID,
+		ProcessPID:           record.ProcessPID,
+		WorkflowJobID:        pointerToInt64(record.WorkflowJobID),
+		WorkflowRunID:        githubLinks.workflowRunID,
+		GitHubJobURL:         githubLinks.jobURL,
+		PullRequestNumber:    githubLinks.pullRequestNumber,
+		AssignedJobID:        record.AssignedJobID,
+		AssignedJobName:      record.AssignedJobName,
+		Error:                record.Error,
+		FailureStage:         record.FailureStage,
+		FailureReason:        record.FailureReason,
+		LastErrorCode:        record.LastErrorCode,
+		LastErrorMessage:     record.LastErrorMessage,
+		LastErrorRetryable:   record.LastErrorRetryable,
+		RetryCount:           record.RetryCount,
+		UpdatedAt:            record.UpdatedAt,
+		CreatedAt:            record.QueuedAt,
+		LastAttemptAt:        pointerToTime(record.LastAttemptAt),
+		NextRetryAt:          pointerToTime(record.NextRetryAt),
+		CreatingAt:           pointerToTime(record.CreatingAt),
+		RunningAt:            pointerToTime(record.RunningAt),
+		StoppingAt:           pointerToTime(record.StoppingAt),
+		CompletedAt:          pointerToTime(record.CompletedAt),
+		FailedAt:             pointerToTime(record.FailedAt),
+		LeaseOwner:           record.LeaseOwner,
+		LeaseExpiresAt:       pointerToTime(record.LeaseExpiresAt),
+		Version:              record.Version,
 	}
 }
 
@@ -218,6 +220,19 @@ func uniqueTrimmed(values []string) []string {
 	for _, value := range values {
 		value = strings.TrimSpace(value)
 		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func uniquePositiveInt64s(values []int64) []int64 {
+	seen := map[int64]bool{}
+	out := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 || seen[value] {
 			continue
 		}
 		seen[value] = true

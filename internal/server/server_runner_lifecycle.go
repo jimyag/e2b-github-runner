@@ -35,16 +35,17 @@ func (s *Server) createAndStart(w http.ResponseWriter, r *http.Request, req stat
 	writeJSON(w, http.StatusOK, st)
 }
 
-func (s *Server) enqueueWorkflowJob(repositoryFullName, workflowRunName string, job github.WorkflowJob, payload []byte) (state.RunnerState, bool, error) {
+func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallationID int64, workflowRunName string, job github.WorkflowJob, payload []byte) (state.RunnerState, bool, error) {
 	id := strconv.FormatInt(job.ID, 10)
 	req := state.RunnerRequest{
-		ID:                 id,
-		Source:             "github_webhook",
-		JobID:              job.ID,
-		RepositoryFullName: repositoryFullName,
-		RequestedLabels:    append([]string(nil), job.Labels...),
-		Labels:             []string(job.Labels),
-		RunnerName:         "e2b-" + id,
+		ID:                   id,
+		Source:               "github_webhook",
+		JobID:                job.ID,
+		GitHubInstallationID: githubInstallationID,
+		RepositoryFullName:   repositoryFullName,
+		RequestedLabels:      append([]string(nil), job.Labels...),
+		Labels:               []string(job.Labels),
+		RunnerName:           "e2b-" + id,
 	}
 	if !s.cfg.RepositoryAllowed(repositoryFullName) {
 		s.logger.Info("runner repository rejected by allowlist", "id", req.ID, "repository", repositoryFullName, "labels", []string(job.Labels))

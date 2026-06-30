@@ -33,6 +33,10 @@ github:
   # Webhook requests use repository.full_name from GitHub and are admitted by runner_policies.
   app:
     id: 123456
+    # Optional. Enables the ordinary-user UI to link to the GitHub App installation flow.
+    # Configure the GitHub App Setup URL as:
+    #   http://127.0.0.1:25500/github-app/setup
+    slug: your-github-app-slug
     # Optional. Leave empty to resolve the GitHub App installation dynamically per repository.
     # installation_id: 12345678
     # Relative paths are resolved from the directory containing runnerd.yaml.

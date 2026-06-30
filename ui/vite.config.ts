@@ -4,7 +4,7 @@ import { defineConfig } from "vite"
 import tailwindcss from "@tailwindcss/vite"
 
 export default defineConfig({
-  base: "/admin/",
+  base: "/",
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
@@ -15,6 +15,8 @@ export default defineConfig({
       "/audit-events": "http://127.0.0.1:25500",
       "/diagnostics": "http://127.0.0.1:25500",
       "/auth": "http://127.0.0.1:25500",
+      "/user/github-app": "http://127.0.0.1:25500",
+      "/user/runner_requests": "http://127.0.0.1:25500",
     },
   },
   resolve: {

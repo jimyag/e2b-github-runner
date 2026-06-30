@@ -5,15 +5,22 @@ import (
 	"bytes"
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -253,6 +260,163 @@ func TestManagementEndpointsRequireAdminAuth(t *testing.T) {
 	}
 }
 
+func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/app/installations/987":
+			if r.Header.Get("Authorization") == "" {
+				t.Fatal("expected app JWT authorization for installation lookup")
+			}
+			w.Write([]byte(`{"id":987,"account":{"login":"o"}}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/987/access_tokens":
+			if r.Header.Get("Authorization") == "" {
+				t.Fatal("expected app JWT authorization for installation token")
+			}
+			w.Write([]byte(`{"token":"installation-token","expires_at":"2099-01-01T00:00:00Z"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/installation/repositories":
+			if r.Header.Get("Authorization") != "token installation-token" {
+				t.Fatalf("expected installation token authorization, got %q", r.Header.Get("Authorization"))
+			}
+			w.Write([]byte(`{"repositories":[{"full_name":"o/r"},{"full_name":"o/another"}]}`))
+		default:
+			t.Fatalf("unexpected github app request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	srv.cfg.GitHubAppSlug = "runnerd-test"
+	appClient, err := github.NewAppClient(ghServer.URL, github.AppAuth{
+		AppID:          123,
+		PrivateKeyFile: testServerPrivateKeyFile(t),
+	}, ghServer.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.gh = appClient
+	if _, _, err := store.CreateRequest(state.RunnerRequest{
+		ID:                   "visible",
+		Source:               "test",
+		GitHubInstallationID: 987,
+		RepositoryFullName:   "o/r",
+		Labels:               []string{"self-hosted"},
+		RunnerName:           "e2b-visible",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CreateRequest(state.RunnerRequest{
+		ID:                   "hidden",
+		Source:               "test",
+		GitHubInstallationID: 456,
+		RepositoryFullName:   "other/r",
+		Labels:               []string{"self-hosted"},
+		RunnerName:           "e2b-hidden",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/github-app", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected app status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var appConfig struct {
+		InstallURL string `json:"install_url"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &appConfig); err != nil {
+		t.Fatal(err)
+	}
+	if appConfig.InstallURL != "https://github.com/apps/runnerd-test/installations/new" {
+		t.Fatalf("unexpected install url: %q", appConfig.InstallURL)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/github-app/setup?installation_id=987&setup_action=install", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("unexpected setup status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Location") != "/accounts?installation_id=987&setup_action=install" {
+		t.Fatalf("unexpected setup redirect: %q", rec.Header().Get("Location"))
+	}
+	req = httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=oauth-code&installation_id=987&setup_action=install", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("unexpected callback setup status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Location") != "/accounts?installation_id=987&setup_action=install" {
+		t.Fatalf("unexpected callback setup redirect: %q", rec.Header().Get("Location"))
+	}
+	req = httptest.NewRequest(http.MethodGet, "/auth/github/callback?installation_id=987&setup_action=install&state=github-app-state", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("unexpected callback setup status with state: %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Location") != "/accounts?installation_id=987&setup_action=install" {
+		t.Fatalf("unexpected callback setup redirect with state: %q", rec.Header().Get("Location"))
+	}
+	req = httptest.NewRequest(http.MethodGet, "/auth/github/callback?installation_id=987&state=github-app-state", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("unexpected callback setup status without setup_action: %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Location") != "/accounts?installation_id=987" {
+		t.Fatalf("unexpected callback setup redirect without setup_action: %q", rec.Header().Get("Location"))
+	}
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	installations, err := store.ListGitHubInstallations(account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installations) != 1 {
+		t.Fatalf("expected one installation, got %#v", installations)
+	}
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/user/github-app/installations/%d/repositories", installations[0].ID), nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected installation repositories status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var installationRepositories struct {
+		Repositories []string `json:"repositories"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &installationRepositories); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(installationRepositories.Repositories, []string{"o/r", "o/another"}) {
+		t.Fatalf("unexpected installation repositories: %#v", installationRepositories.Repositories)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/user/runner_requests", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected runner list status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var runners []state.RunnerState
+	if err := json.Unmarshal(rec.Body.Bytes(), &runners); err != nil {
+		t.Fatal(err)
+	}
+	if len(runners) != 1 || runners[0].ID != "visible" {
+		t.Fatalf("unexpected user runners: %#v", runners)
+	}
+}
+
 func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 	var gotTokenAuth string
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -325,6 +489,9 @@ func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusFound {
 		t.Fatalf("expected callback redirect, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/" {
+		t.Fatalf("expected admin callback to redirect to /, got %q", loc)
 	}
 	if gotTokenAuth != "Bearer user-token" {
 		t.Fatalf("expected user fetch bearer token, got %q", gotTokenAuth)
@@ -417,6 +584,9 @@ func TestGitHubOAuthLoginCreatesNonAdminAccount(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusFound {
 		t.Fatalf("expected callback redirect, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/" {
+		t.Fatalf("expected user callback to redirect to /, got %q", loc)
 	}
 	var sessionCookie *http.Cookie
 	for _, cookie := range rec.Result().Cookies() {
@@ -556,7 +726,7 @@ func TestAdminUIIsServedWithoutAPIAccess(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected admin ui, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), `<div id="root">`) || !strings.Contains(rec.Body.String(), `/admin/assets/`) {
+	if !strings.Contains(rec.Body.String(), `<div id="root">`) || !strings.Contains(rec.Body.String(), `/assets/`) {
 		t.Fatalf("admin ui did not contain expected vite shell")
 	}
 
@@ -568,6 +738,28 @@ func TestAdminUIIsServedWithoutAPIAccess(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `<div id="root">`) {
 		t.Fatalf("admin route fallback did not serve vite shell")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected root user ui, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `<div id="root">`) {
+		t.Fatalf("root user ui did not serve vite shell")
+	}
+
+	for _, path := range []string{"/repositories", "/accounts"} {
+		req = httptest.NewRequest(http.MethodGet, path, nil)
+		rec = httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected user route fallback for %s, got %d", path, rec.Code)
+		}
+		if !strings.Contains(rec.Body.String(), `<div id="root">`) {
+			t.Fatalf("user route fallback for %s did not serve vite shell", path)
+		}
 	}
 }
 
@@ -1989,6 +2181,23 @@ func testSessionCookie(subject, login, role string) *http.Cookie {
 		Value: payloadValue + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)),
 		Path:  "/",
 	}
+}
+
+func testServerPrivateKeyFile(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
+	})
+	path := filepath.Join(t.TempDir(), "github-app.pem")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func waitForState(t *testing.T, store state.Store, id, want string) {
