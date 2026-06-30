@@ -247,6 +247,7 @@ func (s *DBStore) ListAuditEvents(limit int) ([]AuditEvent, error) {
 }
 
 func auditEventFromRecord(record auditEventRecord) AuditEvent {
+	//lint:ignore S1016 keep record/API mapping explicit so field changes are reviewed intentionally
 	return AuditEvent{
 		ID:           record.ID,
 		Actor:        record.Actor,

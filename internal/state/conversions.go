@@ -201,6 +201,7 @@ func (s *DBStore) recordToRunnerGroup(db *gorm.DB, record runnerGroupRecord) (Ru
 }
 
 func recordToRepositoryPolicy(record repositoryPolicyRecord) RepositoryPolicy {
+	//lint:ignore S1016 keep record/API mapping explicit so field changes are reviewed intentionally
 	return RepositoryPolicy{
 		ID:                 record.ID,
 		RepositoryFullName: record.RepositoryFullName,
