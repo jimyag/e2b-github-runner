@@ -17,7 +17,7 @@ type Config struct {
 	HTTPIdleTimeout           time.Duration
 	StateDir                  string
 	StateBackend              string
-	StateDatabaseURL          string
+	StateDatabaseDSN          string
 	E2BAPIKey                 string
 	E2BAPIURL                 string
 	GitHubAppID               int64
@@ -56,8 +56,9 @@ type fileConfig struct {
 		IdleTimeoutSec  int    `yaml:"idle_timeout_seconds"`
 	} `yaml:"server"`
 	Database struct {
-		Backend string `yaml:"backend"`
-		URL     string `yaml:"url"`
+		Backend   string `yaml:"backend"`
+		DSN       string `yaml:"dsn"`
+		LegacyURL string `yaml:"url"`
 	} `yaml:"database"`
 	Auth struct {
 		SessionSecret   string `yaml:"session_secret"`
@@ -126,6 +127,9 @@ func LoadFile(path string) (Config, error) {
 	if strings.TrimSpace(raw.GitHub.Owner) != "" || strings.TrimSpace(raw.GitHub.Repo) != "" {
 		return Config{}, fmt.Errorf("invalid config github.owner/github.repo: no longer supported; pass repository_full_name on manual runner requests")
 	}
+	if strings.TrimSpace(raw.Database.LegacyURL) != "" {
+		return Config{}, fmt.Errorf("invalid config database.url: use database.dsn")
+	}
 	configDir := filepath.Dir(path)
 	cfg := Config{
 		HTTPAddr:                  defaultString(raw.Server.HTTPAddr, ":25500"),
@@ -133,7 +137,7 @@ func LoadFile(path string) (Config, error) {
 		HTTPWriteTimeout:          durationSeconds(raw.Server.WriteTimeoutSec, 60),
 		HTTPIdleTimeout:           durationSeconds(raw.Server.IdleTimeoutSec, 120),
 		StateBackend:              strings.ToLower(defaultString(raw.Database.Backend, "sqlite")),
-		StateDatabaseURL:          raw.Database.URL,
+		StateDatabaseDSN:          raw.Database.DSN,
 		E2BAPIKey:                 raw.E2B.APIKey,
 		E2BAPIURL:                 raw.E2B.APIURL,
 		GitHubAppID:               raw.GitHub.App.ID,
@@ -164,12 +168,12 @@ func LoadFile(path string) (Config, error) {
 		ConfigPath:                path,
 	}
 	if cfg.StateBackend == "sqlite" {
-		if strings.TrimSpace(cfg.StateDatabaseURL) == "" {
-			cfg.StateDatabaseURL = filepath.Join(configDir, "var", "runnerd.db")
+		if strings.TrimSpace(cfg.StateDatabaseDSN) == "" {
+			cfg.StateDatabaseDSN = filepath.Join(configDir, "var", "runnerd.db")
 		} else {
-			cfg.StateDatabaseURL = resolveConfigPath(configDir, cfg.StateDatabaseURL)
+			cfg.StateDatabaseDSN = resolveConfigPath(configDir, cfg.StateDatabaseDSN)
 		}
-		cfg.StateDir = filepath.Dir(cfg.StateDatabaseURL)
+		cfg.StateDir = filepath.Dir(cfg.StateDatabaseDSN)
 	}
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
@@ -229,14 +233,14 @@ func (c Config) validate() error {
 	if authModes > 1 {
 		return fmt.Errorf("invalid config github auth: configure exactly one of app, token, or basic_auth")
 	}
-	if c.StateBackend != "sqlite" && c.StateBackend != "postgres" {
-		return fmt.Errorf("invalid config database.backend: must be sqlite or postgres")
+	if c.StateBackend != "sqlite" && c.StateBackend != "postgres" && c.StateBackend != "mysql" {
+		return fmt.Errorf("invalid config database.backend: must be sqlite, postgres, or mysql")
 	}
 	if strings.TrimRight(c.GitHubAPIBaseURL, "/") != defaultGitHubAPIBaseURL {
 		return fmt.Errorf("invalid config github.api_base_url: only %s is supported", defaultGitHubAPIBaseURL)
 	}
-	if strings.TrimSpace(c.StateDatabaseURL) == "" {
-		missing = append(missing, "database.url")
+	if strings.TrimSpace(c.StateDatabaseDSN) == "" {
+		missing = append(missing, "database.dsn")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))

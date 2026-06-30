@@ -31,7 +31,7 @@ func main() {
 	}
 	store := state.NewWithOptions(state.Options{
 		Backend:        cfg.StateBackend,
-		DatabaseURL:    cfg.StateDatabaseURL,
+		DatabaseDSN:    cfg.StateDatabaseDSN,
 		MigrateOnStart: true,
 	})
 	if err := store.Ensure(); err != nil {
@@ -87,7 +87,7 @@ func main() {
 		IdleTimeout:       cfg.HTTPIdleTimeout,
 		MaxHeaderBytes:    1 << 20,
 	}
-	logger.Info("starting server", "addr", cfg.HTTPAddr, "state_backend", cfg.StateBackend, "state_database_url", redact.DatabaseURL(cfg.StateDatabaseURL))
+	logger.Info("starting server", "addr", cfg.HTTPAddr, "state_backend", cfg.StateBackend, "state_database_dsn", redact.DatabaseDSN(cfg.StateDatabaseDSN))
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)

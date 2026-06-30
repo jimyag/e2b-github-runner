@@ -17,6 +17,7 @@ const (
 const (
 	BackendSQLite   = "sqlite"
 	BackendPostgres = "postgres"
+	BackendMySQL    = "mysql"
 )
 
 var (
@@ -202,6 +203,6 @@ type Store interface {
 
 type Options struct {
 	Backend        string
-	DatabaseURL    string
+	DatabaseDSN    string
 	MigrateOnStart bool
 }

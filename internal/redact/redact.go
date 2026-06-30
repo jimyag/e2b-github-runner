@@ -1,15 +1,22 @@
 package redact
 
-import "net/url"
+import (
+	"net/url"
+	"strings"
+)
 
-// DatabaseURL removes userinfo from database URLs while preserving location fields.
-func DatabaseURL(raw string) string {
+// DatabaseDSN removes credentials from database DSNs while preserving location fields.
+func DatabaseDSN(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" {
-		return raw
-	}
-	if u.User != nil {
+	if err == nil && u.Scheme != "" && u.User != nil {
 		u.User = url.User("xxxxx")
+		return u.String()
 	}
-	return u.String()
+
+	at := strings.Index(raw, "@")
+	colon := strings.Index(raw, ":")
+	if at > 0 && colon > 0 && colon < at {
+		return "xxxxx" + raw[at:]
+	}
+	return raw
 }

@@ -1922,7 +1922,7 @@ func newTestServerWithLimit(t *testing.T, store state.Store, ghURL string, fake 
 	cfg := config.Config{
 		StateDir:                "./var/runner_requests",
 		StateBackend:            "sqlite",
-		StateDatabaseURL:        "./var/runnerd.db",
+		StateDatabaseDSN:        "./var/runnerd.db",
 		GitHubWebhookSecret:     "secret",
 		GitHubOAuthClientID:     "Iv1.test",
 		GitHubOAuthClientSecret: "oauth-secret",

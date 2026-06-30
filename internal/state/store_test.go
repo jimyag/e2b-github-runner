@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,7 +25,7 @@ func closeTestDB(t *testing.T, db *gorm.DB) {
 func TestSQLiteStoreUsesWALAndBusyTimeout(t *testing.T) {
 	store := NewWithOptions(Options{
 		Backend:        BackendSQLite,
-		DatabaseURL:    t.TempDir() + "/runnerd.db",
+		DatabaseDSN:    t.TempDir() + "/runnerd.db",
 		MigrateOnStart: true,
 	}).(*DBStore)
 	if err := store.Ensure(); err != nil {
@@ -56,6 +57,22 @@ func TestSQLiteStoreUsesWALAndBusyTimeout(t *testing.T) {
 	}
 	if busyTimeout != 15000 {
 		t.Fatalf("busy_timeout = %d, want 15000", busyTimeout)
+	}
+}
+
+func TestMySQLStoreBackendIsRecognized(t *testing.T) {
+	store := NewWithOptions(Options{
+		Backend:        "mysql",
+		DatabaseDSN:    "not a valid mysql dsn",
+		MigrateOnStart: false,
+	}).(*DBStore)
+
+	err := store.Ensure()
+	if err == nil {
+		t.Fatal("expected invalid mysql DSN to fail")
+	}
+	if strings.Contains(err.Error(), "unsupported state backend") {
+		t.Fatalf("mysql backend should be recognized, got %v", err)
 	}
 }
 
@@ -308,7 +325,7 @@ func TestMigrateDoesNotHandleLegacyUsers(t *testing.T) {
 	databaseURL := dir + "/runnerd.db"
 	store := NewWithOptions(Options{
 		Backend:        BackendSQLite,
-		DatabaseURL:    databaseURL,
+		DatabaseDSN:    databaseURL,
 		MigrateOnStart: false,
 	}).(*DBStore)
 	db, err := store.open()
@@ -339,7 +356,7 @@ func TestMigrateDoesNotHandleLegacyUsers(t *testing.T) {
 
 	migrated := NewWithOptions(Options{
 		Backend:        BackendSQLite,
-		DatabaseURL:    databaseURL,
+		DatabaseDSN:    databaseURL,
 		MigrateOnStart: true,
 	}).(*DBStore)
 	db, err = migrated.dbOrEnsure()
@@ -363,7 +380,7 @@ func TestMigrateBackfillsLegacyRunnerProfileDefaultAvailable(t *testing.T) {
 	databaseURL := dir + "/runnerd.db"
 	store := NewWithOptions(Options{
 		Backend:        BackendSQLite,
-		DatabaseURL:    databaseURL,
+		DatabaseDSN:    databaseURL,
 		MigrateOnStart: false,
 	}).(*DBStore)
 	db, err := store.open()
@@ -393,7 +410,7 @@ func TestMigrateBackfillsLegacyRunnerProfileDefaultAvailable(t *testing.T) {
 
 	migrated := NewWithOptions(Options{
 		Backend:        BackendSQLite,
-		DatabaseURL:    databaseURL,
+		DatabaseDSN:    databaseURL,
 		MigrateOnStart: true,
 	}).(*DBStore)
 	profile, err := migrated.GetProfile("default")
@@ -410,7 +427,7 @@ func TestMigrateBackfillsLegacyRepositoryPolicyRunnerGroupName(t *testing.T) {
 	databaseURL := dir + "/runnerd.db"
 	store := NewWithOptions(Options{
 		Backend:        BackendSQLite,
-		DatabaseURL:    databaseURL,
+		DatabaseDSN:    databaseURL,
 		MigrateOnStart: false,
 	}).(*DBStore)
 	db, err := store.open()
@@ -435,7 +452,7 @@ func TestMigrateBackfillsLegacyRepositoryPolicyRunnerGroupName(t *testing.T) {
 
 	migrated := NewWithOptions(Options{
 		Backend:        BackendSQLite,
-		DatabaseURL:    databaseURL,
+		DatabaseDSN:    databaseURL,
 		MigrateOnStart: true,
 	}).(*DBStore)
 	policies, err := migrated.ListRepositoryPolicies()

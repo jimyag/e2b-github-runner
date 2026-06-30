@@ -11,7 +11,7 @@ cp runnerd.yaml.example runnerd.yaml
 mkdir -p ./secrets
 ```
 
-相对 sqlite `database.url` 和 `github.app.private_key_file` 都相对 `runnerd.yaml` 所在目录解析。当前只支持 GitHub.com，不支持 GitHub Enterprise Server。GitHub 鉴权可以使用 GitHub App、PAT token 或 basic auth，但只能三选一。
+相对 sqlite `database.dsn` 和 `github.app.private_key_file` 都相对 `runnerd.yaml` 所在目录解析。当前只支持 GitHub.com，不支持 GitHub Enterprise Server。GitHub 鉴权可以使用 GitHub App、PAT token 或 basic auth，但只能三选一。
 
 最小可用配置示例：
 
@@ -21,7 +21,7 @@ server:
 
 database:
   backend: sqlite
-  url: ./var/runnerd.db
+  dsn: ./var/runnerd.db
 
 auth:
   session_secret: <random session signing secret>
@@ -58,7 +58,7 @@ worker:
 
 Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置；服务启动后通过后台页面或 admin API 创建。spec 名称建议使用有意义的名字，例如 `ubuntu-24-04`，`template_id` 填对应的 E2B template ID。保存 runner spec 前，admin API 会验证该 template 存在且有 usable build。
 
-`database.backend` 支持 `sqlite` 和 `postgres`。本地开发优先使用 sqlite；共享数据库的多实例部署需要先用两个 runnerd 进程验证 lease 行为，再作为正式运行方式记录。
+`database.backend` 支持 `sqlite`、`postgres` 和 `mysql`。本地开发优先使用 sqlite；共享数据库的多实例部署需要先用两个 runnerd 进程验证 lease 行为，再作为正式运行方式记录。
 
 ## 2. 配置 GitHub 鉴权
 

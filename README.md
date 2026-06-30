@@ -15,14 +15,14 @@ cp runnerd.yaml.example runnerd.yaml
 The config file covers:
 
 - server listen address and timeouts
-- sqlite or Postgres database backend and DSN/path
+- sqlite, Postgres, or MySQL database backend and DSN/path
 - E2B API settings and template
 - GitHub webhook settings plus GitHub App, PAT, or basic auth
 - GitHub App OAuth login for the admin console
 - worker lease / retry / concurrency settings
 
-Relative sqlite `database.url` and `github.app.private_key_file` paths are resolved from the directory containing `runnerd.yaml`.
-Use sqlite for local and small single-node deployments. Postgres is supported by the state store, but shared-database multi-instance operation should be verified in your deployment before advertising it as supported.
+Relative sqlite `database.dsn` and `github.app.private_key_file` paths are resolved from the directory containing `runnerd.yaml`.
+Use sqlite for local and small single-node deployments. Postgres and MySQL are supported by the state store, but shared-database multi-instance operation should be verified in your deployment before advertising it as supported.
 GitHub Enterprise Server is not currently supported; configure a GitHub.com App installation.
 Configure exactly one GitHub auth method: `github.app`, `github.token`, or `github.basic_auth`. For GitHub App auth, `github.app.installation_id` is optional. When it is omitted, runnerd resolves the installation from each job repository and caches installation transports, allowing one GitHub App to serve multiple installed accounts.
 `github.allowed_repositories` is an optional allowlist of `owner/repo` or `owner/*` patterns. Empty means all repositories that can deliver valid webhooks and match runner labels/policies are allowed.

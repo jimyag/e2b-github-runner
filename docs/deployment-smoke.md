@@ -44,7 +44,7 @@ curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/vars | jq
 Check:
 
 - `github.auth_mode` is `app` for the recommended deployment path.
-- `state.database` points at the intended sqlite or Postgres database.
+- `state.database` points at the intended sqlite, Postgres, or MySQL database.
 - pprof discovery files and dump scripts are visible when the local pprof service is available.
 - Recent failure summaries are empty or understood.
 

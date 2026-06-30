@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/glebarez/sqlite"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -23,7 +24,7 @@ type DBStore struct {
 func New(dir string) Store {
 	return NewWithOptions(Options{
 		Backend:        BackendSQLite,
-		DatabaseURL:    filepath.Join(dir, "runnerd.db"),
+		DatabaseDSN:    filepath.Join(dir, "runnerd.db"),
 		MigrateOnStart: true,
 	})
 }
@@ -33,8 +34,8 @@ func NewWithOptions(opts Options) Store {
 	if backend == "" {
 		backend = BackendSQLite
 	}
-	if opts.DatabaseURL == "" && backend == BackendSQLite {
-		opts.DatabaseURL = filepath.Join(".", "var", "runnerd.db")
+	if opts.DatabaseDSN == "" && backend == BackendSQLite {
+		opts.DatabaseDSN = filepath.Join(".", "var", "runnerd.db")
 	}
 	opts.Backend = backend
 	return &DBStore{opts: opts}
@@ -74,13 +75,13 @@ func (s *DBStore) open() (*gorm.DB, error) {
 	cfg := &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Silent)}
 	switch s.opts.Backend {
 	case BackendSQLite:
-		dir := filepath.Dir(s.opts.DatabaseURL)
+		dir := filepath.Dir(s.opts.DatabaseDSN)
 		if dir != "." && dir != "" {
 			if err := os.MkdirAll(dir, 0o755); err != nil {
 				return nil, err
 			}
 		}
-		db, err := gorm.Open(sqlite.Open(s.opts.DatabaseURL), cfg)
+		db, err := gorm.Open(sqlite.Open(s.opts.DatabaseDSN), cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -89,7 +90,9 @@ func (s *DBStore) open() (*gorm.DB, error) {
 		}
 		return db, nil
 	case BackendPostgres:
-		return gorm.Open(postgres.Open(s.opts.DatabaseURL), cfg)
+		return gorm.Open(postgres.Open(s.opts.DatabaseDSN), cfg)
+	case BackendMySQL:
+		return gorm.Open(mysql.Open(s.opts.DatabaseDSN), cfg)
 	default:
 		return nil, fmt.Errorf("unsupported state backend: %s", s.opts.Backend)
 	}

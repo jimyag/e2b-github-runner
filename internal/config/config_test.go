@@ -15,7 +15,7 @@ server:
   http_addr: ":28000"
 database:
   backend: sqlite
-  url: ./runnerd.db
+  dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
 admin:
@@ -50,8 +50,8 @@ worker:
 	if cfg.StateBackend != "sqlite" {
 		t.Fatalf("unexpected state backend: %s", cfg.StateBackend)
 	}
-	if cfg.StateDatabaseURL != filepath.Join(dir, "runnerd.db") {
-		t.Fatalf("unexpected database url: %s", cfg.StateDatabaseURL)
+	if cfg.StateDatabaseDSN != filepath.Join(dir, "runnerd.db") {
+		t.Fatalf("unexpected database dsn: %s", cfg.StateDatabaseDSN)
 	}
 	if cfg.GitHubAuthMode() != "app" {
 		t.Fatalf("unexpected auth mode: %s", cfg.GitHubAuthMode())
@@ -73,7 +73,7 @@ func TestLoadFileSupportsDynamicGitHubAppInstallation(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 database:
   backend: sqlite
-  url: ./runnerd.db
+  dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
 admin:
@@ -111,7 +111,7 @@ func TestLoadFileSupportsGitHubOAuthLogin(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 database:
   backend: sqlite
-  url: ./runnerd.db
+  dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
 admin:
@@ -150,7 +150,7 @@ func TestLoadFileRejectsPartialGitHubOAuthLogin(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 database:
   backend: sqlite
-  url: ./runnerd.db
+  dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
 admin:
@@ -184,7 +184,7 @@ func TestLoadFileRejectsMissingGitHubOAuthLogin(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 database:
   backend: sqlite
-  url: ./runnerd.db
+  dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
 e2b:
@@ -216,7 +216,7 @@ func TestLoadFileRejectsDeprecatedGitHubDefaultRepository(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 database:
   backend: sqlite
-  url: ./runnerd.db
+  dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
 admin:
@@ -253,7 +253,7 @@ func TestLoadFileAllowsEmptyDeprecatedGitHubDefaultRepository(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 database:
   backend: sqlite
-  url: ./runnerd.db
+  dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
 admin:
@@ -286,7 +286,7 @@ func TestLoadFileRejectsUnsupportedGitHubAPIBaseURL(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 database:
   backend: sqlite
-  url: ./runnerd.db
+  dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
 admin:
@@ -320,7 +320,7 @@ func TestLoadFileSupportsGitHubTokenAuth(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 database:
   backend: sqlite
-  url: ./runnerd.db
+  dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
 admin:
@@ -353,7 +353,7 @@ func TestLoadFileSupportsGitHubBasicAuth(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 database:
   backend: sqlite
-  url: ./runnerd.db
+  dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
 admin:
@@ -382,6 +382,75 @@ github:
 	}
 }
 
+func TestLoadFileSupportsMySQLDatabaseBackend(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "runnerd.yaml")
+	const mysqlDSN = "runner:secret@tcp(mysql.example:3306)/runnerd?parseTime=true"
+	if err := os.WriteFile(configPath, []byte(`
+database:
+  backend: mysql
+  dsn: `+mysqlDSN+`
+auth:
+  session_secret: test-session-secret
+e2b:
+  api_key: test-key
+  api_url: https://api.e2b.dev
+github:
+  webhook_secret: webhook-secret
+  token: ghp_test
+  oauth:
+    client_id: Iv1.test
+    client_secret: secret
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.StateBackend != "mysql" {
+		t.Fatalf("unexpected state backend: %s", cfg.StateBackend)
+	}
+	if cfg.StateDatabaseDSN != mysqlDSN {
+		t.Fatalf("unexpected database dsn: %s", cfg.StateDatabaseDSN)
+	}
+	if cfg.StateDir != "" {
+		t.Fatalf("mysql should not set sqlite state dir, got %q", cfg.StateDir)
+	}
+}
+
+func TestLoadFileRejectsLegacyDatabaseURL(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "runnerd.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+database:
+  backend: sqlite
+  url: ./runnerd.db
+auth:
+  session_secret: test-session-secret
+e2b:
+  api_key: test-key
+  api_url: https://api.e2b.dev
+github:
+  webhook_secret: webhook-secret
+  token: ghp_test
+  oauth:
+    client_id: Iv1.test
+    client_secret: secret
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadFile(configPath)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "database.dsn") {
+		t.Fatalf("expected missing dsn error, got %v", err)
+	}
+}
+
 func TestGitHubAuthModeReturnsNoneWithoutAuthConfig(t *testing.T) {
 	if mode := (Config{}).GitHubAuthMode(); mode != "none" {
 		t.Fatalf("unexpected auth mode: %s", mode)
@@ -394,7 +463,7 @@ func TestLoadFileRejectsMissingGitHubAuth(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 database:
   backend: sqlite
-  url: `+filepath.Join(dir, "runnerd.db")+`
+  dsn: `+filepath.Join(dir, "runnerd.db")+`
 admin:
   token: admin-token
 e2b:
@@ -421,7 +490,7 @@ func TestLoadFileRejectsMultipleGitHubAuthModes(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 database:
   backend: sqlite
-  url: ./runnerd.db
+  dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
 admin:

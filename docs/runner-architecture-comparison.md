@@ -9,7 +9,7 @@ runnerd is a single Go service that receives GitHub `workflow_job` webhooks, adm
 Implemented pieces:
 
 - File-first runtime config loaded from `runnerd.yaml` by default, or from `--config`.
-- SQLite and Postgres state backends through `database.backend` and `database.url`.
+- SQLite, Postgres, and MySQL state backends through `database.backend` and `database.dsn`.
 - DB-backed runner requests, runner events/logs, runner specs, runner groups, repository policies, OAuth accounts, and audit events.
 - Fixed runner states: `queued`, `creating`, `running`, `stopping`, `completed`, and `failed`.
 - DB claim/lease processing with retry metadata (`retry_count`, `next_retry_at`, `lease_owner`, `lease_expires_at`).
@@ -32,7 +32,7 @@ Known boundaries:
 | --- | --- | --- | --- |
 | Deployment | Single Go service | Runner orchestration service | Kubernetes operator |
 | Compute | E2B sandbox | Firecracker microVM | Kubernetes pod |
-| State source | SQLite/Postgres DB | Service-managed pool state | Kubernetes API / CRD status |
+| State source | SQLite/Postgres/MySQL DB | Service-managed pool state | Kubernetes API / CRD status |
 | Scheduling input | GitHub webhooks + admin API | Pool desired/current state | Scale set/listener reconciliation |
 | Runner selection | Runner specs, groups, policies, label matching | Pool/profile selection | Runner groups and scale sets |
 | Auth | GitHub App, token, or basic auth | GitHub App | GitHub App / scale set auth |
@@ -63,7 +63,7 @@ Runner state is database-backed. The worker claims runnable requests with lease 
 - active runners that need recovery after restart;
 - mismatches between original workflow jobs and assigned GitHub jobs.
 
-The design deliberately uses portable DB semantics rather than relying on Postgres-only locking features for the core path. SQLite remains valid for local and small single-node deployments; Postgres is available for more durable deployments, pending multi-process validation.
+The design deliberately uses portable DB semantics rather than relying on Postgres-only locking features for the core path. SQLite remains valid for local and small single-node deployments; Postgres and MySQL are available for more durable deployments, pending multi-process validation.
 
 ## Diagnostics
 
