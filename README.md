@@ -32,6 +32,7 @@ Configure exactly one GitHub auth method: `github.app`, `github.token`, or `gith
 `/webhooks/github` uses GitHub HMAC signature verification. The manual management API under `/runner_requests` requires a valid GitHub OAuth admin session cookie.
 
 Runner state is persisted in a DB-backed store instead of per-request JSON directories. Control/stdout/stderr logs are kept as runner events and remain available from the admin API and UI.
+Schema creation is GORM-model driven on startup. Existing state databases are migrated by `AutoMigrate` plus a narrow compatibility pre-pass for older schema columns, so keep old-schema upgrade tests green when changing state records.
 
 ## Run
 

@@ -60,6 +60,14 @@ Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置
 
 `database.backend` 支持 `sqlite`、`postgres` 和 `mysql`。本地开发优先使用 sqlite；共享数据库的多实例部署需要先用两个 runnerd 进程验证 lease 行为，再作为正式运行方式记录。
 
+状态表结构主要由 `internal/state/records.go` 里的 GORM tag 定义，服务启动时会先执行少量旧 schema 兼容补列，再运行 GORM `AutoMigrate`。修改 state record、索引或迁移 helper 时，至少先跑：
+
+```bash
+go test ./internal/state -count=1
+```
+
+不要只用全新 sqlite 文件验证迁移；旧 schema 升级路径也需要覆盖，尤其是新增 `NOT NULL` 列、唯一索引或关系约束时。
+
 ## 2. 配置 GitHub 鉴权
 
 推荐使用 GitHub App。PAT token 和 basic auth 也支持，主要用于本地验证或已有凭据场景。

@@ -11,6 +11,7 @@ Implemented pieces:
 - File-first runtime config loaded from `runnerd.yaml` by default, or from `--config`.
 - SQLite, Postgres, and MySQL state backends through `database.backend` and `database.dsn`.
 - DB-backed runner requests, runner events/logs, runner specs, runner groups, repository policies, OAuth accounts, and audit events.
+- Schema creation is driven by GORM tags in the state record structs, with startup `AutoMigrate` and narrow compatibility backfills for older schema columns.
 - Fixed runner states: `queued`, `creating`, `running`, `stopping`, `completed`, and `failed`.
 - DB claim/lease processing with retry metadata (`retry_count`, `next_retry_at`, `lease_owner`, `lease_expires_at`).
 - GitHub App auth with optional dynamic installation resolution, plus token and basic auth compatibility modes.
@@ -64,6 +65,8 @@ Runner state is database-backed. The worker claims runnable requests with lease 
 - mismatches between original workflow jobs and assigned GitHub jobs.
 
 The design deliberately uses portable DB semantics rather than relying on Postgres-only locking features for the core path. SQLite remains valid for local and small single-node deployments; Postgres and MySQL are available for more durable deployments, pending multi-process validation.
+
+The schema source of truth lives in `internal/state/records.go`. Startup migration runs a narrow legacy-column compatibility pass in `internal/state/db.go` before GORM `AutoMigrate`. This keeps fresh database creation model-driven while preserving known older sqlite upgrade paths such as `runner_profiles.default_available` and `repository_policies.runner_group_name`.
 
 ## Diagnostics
 

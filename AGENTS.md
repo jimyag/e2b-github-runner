@@ -11,6 +11,7 @@ Use this guide for future Codex or agent work in this repository.
 - Development UI assets are proxied to Vite by `internal/server/ui_assets_development.go`.
 - Current browser entry for the admin console is `/admin/`; the `ui/` tree may also host ordinary-user UI later.
 - Runtime state can use sqlite, Postgres, or MySQL. Do not document multi-instance support until two runnerd processes have been verified against the same database.
+- State schema is defined mostly by GORM tags in `internal/state/records.go`; startup migration runs `AutoMigrate` plus narrow legacy-column backfills in `internal/state/db.go`.
 - Runner specs, runner groups, and repository policies are admin API/UI data, not `runnerd.yaml` fields.
 - The recommended production GitHub auth path is GitHub App auth plus GitHub App OAuth admin login. Token and basic auth still exist as compatibility modes, but their long-term product status is undecided.
 
@@ -34,6 +35,16 @@ Use `task smee` for standalone GitHub webhook forwarding. It reads `.smee-url` a
 
 Use `task build` when verifying production embedded UI behavior because it rebuilds `internal/server/ui/` before compiling `bin/runnerd`.
 
+When changing state records, GORM tags, indexes, or migration helpers, run `go test ./internal/state -count=1` first. Old sqlite schema upgrade tests are intentional compatibility coverage; do not remove them just because fresh database creation passes.
+
+## Local Agent Assets
+
+- `.agents/rules/development-workflow.md`: detailed workflow, generated-file boundaries, and documentation sync rules.
+- `.agents/rules/project-architecture.md`: durable architecture and implementation boundaries for runnerd.
+- `.agents/rules/testing-and-verification.md`: verification matrix for docs, state schema, UI, dev startup, Docker, release, and deployment smoke work.
+- `.agents/skills/runnerd-state-schema/SKILL.md`: use for state records, GORM tags, indexes, and migration compatibility work.
+- `.agents/skills/runnerd-dev-smoke/SKILL.md`: use for `task dev`, Vite proxy, smee forwarding, and local startup verification.
+
 ## Editing Rules
 
 - Do not commit real secrets, local sqlite databases, or local config files.
@@ -41,4 +52,5 @@ Use `task build` when verifying production embedded UI behavior because it rebui
 - Do not hand-edit generated files in `internal/server/ui/`; edit `ui/` and rebuild.
 - Keep `README.md`, `docs/testing.md`, and `TODO.md` aligned when changing config, build, development, or deployment workflows.
 - Keep `docs/README.md` and `docs/deployment-smoke.md` aligned when adding or removing docs or deployment verification steps.
+- Keep `.agents/rules/` and `.agents/skills/` aligned when a change creates durable agent rules or repeatable project workflows.
 - If adding non-admin UI, keep admin routes and role-gated APIs explicit instead of assuming everything under `ui/` is admin-only.
