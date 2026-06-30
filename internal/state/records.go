@@ -134,7 +134,7 @@ func (accountRecord) TableName() string { return "accounts" }
 type oauthIdentityRecord struct {
 	ID            int64         `gorm:"column:id;primaryKey;autoIncrement"`
 	AccountID     int64         `gorm:"column:account_id;not null;index:idx_oauth_identities_account"`
-	Account       accountRecord `gorm:"foreignKey:AccountID;constraint:OnDelete:CASCADE"`
+	Account       accountRecord `gorm:"foreignKey:AccountID"`
 	OAuthProvider string        `gorm:"column:oauth_provider;not null;uniqueIndex:idx_oauth_identities_provider_subject"`
 	OAuthSubject  string        `gorm:"column:oauth_subject;not null;uniqueIndex:idx_oauth_identities_provider_subject"`
 	OAuthLogin    string        `gorm:"column:oauth_login;not null"`

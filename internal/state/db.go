@@ -72,7 +72,10 @@ func (s *DBStore) dbOrEnsure() (*gorm.DB, error) {
 }
 
 func (s *DBStore) open() (*gorm.DB, error) {
-	cfg := &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Silent)}
+	cfg := &gorm.Config{
+		Logger:                                   gormlogger.Default.LogMode(gormlogger.Silent),
+		DisableForeignKeyConstraintWhenMigrating: true,
+	}
 	switch s.opts.Backend {
 	case BackendSQLite:
 		dir := filepath.Dir(s.opts.DatabaseDSN)
@@ -138,6 +141,11 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 
 func migrateLegacySchemaColumns(db *gorm.DB) error {
 	migrator := db.Migrator()
+	if migrator.HasTable(&oauthIdentityRecord{}) && migrator.HasConstraint(&oauthIdentityRecord{}, "Account") {
+		if err := migrator.DropConstraint(&oauthIdentityRecord{}, "Account"); err != nil {
+			return err
+		}
+	}
 	if migrator.HasTable(&runnerProfileRecord{}) && !migrator.HasColumn(&runnerProfileRecord{}, "default_available") {
 		if err := migrator.AddColumn(&legacyRunnerProfileDefaultAvailableColumn{}, "DefaultAvailable"); err != nil {
 			return err

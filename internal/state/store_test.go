@@ -300,23 +300,97 @@ func TestLinkOAuthIdentityToAccountRejectsIdentityOnDifferentAccount(t *testing.
 	}
 }
 
-func TestOAuthIdentityRequiresExistingAccount(t *testing.T) {
+func TestMigrateDoesNotCreateOAuthIdentityForeignKey(t *testing.T) {
 	store := New(t.TempDir()).(*DBStore)
 	db, err := store.dbOrEnsure()
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	var foreignKeys []struct {
+		ID int `gorm:"column:id"`
+	}
+	if err := db.Raw("PRAGMA foreign_key_list(oauth_identities)").Scan(&foreignKeys).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(foreignKeys) != 0 {
+		t.Fatalf("expected oauth_identities to have no database foreign keys, got %d", len(foreignKeys))
+	}
+}
+
+func TestMigrateDropsLegacyOAuthIdentityForeignKey(t *testing.T) {
+	dir := t.TempDir()
+	databaseURL := dir + "/runnerd.db"
+	store := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: false,
+	}).(*DBStore)
+	db, err := store.open()
+	if err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
-	err = db.Create(&oauthIdentityRecord{
-		AccountID:     999,
+	if err := db.Exec(`CREATE TABLE accounts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		role TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE oauth_identities (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		account_id INTEGER NOT NULL,
+		oauth_provider TEXT NOT NULL,
+		oauth_subject TEXT NOT NULL,
+		oauth_login TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		CONSTRAINT fk_oauth_identities_account FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+	);`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO accounts (id, role, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+		1, "admin", now, now).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO oauth_identities (id, account_id, oauth_provider, oauth_subject, oauth_login, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		1, 1, "github", "12345", "octocat", now, now).Error; err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	migrated := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: true,
+	}).(*DBStore)
+	db, err = migrated.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var foreignKeys []struct {
+		ID int `gorm:"column:id"`
+	}
+	if err := db.Raw("PRAGMA foreign_key_list(oauth_identities)").Scan(&foreignKeys).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(foreignKeys) != 0 {
+		t.Fatalf("expected legacy oauth_identities foreign keys to be removed, got %d", len(foreignKeys))
+	}
+}
+
+func TestLinkOAuthIdentityToAccountRequiresExistingAccount(t *testing.T) {
+	store := New(t.TempDir())
+	_, _, err := store.LinkOAuthIdentityToAccount(999, OAuthIdentity{
 		OAuthProvider: "github",
 		OAuthSubject:  "12345",
 		OAuthLogin:    "octocat",
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}).Error
-	if err == nil {
-		t.Fatal("expected foreign key error for missing account")
+	})
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected missing account to be rejected by store logic, got %v", err)
 	}
 }
 
