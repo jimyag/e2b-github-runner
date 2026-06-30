@@ -166,9 +166,13 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 
 func migrateLegacySchemaColumns(db *gorm.DB) error {
 	migrator := db.Migrator()
-	if migrator.HasTable(&oauthIdentityRecord{}) && migrator.HasConstraint(&oauthIdentityRecord{}, "Account") {
-		if err := migrator.DropConstraint(&oauthIdentityRecord{}, "Account"); err != nil {
-			return err
+	if migrator.HasTable(&oauthIdentityRecord{}) {
+		for _, constraint := range []string{"Account", "fk_oauth_identities_account", "oauth_identities_account_id_fkey"} {
+			if migrator.HasConstraint(&oauthIdentityRecord{}, constraint) {
+				if err := migrator.DropConstraint(&oauthIdentityRecord{}, constraint); err != nil {
+					return err
+				}
+			}
 		}
 	}
 	if migrator.HasTable(&runnerProfileRecord{}) && !migrator.HasColumn(&runnerProfileRecord{}, "default_available") {

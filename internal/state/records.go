@@ -24,7 +24,7 @@ type runnerRequestRecord struct {
 	AssignedJobID       int64      `gorm:"column:assigned_job_id"`
 	AssignedJobName     string     `gorm:"column:assigned_job_name"`
 	Error               string     `gorm:"column:error"`
-	GitHubPayloadJSON   string     `gorm:"column:github_payload_json"`
+	GitHubPayloadJSON   string     `gorm:"column:github_payload_json;type:text"`
 	QueuedAt            time.Time  `gorm:"column:queued_at;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_status_retry_queue"`
 	LastAttemptAt       *time.Time `gorm:"column:last_attempt_at"`
 	NextRetryAt         *time.Time `gorm:"column:next_retry_at;index:idx_runner_requests_status_retry_queue"`
@@ -46,8 +46,8 @@ type runnerEventRecord struct {
 	RequestID   string    `gorm:"column:request_id;not null;index:idx_runner_events_request_created"`
 	EventType   string    `gorm:"column:event_type;not null"`
 	Stage       string    `gorm:"column:stage"`
-	Message     string    `gorm:"column:message"`
-	PayloadJSON string    `gorm:"column:payload_json"`
+	Message     string    `gorm:"column:message;type:text"`
+	PayloadJSON string    `gorm:"column:payload_json;type:text"`
 	CreatedAt   time.Time `gorm:"column:created_at;not null;index:idx_runner_events_request_created"`
 }
 
@@ -95,9 +95,9 @@ func (runnerGroupSpecRecord) TableName() string { return "runner_group_specs" }
 
 type repositoryPolicyRecord struct {
 	ID                 int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	RepositoryFullName string    `gorm:"column:repository_full_name;not null;index:idx_repository_policies_repository_profile;index:idx_repository_policies_repository_group"`
-	ProfileName        string    `gorm:"column:profile_name;not null;index:idx_repository_policies_repository_profile"`
-	RunnerGroupName    string    `gorm:"column:runner_group_name;not null;default:'';index:idx_repository_policies_repository_group"`
+	RepositoryFullName string    `gorm:"column:repository_full_name;not null;uniqueIndex:idx_repository_policies_unique"`
+	ProfileName        string    `gorm:"column:profile_name;not null;uniqueIndex:idx_repository_policies_unique"`
+	RunnerGroupName    string    `gorm:"column:runner_group_name;not null;default:'';uniqueIndex:idx_repository_policies_unique"`
 	Enabled            bool      `gorm:"column:enabled;not null"`
 	CreatedAt          time.Time `gorm:"column:created_at;not null"`
 }
@@ -116,7 +116,7 @@ type auditEventRecord struct {
 	Action       string    `gorm:"column:action;not null"`
 	ResourceType string    `gorm:"column:resource_type;not null"`
 	ResourceID   string    `gorm:"column:resource_id;not null"`
-	PayloadJSON  string    `gorm:"column:payload_json"`
+	PayloadJSON  string    `gorm:"column:payload_json;type:text"`
 	CreatedAt    time.Time `gorm:"column:created_at;not null;index:idx_audit_events_created"`
 }
 

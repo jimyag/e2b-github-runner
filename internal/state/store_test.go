@@ -606,12 +606,58 @@ func TestRepositoryPolicyIndexesArePortable(t *testing.T) {
 	}
 
 	var indexSQL []string
-	if err := db.Raw(`SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'repository_policies' AND sql IS NOT NULL`).Scan(&indexSQL).Error; err != nil {
+	if err := db.Raw(`SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'repository_policies' AND name = 'idx_repository_policies_unique' AND sql IS NOT NULL`).Scan(&indexSQL).Error; err != nil {
 		t.Fatal(err)
+	}
+	if len(indexSQL) != 1 {
+		t.Fatalf("expected portable repository policy unique index, got %d", len(indexSQL))
 	}
 	for _, sql := range indexSQL {
 		if strings.Contains(strings.ToUpper(sql), " WHERE ") {
 			t.Fatalf("repository policy index should not use a partial WHERE clause: %s", sql)
+		}
+		if !strings.Contains(strings.ToUpper(sql), "UNIQUE") {
+			t.Fatalf("repository policy index should enforce uniqueness: %s", sql)
+		}
+	}
+
+	duplicate := repositoryPolicyRecord{
+		RepositoryFullName: "owner/repo",
+		ProfileName:        "default",
+		Enabled:            true,
+		CreatedAt:          time.Now().UTC(),
+	}
+	if err := db.Create(&duplicate).Error; err != nil {
+		t.Fatal(err)
+	}
+	duplicate.ID = 0
+	if err := db.Create(&duplicate).Error; err == nil {
+		t.Fatal("expected duplicate repository policy insert to fail")
+	}
+}
+
+func TestLargePayloadColumnsUseTextType(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for table, columns := range map[string][]string{
+		"runner_requests": {"github_payload_json"},
+		"runner_events":   {"message", "payload_json"},
+		"audit_events":    {"payload_json"},
+	} {
+		for _, column := range columns {
+			var info struct {
+				Type string
+			}
+			if err := db.Raw("SELECT type FROM pragma_table_info(?) WHERE name = ?", table, column).Scan(&info).Error; err != nil {
+				t.Fatal(err)
+			}
+			if !strings.EqualFold(info.Type, "text") {
+				t.Fatalf("%s.%s type = %q, want text", table, column, info.Type)
+			}
 		}
 	}
 }
@@ -677,6 +723,8 @@ func TestIsTransientStoreErrorRecognizesPostgresSQLSTATE(t *testing.T) {
 	for _, message := range []string{
 		"ERROR: transaction failed (SQLSTATE 40001)",
 		"ERROR: transaction failed (SQLSTATE 40P01)",
+		"Error 1213 (40001): Deadlock found when trying to get lock; try restarting transaction",
+		"Error 1205 (HY000): Lock wait timeout exceeded; try restarting transaction",
 	} {
 		t.Run(message, func(t *testing.T) {
 			if !isTransientStoreError(errors.New(message)) {

@@ -2,8 +2,11 @@ package redact
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 )
+
+var passwordFieldPattern = regexp.MustCompile(`(?i)(password\s*=\s*)(?:'[^']*'|"[^"]*"|[^\s]+)`)
 
 // DatabaseDSN removes credentials from database DSNs while preserving location fields.
 func DatabaseDSN(raw string) string {
@@ -18,5 +21,5 @@ func DatabaseDSN(raw string) string {
 	if at > 0 && colon > 0 && colon < at {
 		return "xxxxx" + raw[at:]
 	}
-	return raw
+	return passwordFieldPattern.ReplaceAllString(raw, `${1}xxxxx`)
 }

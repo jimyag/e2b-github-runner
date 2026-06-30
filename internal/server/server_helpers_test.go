@@ -784,6 +784,16 @@ func TestRedactDatabaseDSNRemovesMySQLCredentials(t *testing.T) {
 	}
 }
 
+func TestRedactDatabaseDSNRemovesPostgresKeyValuePassword(t *testing.T) {
+	got := redact.DatabaseDSN("host=localhost user=postgres password='secret value' dbname=runnerd")
+	if strings.Contains(got, "secret") {
+		t.Fatalf("database DSN leaked key-value password: %s", got)
+	}
+	if !strings.Contains(got, "host=localhost") || !strings.Contains(got, "dbname=runnerd") {
+		t.Fatalf("database DSN lost non-secret key-value fields: %s", got)
+	}
+}
+
 // ---------- isSandboxGone ----------
 
 func TestIsSandboxGoneReturnsFalseForNilError(t *testing.T) {
