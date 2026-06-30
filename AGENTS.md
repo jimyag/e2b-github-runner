@@ -28,7 +28,7 @@ task docker-check
 task release-check
 ```
 
-Use `task dev` for local development. It defaults to `RUNNERD_CONFIG=runnerd.local.yaml` and `RUNNERD_VITE_PORT=5173`, and starts smee forwarding when `.smee-url` exists.
+Use `task dev` for local development. It defaults to `RUNNERD_CONFIG=runnerd.local.yaml`, starts Vite on the first available localhost port at or after `5173`, and starts smee forwarding when `.smee-url` exists.
 
 Use `task smee` for standalone GitHub webhook forwarding. It reads `.smee-url` and defaults to `SMEE_TARGET=http://127.0.0.1:25500/webhooks/github`.
 

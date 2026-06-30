@@ -55,9 +55,9 @@ cp runnerd.yaml.example runnerd.local.yaml
 task dev
 ```
 
-`task dev` starts the Vite UI dev server on `127.0.0.1:5173` by default, starts the smee webhook forwarder when `.smee-url` exists, and runs `runnerd` with the `development` build tag. The Go server still listens on the address from `runnerd.local.yaml`, commonly `:25500`, and proxies embedded UI assets to Vite. Open `http://127.0.0.1:25500/admin/` while developing.
+`task dev` starts the Vite UI dev server on the first available localhost port at or after `5173`, starts the smee webhook forwarder when `.smee-url` exists, and runs `runnerd` with the `development` build tag. The Go server still listens on the address from `runnerd.local.yaml`, commonly `:25500`, and proxies embedded UI assets to Vite. Open `http://127.0.0.1:25500/admin/` while developing.
 
-Set `RUNNERD_CONFIG` to use another config file, or `RUNNERD_VITE_PORT` when port `5173` is already in use.
+Set `RUNNERD_CONFIG` to use another config file, or `RUNNERD_VITE_PORT` to require a specific Vite port.
 
 For local GitHub webhook forwarding, create a per-developer smee channel file:
 

@@ -130,7 +130,7 @@ cp runnerd.yaml.example runnerd.local.yaml
 task dev
 ```
 
-`task dev` 默认读取 `runnerd.local.yaml`，启动 Vite dev server 到 `127.0.0.1:5173`，并用 `development` build tag 启动 Go 服务。浏览器仍然访问 runnerd 的地址，例如：
+`task dev` 默认读取 `runnerd.local.yaml`，从 `127.0.0.1:5173` 开始选择第一个可用端口启动 Vite dev server，并用 `development` build tag 启动 Go 服务。浏览器仍然访问 runnerd 的地址，例如：
 
 ```text
 http://127.0.0.1:25500/admin/
@@ -140,6 +140,12 @@ http://127.0.0.1:25500/admin/
 
 ```bash
 RUNNERD_CONFIG=./runnerd.yaml task dev
+```
+
+如需固定 Vite 端口：
+
+```bash
+RUNNERD_VITE_PORT=5173 task dev
 ```
 
 生产模式或验证嵌入式前端资源时，直接启动 Go 服务：

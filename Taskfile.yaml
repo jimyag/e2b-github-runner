@@ -124,15 +124,38 @@ tasks:
           echo "Create one from runnerd.yaml.example, then update local secrets and OAuth settings." >&2
           exit 1
         }
-        export RUNNERD_VITE_PORT="${RUNNERD_VITE_PORT:-5173}"
-        export RUNNERD_VITE_DEV_SERVER_URL="${RUNNERD_VITE_DEV_SERVER_URL:-http://127.0.0.1:${RUNNERD_VITE_PORT}}"
-
         command -v curl >/dev/null 2>&1 || {
           echo "curl is required for task dev startup checks." >&2
           exit 1
         }
-        if curl -fsS "${RUNNERD_VITE_DEV_SERVER_URL}" >/dev/null 2>&1; then
-          echo "UI dev server address is already in use: ${RUNNERD_VITE_DEV_SERVER_URL}" >&2
+
+        VITE_HOST="127.0.0.1"
+        vite_port_in_use() {
+          if command -v nc >/dev/null 2>&1; then
+            nc -z "${VITE_HOST}" "$1" >/dev/null 2>&1
+            return $?
+          fi
+          if command -v lsof >/dev/null 2>&1; then
+            lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
+            return $?
+          fi
+          curl -fsS "http://${VITE_HOST}:$1" >/dev/null 2>&1
+        }
+
+        if [ -z "${RUNNERD_VITE_DEV_SERVER_URL:-}" ]; then
+          VITE_PORT="${RUNNERD_VITE_PORT:-5173}"
+          if [ -z "${RUNNERD_VITE_PORT:-}" ]; then
+            while vite_port_in_use "${VITE_PORT}"; do
+              VITE_PORT=$((VITE_PORT + 1))
+            done
+          elif vite_port_in_use "${VITE_PORT}"; then
+            echo "UI dev server port is already in use: ${VITE_HOST}:${VITE_PORT}" >&2
+            exit 1
+          fi
+          export RUNNERD_VITE_PORT="${VITE_PORT}"
+          export RUNNERD_VITE_DEV_SERVER_URL="http://${VITE_HOST}:${RUNNERD_VITE_PORT}"
+        elif [ -z "${RUNNERD_VITE_PORT:-}" ]; then
+          echo "RUNNERD_VITE_PORT is required when RUNNERD_VITE_DEV_SERVER_URL is set." >&2
           exit 1
         fi
 
