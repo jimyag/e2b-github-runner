@@ -1,0 +1,557 @@
+package state
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+func (s *DBStore) CreateRequest(req RunnerRequest, payload []byte) (bool, RunnerState, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return false, RunnerState{}, err
+	}
+
+	req.ID = sanitizeID(req.ID)
+	if req.ID == "" {
+		return false, RunnerState{}, fmt.Errorf("request id is empty")
+	}
+	req.RunnerName = sanitizeRunnerName(req.RunnerName)
+	if req.RunnerName == "" {
+		req.RunnerName = "e2b-" + req.ID
+	}
+	now := time.Now().UTC()
+	if req.CreatedAt.IsZero() {
+		req.CreatedAt = now
+	}
+
+	if len(req.RequestedLabels) == 0 {
+		req.RequestedLabels = append([]string(nil), req.Labels...)
+	}
+	labelsJSON, err := json.Marshal(req.Labels)
+	if err != nil {
+		return false, RunnerState{}, err
+	}
+	requestedLabelsJSON, err := json.Marshal(req.RequestedLabels)
+	if err != nil {
+		return false, RunnerState{}, err
+	}
+	record := runnerRequestRecord{
+		ID:                  req.ID,
+		Source:              req.Source,
+		RepositoryFullName:  req.RepositoryFullName,
+		RequestedLabelsJSON: string(requestedLabelsJSON),
+		LabelsJSON:          string(labelsJSON),
+		ProfileName:         req.ProfileName,
+		RunnerGroup:         req.RunnerGroup,
+		RunnerName:          req.RunnerName,
+		Status:              StatusQueued,
+		GitHubPayloadJSON:   string(payload),
+		QueuedAt:            req.CreatedAt,
+		UpdatedAt:           now,
+		Version:             0,
+	}
+	if req.JobID != 0 {
+		record.WorkflowJobID = &req.JobID
+	}
+	result := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
+	if result.Error != nil {
+		return false, RunnerState{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		st, err := s.ReadState(req.ID)
+		return false, st, err
+	}
+	return true, recordToState(record), nil
+}
+
+func (s *DBStore) ReadRequest(id string) (RunnerRequest, error) {
+	record, err := s.readRecord(id)
+	if err != nil {
+		return RunnerRequest{}, err
+	}
+	return recordToRequest(record)
+}
+
+func (s *DBStore) ReadState(id string) (RunnerState, error) {
+	record, err := s.readRecord(id)
+	if err != nil {
+		return RunnerState{}, err
+	}
+	return recordToState(record), nil
+}
+
+func (s *DBStore) WriteState(st RunnerState) error {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return err
+	}
+	st.ID = sanitizeID(st.ID)
+	if st.ID == "" {
+		return fmt.Errorf("request id is empty")
+	}
+	now := time.Now().UTC()
+	st.UpdatedAt = now
+	applyStateTimestamps(&st, now)
+
+	updates := map[string]any{
+		"status":               st.Status,
+		"repository_full_name": st.RepositoryFullName,
+		"profile_name":         st.ProfileName,
+		"runner_group":         st.RunnerGroup,
+		"runner_name":          sanitizeRunnerName(st.RunnerName),
+		"sandbox_id":           st.SandboxID,
+		"process_pid":          st.ProcessPID,
+		"assigned_job_id":      st.AssignedJobID,
+		"assigned_job_name":    st.AssignedJobName,
+		"error":                st.Error,
+		"failure_stage":        st.FailureStage,
+		"failure_reason":       st.FailureReason,
+		"last_error_code":      st.LastErrorCode,
+		"last_error_message":   st.LastErrorMessage,
+		"last_error_retryable": st.LastErrorRetryable,
+		"retry_count":          st.RetryCount,
+		"updated_at":           st.UpdatedAt,
+		"version":              st.Version + 1,
+		"last_attempt_at":      zeroTimeToPointer(st.LastAttemptAt),
+		"next_retry_at":        zeroTimeToPointer(st.NextRetryAt),
+		"creating_at":          zeroTimeToPointer(st.CreatingAt),
+		"running_at":           zeroTimeToPointer(st.RunningAt),
+		"stopping_at":          zeroTimeToPointer(st.StoppingAt),
+		"completed_at":         zeroTimeToPointer(st.CompletedAt),
+		"failed_at":            zeroTimeToPointer(st.FailedAt),
+		"lease_owner":          st.LeaseOwner,
+		"lease_expires_at":     zeroTimeToPointer(st.LeaseExpiresAt),
+	}
+	result := db.Model(&runnerRequestRecord{}).
+		Where("id = ? AND version = ?", st.ID, st.Version).
+		Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrConflict
+	}
+	return nil
+}
+
+func (s *DBStore) ListStates() ([]RunnerState, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, err
+	}
+	var records []runnerRequestRecord
+	if err := db.Order("queued_at DESC").Find(&records).Error; err != nil {
+		return nil, err
+	}
+	states := make([]RunnerState, 0, len(records))
+	for _, record := range records {
+		states = append(states, recordToState(record))
+	}
+	return states, nil
+}
+
+func (s *DBStore) ListActiveStates() ([]RunnerState, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, err
+	}
+	var records []runnerRequestRecord
+	if err := db.
+		Where("status IN ?", activeStatuses()).
+		Order("queued_at DESC").
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	states := make([]RunnerState, 0, len(records))
+	for _, record := range records {
+		states = append(states, recordToState(record))
+	}
+	return states, nil
+}
+
+func (s *DBStore) ListMismatchedCompletedStates(limit int) ([]RunnerState, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	var records []runnerRequestRecord
+	if err := db.
+		Where("status = ?", StatusCompleted).
+		Where("workflow_job_id IS NOT NULL AND workflow_job_id != 0").
+		Where("assigned_job_id != 0 AND assigned_job_id != workflow_job_id").
+		Order("updated_at DESC").
+		Limit(limit).
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	states := make([]RunnerState, 0, len(records))
+	for _, record := range records {
+		states = append(states, recordToState(record))
+	}
+	return states, nil
+}
+
+func (s *DBStore) ListFailedWorkflowJobStates(limit int) ([]RunnerState, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	var records []runnerRequestRecord
+	if err := db.
+		Where("status = ?", StatusFailed).
+		Where("workflow_job_id IS NOT NULL AND workflow_job_id != 0").
+		Where("failure_stage IN ?", []string{"recovery", "cleanup"}).
+		Order("updated_at DESC").
+		Limit(limit).
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	states := make([]RunnerState, 0, len(records))
+	for _, record := range records {
+		states = append(states, recordToState(record))
+	}
+	return states, nil
+}
+
+func (s *DBStore) ListStatesPage(limit, offset int) ([]RunnerState, int64, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int64
+	if err := db.Model(&runnerRequestRecord{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var records []runnerRequestRecord
+	if err := db.Order("queued_at DESC").Limit(limit).Offset(offset).Find(&records).Error; err != nil {
+		return nil, 0, err
+	}
+	states := make([]RunnerState, 0, len(records))
+	for _, record := range records {
+		states = append(states, recordToState(record))
+	}
+	return states, total, nil
+}
+
+func activeStatuses() []string {
+	return []string{StatusQueued, StatusCreating, StatusRunning, StatusStopping}
+}
+
+func (s *DBStore) ActiveCount() (int, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	if err := db.Model(&runnerRequestRecord{}).
+		Where("status IN ?", activeStatuses()).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func (s *DBStore) InFlightCount() (int, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	if err := db.Model(&runnerRequestRecord{}).
+		Where("status IN ?", []string{StatusCreating, StatusRunning, StatusStopping}).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func (s *DBStore) ActiveCountForProfile(name string) (int, error) {
+	return s.countStatesForProfile(name, []string{StatusQueued, StatusCreating, StatusRunning, StatusStopping})
+}
+
+func (s *DBStore) InFlightCountForProfile(name string) (int, error) {
+	return s.countStatesForProfile(name, []string{StatusCreating, StatusRunning, StatusStopping})
+}
+
+func (s *DBStore) ClaimNextRunnable(workerID string, now time.Time, leaseTTL time.Duration) (RunnerRequest, RunnerState, bool, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return RunnerRequest{}, RunnerState{}, false, err
+	}
+	workerID = strings.TrimSpace(workerID)
+	if workerID == "" {
+		return RunnerRequest{}, RunnerState{}, false, fmt.Errorf("worker id is required")
+	}
+	leaseExpiresAt := now.UTC().Add(leaseTTL)
+	var claimed runnerRequestRecord
+	err = db.Transaction(func(tx *gorm.DB) error {
+		var candidate runnerRequestRecord
+		if err := tx.
+			Where("status = ?", StatusQueued).
+			Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now.UTC()).
+			Where("(lease_expires_at IS NULL OR lease_expires_at <= ?)", now.UTC()).
+			Order("queued_at ASC").
+			First(&candidate).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&runnerRequestRecord{}).
+			Where("id = ?", candidate.ID).
+			Where("status = ?", StatusQueued).
+			Where("(lease_expires_at IS NULL OR lease_expires_at <= ?)", now.UTC()).
+			Updates(map[string]any{
+				"lease_owner":      workerID,
+				"lease_expires_at": leaseExpiresAt,
+				"last_attempt_at":  now.UTC(),
+				"updated_at":       now.UTC(),
+				"version":          candidate.Version + 1,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrConflict
+		}
+		if err := tx.First(&claimed, "id = ?", candidate.ID).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return RunnerRequest{}, RunnerState{}, false, nil
+	}
+	if errors.Is(err, ErrConflict) {
+		return RunnerRequest{}, RunnerState{}, false, nil
+	}
+	if err != nil {
+		return RunnerRequest{}, RunnerState{}, false, err
+	}
+	req, err := recordToRequest(claimed)
+	if err != nil {
+		return RunnerRequest{}, RunnerState{}, false, err
+	}
+	return req, recordToState(claimed), true, nil
+}
+
+func (s *DBStore) ReleaseLease(id, workerID string) error {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return err
+	}
+	return db.Model(&runnerRequestRecord{}).
+		Where("id = ? AND lease_owner = ?", sanitizeID(id), strings.TrimSpace(workerID)).
+		Updates(map[string]any{
+			"lease_owner":      "",
+			"lease_expires_at": nil,
+		}).Error
+}
+
+func (s *DBStore) RetryRequest(id string, now time.Time) (RunnerState, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return RunnerState{}, err
+	}
+	id = sanitizeID(id)
+	var saved runnerRequestRecord
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		var record runnerRequestRecord
+		if err := tx.First(&record, "id = ?", id).Error; err != nil {
+			return err
+		}
+		switch record.Status {
+		case StatusFailed:
+		case StatusQueued:
+			if record.NextRetryAt == nil || !record.LastErrorRetryable {
+				return ErrRetryNotAllowed
+			}
+		default:
+			return ErrRetryNotAllowed
+		}
+		record.Status = StatusQueued
+		record.Error = ""
+		record.FailureStage = ""
+		record.FailureReason = ""
+		record.LastErrorCode = ""
+		record.LastErrorMessage = ""
+		record.LastErrorRetryable = false
+		record.SandboxID = ""
+		record.ProcessPID = 0
+		record.AssignedJobID = 0
+		record.AssignedJobName = ""
+		record.NextRetryAt = nil
+		record.LeaseOwner = ""
+		record.LeaseExpiresAt = nil
+		record.CreatingAt = nil
+		record.RunningAt = nil
+		record.StoppingAt = nil
+		record.CompletedAt = nil
+		record.FailedAt = nil
+		record.UpdatedAt = now.UTC()
+		record.Version++
+		if err := tx.Model(&runnerRequestRecord{}).
+			Where("id = ? AND version = ?", record.ID, record.Version-1).
+			Updates(map[string]any{
+				"status":               record.Status,
+				"error":                record.Error,
+				"failure_stage":        record.FailureStage,
+				"failure_reason":       record.FailureReason,
+				"last_error_code":      record.LastErrorCode,
+				"last_error_message":   record.LastErrorMessage,
+				"last_error_retryable": record.LastErrorRetryable,
+				"sandbox_id":           record.SandboxID,
+				"process_pid":          record.ProcessPID,
+				"assigned_job_id":      record.AssignedJobID,
+				"assigned_job_name":    record.AssignedJobName,
+				"next_retry_at":        nil,
+				"lease_owner":          record.LeaseOwner,
+				"lease_expires_at":     nil,
+				"creating_at":          nil,
+				"running_at":           nil,
+				"stopping_at":          nil,
+				"completed_at":         nil,
+				"failed_at":            nil,
+				"updated_at":           record.UpdatedAt,
+				"version":              record.Version,
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.First(&saved, "id = ?", id).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return RunnerState{}, err
+	}
+	return recordToState(saved), nil
+}
+
+func (s *DBStore) AppendLog(id, name string, data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		slog.Default().Warn("append runner log failed", "id", id, "name", name, "error", err)
+		return
+	}
+	eventType, err := logEventType(name)
+	if err != nil {
+		slog.Default().Warn("append runner log failed", "id", id, "name", name, "error", err)
+		return
+	}
+	if err := db.Create(&runnerEventRecord{
+		RequestID: id,
+		EventType: eventType,
+		Message:   string(data),
+		CreatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		slog.Default().Warn("append runner log failed", "id", id, "name", name, "error", err)
+	}
+}
+
+func (s *DBStore) ReadLog(id, name string, maxBytes int64) ([]byte, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, err
+	}
+	eventType, err := logEventType(name)
+	if err != nil {
+		return nil, err
+	}
+	var events []runnerEventRecord
+	if err := db.Where("request_id = ? AND event_type = ?", sanitizeID(id), eventType).
+		Order("id ASC").
+		Find(&events).Error; err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		return nil, os.ErrNotExist
+	}
+	var buf bytes.Buffer
+	for _, event := range events {
+		buf.WriteString(event.Message)
+	}
+	data := buf.Bytes()
+	if maxBytes > 0 && int64(len(data)) > maxBytes {
+		data = data[len(data)-int(maxBytes):]
+	}
+	return append([]byte(nil), data...), nil
+}
+
+func (s *DBStore) readRecord(id string) (runnerRequestRecord, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return runnerRequestRecord{}, err
+	}
+	var record runnerRequestRecord
+	if err := db.First(&record, "id = ?", sanitizeID(id)).Error; err != nil {
+		return runnerRequestRecord{}, err
+	}
+	return record, nil
+}
+
+func (s *DBStore) countStatesForProfile(name string, statuses []string) (int, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	if err := db.Model(&runnerRequestRecord{}).
+		Where("profile_name = ?", strings.TrimSpace(name)).
+		Where("status IN ?", statuses).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func applyStateTimestamps(st *RunnerState, now time.Time) {
+	switch st.Status {
+	case StatusCreating:
+		if st.CreatingAt.IsZero() {
+			st.CreatingAt = now
+		}
+	case StatusRunning:
+		if st.CreatingAt.IsZero() {
+			st.CreatingAt = now
+		}
+		if st.RunningAt.IsZero() {
+			st.RunningAt = now
+		}
+	case StatusStopping:
+		if st.StoppingAt.IsZero() {
+			st.StoppingAt = now
+		}
+	case StatusCompleted:
+		if st.StoppingAt.IsZero() {
+			st.StoppingAt = now
+		}
+		if st.CompletedAt.IsZero() {
+			st.CompletedAt = now
+		}
+	case StatusFailed:
+		if st.FailedAt.IsZero() {
+			st.FailedAt = now
+		}
+	}
+}
