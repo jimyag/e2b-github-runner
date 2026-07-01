@@ -1,4 +1,4 @@
-import { Github, GitPullRequest, ListTree, LogOut, Trash2, UserRound } from "lucide-react"
+import { Github, ListTree, LogOut, Trash2, UserRound, Workflow } from "lucide-react"
 import { type MouseEvent, useEffect, useMemo, useState } from "react"
 
 import type { AuthSession, GitHubAppConfig, RunnerState } from "@/admin-types"
@@ -50,10 +50,6 @@ export function UserDashboard({
   const selected = groups.find((group) => group.key === selectedKey) || groups[0]
   const installations = githubApp?.installations ?? []
   const hasInstallations = installations.length > 0
-  const repositoryCount = useMemo(
-    () => new Set(installations.flatMap((installation) => installation.repositories)).size,
-    [installations]
-  )
   const navItemClass = (active: boolean) =>
     cn(
       "inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors",
@@ -76,8 +72,8 @@ export function UserDashboard({
         </div>
         <nav className="ml-3 hidden items-center gap-1 md:flex" aria-label="Workspace">
           <a href="/" className={navItemClass(page === "home")} onClick={(event) => goToPage(event, "home")}>
-            <GitPullRequest className="h-4 w-4" />
-            Pull Requests
+            <Workflow className="h-4 w-4" />
+            Jobs
           </a>
           <a
             href="/repositories"
@@ -85,7 +81,7 @@ export function UserDashboard({
             onClick={(event) => goToPage(event, "repositories")}
           >
             <ListTree className="h-4 w-4" />
-            Activity
+            Repositories
           </a>
           <a href="/accounts" className={navItemClass(page === "accounts")} onClick={(event) => goToPage(event, "accounts")}>
             <UserRound className="h-4 w-4" />
@@ -101,8 +97,8 @@ export function UserDashboard({
 
       <nav className="flex items-center gap-1 border-b px-4 py-2 md:hidden" aria-label="Workspace">
         <a href="/" className={navItemClass(page === "home")} onClick={(event) => goToPage(event, "home")}>
-          <GitPullRequest className="h-4 w-4" />
-          Pull Requests
+          <Workflow className="h-4 w-4" />
+          Jobs
         </a>
         <a
           href="/repositories"
@@ -110,7 +106,7 @@ export function UserDashboard({
           onClick={(event) => goToPage(event, "repositories")}
         >
           <ListTree className="h-4 w-4" />
-          Activity
+          Repositories
         </a>
         <a href="/accounts" className={navItemClass(page === "accounts")} onClick={(event) => goToPage(event, "accounts")}>
           <UserRound className="h-4 w-4" />
@@ -121,8 +117,6 @@ export function UserDashboard({
       {page === "repositories" ? (
         <ActivityRepositoriesPage
           installations={installations}
-          repositoryCount={repositoryCount}
-          onNavigate={onNavigate}
         />
       ) : page === "accounts" ? (
         <AccountsPage
@@ -148,51 +142,86 @@ export function UserDashboard({
 
 function ActivityRepositoriesPage({
   installations,
-  repositoryCount,
-  onNavigate,
 }: {
   installations: NonNullable<GitHubAppConfig["installations"]>
-  repositoryCount: number
-  onNavigate: (page: UserPage) => void
 }) {
+  const [selectedID, setSelectedID] = useState<number | null>(null)
+  const selected = installations.find((installation) => installation.id === selectedID) || installations[0]
+
+  useEffect(() => {
+    if (!selected) {
+      setSelectedID(null)
+      return
+    }
+    if (selectedID !== selected.id) {
+      setSelectedID(selected.id)
+    }
+  }, [selected, selectedID])
+
   return (
     <>
       <section className="border-b bg-muted/35 px-4 py-4 lg:px-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold">Activity repositories</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Local repositories appear here after runnerd observes jobs from them.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{installations.length} installations</Badge>
-            <Badge variant="secondary">{repositoryCount} active repositories</Badge>
-            <Button type="button" variant="outline" size="sm" onClick={() => onNavigate("accounts")}>
-              <UserRound className="h-4 w-4" />
-              Accounts
-            </Button>
-          </div>
+        <div>
+          <h1 className="text-xl font-semibold">Repositories</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Local repositories appear here after runnerd observes jobs from them.
+          </p>
         </div>
       </section>
 
-      <section className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 lg:p-6">
-        {installations.length ? (
-          <div className="grid gap-4">
-            {installations.map((installation) => (
-              <Card key={installation.id} className="rounded-lg">
-                <CardHeader className="gap-3 pb-3">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <CardTitle className="text-base">{installation.account_login || "GitHub App"}</CardTitle>
+      <div className="grid min-h-0 flex-1 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <aside className="min-h-0 border-r bg-muted/20">
+          <div className="flex h-full flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {installations.length ? (
+                installations.map((installation) => (
+                  <button
+                    key={installation.id}
+                    type="button"
+                    className={cn(
+                      "flex h-14 w-full items-center gap-3 border-b px-4 text-left transition-colors hover:bg-accent",
+                      selected?.id === installation.id ? "bg-accent" : ""
+                    )}
+                    onClick={() => setSelectedID(installation.id)}
+                  >
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-foreground text-xs font-semibold text-background">
+                      {(installation.account_login || "GH").slice(0, 2).toUpperCase()}
                     </div>
-                    <Badge variant="secondary">{installation.repositories.length} active repositories</Badge>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-semibold">{installation.account_login || "GitHub App"}</div>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="p-4 text-sm text-muted-foreground">
+                  Connect a GitHub App account, then trigger a workflow job to show active repositories here.
+                </div>
+              )}
+            </div>
+          </div>
+        </aside>
+
+        <section className="min-h-0 overflow-y-auto p-4 lg:p-6">
+          {selected ? (
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-2xl font-semibold">{selected.account_login || "GitHub App"}</h2>
+              </div>
+
+              <Card className="rounded-lg">
+                <CardHeader className="gap-3 pb-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <CardTitle className="text-base">Active repositories</CardTitle>
+                      <CardDescription>Local repositories with observed runner jobs.</CardDescription>
+                    </div>
+                    <Badge variant="secondary">{selected.repositories.length} repositories</Badge>
                   </div>
                 </CardHeader>
                 <CardContent>
-                  {installation.repositories.length ? (
+                  {selected.repositories.length ? (
                     <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                      {installation.repositories.map((repository) => (
+                      {selected.repositories.map((repository) => (
                         <div key={repository} className="rounded-md border bg-muted/25 px-3 py-2">
                           <div className="truncate text-sm font-medium">{repository}</div>
                         </div>
@@ -200,21 +229,19 @@ function ActivityRepositoriesPage({
                     </div>
                   ) : (
                     <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
-                      No repositories have runner jobs for this installation yet.
+                      No repositories have runner jobs for this account yet.
                     </div>
                   )}
                 </CardContent>
               </Card>
-            ))}
-          </div>
-        ) : (
-          <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
-            <button type="button" className="text-left text-primary hover:underline" onClick={() => onNavigate("accounts")}>
-              Connect a GitHub App account, then trigger a PR workflow to show active repositories here.
-            </button>
-          </div>
-        )}
-      </section>
+            </div>
+          ) : (
+            <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
+              Connect a GitHub App account, then trigger a workflow job to show active repositories here.
+            </div>
+          )}
+        </section>
+      </div>
     </>
   )
 }
@@ -286,10 +313,6 @@ function AccountsPage({
       <div className="grid min-h-0 flex-1 lg:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="min-h-0 border-r bg-muted/20">
           <div className="flex h-full flex-col">
-            <div className="flex h-12 items-center justify-between border-b px-4">
-              <span className="text-sm font-semibold">GitHub accounts</span>
-              <Badge variant="outline">{installations.length}</Badge>
-            </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {installations.length ? (
                 installations.map((installation) => (
@@ -416,23 +439,17 @@ function PullRequestsPage({
   return (
     <>
       <section className="border-b bg-muted/35 px-4 py-4 lg:px-6">
-        <div className="space-y-3">
-          <div>
-            <h1 className="text-xl font-semibold">Pull requests</h1>
-            <p className="text-sm text-muted-foreground">
-              Review pull requests and the runner jobs currently attached to them.
-            </p>
-          </div>
+        <div>
+          <h1 className="text-xl font-semibold">Jobs</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Review runner jobs grouped by repository, pull request, or workflow run.
+          </p>
         </div>
       </section>
 
       <div className="grid min-h-0 flex-1 xl:grid-cols-[360px_minmax(0,1fr)]">
         <aside className="min-h-0 border-r bg-muted/20">
           <div className="flex h-full flex-col">
-            <div className="flex h-12 items-center justify-between border-b px-4">
-              <span className="text-sm font-semibold">Repo + PR</span>
-              <Badge variant="outline">{groups.length}</Badge>
-            </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {groups.length ? (
                 groups.map((group) => (
@@ -446,7 +463,7 @@ function PullRequestsPage({
                     )}
                   >
                     <div className="flex items-center gap-2">
-                      <GitPullRequest className="h-4 w-4 text-primary" />
+                      <Workflow className="h-4 w-4 text-primary" />
                       <span className="truncate text-sm font-semibold">{group.prLabel}</span>
                     </div>
                     <div className="truncate text-xs text-muted-foreground">{group.repository}</div>
@@ -459,14 +476,14 @@ function PullRequestsPage({
               ) : (
                 <div className="p-4 text-sm text-muted-foreground">
                   {hasInstallations ? (
-                    "No PR jobs yet. Trigger a workflow in an installed repository, then refresh."
+                    "No jobs yet. Trigger a workflow in an installed repository, then refresh."
                   ) : (
                     <button
                       type="button"
                       className="text-left text-primary hover:underline"
                       onClick={() => onNavigate("accounts")}
                     >
-                      Connect a GitHub App account to start tracking PR jobs.
+                      Connect a GitHub App account to start tracking jobs.
                     </button>
                   )}
                 </div>
@@ -514,14 +531,14 @@ function PullRequestsPage({
           ) : (
             <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
               {hasInstallations ? (
-                "No runner jobs are available yet. Trigger a PR workflow in an installed repository to see jobs here."
+                "No runner jobs are available yet. Trigger a workflow in an installed repository to see jobs here."
               ) : (
                 <button
                   type="button"
                   className="text-left text-primary hover:underline"
                   onClick={() => onNavigate("accounts")}
                 >
-                  Connect a GitHub App account to start tracking PR jobs.
+                  Connect a GitHub App account to start tracking jobs.
                 </button>
               )}
             </div>
