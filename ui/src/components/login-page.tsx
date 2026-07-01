@@ -36,7 +36,7 @@ export function LoginPage({
               <Play className="h-5 w-5" />
             </div>
             <div>
-              <div className="text-sm font-semibold tracking-wide">E2B Runner Console</div>
+              <div className="text-sm font-semibold tracking-wide">Qiniu Runner</div>
               <div className="text-xs text-muted-foreground">Ephemeral Actions control plane</div>
             </div>
           </div>
@@ -54,7 +54,7 @@ export function LoginPage({
                 {currentLogin ? (
                   <div className="space-y-3">
                     <div className="rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
-                      @{currentLogin} is signed in as {currentRole || "user"} and does not have admin access.
+                      {currentLogin} is signed in as {currentRole || "user"} and does not have admin access.
                     </div>
                     <Button
                       type="button"

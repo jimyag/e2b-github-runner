@@ -100,6 +100,8 @@ export type GitHubInstallation = {
   account_id: number
   installation_id: number
   account_login?: string
+  account_name?: string
+  account_avatar?: string
   repositories: string[]
   created_at: string
   updated_at: string

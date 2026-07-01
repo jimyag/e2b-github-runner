@@ -151,6 +151,8 @@ type githubInstallationRecord struct {
 	Account        accountRecord `gorm:"foreignKey:AccountID"`
 	InstallationID int64         `gorm:"column:installation_id;not null;uniqueIndex:idx_github_installations_account_installation"`
 	AccountLogin   string        `gorm:"column:account_login;not null"`
+	AccountName    string        `gorm:"column:account_name"`
+	AccountAvatar  string        `gorm:"column:account_avatar"`
 	CreatedAt      time.Time     `gorm:"column:created_at;not null"`
 	UpdatedAt      time.Time     `gorm:"column:updated_at;not null"`
 }

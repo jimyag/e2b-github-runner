@@ -30,6 +30,7 @@ import {
   type AuthorizedRepositories,
   type DiagnosticsSummary,
   type GitHubAppConfig,
+  type GitHubInstallation,
   type Metric,
   type RunnerGroup,
   type RunnerPolicy,
@@ -39,6 +40,12 @@ import {
   type RunnerStatus,
 } from "@/admin-types"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
+
+type AccountSettingsTab = "repositories" | "preferences"
+type AccountSettingsRoute = {
+  accountLogin?: string
+  tab: AccountSettingsTab
+}
 
 function App() {
   const [authSession, setAuthSession] = useState<AuthSession>({ authenticated: false, oauth_enabled: false })
@@ -83,13 +90,24 @@ function App() {
     }
   }, [])
 
-  const setUserPage = useCallback((next: "home" | "repositories" | "accounts") => {
-    const nextPath = next === "accounts" ? "/accounts" : next === "repositories" ? "/repositories" : "/"
+  const setUserPage = useCallback((next: "home" | "repositories" | "settings") => {
+    const nextPath = next === "settings" ? "/account/repositories" : next === "repositories" ? "/repositories" : "/"
     if (window.location.pathname !== nextPath) {
       window.history.pushState(null, "", nextPath)
     }
     setLocationPath(nextPath)
   }, [])
+
+  const setAccountSettingsRoute = useCallback(
+    (accountLogin: string | undefined, tab: AccountSettingsTab) => {
+      const nextPath = accountSettingsPath(accountLogin, authSession.login, tab)
+      if (window.location.pathname !== nextPath) {
+        window.history.pushState(null, "", nextPath)
+      }
+      setLocationPath(nextPath)
+    },
+    [authSession.login]
+  )
 
   const selected = useMemo(
     () => runners.find((runner) => runner.id === selectedID),
@@ -128,7 +146,8 @@ function App() {
 
   const hasAccess = authSession.authenticated && authSession.role === "admin"
   const isAdminRoute = locationPath === "/admin" || locationPath.startsWith("/admin/")
-  const userPage = locationPath === "/accounts" ? "accounts" : locationPath === "/repositories" ? "repositories" : "home"
+  const accountSettingsRoute = parseAccountSettingsRoute(locationPath, authSession.login)
+  const userPage = accountSettingsRoute ? "settings" : locationPath === "/repositories" ? "repositories" : "home"
 
   const metrics = useMemo<Metric[]>(() => {
     const count = (status: RunnerStatus) => runners.filter((runner) => runner.status === status).length
@@ -250,27 +269,28 @@ function App() {
   }, [authSession.authenticated, hasAccess, isAdminRoute, request])
 
   const syncGitHubAppSetupFromURL = useCallback(async () => {
-    if (!authSession.authenticated || (hasAccess && isAdminRoute) || locationPath !== "/accounts") return
+    if (!authSession.authenticated || (hasAccess && isAdminRoute) || !isAccountSettingsPath(locationPath)) return
     const params = new URLSearchParams(window.location.search)
     const installationID = Number(params.get("installation_id") || "")
     if (!Number.isSafeInteger(installationID) || installationID <= 0) return
     setLoading(true)
     try {
-      await request("/user/github-app/installations", {
+      const installation = (await request("/user/github-app/installations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ installation_id: installationID }),
-      })
+      })) as GitHubInstallation
       toast.success("GitHub App account connected")
-      window.history.replaceState(null, "", "/accounts")
-      setLocationPath("/accounts")
+      const nextPath = accountSettingsPathForInstallation(installation, authSession.login, "repositories")
+      window.history.replaceState(null, "", nextPath)
+      setLocationPath(nextPath)
       await loadUserAll()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to sync GitHub App repositories")
     } finally {
       setLoading(false)
     }
-  }, [authSession.authenticated, hasAccess, isAdminRoute, loadUserAll, locationPath, request])
+  }, [authSession.authenticated, authSession.login, hasAccess, isAdminRoute, loadUserAll, locationPath, request])
 
   const loadAuthorizedRepositories = useCallback(async (id: number) => {
     setLoadingRepositoriesFor(id)
@@ -345,6 +365,13 @@ function App() {
     window.addEventListener("popstate", handlePopState)
     return () => window.removeEventListener("popstate", handlePopState)
   }, [])
+
+  useEffect(() => {
+    if (locationPath !== "/accounts" && locationPath !== "/settings") return
+    const nextPath = `/account/repositories${window.location.search}`
+    window.history.replaceState(null, "", nextPath)
+    setLocationPath("/account/repositories")
+  }, [locationPath])
 
   useEffect(() => {
     void loadAll()
@@ -488,21 +515,6 @@ function App() {
     }
   }
 
-  const deleteGitHubInstallation = async (id: number) => {
-    try {
-      await request(`/user/github-app/installations/${encodeURIComponent(String(id))}`, { method: "DELETE" })
-      toast.success("GitHub App installation removed")
-      setAuthorizedRepositories((current) => {
-        const next = { ...current }
-        delete next[id]
-        return next
-      })
-      await loadUserAll()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to remove GitHub App installation")
-    }
-  }
-
   const copySelectedID = async () => {
     if (!selected) return
     await navigator.clipboard.writeText(selected.id)
@@ -532,11 +544,12 @@ function App() {
           runners={userRunners}
           selectedKey={userSelectedKey}
           page={userPage}
+          accountSettingsRoute={accountSettingsRoute || defaultAccountSettingsRoute(authSession.login)}
           authorizedRepositories={authorizedRepositories}
           loadingRepositoriesFor={loadingRepositoriesFor}
-          onDeleteInstallation={(id) => void deleteGitHubInstallation(id)}
           onLoadAuthorizedRepositories={(id) => void loadAuthorizedRepositories(id)}
           onNavigate={setUserPage}
+          onNavigateAccountSettings={setAccountSettingsRoute}
           onSelectKey={setUserSelectedKey}
           onSignOut={signOut}
         />
@@ -696,6 +709,63 @@ function App() {
       <Toaster richColors />
     </SidebarProvider>
   )
+}
+
+function defaultAccountSettingsRoute(currentLogin?: string): AccountSettingsRoute {
+  return { accountLogin: currentLogin, tab: "repositories" }
+}
+
+function isAccountSettingsPath(path: string): boolean {
+  return (
+    path === "/settings" ||
+    path === "/accounts" ||
+    path === "/account/repositories" ||
+    path === "/account/preferences" ||
+    /^\/organizations\/[^/]+\/(repositories|preferences)$/.test(path)
+  )
+}
+
+function parseAccountSettingsRoute(path: string, currentLogin?: string): AccountSettingsRoute | null {
+  if (path === "/settings" || path === "/accounts") return defaultAccountSettingsRoute(currentLogin)
+  if (path === "/account/repositories") return { accountLogin: currentLogin, tab: "repositories" }
+  if (path === "/account/preferences") return { accountLogin: currentLogin, tab: "preferences" }
+
+  const organizationMatch = path.match(/^\/organizations\/([^/]+)\/(repositories|preferences)$/)
+  if (!organizationMatch) return null
+  const accountLogin = safeDecodePathSegment(organizationMatch[1])
+  if (!accountLogin) return null
+
+  return {
+    accountLogin,
+    tab: organizationMatch[2] as AccountSettingsTab,
+  }
+}
+
+function safeDecodePathSegment(value: string): string | null {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return null
+  }
+}
+
+function accountSettingsPathForInstallation(
+  installation: Pick<GitHubInstallation, "account_login">,
+  currentLogin: string | undefined,
+  tab: AccountSettingsTab
+): string {
+  return accountSettingsPath(installation.account_login, currentLogin, tab)
+}
+
+function accountSettingsPath(
+  accountLogin: string | undefined,
+  currentLogin: string | undefined,
+  tab: AccountSettingsTab
+): string {
+  const segment = tab === "preferences" ? "preferences" : "repositories"
+  const login = accountLogin?.trim()
+  if (!login || login === currentLogin) return `/account/${segment}`
+  return `/organizations/${encodeURIComponent(login)}/${segment}`
 }
 
 export default App

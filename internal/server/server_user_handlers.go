@@ -40,7 +40,7 @@ func (s *Server) handleGitHubAppSetupRedirect(w http.ResponseWriter, r *http.Req
 			})
 		}
 	}
-	target := "/accounts"
+	target := "/account/repositories"
 	if encoded := values.Encode(); encoded != "" {
 		target += "?" + encoded
 	}
@@ -190,6 +190,8 @@ func (s *Server) syncGitHubInstallation(ctx context.Context, accountID, installa
 		AccountID:      accountID,
 		InstallationID: installation.ID,
 		AccountLogin:   installation.AccountLogin,
+		AccountName:    installation.AccountName,
+		AccountAvatar:  installation.AccountAvatar,
 	})
 }
 

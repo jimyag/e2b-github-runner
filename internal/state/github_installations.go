@@ -51,12 +51,14 @@ func (s *DBStore) UpsertGitHubInstallation(installation GitHubInstallation) (Git
 		AccountID:      installation.AccountID,
 		InstallationID: installation.InstallationID,
 		AccountLogin:   strings.TrimSpace(installation.AccountLogin),
+		AccountName:    strings.TrimSpace(installation.AccountName),
+		AccountAvatar:  strings.TrimSpace(installation.AccountAvatar),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
 	if err := db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "account_id"}, {Name: "installation_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"account_login", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"account_login", "account_name", "account_avatar", "updated_at"}),
 	}).Create(&record).Error; err != nil {
 		return GitHubInstallation{}, err
 	}
@@ -122,6 +124,8 @@ func recordToGitHubInstallation(record githubInstallationRecord, repositories []
 		AccountID:      record.AccountID,
 		InstallationID: record.InstallationID,
 		AccountLogin:   record.AccountLogin,
+		AccountName:    record.AccountName,
+		AccountAvatar:  record.AccountAvatar,
 		Repositories:   normalizeRepositories(repositories),
 		CreatedAt:      record.CreatedAt,
 		UpdatedAt:      record.UpdatedAt,

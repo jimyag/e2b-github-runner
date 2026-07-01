@@ -883,6 +883,8 @@ func TestGitHubInstallationsAndRepositoryRunnerList(t *testing.T) {
 		AccountID:      account.ID,
 		InstallationID: 987,
 		AccountLogin:   "o",
+		AccountName:    "Octo Org",
+		AccountAvatar:  "https://avatars.example/o.png",
 		Repositories:   []string{"o/r", "o/another", "bad*", "missing-slash"},
 	})
 	if err != nil {
@@ -895,6 +897,8 @@ func TestGitHubInstallationsAndRepositoryRunnerList(t *testing.T) {
 		AccountID:      account.ID,
 		InstallationID: 987,
 		AccountLogin:   "renamed",
+		AccountName:    "Renamed Org",
+		AccountAvatar:  "https://avatars.example/renamed.png",
 		Repositories:   []string{"o/r"},
 	}); err != nil {
 		t.Fatal(err)
@@ -937,7 +941,11 @@ func TestGitHubInstallationsAndRepositoryRunnerList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(installations) != 1 || installations[0].AccountLogin != "renamed" || !reflect.DeepEqual(installations[0].Repositories, []string{"o/r"}) {
+	if len(installations) != 1 ||
+		installations[0].AccountLogin != "renamed" ||
+		installations[0].AccountName != "Renamed Org" ||
+		installations[0].AccountAvatar != "https://avatars.example/renamed.png" ||
+		!reflect.DeepEqual(installations[0].Repositories, []string{"o/r"}) {
 		t.Fatalf("unexpected installations: %#v", installations)
 	}
 	if err := store.DeleteGitHubInstallation(account.ID, installations[0].ID); err != nil {

@@ -1,4 +1,5 @@
-import { Github, ListTree, LogOut, Trash2, UserRound, Workflow } from "lucide-react"
+import { BookOpen, Github, LogOut, Monitor, Moon, Settings, ShieldCheck, Sun, Workflow } from "lucide-react"
+import { useTheme } from "next-themes"
 import { type MouseEvent, useEffect, useMemo, useState } from "react"
 
 import type { AuthSession, GitHubAppConfig, RunnerState } from "@/admin-types"
@@ -6,7 +7,18 @@ import { formatTime } from "@/admin-format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 
 type PRGroup = {
@@ -17,7 +29,12 @@ type PRGroup = {
   jobs: RunnerState[]
 }
 
-type UserPage = "home" | "repositories" | "accounts"
+type UserPage = "home" | "repositories" | "settings"
+type AccountSettingsTab = "repositories" | "preferences"
+type AccountSettingsRoute = {
+  accountLogin?: string
+  tab: AccountSettingsTab
+}
 
 export function UserDashboard({
   authSession,
@@ -25,11 +42,12 @@ export function UserDashboard({
   runners,
   selectedKey,
   page,
+  accountSettingsRoute,
   authorizedRepositories,
   loadingRepositoriesFor,
-  onDeleteInstallation,
   onLoadAuthorizedRepositories,
   onNavigate,
+  onNavigateAccountSettings,
   onSelectKey,
   onSignOut,
 }: {
@@ -38,17 +56,21 @@ export function UserDashboard({
   runners: RunnerState[]
   selectedKey: string
   page: UserPage
+  accountSettingsRoute: AccountSettingsRoute
   authorizedRepositories: Record<number, string[]>
   loadingRepositoriesFor: number | null
-  onDeleteInstallation: (id: number) => void
   onLoadAuthorizedRepositories: (id: number) => void
   onNavigate: (page: UserPage) => void
+  onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
   onSelectKey: (key: string) => void
   onSignOut: () => void
 }) {
   const groups = useMemo(() => groupRunnersByPR(runners), [runners])
   const selected = groups.find((group) => group.key === selectedKey) || groups[0]
-  const installations = githubApp?.installations ?? []
+  const installations = useMemo(
+    () => orderInstallationsByCurrentAccount(githubApp?.installations ?? [], authSession.login),
+    [authSession.login, githubApp?.installations]
+  )
   const hasInstallations = installations.length > 0
   const navItemClass = (active: boolean) =>
     cn(
@@ -67,8 +89,7 @@ export function UserDashboard({
           <Github className="h-4 w-4" />
         </div>
         <div>
-          <div className="text-sm font-semibold">E2B Runner Console</div>
-          <div className="text-xs text-muted-foreground">@{authSession.login} workspace</div>
+          <div className="text-sm font-semibold">Qiniu Runner</div>
         </div>
         <nav className="ml-3 hidden items-center gap-1 md:flex" aria-label="Workspace">
           <a href="/" className={navItemClass(page === "home")} onClick={(event) => goToPage(event, "home")}>
@@ -80,18 +101,16 @@ export function UserDashboard({
             className={navItemClass(page === "repositories")}
             onClick={(event) => goToPage(event, "repositories")}
           >
-            <ListTree className="h-4 w-4" />
+            <BookOpen className="h-4 w-4" />
             Repositories
           </a>
-          <a href="/accounts" className={navItemClass(page === "accounts")} onClick={(event) => goToPage(event, "accounts")}>
-            <UserRound className="h-4 w-4" />
-            Accounts
+          <a href="/account/repositories" className={navItemClass(page === "settings")} onClick={(event) => goToPage(event, "settings")}>
+            <Settings className="h-4 w-4" />
+            Settings
           </a>
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          <Button type="button" variant="ghost" size="icon" onClick={onSignOut} aria-label="Sign out">
-            <LogOut className="h-4 w-4" />
-          </Button>
+          <UserMenu authSession={authSession} onSignOut={onSignOut} />
         </div>
       </header>
 
@@ -105,12 +124,12 @@ export function UserDashboard({
           className={navItemClass(page === "repositories")}
           onClick={(event) => goToPage(event, "repositories")}
         >
-          <ListTree className="h-4 w-4" />
+          <BookOpen className="h-4 w-4" />
           Repositories
         </a>
-        <a href="/accounts" className={navItemClass(page === "accounts")} onClick={(event) => goToPage(event, "accounts")}>
-          <UserRound className="h-4 w-4" />
-          Accounts
+        <a href="/account/repositories" className={navItemClass(page === "settings")} onClick={(event) => goToPage(event, "settings")}>
+          <Settings className="h-4 w-4" />
+          Settings
         </a>
       </nav>
 
@@ -118,14 +137,15 @@ export function UserDashboard({
         <ActivityRepositoriesPage
           installations={installations}
         />
-      ) : page === "accounts" ? (
+      ) : page === "settings" ? (
         <AccountsPage
           githubApp={githubApp}
           installations={installations}
           authorizedRepositories={authorizedRepositories}
           loadingRepositoriesFor={loadingRepositoriesFor}
-          onDeleteInstallation={onDeleteInstallation}
+          route={accountSettingsRoute}
           onLoadAuthorizedRepositories={onLoadAuthorizedRepositories}
+          onNavigateAccountSettings={onNavigateAccountSettings}
         />
       ) : (
         <PullRequestsPage
@@ -184,9 +204,7 @@ function ActivityRepositoriesPage({
                     )}
                     onClick={() => setSelectedID(installation.id)}
                   >
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-foreground text-xs font-semibold text-background">
-                      {(installation.account_login || "GH").slice(0, 2).toUpperCase()}
-                    </div>
+                    <AccountAvatar installation={installation} size="sm" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-semibold">{installation.account_login || "GitHub App"}</div>
                     </div>
@@ -204,8 +222,12 @@ function ActivityRepositoriesPage({
         <section className="min-h-0 overflow-y-auto p-4 lg:p-6">
           {selected ? (
             <div className="space-y-4">
-              <div>
-                <h2 className="text-2xl font-semibold">{selected.account_login || "GitHub App"}</h2>
+              <div className="flex items-center gap-3">
+                <AccountAvatar installation={selected} size="lg" />
+                <div className="min-w-0">
+                  <h2 className="truncate text-2xl font-semibold">{accountDisplayName(selected)}</h2>
+                  <div className="truncate text-sm text-muted-foreground">{selected.account_login || "GitHub"}</div>
+                </div>
               </div>
 
               <Card className="rounded-lg">
@@ -251,19 +273,21 @@ function AccountsPage({
   installations,
   authorizedRepositories,
   loadingRepositoriesFor,
-  onDeleteInstallation,
+  route,
   onLoadAuthorizedRepositories,
+  onNavigateAccountSettings,
 }: {
   githubApp: GitHubAppConfig | null
   installations: NonNullable<GitHubAppConfig["installations"]>
   authorizedRepositories: Record<number, string[]>
   loadingRepositoriesFor: number | null
-  onDeleteInstallation: (id: number) => void
+  route: AccountSettingsRoute
   onLoadAuthorizedRepositories: (id: number) => void
+  onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
 }) {
-  const [selectedID, setSelectedID] = useState<number | null>(null)
   const [filter, setFilter] = useState("")
-  const selected = installations.find((installation) => installation.id === selectedID) || installations[0]
+  const selected =
+    installations.find((installation) => installation.account_login === route.accountLogin) || installations[0]
   const authorized = selected ? authorizedRepositories[selected.id] : undefined
   const filteredRepositories = useMemo(() => {
     const query = filter.trim().toLowerCase()
@@ -273,26 +297,20 @@ function AccountsPage({
   }, [authorized, filter])
 
   useEffect(() => {
-    if (!selected) {
-      setSelectedID(null)
-      return
-    }
-    if (selectedID !== selected.id) {
-      setSelectedID(selected.id)
-    }
+    if (!selected) return
     if (!authorizedRepositories[selected.id]) {
       onLoadAuthorizedRepositories(selected.id)
     }
-  }, [authorizedRepositories, onLoadAuthorizedRepositories, selected, selectedID])
+  }, [authorizedRepositories, onLoadAuthorizedRepositories, selected])
 
   return (
     <>
       <section className="border-b bg-muted/35 px-4 py-4 lg:px-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-semibold">Accounts</h1>
+            <h1 className="text-xl font-semibold">Settings</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Manage GitHub App accounts and inspect repositories currently authorized on GitHub.
+              Configure repository access and runner preferences for GitHub users and organizations.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -324,14 +342,12 @@ function AccountsPage({
                       selected?.id === installation.id ? "bg-accent" : ""
                     )}
                     onClick={() => {
-                      setSelectedID(installation.id)
+                      onNavigateAccountSettings(installation.account_login, route.tab)
                       setFilter("")
                       if (!authorizedRepositories[installation.id]) onLoadAuthorizedRepositories(installation.id)
                     }}
                   >
-                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-foreground text-xs font-semibold text-background">
-                      {(installation.account_login || "GH").slice(0, 2).toUpperCase()}
-                    </div>
+                    <AccountAvatar installation={installation} size="sm" />
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-semibold">{installation.account_login || "GitHub App"}</div>
                     </div>
@@ -339,7 +355,7 @@ function AccountsPage({
                 ))
               ) : (
                 <div className="p-4 text-sm text-muted-foreground">
-                  Install the GitHub App to connect a user or organization account.
+                  Install the GitHub App to connect a user or organization.
                 </div>
               )}
             </div>
@@ -349,72 +365,101 @@ function AccountsPage({
         <section className="min-h-0 overflow-y-auto p-4 lg:p-6">
           {selected ? (
             <div className="space-y-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-2xl font-semibold">{selected.account_login || "GitHub App"}</h2>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button type="button" variant="outline" size="sm" asChild>
-                    <a href={`https://github.com/settings/installations/${selected.installation_id}`}>
-                      <Github className="h-4 w-4" />
-                      Manage on GitHub
-                    </a>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => onDeleteInstallation(selected.id)}
-                    aria-label="Delete installation"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+              <div className="flex items-center gap-3">
+                <AccountAvatar installation={selected} size="lg" />
+                <div className="min-w-0">
+                  <h2 className="truncate text-2xl font-semibold">{accountDisplayName(selected)}</h2>
+                  <div className="truncate text-sm text-muted-foreground">{selected.account_login || "GitHub"}</div>
                 </div>
               </div>
 
-              <Card className="rounded-lg">
-                <CardHeader className="gap-3 pb-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <CardTitle className="text-base">Authorized repositories</CardTitle>
-                      <CardDescription>Loaded from GitHub App authorization for this account.</CardDescription>
-                    </div>
-                    <Badge variant="secondary">
-                      {authorized ? `${authorized.length} repositories` : "Not loaded"}
-                    </Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <input
-                    className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    placeholder="Filter GitHub repositories"
-                    value={filter}
-                    onChange={(event) => setFilter(event.target.value)}
-                  />
-                  {loadingRepositoriesFor === selected.id ? (
-                    <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
-                      Loading repositories from GitHub...
-                    </div>
-                  ) : filteredRepositories.length ? (
-                    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                      {filteredRepositories.map((repository) => (
-                        <div key={repository} className="rounded-md border bg-muted/25 px-3 py-2">
-                          <div className="truncate text-sm font-medium">{repository}</div>
+              <Tabs
+                value={route.tab}
+                onValueChange={(value) => onNavigateAccountSettings(selected.account_login, value as AccountSettingsTab)}
+                className="gap-4"
+              >
+                <TabsList className="h-auto w-full justify-start rounded-none border-b bg-transparent p-0">
+                  <TabsTrigger
+                    value="repositories"
+                    className="mr-8 h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+                  >
+                    Repositories
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="preferences"
+                    className="h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+                  >
+                    Preferences
+                  </TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="repositories">
+                  <Card className="rounded-lg">
+                    <CardHeader className="gap-3 pb-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <CardTitle className="text-base">Authorized repositories</CardTitle>
+                          <CardDescription>Repositories currently authorized for this GitHub App installation.</CardDescription>
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
-                      {authorized ? "No repositories match the current filter." : "Select this account to load repositories."}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="secondary">
+                            {authorized ? `${authorized.length} repositories` : "Not loaded"}
+                          </Badge>
+                          <Button type="button" variant="outline" size="sm" asChild>
+                            <a href={`https://github.com/settings/installations/${selected.installation_id}`}>
+                              <Github className="h-4 w-4" />
+                              Manage on GitHub
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <input
+                        className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        placeholder="Filter GitHub repositories"
+                        value={filter}
+                        onChange={(event) => setFilter(event.target.value)}
+                      />
+                      {loadingRepositoriesFor === selected.id ? (
+                        <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
+                          Loading repositories from GitHub...
+                        </div>
+                      ) : filteredRepositories.length ? (
+                        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                          {filteredRepositories.map((repository) => (
+                            <div key={repository} className="rounded-md border bg-muted/25 px-3 py-2">
+                              <div className="truncate text-sm font-medium">{repository}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
+                          {authorized ? "No repositories match the current filter." : "Select this account to load repositories."}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="preferences">
+                  <Card className="rounded-lg">
+                    <CardHeader>
+                      <CardTitle className="text-base">Runner preferences</CardTitle>
+                      <CardDescription>Runner platform preferences for this account.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
+                        No runner platform settings are configured for this account yet.
+                      </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
             </div>
           ) : (
             <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
-              Install the GitHub App to connect a user or organization account.
+              Install the GitHub App to connect a user or organization.
             </div>
           )}
         </section>
@@ -481,7 +526,7 @@ function PullRequestsPage({
                     <button
                       type="button"
                       className="text-left text-primary hover:underline"
-                      onClick={() => onNavigate("accounts")}
+                      onClick={() => onNavigate("settings")}
                     >
                       Connect a GitHub App account to start tracking jobs.
                     </button>
@@ -536,7 +581,7 @@ function PullRequestsPage({
                 <button
                   type="button"
                   className="text-left text-primary hover:underline"
-                  onClick={() => onNavigate("accounts")}
+                  onClick={() => onNavigate("settings")}
                 >
                   Connect a GitHub App account to start tracking jobs.
                 </button>
@@ -546,6 +591,68 @@ function PullRequestsPage({
         </section>
       </div>
     </>
+  )
+}
+
+function UserMenu({ authSession, onSignOut }: { authSession: AuthSession; onSignOut: () => void }) {
+  const { setTheme, theme } = useTheme()
+  const avatarURL = userAvatarURL(authSession)
+  const login = authSession.login || "github"
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="ghost" size="icon" className="rounded-full" aria-label="Account menu">
+          {avatarURL ? (
+            <img
+              src={avatarURL}
+              alt=""
+              className="h-8 w-8 rounded-full border bg-muted object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <span className="flex h-8 w-8 items-center justify-center rounded-full border bg-muted text-xs font-semibold">
+              {userInitials(login)}
+            </span>
+          )}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel className="truncate">{login}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Theme</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={theme || "system"} onValueChange={setTheme}>
+          <DropdownMenuRadioItem value="light">
+            <Sun className="h-4 w-4" />
+            Light
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="dark">
+            <Moon className="h-4 w-4" />
+            Dark
+          </DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="system">
+            <Monitor className="h-4 w-4" />
+            System
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        {authSession.role === "admin" ? (
+          <>
+            <DropdownMenuItem asChild>
+              <a href="/admin/">
+                <ShieldCheck className="h-4 w-4" />
+                Admin
+              </a>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+          </>
+        ) : null}
+        <DropdownMenuItem onClick={onSignOut}>
+          <LogOut className="h-4 w-4" />
+          Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -579,6 +686,77 @@ function groupRunnersByPR(runners: RunnerState[]): PRGroup[] {
     })
   }
   return Array.from(groups.values()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+}
+
+function orderInstallationsByCurrentAccount(
+  installations: NonNullable<GitHubAppConfig["installations"]>,
+  currentLogin?: string
+) {
+  const login = (currentLogin || "").toLowerCase()
+  return [...installations].sort((a, b) => {
+    const aLogin = a.account_login || ""
+    const bLogin = b.account_login || ""
+    const aIsCurrent = aLogin.toLowerCase() === login
+    const bIsCurrent = bLogin.toLowerCase() === login
+    if (aIsCurrent !== bIsCurrent) return aIsCurrent ? -1 : 1
+    return aLogin.localeCompare(bLogin)
+  })
+}
+
+function AccountAvatar({
+  installation,
+  size,
+}: {
+  installation: NonNullable<GitHubAppConfig["installations"]>[number]
+  size: "sm" | "lg"
+}) {
+  const className =
+    size === "lg"
+      ? "flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-foreground text-sm font-semibold text-background"
+      : "flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-foreground text-xs font-semibold text-background"
+  const label = accountInitials(installation)
+  const avatarURL = accountAvatarURL(installation)
+  if (avatarURL) {
+    return (
+      <img
+        className={className}
+        src={avatarURL}
+        alt={`${installation.account_login || "GitHub"} avatar`}
+      />
+    )
+  }
+  return <div className={className}>{label}</div>
+}
+
+function accountDisplayName(installation: NonNullable<GitHubAppConfig["installations"]>[number]) {
+  return installation.account_name || installation.account_login || "GitHub App"
+}
+
+function accountInitials(installation: NonNullable<GitHubAppConfig["installations"]>[number]) {
+  return accountDisplayName(installation).slice(0, 2).toUpperCase()
+}
+
+function accountAvatarURL(installation: NonNullable<GitHubAppConfig["installations"]>[number]) {
+  if (installation.account_avatar) return installation.account_avatar
+  if (!installation.account_login) return ""
+  return `https://github.com/${encodeURIComponent(installation.account_login)}.png?size=96`
+}
+
+function userAvatarURL(authSession: AuthSession) {
+  if (authSession.avatar_url) return authSession.avatar_url
+  if (!authSession.login) return ""
+  return `https://github.com/${encodeURIComponent(authSession.login)}.png?size=96`
+}
+
+function userInitials(login: string) {
+  return (
+    login
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "GH"
+  )
 }
 
 function userStatusClass(status: RunnerState["status"]) {

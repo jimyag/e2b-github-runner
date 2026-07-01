@@ -11,7 +11,7 @@ export function SiteHeader() {
           orientation="vertical"
           className="mx-2 data-[orientation=vertical]:h-4"
         />
-        <span className="text-sm font-semibold text-foreground">E2B Runner Console</span>
+        <span className="text-sm font-semibold text-foreground">Qiniu Runner</span>
         <div className="ml-auto flex items-center gap-2">
           <ModeToggle />
         </div>

@@ -268,7 +268,7 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 			if r.Header.Get("Authorization") == "" {
 				t.Fatal("expected app JWT authorization for installation lookup")
 			}
-			w.Write([]byte(`{"id":987,"account":{"login":"o"}}`))
+			w.Write([]byte(`{"id":987,"account":{"login":"o","name":"Octo Org","avatar_url":"https://avatars.example/o.png"}}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/987/access_tokens":
 			if r.Header.Get("Authorization") == "" {
 				t.Fatal("expected app JWT authorization for installation token")
@@ -341,7 +341,7 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("unexpected setup status: %d body=%s", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("Location") != "/accounts?installation_id=987&setup_action=install" {
+	if rec.Header().Get("Location") != "/account/repositories?installation_id=987&setup_action=install" {
 		t.Fatalf("unexpected setup redirect: %q", rec.Header().Get("Location"))
 	}
 	req = httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=oauth-code&installation_id=987&setup_action=install", nil)
@@ -351,7 +351,7 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("unexpected callback setup status: %d body=%s", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("Location") != "/accounts?installation_id=987&setup_action=install" {
+	if rec.Header().Get("Location") != "/account/repositories?installation_id=987&setup_action=install" {
 		t.Fatalf("unexpected callback setup redirect: %q", rec.Header().Get("Location"))
 	}
 	req = httptest.NewRequest(http.MethodGet, "/auth/github/callback?installation_id=987&setup_action=install&state=github-app-state", nil)
@@ -361,7 +361,7 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("unexpected callback setup status with state: %d body=%s", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("Location") != "/accounts?installation_id=987&setup_action=install" {
+	if rec.Header().Get("Location") != "/account/repositories?installation_id=987&setup_action=install" {
 		t.Fatalf("unexpected callback setup redirect with state: %q", rec.Header().Get("Location"))
 	}
 	req = httptest.NewRequest(http.MethodGet, "/auth/github/callback?installation_id=987&state=github-app-state", nil)
@@ -371,7 +371,7 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("unexpected callback setup status without setup_action: %d body=%s", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("Location") != "/accounts?installation_id=987" {
+	if rec.Header().Get("Location") != "/account/repositories?installation_id=987" {
 		t.Fatalf("unexpected callback setup redirect without setup_action: %q", rec.Header().Get("Location"))
 	}
 	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
@@ -384,6 +384,9 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 	}
 	if len(installations) != 1 {
 		t.Fatalf("expected one installation, got %#v", installations)
+	}
+	if installations[0].AccountName != "Octo Org" || installations[0].AccountAvatar != "https://avatars.example/o.png" {
+		t.Fatalf("unexpected installation account metadata: %#v", installations[0])
 	}
 	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/user/github-app/installations/%d/repositories", installations[0].ID), nil)
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
@@ -750,7 +753,7 @@ func TestAdminUIIsServedWithoutAPIAccess(t *testing.T) {
 		t.Fatalf("root user ui did not serve vite shell")
 	}
 
-	for _, path := range []string{"/repositories", "/accounts"} {
+	for _, path := range []string{"/repositories", "/account/repositories", "/account/preferences", "/organizations/qiniu/repositories", "/organizations/qiniu/preferences", "/settings", "/accounts"} {
 		req = httptest.NewRequest(http.MethodGet, path, nil)
 		rec = httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)

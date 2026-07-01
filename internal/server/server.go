@@ -249,7 +249,8 @@ func (s *Server) handleUserRedirect(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/")
-	if name == "accounts" || name == "repositories" {
+	if name == "accounts" || name == "repositories" || name == "settings" ||
+		strings.HasPrefix(name, "account/") || strings.HasPrefix(name, "organizations/") {
 		name = "index.html"
 	}
 	s.handleUI(w, r, name)

@@ -154,6 +154,8 @@ type GitHubInstallation struct {
 	AccountID      int64     `json:"account_id"`
 	InstallationID int64     `json:"installation_id"`
 	AccountLogin   string    `json:"account_login,omitempty"`
+	AccountName    string    `json:"account_name,omitempty"`
+	AccountAvatar  string    `json:"account_avatar,omitempty"`
 	Repositories   []string  `json:"repositories"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`

@@ -59,9 +59,11 @@ type Runner struct {
 }
 
 type Installation struct {
-	ID           int64    `json:"id"`
-	AccountLogin string   `json:"account_login,omitempty"`
-	Repositories []string `json:"repositories"`
+	ID            int64    `json:"id"`
+	AccountLogin  string   `json:"account_login,omitempty"`
+	AccountName   string   `json:"account_name,omitempty"`
+	AccountAvatar string   `json:"account_avatar,omitempty"`
+	Repositories  []string `json:"repositories"`
 }
 
 type runnerTarget struct {
@@ -96,7 +98,9 @@ func (c *Client) GetInstallation(ctx context.Context, installationID int64) (Ins
 	var out struct {
 		ID      int64 `json:"id"`
 		Account struct {
-			Login string `json:"login"`
+			Login     string `json:"login"`
+			Name      string `json:"name"`
+			AvatarURL string `json:"avatar_url"`
 		} `json:"account"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
@@ -105,7 +109,12 @@ func (c *Client) GetInstallation(ctx context.Context, installationID int64) (Ins
 	if out.ID == 0 {
 		return Installation{}, fmt.Errorf("github installation response missing id")
 	}
-	return Installation{ID: out.ID, AccountLogin: out.Account.Login}, nil
+	return Installation{
+		ID:            out.ID,
+		AccountLogin:  out.Account.Login,
+		AccountName:   out.Account.Name,
+		AccountAvatar: out.Account.AvatarURL,
+	}, nil
 }
 
 func (c *Client) ListInstallationRepositories(ctx context.Context, installationID int64) ([]string, error) {
