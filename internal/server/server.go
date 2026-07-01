@@ -91,6 +91,7 @@ const (
 	defaultRunnerRequestListLimit = 100
 	maxRunnerRequestListLimit     = 500
 	oauthStateCookieName          = "runnerd_oauth_state"
+	githubAppSetupStateCookieName = "runnerd_github_app_setup_state"
 	adminSessionCookieName        = "runnerd_admin_session"
 )
 
@@ -201,6 +202,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /auth/github/login", s.handleGitHubOAuthLogin)
 	s.mux.HandleFunc("GET /auth/github/callback", s.handleGitHubOAuthCallback)
 	s.mux.HandleFunc("POST /auth/logout", s.handleAuthLogout)
+	s.mux.HandleFunc("GET /github-app/install", s.handleGitHubAppInstallRedirect)
 	s.mux.HandleFunc("GET /github-app/setup", s.handleGitHubAppSetupRedirect)
 	s.mux.HandleFunc("GET /user/github-app", s.handleUserGitHubApp)
 	s.mux.HandleFunc("POST /user/github-app/installations", s.handleUserSaveGitHubInstallation)

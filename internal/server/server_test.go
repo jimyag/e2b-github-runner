@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -330,49 +331,69 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &appConfig); err != nil {
 		t.Fatal(err)
 	}
-	if appConfig.InstallURL != "https://github.com/apps/runnerd-test/installations/new" {
+	if appConfig.InstallURL != "/github-app/install" {
 		t.Fatalf("unexpected install url: %q", appConfig.InstallURL)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/github-app/setup?installation_id=987&setup_action=install", nil)
+	req = httptest.NewRequest(http.MethodGet, "/github-app/install", nil)
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("unexpected install redirect status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	installLocation := rec.Header().Get("Location")
+	if !strings.HasPrefix(installLocation, "https://github.com/apps/runnerd-test/installations/new?") {
+		t.Fatalf("unexpected github app install redirect: %q", installLocation)
+	}
+	parsedInstallLocation, err := url.Parse(installLocation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setupState := parsedInstallLocation.Query().Get("state")
+	if setupState == "" {
+		t.Fatalf("expected github app install state in %q", installLocation)
+	}
+	var setupStateCookie *http.Cookie
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == githubAppSetupStateCookieName {
+			setupStateCookie = cookie
+		}
+	}
+	if setupStateCookie == nil || setupStateCookie.Value != setupState {
+		t.Fatalf("expected github app setup state cookie, got %#v state=%q", setupStateCookie, setupState)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/github-app/setup?installation_id=987&setup_action=install&state="+url.QueryEscape(setupState), nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	req.AddCookie(setupStateCookie)
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusFound {
 		t.Fatalf("unexpected setup status: %d body=%s", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("Location") != "/account/repositories?installation_id=987&setup_action=install" {
+	if rec.Header().Get("Location") != "/account/repositories?installation_id=987&setup_action=install&state="+url.QueryEscape(setupState) {
 		t.Fatalf("unexpected setup redirect: %q", rec.Header().Get("Location"))
 	}
-	req = httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=oauth-code&installation_id=987&setup_action=install", nil)
+
+	req = httptest.NewRequest(http.MethodPost, "/user/github-app/installations", strings.NewReader(fmt.Sprintf(`{"installation_id":987,"setup_state":%q}`, setupState)))
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	req.AddCookie(setupStateCookie)
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusFound {
-		t.Fatalf("unexpected callback setup status: %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected installation save status: %d body=%s", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("Location") != "/account/repositories?installation_id=987&setup_action=install" {
-		t.Fatalf("unexpected callback setup redirect: %q", rec.Header().Get("Location"))
-	}
-	req = httptest.NewRequest(http.MethodGet, "/auth/github/callback?installation_id=987&setup_action=install&state=github-app-state", nil)
+
+	req = httptest.NewRequest(http.MethodPost, "/user/github-app/installations", strings.NewReader(`{"installation_id":987,"setup_state":"wrong"}`))
+	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	req.AddCookie(setupStateCookie)
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusFound {
-		t.Fatalf("unexpected callback setup status with state: %d body=%s", rec.Code, rec.Body.String())
-	}
-	if rec.Header().Get("Location") != "/account/repositories?installation_id=987&setup_action=install" {
-		t.Fatalf("unexpected callback setup redirect with state: %q", rec.Header().Get("Location"))
-	}
-	req = httptest.NewRequest(http.MethodGet, "/auth/github/callback?installation_id=987&state=github-app-state", nil)
-	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusFound {
-		t.Fatalf("unexpected callback setup status without setup_action: %d body=%s", rec.Code, rec.Body.String())
-	}
-	if rec.Header().Get("Location") != "/account/repositories?installation_id=987" {
-		t.Fatalf("unexpected callback setup redirect without setup_action: %q", rec.Header().Get("Location"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected invalid setup state to be rejected, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
 	if err != nil {

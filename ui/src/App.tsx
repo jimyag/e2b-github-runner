@@ -273,12 +273,13 @@ function App() {
     const params = new URLSearchParams(window.location.search)
     const installationID = Number(params.get("installation_id") || "")
     if (!Number.isSafeInteger(installationID) || installationID <= 0) return
+    const setupState = params.get("state") || ""
     setLoading(true)
     try {
       const installation = (await request("/user/github-app/installations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ installation_id: installationID }),
+        body: JSON.stringify({ installation_id: installationID, setup_state: setupState }),
       })) as GitHubInstallation
       toast.success("GitHub App account connected")
       const nextPath = accountSettingsPathForInstallation(installation, authSession.login, "repositories")
