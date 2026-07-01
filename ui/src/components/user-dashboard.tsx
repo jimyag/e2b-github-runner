@@ -104,10 +104,6 @@ export function UserDashboard({
             <BookOpen className="h-4 w-4" />
             Repositories
           </a>
-          <a href="/account/repositories" className={navItemClass(page === "settings")} onClick={(event) => goToPage(event, "settings")}>
-            <Settings className="h-4 w-4" />
-            Settings
-          </a>
         </nav>
         <div className="ml-auto flex items-center gap-2">
           <UserMenu authSession={authSession} onSignOut={onSignOut} />
@@ -126,10 +122,6 @@ export function UserDashboard({
         >
           <BookOpen className="h-4 w-4" />
           Repositories
-        </a>
-        <a href="/account/repositories" className={navItemClass(page === "settings")} onClick={(event) => goToPage(event, "settings")}>
-          <Settings className="h-4 w-4" />
-          Settings
         </a>
       </nav>
 
@@ -619,6 +611,13 @@ function UserMenu({ authSession, onSignOut }: { authSession: AuthSession; onSign
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel className="truncate">{login}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <a href="/account/repositories">
+            <Settings className="h-4 w-4" />
+            Settings
+          </a>
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Theme</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={theme || "system"} onValueChange={setTheme}>
