@@ -1113,6 +1113,16 @@ func TestAccountScopeForPersonalGitHubInstallation(t *testing.T) {
 	if accountID, ok, err := store.AccountScopeForPersonalGitHubInstallation(456); err != nil || ok || accountID != 0 {
 		t.Fatalf("expected org installation not to resolve account scope, account_id=%d ok=%v err=%v", accountID, ok, err)
 	}
+	installationID, ok, err := store.GitHubInstallationScopeForAccountLogin("ALICE-ORG")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || installationID != 456 {
+		t.Fatalf("expected account login to resolve installation scope, installation_id=%d ok=%v", installationID, ok)
+	}
+	if installationID, ok, err := store.GitHubInstallationScopeForAccountLogin("missing"); err != nil || ok || installationID != 0 {
+		t.Fatalf("expected missing account login not to resolve, installation_id=%d ok=%v err=%v", installationID, ok, err)
+	}
 }
 
 func TestAccountSecretsAreScopedToAccountAndType(t *testing.T) {

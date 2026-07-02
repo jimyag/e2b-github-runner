@@ -37,6 +37,15 @@ func (s *Server) sandboxServiceAndConfigForRunnerRequest(req state.RunnerRequest
 			EncryptedAPIKey: strings.TrimSpace(req.SandboxAPIKeyEncrypted),
 		}, err
 	}
+	if req.GitHubInstallationID <= 0 {
+		installationID, ok, err := s.githubInstallationScopeForRepository(req.RepositoryFullName)
+		if err != nil {
+			return nil, sandboxServiceConfigSnapshot{}, err
+		}
+		if ok {
+			req.GitHubInstallationID = installationID
+		}
+	}
 	scope, err := sandboxScopeForRunnerRequest(req)
 	if err != nil {
 		return nil, sandboxServiceConfigSnapshot{}, err
@@ -57,6 +66,14 @@ func (s *Server) sandboxServiceAndConfigForRunnerRequest(req state.RunnerRequest
 	}
 	accountScope := accountPreferenceScope{Type: state.AccountScopeTypeAccount, ID: accountID}
 	return s.sandboxServiceForScope(accountScope)
+}
+
+func (s *Server) githubInstallationScopeForRepository(repositoryFullName string) (int64, bool, error) {
+	owner, _, ok := strings.Cut(strings.TrimSpace(repositoryFullName), "/")
+	if !ok {
+		return 0, false, nil
+	}
+	return s.store.GitHubInstallationScopeForAccountLogin(owner)
 }
 
 func (s *Server) sandboxServiceForScope(scope accountPreferenceScope) (sandboxrunner.Service, sandboxServiceConfigSnapshot, error) {

@@ -247,6 +247,7 @@ type IdentityStore interface {
 
 type GitHubInstallationStore interface {
 	ListGitHubInstallations(accountID int64) ([]GitHubInstallation, error)
+	GitHubInstallationScopeForAccountLogin(accountLogin string) (int64, bool, error)
 	AccountScopeForPersonalGitHubInstallation(installationID int64) (int64, bool, error)
 	UpsertGitHubInstallation(installation GitHubInstallation) (GitHubInstallation, error)
 	DeleteGitHubInstallation(accountID, id int64) error

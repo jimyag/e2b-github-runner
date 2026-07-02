@@ -110,7 +110,7 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		store:       store,
 		gh:          gh,
 		sandbox:     sandbox,
-		sandboxHTTP: &http.Client{},
+		sandboxHTTP: &http.Client{Timeout: 60 * time.Second},
 		logger:      logger,
 		mux:         http.NewServeMux(),
 		slots:       make(chan struct{}, cfg.MaxConcurrentRunners),

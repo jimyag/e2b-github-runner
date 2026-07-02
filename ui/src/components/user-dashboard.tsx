@@ -315,8 +315,7 @@ function AccountsPage({
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
 }) {
   const [filter, setFilter] = useState("")
-  const selected =
-    installations.find((installation) => installation.account_login === route.accountLogin) || installations[0]
+  const selected = installations.find((installation) => installation.account_login === route.accountLogin)
   const authorized = selected ? authorizedRepositories[selected.id] : undefined
   const preferenceInstallationID =
     selected && selected.account_login && selected.account_login !== currentLogin ? selected.id : undefined

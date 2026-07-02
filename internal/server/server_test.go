@@ -790,6 +790,57 @@ func TestSandboxServiceFallsBackToPersonalAccountPreferences(t *testing.T) {
 	}
 }
 
+func TestSandboxServiceInfersInstallationFromRepositoryOwner(t *testing.T) {
+	store := state.New(t.TempDir())
+	cfg := config.Config{
+		AuthEncryptionKey:    "encryption-key",
+		MaxConcurrentRunners: 10,
+	}
+	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
+	account, _, err := store.EnsureAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "miclle"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "miclle",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	valueJSON, err := json.Marshal(accountSandboxServicePreferenceValue{APIURL: "https://sandbox.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountPreference(state.AccountPreference{
+		ScopeType: state.AccountScopeTypeGitHubInstall,
+		ScopeID:   987,
+		Namespace: accountPreferenceNamespaceSandbox,
+		Key:       accountPreferenceKeySandboxService,
+		ValueJSON: string(valueJSON),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountSecret(state.AccountSecret{
+		ScopeType:      state.AccountScopeTypeGitHubInstall,
+		ScopeID:        987,
+		KeyType:        state.AccountSecretTypeSandboxAPIKey,
+		EncryptedValue: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if svc, err := srv.sandboxServiceForRunnerRequest(context.Background(), state.RunnerRequest{
+		ID:                 "req-1",
+		RepositoryFullName: "miclle/example",
+	}); err != nil || svc == nil {
+		t.Fatalf("expected sandbox service by repository owner installation, service=%T err=%v", svc, err)
+	}
+}
+
 func TestSandboxServiceDoesNotFallBackToAccountForOrgInstallation(t *testing.T) {
 	store := state.New(t.TempDir())
 	cfg := config.Config{

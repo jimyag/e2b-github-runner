@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -58,6 +59,28 @@ func (s *DBStore) AccountScopeForPersonalGitHubInstallation(installationID int64
 		return 0, false, nil
 	}
 	return rows[0].AccountID, true, nil
+}
+
+func (s *DBStore) GitHubInstallationScopeForAccountLogin(accountLogin string) (int64, bool, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return 0, false, err
+	}
+	accountLogin = strings.TrimSpace(accountLogin)
+	if accountLogin == "" {
+		return 0, false, ErrNotFound
+	}
+	var record githubInstallationRecord
+	if err := db.
+		Where("LOWER(account_login) = LOWER(?)", accountLogin).
+		Order("updated_at DESC, installation_id ASC").
+		First(&record).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return record.InstallationID, true, nil
 }
 
 func (s *DBStore) UpsertGitHubInstallation(installation GitHubInstallation) (GitHubInstallation, error) {
