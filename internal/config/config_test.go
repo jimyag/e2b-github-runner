@@ -18,11 +18,9 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
+  encryption_key: test-encryption-key
 admin:
   token: admin-token
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
 github:
   webhook_secret: webhook-secret
   allowed_repositories:
@@ -62,6 +60,9 @@ worker:
 	if cfg.GitHubAppPrivateKeyFile != filepath.Join(dir, "secrets", "app.pem") {
 		t.Fatalf("unexpected private key path: %s", cfg.GitHubAppPrivateKeyFile)
 	}
+	if cfg.AuthSessionSecret != "test-session-secret" || cfg.AuthEncryptionKey != "test-encryption-key" {
+		t.Fatalf("unexpected auth secrets: session=%q encryption=%q", cfg.AuthSessionSecret, cfg.AuthEncryptionKey)
+	}
 	if !cfg.RepositoryAllowed("octo/repo") || cfg.RepositoryAllowed("other/repo") {
 		t.Fatalf("unexpected repository allowlist behavior: %#v", cfg.GitHubAllowedRepositories)
 	}
@@ -76,11 +77,9 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
+  encryption_key: test-encryption-key
 admin:
   token: admin-token
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
 github:
   webhook_secret: webhook-secret
   app:
@@ -114,11 +113,9 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
+  encryption_key: test-encryption-key
 admin:
   token: admin-token
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
 github:
   webhook_secret: webhook-secret
   app:
@@ -153,11 +150,9 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
+  encryption_key: test-encryption-key
 admin:
   token: admin-token
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
 github:
   webhook_secret: webhook-secret
   app:
@@ -187,9 +182,7 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
+  encryption_key: test-encryption-key
 github:
   webhook_secret: webhook-secret
   app:
@@ -210,6 +203,34 @@ github:
 	}
 }
 
+func TestLoadFileRejectsMissingEncryptionKey(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "runnerd.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+database:
+  backend: sqlite
+  dsn: ./runnerd.db
+auth:
+  session_secret: test-session-secret
+github:
+  webhook_secret: webhook-secret
+  token: ghp_test
+  oauth:
+    client_id: Iv1.test
+    client_secret: secret
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadFile(configPath)
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "auth.encryption_key") {
+		t.Fatalf("expected missing encryption key error, got %v", err)
+	}
+}
+
 func TestLoadFileRejectsDeprecatedGitHubDefaultRepository(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "runnerd.yaml")
@@ -219,11 +240,9 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
+  encryption_key: test-encryption-key
 admin:
   token: admin-token
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
 github:
   webhook_secret: webhook-secret
   owner: o
@@ -256,11 +275,9 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
+  encryption_key: test-encryption-key
 admin:
   token: admin-token
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
 github:
   webhook_secret: webhook-secret
   owner: ""
@@ -289,11 +306,9 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
+  encryption_key: test-encryption-key
 admin:
   token: admin-token
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
 github:
   webhook_secret: webhook-secret
   api_base_url: https://github.example/api/v3
@@ -323,11 +338,9 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
+  encryption_key: test-encryption-key
 admin:
   token: admin-token
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
 github:
   webhook_secret: webhook-secret
   token: ghp_test
@@ -356,11 +369,9 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
+  encryption_key: test-encryption-key
 admin:
   token: admin-token
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
 github:
   webhook_secret: webhook-secret
   basic_auth:
@@ -392,9 +403,7 @@ database:
   dsn: `+mysqlDSN+`
 auth:
   session_secret: test-session-secret
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
+  encryption_key: test-encryption-key
 github:
   webhook_secret: webhook-secret
   token: ghp_test
@@ -429,9 +438,7 @@ database:
   url: ./runnerd.db
 auth:
   session_secret: test-session-secret
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
+  encryption_key: test-encryption-key
 github:
   webhook_secret: webhook-secret
   token: ghp_test
@@ -467,9 +474,6 @@ database:
   dsn: `+filepath.Join(dir, "runnerd.db")+`
 admin:
   token: admin-token
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
 github:
   webhook_secret: webhook-secret
 `), 0o644); err != nil {
@@ -494,11 +498,9 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
+  encryption_key: test-encryption-key
 admin:
   token: admin-token
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
 github:
   webhook_secret: webhook-secret
   token: ghp_test

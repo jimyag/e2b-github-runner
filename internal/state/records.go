@@ -29,6 +29,8 @@ type runnerRequestRecord struct {
 	LastErrorRetryable      bool       `gorm:"column:last_error_retryable;not null;default:false"`
 	RetryCount              int        `gorm:"column:retry_count;not null;default:0"`
 	SandboxID               string     `gorm:"column:sandbox_id"`
+	SandboxAPIURL           string     `gorm:"column:sandbox_api_url"`
+	SandboxAPIKeyEncrypted  string     `gorm:"column:sandbox_api_key_encrypted;type:text"`
 	ProcessPID              uint32     `gorm:"column:process_pid"`
 	AssignedJobID           int64      `gorm:"column:assigned_job_id"`
 	AssignedJobName         string     `gorm:"column:assigned_job_name"`
@@ -166,3 +168,28 @@ type githubInstallationRecord struct {
 }
 
 func (githubInstallationRecord) TableName() string { return "github_installations" }
+
+type accountSecretRecord struct {
+	ID             int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	ScopeType      string    `gorm:"column:scope_type;not null;uniqueIndex:idx_account_secrets_scope_type,priority:1;index:idx_account_secrets_scope"`
+	ScopeID        int64     `gorm:"column:scope_id;not null;uniqueIndex:idx_account_secrets_scope_type,priority:2;index:idx_account_secrets_scope"`
+	KeyType        string    `gorm:"column:key_type;not null;uniqueIndex:idx_account_secrets_scope_type,priority:3"`
+	EncryptedValue string    `gorm:"column:encrypted_value;type:text;not null"`
+	CreatedAt      time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (accountSecretRecord) TableName() string { return "account_secrets" }
+
+type accountPreferenceRecord struct {
+	ID        int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	ScopeType string    `gorm:"column:scope_type;not null;uniqueIndex:idx_account_preferences_scope_key,priority:1;index:idx_account_preferences_scope"`
+	ScopeID   int64     `gorm:"column:scope_id;not null;uniqueIndex:idx_account_preferences_scope_key,priority:2;index:idx_account_preferences_scope"`
+	Namespace string    `gorm:"column:namespace;not null;uniqueIndex:idx_account_preferences_scope_key,priority:3"`
+	Key       string    `gorm:"column:key;not null;uniqueIndex:idx_account_preferences_scope_key,priority:4"`
+	ValueJSON string    `gorm:"column:value_json;type:text;not null"`
+	CreatedAt time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (accountPreferenceRecord) TableName() string { return "account_preferences" }

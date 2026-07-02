@@ -29,8 +29,10 @@ export type RunnerState = {
   retry_count?: number
   updated_at: string
   created_at: string
+  running_at?: string
   next_retry_at?: string
   completed_at?: string
+  failed_at?: string
 }
 
 export type RunnerSpec = {
@@ -76,7 +78,6 @@ export type DiagnosticsSummary = {
   pprof: Array<{ address: string; address_file: string; dump_script: string }>
   state: { backend: string; database: string }
   github: { auth_mode: string; installation_id?: number; api_base_url: string }
-  sandbox: { api_url: string }
   recent_failures: RunnerState[]
 }
 
@@ -116,6 +117,16 @@ export type GitHubAppConfig = {
   install_url?: string
   setup_url: string
   installations: GitHubInstallation[]
+}
+
+export type UserPreferences = {
+  sandbox: {
+    api_url: string
+    api_key: {
+      configured: boolean
+      updated_at?: string
+    }
+  }
 }
 
 export type AuthorizedRepositories = {

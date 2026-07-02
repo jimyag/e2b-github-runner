@@ -16,14 +16,14 @@ database:
   # dsn: runner:secret@tcp(mysql.example:3306)/runnerd?parseTime=true&charset=utf8mb4&loc=UTC
 
 auth:
+  # Generate with: openssl rand -base64 32
   session_secret: change-me-to-a-random-session-secret
+  # Generate with: openssl rand -base64 32
+  encryption_key: change-me-to-a-separate-random-encryption-key
   session_ttl_hours: 12
 
-e2b:
-  api_key: your-e2b-api-key
-  api_url: https://api.e2b.dev
+sandbox:
   timeout_seconds: 3600
-  api_timeout_seconds: 60
   create_timeout_seconds: 120
   stop_timeout_seconds: 30
 

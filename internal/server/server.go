@@ -22,6 +22,7 @@ type Server struct {
 	store       state.Store
 	gh          *github.Client
 	sandbox     sandboxrunner.Service
+	sandboxHTTP *http.Client
 	logger      *slog.Logger
 	mux         *http.ServeMux
 	slots       chan struct{}
@@ -109,6 +110,7 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		store:       store,
 		gh:          gh,
 		sandbox:     sandbox,
+		sandboxHTTP: &http.Client{},
 		logger:      logger,
 		mux:         http.NewServeMux(),
 		slots:       make(chan struct{}, cfg.MaxConcurrentRunners),
@@ -209,6 +211,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /user/github-app/installations/{id}/repositories", s.handleUserListGitHubInstallationRepositories)
 	s.mux.HandleFunc("DELETE /user/github-app/installations/{id}", s.handleUserDeleteGitHubInstallation)
 	s.mux.HandleFunc("GET /user/runner_requests", s.handleUserListRunners)
+	s.mux.HandleFunc("GET /user/preferences", s.handleUserPreferences)
+	s.mux.HandleFunc("PUT /user/preferences/sandbox", s.handleUserSaveSandboxConfig)
+	s.mux.HandleFunc("DELETE /user/preferences/sandbox-api-key", s.handleUserDeleteSandboxAPIKey)
 	s.mux.HandleFunc("POST /webhooks/github", s.handleGitHubWebhook)
 	s.mux.HandleFunc("POST /runner_requests", s.handleCreateRunner)
 	s.mux.HandleFunc("GET /runner_requests", s.handleListRunners)

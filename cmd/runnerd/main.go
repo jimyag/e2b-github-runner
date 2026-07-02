@@ -14,7 +14,6 @@ import (
 	"github.com/qiniu/ci-runner/internal/config"
 	"github.com/qiniu/ci-runner/internal/github"
 	"github.com/qiniu/ci-runner/internal/redact"
-	"github.com/qiniu/ci-runner/internal/sandboxrunner"
 	"github.com/qiniu/ci-runner/internal/server"
 	"github.com/qiniu/ci-runner/internal/state"
 )
@@ -43,7 +42,6 @@ func main() {
 		os.Exit(1)
 	}
 	githubHTTPClient := &http.Client{Timeout: 30 * time.Second}
-	sandboxHTTPClient := &http.Client{}
 	var gh *github.Client
 	switch cfg.GitHubAuthMode() {
 	case "app":
@@ -64,12 +62,7 @@ func main() {
 		logger.Error("unsupported github auth mode", "mode", cfg.GitHubAuthMode())
 		os.Exit(1)
 	}
-	sb, err := sandboxrunner.NewE2BService(cfg.E2BAPIKey, cfg.E2BAPIURL, sandboxHTTPClient)
-	if err != nil {
-		logger.Error("create sandbox client", "error", err)
-		os.Exit(1)
-	}
-	handler := server.New(cfg, store, gh, sb, logger)
+	handler := server.New(cfg, store, gh, nil, logger)
 	go func() {
 		recoveryCtx, cancel := context.WithTimeout(context.Background(), cfg.RecoveryTimeout)
 		defer cancel()

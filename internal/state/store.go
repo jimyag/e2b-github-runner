@@ -27,59 +27,63 @@ var (
 )
 
 type RunnerRequest struct {
-	ID                   string    `json:"id"`
-	Source               string    `json:"source"`
-	JobID                int64     `json:"job_id,omitempty"`
-	GitHubInstallationID int64     `json:"github_installation_id,omitempty"`
-	RepositoryFullName   string    `json:"repository_full_name,omitempty"`
-	RequestedLabels      []string  `json:"requested_labels,omitempty"`
-	Labels               []string  `json:"labels"`
-	ProfileName          string    `json:"runner_spec_name,omitempty"`
-	RunnerGroup          string    `json:"runner_group,omitempty"`
-	RunnerName           string    `json:"runner_name"`
-	CreatedAt            time.Time `json:"created_at"`
+	ID                     string    `json:"id"`
+	Source                 string    `json:"source"`
+	JobID                  int64     `json:"job_id,omitempty"`
+	GitHubInstallationID   int64     `json:"github_installation_id,omitempty"`
+	RepositoryFullName     string    `json:"repository_full_name,omitempty"`
+	RequestedLabels        []string  `json:"requested_labels,omitempty"`
+	Labels                 []string  `json:"labels"`
+	ProfileName            string    `json:"runner_spec_name,omitempty"`
+	RunnerGroup            string    `json:"runner_group,omitempty"`
+	RunnerName             string    `json:"runner_name"`
+	SandboxAPIURL          string    `json:"-"`
+	SandboxAPIKeyEncrypted string    `json:"-"`
+	CreatedAt              time.Time `json:"created_at"`
 }
 
 type RunnerState struct {
-	ID                   string    `json:"id"`
-	Status               string    `json:"status"`
-	GitHubInstallationID int64     `json:"github_installation_id,omitempty"`
-	RepositoryFullName   string    `json:"repository_full_name,omitempty"`
-	RequestedLabels      []string  `json:"requested_labels,omitempty"`
-	ProfileName          string    `json:"runner_spec_name,omitempty"`
-	RunnerGroup          string    `json:"runner_group,omitempty"`
-	RunnerName           string    `json:"runner_name"`
-	SandboxID            string    `json:"sandbox_id,omitempty"`
-	ProcessPID           uint32    `json:"process_pid,omitempty"`
-	WorkflowJobID        int64     `json:"workflow_job_id,omitempty"`
-	WorkflowRunID        int64     `json:"workflow_run_id,omitempty"`
-	WorkflowName         string    `json:"workflow_name,omitempty"`
-	WorkflowRunAttempt   int64     `json:"workflow_run_attempt,omitempty"`
-	HeadBranch           string    `json:"head_branch,omitempty"`
-	HeadSHA              string    `json:"head_sha,omitempty"`
-	GitHubJobURL         string    `json:"github_job_url,omitempty"`
-	PullRequestNumber    int64     `json:"pull_request_number,omitempty"`
-	AssignedJobID        int64     `json:"assigned_job_id,omitempty"`
-	AssignedJobName      string    `json:"assigned_job_name,omitempty"`
-	Error                string    `json:"error,omitempty"`
-	FailureStage         string    `json:"failure_stage,omitempty"`
-	FailureReason        string    `json:"failure_reason,omitempty"`
-	LastErrorCode        string    `json:"last_error_code,omitempty"`
-	LastErrorMessage     string    `json:"last_error_message,omitempty"`
-	LastErrorRetryable   bool      `json:"last_error_retryable,omitempty"`
-	RetryCount           int       `json:"retry_count,omitempty"`
-	UpdatedAt            time.Time `json:"updated_at"`
-	CreatedAt            time.Time `json:"created_at"`
-	LastAttemptAt        time.Time `json:"last_attempt_at,omitempty"`
-	NextRetryAt          time.Time `json:"next_retry_at,omitempty"`
-	CreatingAt           time.Time `json:"creating_at,omitempty"`
-	RunningAt            time.Time `json:"running_at,omitempty"`
-	StoppingAt           time.Time `json:"stopping_at,omitempty"`
-	CompletedAt          time.Time `json:"completed_at,omitempty"`
-	FailedAt             time.Time `json:"failed_at,omitempty"`
-	LeaseOwner           string    `json:"lease_owner,omitempty"`
-	LeaseExpiresAt       time.Time `json:"lease_expires_at,omitempty"`
-	Version              int64     `json:"version"`
+	ID                     string    `json:"id"`
+	Status                 string    `json:"status"`
+	GitHubInstallationID   int64     `json:"github_installation_id,omitempty"`
+	RepositoryFullName     string    `json:"repository_full_name,omitempty"`
+	RequestedLabels        []string  `json:"requested_labels,omitempty"`
+	ProfileName            string    `json:"runner_spec_name,omitempty"`
+	RunnerGroup            string    `json:"runner_group,omitempty"`
+	RunnerName             string    `json:"runner_name"`
+	SandboxID              string    `json:"sandbox_id,omitempty"`
+	SandboxAPIURL          string    `json:"-"`
+	SandboxAPIKeyEncrypted string    `json:"-"`
+	ProcessPID             uint32    `json:"process_pid,omitempty"`
+	WorkflowJobID          int64     `json:"workflow_job_id,omitempty"`
+	WorkflowRunID          int64     `json:"workflow_run_id,omitempty"`
+	WorkflowName           string    `json:"workflow_name,omitempty"`
+	WorkflowRunAttempt     int64     `json:"workflow_run_attempt,omitempty"`
+	HeadBranch             string    `json:"head_branch,omitempty"`
+	HeadSHA                string    `json:"head_sha,omitempty"`
+	GitHubJobURL           string    `json:"github_job_url,omitempty"`
+	PullRequestNumber      int64     `json:"pull_request_number,omitempty"`
+	AssignedJobID          int64     `json:"assigned_job_id,omitempty"`
+	AssignedJobName        string    `json:"assigned_job_name,omitempty"`
+	Error                  string    `json:"error,omitempty"`
+	FailureStage           string    `json:"failure_stage,omitempty"`
+	FailureReason          string    `json:"failure_reason,omitempty"`
+	LastErrorCode          string    `json:"last_error_code,omitempty"`
+	LastErrorMessage       string    `json:"last_error_message,omitempty"`
+	LastErrorRetryable     bool      `json:"last_error_retryable,omitempty"`
+	RetryCount             int       `json:"retry_count,omitempty"`
+	UpdatedAt              time.Time `json:"updated_at"`
+	CreatedAt              time.Time `json:"created_at"`
+	LastAttemptAt          time.Time `json:"last_attempt_at,omitempty"`
+	NextRetryAt            time.Time `json:"next_retry_at,omitempty"`
+	CreatingAt             time.Time `json:"creating_at,omitempty"`
+	RunningAt              time.Time `json:"running_at,omitempty"`
+	StoppingAt             time.Time `json:"stopping_at,omitempty"`
+	CompletedAt            time.Time `json:"completed_at,omitempty"`
+	FailedAt               time.Time `json:"failed_at,omitempty"`
+	LeaseOwner             string    `json:"lease_owner,omitempty"`
+	LeaseExpiresAt         time.Time `json:"lease_expires_at,omitempty"`
+	Version                int64     `json:"version"`
 }
 
 type RunnerProfile struct {
@@ -165,6 +169,35 @@ type GitHubInstallation struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+const (
+	AccountSecretTypeSandboxAPIKey = "sandbox_api_key"
+	AccountScopeTypeAccount        = "account"
+	AccountScopeTypeGitHubInstall  = "github_installation"
+)
+
+// AccountSecret stores an encrypted named secret for one account.
+type AccountSecret struct {
+	ID             int64     `json:"id"`
+	ScopeType      string    `json:"scope_type"`
+	ScopeID        int64     `json:"scope_id"`
+	KeyType        string    `json:"key_type"`
+	EncryptedValue string    `json:"-"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// AccountPreference stores a non-secret structured preference for one account.
+type AccountPreference struct {
+	ID        int64     `json:"id"`
+	ScopeType string    `json:"scope_type"`
+	ScopeID   int64     `json:"scope_id"`
+	Namespace string    `json:"namespace"`
+	Key       string    `json:"key"`
+	ValueJSON string    `json:"-"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type RunnerRequestStore interface {
 	Ensure() error
 	CreateRequest(req RunnerRequest, payload []byte) (bool, RunnerState, error)
@@ -214,8 +247,20 @@ type IdentityStore interface {
 
 type GitHubInstallationStore interface {
 	ListGitHubInstallations(accountID int64) ([]GitHubInstallation, error)
+	AccountScopeForPersonalGitHubInstallation(installationID int64) (int64, bool, error)
 	UpsertGitHubInstallation(installation GitHubInstallation) (GitHubInstallation, error)
 	DeleteGitHubInstallation(accountID, id int64) error
+}
+
+type AccountSecretStore interface {
+	GetAccountSecret(scopeType string, scopeID int64, keyType string) (AccountSecret, error)
+	UpsertAccountSecret(secret AccountSecret) (AccountSecret, error)
+	DeleteAccountSecret(scopeType string, scopeID int64, keyType string) error
+}
+
+type AccountPreferenceStore interface {
+	GetAccountPreference(scopeType string, scopeID int64, namespace, key string) (AccountPreference, error)
+	UpsertAccountPreference(preference AccountPreference) (AccountPreference, error)
 }
 
 type AuditStore interface {
@@ -228,6 +273,8 @@ type Store interface {
 	RunnerCatalogStore
 	IdentityStore
 	GitHubInstallationStore
+	AccountSecretStore
+	AccountPreferenceStore
 	AuditStore
 }
 

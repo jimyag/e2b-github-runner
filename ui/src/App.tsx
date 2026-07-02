@@ -38,6 +38,7 @@ import {
   type RunnerSpecMatch,
   type RunnerState,
   type RunnerStatus,
+  type UserPreferences,
 } from "@/admin-types"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
 
@@ -76,6 +77,7 @@ function App() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])
   const [userRunners, setUserRunners] = useState<RunnerState[]>([])
   const [githubApp, setGitHubApp] = useState<GitHubAppConfig | null>(null)
+  const [userPreferences, setUserPreferences] = useState<UserPreferences | null>(null)
   const [authorizedRepositories, setAuthorizedRepositories] = useState<Record<number, string[]>>({})
   const [loadingRepositoriesFor, setLoadingRepositoriesFor] = useState<number | null>(null)
   const [userSelectedKey, setUserSelectedKey] = useState("")
@@ -258,15 +260,21 @@ function App() {
       ])
       const nextApp = appData as GitHubAppConfig
       const nextRunners = Array.isArray(runnerData) ? (runnerData as RunnerState[]) : []
+      const nextRoute = parseAccountSettingsRoute(locationPath, authSession.login)
+      const preferencesPath = userPreferencesPath(
+        preferenceInstallationID(nextApp, nextRoute, authSession.login)
+      )
+      const preferencesData = await request(preferencesPath)
       setGitHubApp(nextApp)
       setUserRunners(nextRunners)
+      setUserPreferences(preferencesData as UserPreferences)
       if (nextRunners.length === 0) setUserSelectedKey("")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load workspace data")
     } finally {
       setLoading(false)
     }
-  }, [authSession.authenticated, hasAccess, isAdminRoute, request])
+  }, [authSession.authenticated, authSession.login, hasAccess, isAdminRoute, locationPath, request])
 
   const syncGitHubAppSetupFromURL = useCallback(async () => {
     if (!authSession.authenticated || (hasAccess && isAdminRoute) || !isAccountSettingsPath(locationPath)) return
@@ -305,6 +313,24 @@ function App() {
     } finally {
       setLoadingRepositoriesFor(null)
     }
+  }, [request])
+
+  const saveSandboxConfig = useCallback(async (apiURL: string, apiKey: string, installationID?: number) => {
+    const preferences = (await request(userPreferencesPath(installationID, "/user/preferences/sandbox"), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_url: apiURL, api_key: apiKey }),
+    })) as UserPreferences
+    setUserPreferences(preferences)
+    toast.success("Sandbox service settings saved")
+  }, [request])
+
+  const deleteSandboxAPIKey = useCallback(async (installationID?: number) => {
+    const preferences = (await request(userPreferencesPath(installationID, "/user/preferences/sandbox-api-key"), {
+      method: "DELETE",
+    })) as UserPreferences
+    setUserPreferences(preferences)
+    toast.success("Sandbox API Key removed")
   }, [request])
 
   const {
@@ -542,6 +568,7 @@ function App() {
         <UserDashboard
           authSession={authSession}
           githubApp={githubApp}
+          userPreferences={userPreferences}
           runners={userRunners}
           selectedKey={userSelectedKey}
           page={userPage}
@@ -549,6 +576,8 @@ function App() {
           authorizedRepositories={authorizedRepositories}
           loadingRepositoriesFor={loadingRepositoriesFor}
           onLoadAuthorizedRepositories={(id) => void loadAuthorizedRepositories(id)}
+          onSaveSandboxConfig={saveSandboxConfig}
+          onDeleteSandboxAPIKey={deleteSandboxAPIKey}
           onNavigate={setUserPage}
           onNavigateAccountSettings={setAccountSettingsRoute}
           onSelectKey={setUserSelectedKey}
@@ -714,6 +743,22 @@ function App() {
 
 function defaultAccountSettingsRoute(currentLogin?: string): AccountSettingsRoute {
   return { accountLogin: currentLogin, tab: "repositories" }
+}
+
+function userPreferencesPath(installationID?: number, base = "/user/preferences") {
+  if (!installationID) return base
+  return `${base}?installation_id=${encodeURIComponent(String(installationID))}`
+}
+
+function preferenceInstallationID(
+  githubApp: GitHubAppConfig,
+  route: AccountSettingsRoute | null,
+  currentLogin: string | undefined
+) {
+  const accountLogin = route?.accountLogin?.trim()
+  if (!accountLogin || accountLogin === currentLogin) return undefined
+  const installation = githubApp.installations.find((item) => item.account_login === accountLogin)
+  return installation?.id
 }
 
 function isAccountSettingsPath(path: string): boolean {

@@ -164,6 +164,8 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 		&accountRecord{},
 		&oauthIdentityRecord{},
 		&githubInstallationRecord{},
+		&accountSecretRecord{},
+		&accountPreferenceRecord{},
 	); err != nil {
 		return err
 	}
@@ -191,6 +193,18 @@ func migrateLegacySchemaColumns(db *gorm.DB) error {
 	}
 	if migrator.HasTable(&repositoryPolicyRecord{}) && !migrator.HasColumn(&repositoryPolicyRecord{}, "runner_group_name") {
 		if err := migrator.AddColumn(&legacyRepositoryPolicyRunnerGroupNameColumn{}, "RunnerGroupName"); err != nil {
+			return err
+		}
+	}
+	if migrator.HasTable(&accountSecretRecord{}) &&
+		(!migrator.HasColumn(&accountSecretRecord{}, "scope_type") || !migrator.HasColumn(&accountSecretRecord{}, "scope_id")) {
+		if err := migrator.DropTable(&accountSecretRecord{}); err != nil {
+			return err
+		}
+	}
+	if migrator.HasTable(&accountPreferenceRecord{}) &&
+		(!migrator.HasColumn(&accountPreferenceRecord{}, "scope_type") || !migrator.HasColumn(&accountPreferenceRecord{}, "scope_id")) {
+		if err := migrator.DropTable(&accountPreferenceRecord{}); err != nil {
 			return err
 		}
 	}

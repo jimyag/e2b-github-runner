@@ -224,7 +224,7 @@ export function DiagnosticsSection({
       <Card>
         <CardHeader>
           <CardTitle>Diagnostics summary</CardTitle>
-          <CardDescription>DB, GitHub auth, sandbox API, and pprof discovery.</CardDescription>
+          <CardDescription>DB, GitHub auth, recent failures, and pprof discovery.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <Detail label="State backend" value={diagnostics?.state.backend || "-"} />
@@ -232,7 +232,6 @@ export function DiagnosticsSection({
           <Detail label="GitHub auth" value={diagnostics?.github.auth_mode || "-"} />
           <Detail label="Installation" value={diagnostics?.github.installation_id || "-"} />
           <Detail label="GitHub API" value={diagnostics?.github.api_base_url || "-"} />
-          <Detail label="Sandbox API" value={diagnostics?.sandbox.api_url || "-"} />
           <div className="space-y-2">
             <div className="text-sm font-medium">pprof endpoints</div>
             {diagnostics?.pprof?.length ? (

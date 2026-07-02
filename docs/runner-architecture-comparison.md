@@ -11,6 +11,7 @@ Implemented pieces:
 - File-first runtime config loaded from `runnerd.yaml` by default, or from `--config`.
 - SQLite, Postgres, and MySQL state backends through `database.backend` and `database.dsn`.
 - DB-backed runner requests, runner events/logs, runner specs, runner groups, repository policies, OAuth accounts, and audit events.
+- Account and GitHub installation scoped Preferences for Sandbox service settings, with API keys stored as encrypted account secrets.
 - Schema creation is driven by GORM tags in the state record structs, with startup `AutoMigrate` and narrow compatibility backfills for older schema columns.
 - Fixed runner states: `queued`, `creating`, `running`, `stopping`, `completed`, and `failed`.
 - DB claim/lease processing with retry metadata (`retry_count`, `next_retry_at`, `lease_owner`, `lease_expires_at`).
@@ -75,7 +76,6 @@ The service imports `github.com/jimmicro/pprof`, which starts a local-only pprof
 - discovered pprof address files and dump scripts;
 - DB backend/path, with secrets redacted;
 - GitHub auth mode and installation details;
-- sandbox API configuration summary;
 - retry, lease, runner lifecycle, GitHub API, and workflow metrics;
 - recent failure state.
 

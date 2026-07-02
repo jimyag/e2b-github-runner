@@ -20,6 +20,39 @@ type upsertGitHubInstallationRequest struct {
 	SetupState     string `json:"setup_state"`
 }
 
+type accountPreferencesResponse struct {
+	Sandbox accountSandboxPreference `json:"sandbox"`
+}
+
+type accountSandboxPreference struct {
+	APIURL string                         `json:"api_url"`
+	APIKey accountSandboxAPIKeyPreference `json:"api_key"`
+}
+
+type accountSandboxAPIKeyPreference struct {
+	Configured bool   `json:"configured"`
+	UpdatedAt  string `json:"updated_at,omitempty"`
+}
+
+type accountSandboxServicePreferenceValue struct {
+	APIURL string `json:"api_url"`
+}
+
+type upsertSandboxConfigRequest struct {
+	APIURL string `json:"api_url"`
+	APIKey string `json:"api_key"`
+}
+
+type accountPreferenceScope struct {
+	Type string
+	ID   int64
+}
+
+const (
+	accountPreferenceNamespaceSandbox  = "sandbox"
+	accountPreferenceKeySandboxService = "service"
+)
+
 func (s *Server) handleGitHubAppInstallRedirect(w http.ResponseWriter, r *http.Request) {
 	if _, _, ok := s.requireUserSession(w, r); !ok {
 		return
@@ -185,6 +218,179 @@ func (s *Server) handleUserListRunners(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, states)
+}
+
+func (s *Server) handleUserPreferences(w http.ResponseWriter, r *http.Request) {
+	_, account, ok := s.requireUserSession(w, r)
+	if !ok {
+		return
+	}
+	scope, err := s.accountPreferenceScopeFromRequest(account.ID, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	response, err := s.accountPreferencesResponse(scope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Request) {
+	session, account, ok := s.requireUserSession(w, r)
+	if !ok {
+		return
+	}
+	scope, err := s.accountPreferenceScopeFromRequest(account.ID, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var input upsertSandboxConfigRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid sandbox config payload")
+		return
+	}
+	apiURL, err := normalizeHTTPURL(input.APIURL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	apiKey := strings.TrimSpace(input.APIKey)
+	_, currentKeyErr := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeSandboxAPIKey)
+	if apiKey == "" && errors.Is(currentKeyErr, state.ErrNotFound) {
+		writeError(w, http.StatusBadRequest, "api_key is required")
+		return
+	}
+	if currentKeyErr != nil && !errors.Is(currentKeyErr, state.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, currentKeyErr.Error())
+		return
+	}
+	valueJSON, err := json.Marshal(accountSandboxServicePreferenceValue{APIURL: apiURL})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, err := s.store.UpsertAccountPreference(state.AccountPreference{
+		ScopeType: scope.Type,
+		ScopeID:   scope.ID,
+		Namespace: accountPreferenceNamespaceSandbox,
+		Key:       accountPreferenceKeySandboxService,
+		ValueJSON: string(valueJSON),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if apiKey != "" {
+		encryptedAPIKey, err := encryptSecret(apiKey, s.cfg.AuthEncryptionKey)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if _, err := s.store.UpsertAccountSecret(state.AccountSecret{
+			ScopeType:      scope.Type,
+			ScopeID:        scope.ID,
+			KeyType:        state.AccountSecretTypeSandboxAPIKey,
+			EncryptedValue: encryptedAPIKey,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	s.recordAudit("github:"+session.Subject, "sandbox.configure", scope.Type, strconv.FormatInt(scope.ID, 10), map[string]any{
+		"api_url":        apiURL,
+		"api_key_update": apiKey != "",
+	})
+	response, err := s.accountPreferencesResponse(scope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleUserDeleteSandboxAPIKey(w http.ResponseWriter, r *http.Request) {
+	session, account, ok := s.requireUserSession(w, r)
+	if !ok {
+		return
+	}
+	scope, err := s.accountPreferenceScopeFromRequest(account.ID, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.store.DeleteAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeSandboxAPIKey); err != nil && !errors.Is(err, state.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.recordAudit("github:"+session.Subject, "sandbox_api_key.delete", scope.Type, strconv.FormatInt(scope.ID, 10), nil)
+	response, err := s.accountPreferencesResponse(scope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) accountPreferencesResponse(scope accountPreferenceScope) (accountPreferencesResponse, error) {
+	var response accountPreferencesResponse
+	preference, err := s.store.GetAccountPreference(scope.Type, scope.ID, accountPreferenceNamespaceSandbox, accountPreferenceKeySandboxService)
+	if err != nil {
+		if !errors.Is(err, state.ErrNotFound) {
+			return accountPreferencesResponse{}, err
+		}
+	} else {
+		var value accountSandboxServicePreferenceValue
+		if err := json.Unmarshal([]byte(preference.ValueJSON), &value); err != nil {
+			return accountPreferencesResponse{}, err
+		}
+		response.Sandbox.APIURL = value.APIURL
+	}
+	key, err := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeSandboxAPIKey)
+	if err != nil {
+		if errors.Is(err, state.ErrNotFound) {
+			return response, nil
+		}
+		return accountPreferencesResponse{}, err
+	}
+	response.Sandbox.APIKey.Configured = true
+	response.Sandbox.APIKey.UpdatedAt = key.UpdatedAt.Format(time.RFC3339)
+	return response, nil
+}
+
+func (s *Server) accountPreferenceScopeFromRequest(accountID int64, r *http.Request) (accountPreferenceScope, error) {
+	installationIDText := strings.TrimSpace(r.URL.Query().Get("installation_id"))
+	if installationIDText == "" {
+		return accountPreferenceScope{Type: state.AccountScopeTypeAccount, ID: accountID}, nil
+	}
+	installationID, err := strconv.ParseInt(installationIDText, 10, 64)
+	if err != nil || installationID <= 0 {
+		return accountPreferenceScope{}, errors.New("invalid installation_id")
+	}
+	installation, ok, err := s.githubInstallationForAccount(accountID, installationID)
+	if err != nil {
+		return accountPreferenceScope{}, err
+	} else if !ok {
+		return accountPreferenceScope{}, errors.New("github installation not found")
+	}
+	return accountPreferenceScope{Type: state.AccountScopeTypeGitHubInstall, ID: installation.InstallationID}, nil
+}
+
+func normalizeHTTPURL(rawURL string) (string, error) {
+	value := strings.TrimSpace(rawURL)
+	if value == "" {
+		return "", errors.New("api_url is required")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", errors.New("api_url must be an absolute URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", errors.New("api_url must use http or https")
+	}
+	return parsed.String(), nil
 }
 
 func (s *Server) githubAppInstallURL() string {

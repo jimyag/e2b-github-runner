@@ -25,11 +25,8 @@ database:
 
 auth:
   session_secret: <random session signing secret>
+  encryption_key: <separate random encryption key>
   session_ttl_hours: 12
-
-e2b:
-  api_key: <e2b api key>
-  api_url: <e2b api url>
 
 github:
   webhook_secret: <random webhook secret>
@@ -56,7 +53,9 @@ worker:
   retry_max_attempts: 5
 ```
 
-Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置；服务启动后通过后台页面或 admin API 创建。spec 名称建议使用有意义的名字，例如 `ubuntu-24-04`，`template_id` 填对应的 E2B template ID。保存 runner spec 前，admin API 会验证该 template 存在且有 usable build。
+Sandbox service API URL 和 API Key 不在 `runnerd.yaml` 中配置；登录普通用户界面后，在账户或组织的 Preferences 页面配置。API Key 会使用 `auth.encryption_key` 加密保存。
+
+Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置；服务启动后通过后台页面或 admin API 创建。spec 名称建议使用有意义的名字，例如 `ubuntu-24-04`，`template_id` 填对应的 E2B template ID。template 是否可访问会在 runnerd 使用对应账户或组织的 Sandbox service 配置启动 sandbox 时确认。
 
 `database.backend` 支持 `sqlite`、`postgres` 和 `mysql`。本地开发优先使用 sqlite；共享数据库的多实例部署需要先用两个 runnerd 进程验证 lease 行为，再作为正式运行方式记录。
 
@@ -390,7 +389,7 @@ curl -fsS -b "$COOKIE_JAR" \
 - `invalid signature`：GitHub webhook secret 和 `github.webhook_secret` 不一致。
 - `runner concurrency limit reached`：活跃 request 数量达到 `worker.max_concurrent_runners`。
 - GitHub job 一直 queued：workflow 的 `runs-on` labels 必须包含 `self-hosted` 和 `e2b`。
-- sandbox 创建失败：确认 `e2b.api_key`、`e2b.api_url` 和 template 配置是否匹配本地环境。
+- sandbox 创建失败：确认账户或组织 Preferences 里的 Sandbox service 配置和 template 配置是否匹配本地环境。
 - registration token 失败：确认 GitHub App installation 对目标仓库有对应的 administration/self-hosted runner 权限。
 
 ## 9. GitHub Actions 日志怎么看
@@ -443,7 +442,6 @@ curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
 - dump 脚本路径
 - 当前 DB 路径
 - GitHub 鉴权模式（app、token 或 basic）
-- sandbox API 配置摘要
 - 最近失败的 runner request
 
 `/diagnostics/vars` 会代理本地 pprof 服务的 `GET /debug/vars`，可以直接看到 expvar 指标摘要。当前指标覆盖 profile current/busy/idle/pending/desired、retry/lease、create/stop 次数与耗时、GitHub API 调用、runner 注册/清理，以及 workflow job queued/started/completed、conclusion、failure、queue duration 和 run duration。

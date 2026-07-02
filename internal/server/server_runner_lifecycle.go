@@ -209,6 +209,24 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		s.failStart(id, st, "profile_lookup", fmt.Errorf("load profile %q: %w", req.ProfileName, err))
 		return
 	}
+	sandboxService, sandboxConfig, err := s.sandboxServiceAndConfigForRunnerRequest(req)
+	if err != nil {
+		s.failStart(id, st, "sandbox_config", err)
+		return
+	}
+	if sandboxConfig.APIURL != "" || sandboxConfig.EncryptedAPIKey != "" {
+		current, err := s.store.ReadState(id)
+		if err != nil {
+			s.failStart(id, st, "sandbox_config", fmt.Errorf("read state for sandbox config snapshot: %w", err))
+			return
+		}
+		current.SandboxAPIURL = sandboxConfig.APIURL
+		current.SandboxAPIKeyEncrypted = sandboxConfig.EncryptedAPIKey
+		if err := s.store.WriteState(current); err != nil {
+			s.failStart(id, current, "sandbox_config", fmt.Errorf("write sandbox config snapshot: %w", err))
+			return
+		}
+	}
 	exitCh := make(chan struct{})
 	startStage := "sandbox_start"
 	result, err := func() (sandboxrunner.StartResult, error) {
@@ -219,7 +237,7 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 			startStage = "github_runner_url"
 			return sandboxrunner.StartResult{}, err
 		}
-		return s.sandbox.StartRunner(createCtx, sandboxrunner.StartInput{
+		return sandboxService.StartRunner(createCtx, sandboxrunner.StartInput{
 			RequestID:         req.ID,
 			RunnerName:        req.RunnerName,
 			RepositoryURL:     repositoryURL,
@@ -512,7 +530,7 @@ func (s *Server) cleanupSandboxAfterExit(id string, st state.RunnerState) error 
 	if st.SandboxID == "" {
 		return nil
 	}
-	if err := s.stopSandboxWithTimeout(context.Background(), st.SandboxID, st.ProcessPID); err != nil {
+	if err := s.stopSandboxWithTimeout(context.Background(), id, st.SandboxID, st.ProcessPID); err != nil {
 		if isSandboxGone(err) {
 			s.logger.Info("sandbox already gone after runner exit", "id", id, "sandbox_id", st.SandboxID, "error", err)
 			s.store.AppendLog(id, "control.log", []byte("sandbox already gone after runner exit: "+err.Error()+"\n"))
@@ -545,7 +563,7 @@ func (s *Server) recoverRunner(ctx context.Context, id string) error {
 
 	var sandboxErr error
 	if st.SandboxID != "" {
-		sandboxErr = s.stopSandboxWithTimeout(ctx, st.SandboxID, st.ProcessPID)
+		sandboxErr = s.stopSandboxWithTimeout(ctx, id, st.SandboxID, st.ProcessPID)
 		if sandboxErr != nil && isSandboxGone(sandboxErr) {
 			s.logger.Info("sandbox already gone during recovery", "id", id, "sandbox_id", st.SandboxID, "error", sandboxErr)
 			s.store.AppendLog(id, "control.log", []byte("sandbox already gone during recovery: "+sandboxErr.Error()+"\n"))
@@ -651,7 +669,7 @@ func (s *Server) stopRunner(ctx context.Context, id string, job github.WorkflowJ
 	s.logger.Info("runner marked stopping", "id", id, "sandbox_id", st.SandboxID, "pid", st.ProcessPID)
 	st.Version++
 	if st.SandboxID != "" {
-		if err := s.stopSandboxWithTimeout(ctx, st.SandboxID, st.ProcessPID); err != nil {
+		if err := s.stopSandboxWithTimeout(ctx, id, st.SandboxID, st.ProcessPID); err != nil {
 			if isSandboxGone(err) {
 				s.logger.Info("sandbox already gone", "id", id, "sandbox_id", st.SandboxID, "error", err)
 				s.store.AppendLog(id, "control.log", []byte("sandbox already gone: "+err.Error()+"\n"))
@@ -783,7 +801,7 @@ func (s *Server) failAndStopRunner(ctx context.Context, id, stage, reason, messa
 	}
 	st.Version++
 	if st.SandboxID != "" {
-		if err := s.stopSandboxWithTimeout(ctx, st.SandboxID, st.ProcessPID); err != nil && !isSandboxGone(err) {
+		if err := s.stopSandboxWithTimeout(ctx, id, st.SandboxID, st.ProcessPID); err != nil && !isSandboxGone(err) {
 			st.Status = state.StatusFailed
 			st.FailureStage = "stop"
 			st.FailureReason = "stop_failed"
@@ -1269,7 +1287,7 @@ func (s *Server) cleanupStartedSandbox(id string, result sandboxrunner.StartResu
 		return
 	}
 	s.logger.Info("cleanup started sandbox", "id", id, "sandbox_id", result.SandboxID, "pid", result.PID)
-	if err := s.stopSandboxWithTimeout(context.Background(), result.SandboxID, result.PID); err != nil && !isSandboxGone(err) {
+	if err := s.stopSandboxWithTimeout(context.Background(), id, result.SandboxID, result.PID); err != nil && !isSandboxGone(err) {
 		s.logger.Error("cleanup started sandbox", "id", id, "sandbox_id", result.SandboxID, "error", err)
 		s.store.AppendLog(id, "control.log", []byte("cleanup started sandbox failed: "+err.Error()+"\n"))
 		return
@@ -1278,16 +1296,24 @@ func (s *Server) cleanupStartedSandbox(id string, result sandboxrunner.StartResu
 	s.store.AppendLog(id, "control.log", []byte("cleaned started sandbox\n"))
 }
 
-func (s *Server) stopSandboxWithTimeout(ctx context.Context, sandboxID string, pid uint32) error {
+func (s *Server) stopSandboxWithTimeout(ctx context.Context, id, sandboxID string, pid uint32) error {
 	if ctx == nil {
 		ctx = context.Background()
 	} else {
 		ctx = context.WithoutCancel(ctx)
 	}
+	req, err := s.store.ReadRequest(id)
+	if err != nil {
+		return fmt.Errorf("read runner request for sandbox service: %w", err)
+	}
+	sandboxService, err := s.sandboxServiceForRunnerRequest(ctx, req)
+	if err != nil {
+		return err
+	}
 	s.logger.Info("stopping sandbox", "sandbox_id", sandboxID, "pid", pid, "timeout", s.cfg.SandboxStopTimeout.String())
 	stopCtx, cancel := context.WithTimeout(ctx, s.cfg.SandboxStopTimeout)
 	defer cancel()
-	if err := s.sandbox.StopRunner(stopCtx, sandboxID, pid); err != nil {
+	if err := sandboxService.StopRunner(stopCtx, sandboxID, pid); err != nil {
 		s.logger.Error("stop sandbox failed", "sandbox_id", sandboxID, "pid", pid, "error", err)
 		return err
 	}

@@ -18,8 +18,6 @@ type Config struct {
 	StateDir                  string
 	StateBackend              string
 	StateDatabaseDSN          string
-	E2BAPIKey                 string
-	E2BAPIURL                 string
 	GitHubAppID               int64
 	GitHubAppInstallationID   int64
 	GitHubAppSlug             string
@@ -30,12 +28,12 @@ type Config struct {
 	GitHubWebhookSecret       string
 	GitHubAllowedRepositories []string
 	AuthSessionSecret         string
+	AuthEncryptionKey         string
 	AuthSessionTTL            time.Duration
 	GitHubOAuthClientID       string
 	GitHubOAuthClientSecret   string
 	GitHubOAuthRedirectURL    string
 	SandboxTimeout            time.Duration
-	SandboxAPITimeout         time.Duration
 	SandboxCreateTimeout      time.Duration
 	SandboxStopTimeout        time.Duration
 	RecoveryTimeout           time.Duration
@@ -62,17 +60,15 @@ type fileConfig struct {
 		LegacyURL string `yaml:"url"`
 	} `yaml:"database"`
 	Auth struct {
+		EncryptionKey   string `yaml:"encryption_key"`
 		SessionSecret   string `yaml:"session_secret"`
 		SessionTTLHours int    `yaml:"session_ttl_hours"`
 	} `yaml:"auth"`
-	E2B struct {
-		APIKey           string `yaml:"api_key"`
-		APIURL           string `yaml:"api_url"`
-		TimeoutSec       int    `yaml:"timeout_seconds"`
-		APITimeoutSec    int    `yaml:"api_timeout_seconds"`
-		CreateTimeoutSec int    `yaml:"create_timeout_seconds"`
-		StopTimeoutSec   int    `yaml:"stop_timeout_seconds"`
-	} `yaml:"e2b"`
+	Sandbox struct {
+		TimeoutSec       int `yaml:"timeout_seconds"`
+		CreateTimeoutSec int `yaml:"create_timeout_seconds"`
+		StopTimeoutSec   int `yaml:"stop_timeout_seconds"`
+	} `yaml:"sandbox"`
 	GitHub struct {
 		WebhookSecret       string   `yaml:"webhook_secret"`
 		APIBaseURL          string   `yaml:"api_base_url"`
@@ -137,8 +133,6 @@ func LoadFile(path string) (Config, error) {
 		HTTPIdleTimeout:           durationSeconds(raw.Server.IdleTimeoutSec, 120),
 		StateBackend:              strings.ToLower(defaultString(raw.Database.Backend, "sqlite")),
 		StateDatabaseDSN:          defaultString(raw.Database.DSN, raw.Database.LegacyURL),
-		E2BAPIKey:                 raw.E2B.APIKey,
-		E2BAPIURL:                 raw.E2B.APIURL,
 		GitHubAppID:               raw.GitHub.App.ID,
 		GitHubAppInstallationID:   raw.GitHub.App.InstallationID,
 		GitHubAppSlug:             strings.TrimSpace(raw.GitHub.App.Slug),
@@ -148,15 +142,15 @@ func LoadFile(path string) (Config, error) {
 		GitHubBasicAuthPassword:   raw.GitHub.BasicAuth.Password,
 		GitHubWebhookSecret:       raw.GitHub.WebhookSecret,
 		GitHubAllowedRepositories: normalizePatterns(raw.GitHub.AllowedRepositories),
+		AuthEncryptionKey:         strings.TrimSpace(raw.Auth.EncryptionKey),
 		AuthSessionSecret:         strings.TrimSpace(raw.Auth.SessionSecret),
 		AuthSessionTTL:            durationHours(raw.Auth.SessionTTLHours, 12),
 		GitHubOAuthClientID:       strings.TrimSpace(raw.GitHub.OAuth.ClientID),
 		GitHubOAuthClientSecret:   strings.TrimSpace(raw.GitHub.OAuth.ClientSecret),
 		GitHubOAuthRedirectURL:    strings.TrimSpace(raw.GitHub.OAuth.RedirectURL),
-		SandboxTimeout:            durationSeconds(raw.E2B.TimeoutSec, 3600),
-		SandboxAPITimeout:         durationSeconds(raw.E2B.APITimeoutSec, 60),
-		SandboxCreateTimeout:      durationSeconds(raw.E2B.CreateTimeoutSec, 120),
-		SandboxStopTimeout:        durationSeconds(raw.E2B.StopTimeoutSec, 30),
+		SandboxTimeout:            durationSeconds(raw.Sandbox.TimeoutSec, 3600),
+		SandboxCreateTimeout:      durationSeconds(raw.Sandbox.CreateTimeoutSec, 120),
+		SandboxStopTimeout:        durationSeconds(raw.Sandbox.StopTimeoutSec, 30),
 		RecoveryTimeout:           durationSeconds(raw.Worker.RecoveryTimeoutSec, 120),
 		WorkerLeaseTTL:            durationSeconds(raw.Worker.LeaseTTLSec, 300),
 		RunnerIdleTimeout:         durationSeconds(raw.Worker.RunnerIdleTimeoutSec, 300),
@@ -197,8 +191,6 @@ func (c Config) GitHubAuthMode() string {
 func (c Config) validate() error {
 	var missing []string
 	for path, value := range map[string]string{
-		"e2b.api_key":           c.E2BAPIKey,
-		"e2b.api_url":           c.E2BAPIURL,
 		"github.webhook_secret": c.GitHubWebhookSecret,
 	} {
 		if strings.TrimSpace(value) == "" {
@@ -241,6 +233,9 @@ func (c Config) validate() error {
 	}
 	if strings.TrimSpace(c.StateDatabaseDSN) == "" {
 		missing = append(missing, "database.dsn")
+	}
+	if strings.TrimSpace(c.AuthEncryptionKey) == "" {
+		missing = append(missing, "auth.encryption_key")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing required config: %s", strings.Join(missing, ", "))

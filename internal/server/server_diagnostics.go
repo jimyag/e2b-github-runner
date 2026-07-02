@@ -52,9 +52,6 @@ func (s *Server) handleDiagnosticsPprof(w http.ResponseWriter, r *http.Request) 
 			"installation_id": s.cfg.GitHubAppInstallationID,
 			"api_base_url":    s.cfg.GitHubAPIBaseURL,
 		},
-		"sandbox": map[string]any{
-			"api_url": s.cfg.E2BAPIURL,
-		},
 		"recent_failures": failures,
 	})
 }

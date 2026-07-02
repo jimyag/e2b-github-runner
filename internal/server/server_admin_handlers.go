@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/qiniu/ci-runner/internal/github"
-	"github.com/qiniu/ci-runner/internal/sandboxrunner"
 	"github.com/qiniu/ci-runner/internal/state"
 )
 
@@ -241,11 +240,6 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	if input.Enabled != nil {
 		enabled = *input.Enabled
 	}
-	if err := s.validateTemplate(r.Context(), input.TemplateID); err != nil {
-		s.logger.Info("profile template rejected", "name", input.Name, "template_id", input.TemplateID, "error", err)
-		writeTemplateValidationError(w, err)
-		return
-	}
 	profile, err := s.store.UpsertProfile(state.RunnerProfile{
 		Name:             input.Name,
 		Labels:           input.Labels,
@@ -298,11 +292,6 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 		current.Labels = input.Labels
 	}
 	if input.TemplateID != "" {
-		if err := s.validateTemplate(r.Context(), input.TemplateID); err != nil {
-			s.logger.Info("profile template rejected", "name", current.Name, "template_id", input.TemplateID, "error", err)
-			writeTemplateValidationError(w, err)
-			return
-		}
 		current.TemplateID = input.TemplateID
 	}
 	if input.RunnerGroup != "" {
@@ -333,25 +322,6 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 	s.recordAudit("admin_api", "profile.update", "runner_profile", profile.Name, profile)
 	s.refreshMetrics()
 	writeJSON(w, http.StatusOK, profile)
-}
-
-func (s *Server) validateTemplate(ctx context.Context, templateID string) error {
-	ctx, cancel := context.WithTimeout(ctx, s.cfg.SandboxAPITimeout)
-	defer cancel()
-	return s.sandbox.ValidateTemplate(ctx, templateID)
-}
-
-func writeTemplateValidationError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, sandboxrunner.ErrTemplateRequired):
-		writeError(w, http.StatusBadRequest, "template_id is required")
-	case errors.Is(err, sandboxrunner.ErrTemplateNotFound):
-		writeError(w, http.StatusBadRequest, "template_id not found")
-	case errors.Is(err, sandboxrunner.ErrTemplateNotReady):
-		writeError(w, http.StatusBadRequest, "template_id has no usable build")
-	default:
-		writeError(w, http.StatusBadGateway, "validate template_id: "+err.Error())
-	}
 }
 
 func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {

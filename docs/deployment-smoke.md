@@ -5,10 +5,11 @@ Use this checklist before treating a runnerd deployment as ready for real GitHub
 ## Prerequisites
 
 - A runnerd deployment reachable over HTTPS for GitHub webhooks and admin login.
-- A `runnerd.yaml` with `database`, `auth`, `e2b`, `github`, and `worker` sections configured.
+- A `runnerd.yaml` with `database`, `auth`, `github`, and `worker` sections configured.
 - A GitHub.com App installed on the target repository or organization.
 - A GitHub App OAuth callback URL pointing at `/auth/github/callback` on the runnerd origin.
 - A repository webhook delivering `workflow_job` events to `POST /webhooks/github`.
+- Sandbox service API URL and API key configured in the target account or organization Preferences page.
 - At least one E2B template that contains `/opt/actions-runner/config.sh` and `/opt/actions-runner/run.sh`.
 - An admin account bootstrapped with `runnerd --bootstrap-admin github:<github-user-id>`.
 

@@ -599,6 +599,78 @@ func TestMigrateBackfillsLegacyRepositoryPolicyRunnerGroupName(t *testing.T) {
 	}
 }
 
+func TestMigrateResetsLegacyAccountPreferencesAndSecrets(t *testing.T) {
+	dir := t.TempDir()
+	databaseURL := dir + "/runnerd.db"
+	store := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: false,
+	}).(*DBStore)
+	db, err := store.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Exec(`CREATE TABLE account_preferences (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		account_id INTEGER NOT NULL,
+		namespace TEXT NOT NULL,
+		key TEXT NOT NULL,
+		value_json TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE account_secrets (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		account_id INTEGER NOT NULL,
+		key_type TEXT NOT NULL,
+		encrypted_value TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO account_preferences (account_id, namespace, key, value_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		1, "sandbox", "service", `{"api_url":"https://legacy.example.test"}`, now, now).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO account_secrets (account_id, key_type, encrypted_value, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		1, AccountSecretTypeSandboxAPIKey, "legacy-encrypted-value", now, now).Error; err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	migrated := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: true,
+	}).(*DBStore)
+	if err := migrated.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	migratedDB, err := migrated.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"account_preferences", "account_secrets"} {
+		var count int64
+		if err := migratedDB.Table(table).Count(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("expected legacy %s rows to be reset, got %d", table, count)
+		}
+		for _, column := range []string{"scope_type", "scope_id"} {
+			if !migratedDB.Migrator().HasColumn(table, column) {
+				t.Fatalf("expected %s.%s after migration", table, column)
+			}
+		}
+	}
+}
+
 func TestRepositoryPolicyIndexesArePortable(t *testing.T) {
 	store := New(t.TempDir()).(*DBStore)
 	db, err := store.dbOrEnsure()
@@ -1007,6 +1079,174 @@ func TestGitHubInstallationsAllowSharedOrgInstallationAcrossAccounts(t *testing.
 	}
 	if len(firstInstallations) != 0 || len(secondInstallations) != 1 {
 		t.Fatalf("expected deleting one user's link to preserve collaborator link, first=%#v second=%#v", firstInstallations, secondInstallations)
+	}
+}
+
+func TestAccountScopeForPersonalGitHubInstallation(t *testing.T) {
+	store := New(t.TempDir())
+	account, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "alice",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 456,
+		AccountLogin:   "alice-org",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	accountID, ok, err := store.AccountScopeForPersonalGitHubInstallation(987)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || accountID != account.ID {
+		t.Fatalf("expected personal installation to resolve account scope, account_id=%d ok=%v", accountID, ok)
+	}
+	if accountID, ok, err := store.AccountScopeForPersonalGitHubInstallation(456); err != nil || ok || accountID != 0 {
+		t.Fatalf("expected org installation not to resolve account scope, account_id=%d ok=%v err=%v", accountID, ok, err)
+	}
+}
+
+func TestAccountSecretsAreScopedToAccountAndType(t *testing.T) {
+	store := New(t.TempDir())
+	first, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "200", OAuthLogin: "bob"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountSecret(AccountSecret{
+		ScopeType:      AccountScopeTypeAccount,
+		ScopeID:        first.ID,
+		KeyType:        AccountSecretTypeSandboxAPIKey,
+		EncryptedValue: "v1:first",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountSecret(AccountSecret{
+		ScopeType:      AccountScopeTypeAccount,
+		ScopeID:        second.ID,
+		KeyType:        AccountSecretTypeSandboxAPIKey,
+		EncryptedValue: "v1:second",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountSecret(AccountSecret{
+		ScopeType:      AccountScopeTypeAccount,
+		ScopeID:        first.ID,
+		KeyType:        "other_api_key",
+		EncryptedValue: "v1:first-other",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountSecret(AccountSecret{
+		ScopeType:      AccountScopeTypeAccount,
+		ScopeID:        first.ID,
+		KeyType:        AccountSecretTypeSandboxAPIKey,
+		EncryptedValue: "v1:first-updated",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	firstKey, err := store.GetAccountSecret(AccountScopeTypeAccount, first.ID, AccountSecretTypeSandboxAPIKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondKey, err := store.GetAccountSecret(AccountScopeTypeAccount, second.ID, AccountSecretTypeSandboxAPIKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherKey, err := store.GetAccountSecret(AccountScopeTypeAccount, first.ID, "other_api_key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstKey.EncryptedValue != "v1:first-updated" || secondKey.EncryptedValue != "v1:second" || otherKey.EncryptedValue != "v1:first-other" {
+		t.Fatalf("unexpected sandbox api keys: first=%#v second=%#v", firstKey, secondKey)
+	}
+	if err := store.DeleteAccountSecret(AccountScopeTypeAccount, first.ID, AccountSecretTypeSandboxAPIKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetAccountSecret(AccountScopeTypeAccount, first.ID, AccountSecretTypeSandboxAPIKey); err != ErrNotFound {
+		t.Fatalf("expected first key to be deleted, got %v", err)
+	}
+	if _, err := store.GetAccountSecret(AccountScopeTypeAccount, second.ID, AccountSecretTypeSandboxAPIKey); err != nil {
+		t.Fatalf("second key should remain: %v", err)
+	}
+	if _, err := store.GetAccountSecret(AccountScopeTypeAccount, first.ID, "other_api_key"); err != nil {
+		t.Fatalf("other key should remain: %v", err)
+	}
+}
+
+func TestAccountPreferencesAreScopedToAccountNamespaceAndKey(t *testing.T) {
+	store := New(t.TempDir())
+	first, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "200", OAuthLogin: "bob"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountPreference(AccountPreference{
+		ScopeType: AccountScopeTypeAccount,
+		ScopeID:   first.ID,
+		Namespace: "Sandbox",
+		Key:       "Service",
+		ValueJSON: `{"api_url":"https://sandbox-one.example.test"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountPreference(AccountPreference{
+		ScopeType: AccountScopeTypeAccount,
+		ScopeID:   second.ID,
+		Namespace: "sandbox",
+		Key:       "service",
+		ValueJSON: `{"api_url":"https://sandbox-two.example.test"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountPreference(AccountPreference{
+		ScopeType: AccountScopeTypeAccount,
+		ScopeID:   first.ID,
+		Namespace: "sandbox",
+		Key:       "other",
+		ValueJSON: `{"enabled":true}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountPreference(AccountPreference{
+		ScopeType: AccountScopeTypeAccount,
+		ScopeID:   first.ID,
+		Namespace: "sandbox",
+		Key:       "service",
+		ValueJSON: `{"api_url":"https://sandbox-one-updated.example.test"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	firstConfig, err := store.GetAccountPreference(AccountScopeTypeAccount, first.ID, "sandbox", "service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondConfig, err := store.GetAccountPreference(AccountScopeTypeAccount, second.ID, "sandbox", "service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPreference, err := store.GetAccountPreference(AccountScopeTypeAccount, first.ID, "sandbox", "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstConfig.ValueJSON != `{"api_url":"https://sandbox-one-updated.example.test"}` || secondConfig.ValueJSON != `{"api_url":"https://sandbox-two.example.test"}` || otherPreference.ValueJSON != `{"enabled":true}` {
+		t.Fatalf("unexpected account preferences: first=%#v second=%#v other=%#v", firstConfig, secondConfig, otherPreference)
 	}
 }
 

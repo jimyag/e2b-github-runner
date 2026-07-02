@@ -17,7 +17,7 @@ The remaining work is no longer a basic architecture catch-up. The next decision
 ## Current Baseline
 
 - Configuration is loaded from `runnerd.yaml` by default, or from `--config`. Relative sqlite database paths and GitHub App private-key paths resolve from the config file directory.
-- The config schema covers server, database, OAuth session auth, E2B, GitHub webhook/auth/OAuth, allowed repositories, and worker retry/lease/concurrency behavior.
+- The config schema covers server, database, OAuth session auth, Sandbox lifecycle timeouts, GitHub webhook/auth/OAuth, allowed repositories, and worker retry/lease/concurrency behavior. Sandbox service API URL and API key are account or organization Preferences rather than file config.
 - Exactly one GitHub API auth mode is allowed: GitHub App, token, or basic auth. GitHub App mode supports optional static `installation_id`; when omitted, runnerd resolves installation access per job repository and caches transports.
 - Runner requests, events, specs, groups, policies, retry metadata, leases, and audit events are stored in the configured database backend.
 - State schema creation runs through GORM `AutoMigrate` after a small compatibility pass for older schema columns that cannot be safely added as `NOT NULL` without defaults.

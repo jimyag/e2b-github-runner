@@ -205,9 +205,7 @@ admin:
   token: test-token
 auth:
   session_secret: test-session-secret
-e2b:
-  api_key: test-key
-  api_url: https://api.e2b.dev
+  encryption_key: test-encryption-key
 github:
   webhook_secret: webhook-secret
   token: ghp_test

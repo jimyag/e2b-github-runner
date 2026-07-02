@@ -6,6 +6,7 @@ import {
   Check,
   ExternalLink,
   Github,
+  KeyRound,
   LogOut,
   Monitor,
   Moon,
@@ -17,9 +18,9 @@ import {
   X,
 } from "lucide-react"
 import { useTheme } from "next-themes"
-import { type MouseEvent, type ReactNode, useEffect, useMemo, useState } from "react"
+import { type FormEvent, type MouseEvent, type ReactNode, useEffect, useMemo, useState } from "react"
 
-import type { AuthSession, GitHubAppConfig, RunnerState } from "@/admin-types"
+import type { AuthSession, GitHubAppConfig, RunnerState, UserPreferences } from "@/admin-types"
 import { formatTime } from "@/admin-format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -35,6 +36,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 
@@ -65,6 +68,7 @@ type AccountSettingsRoute = {
 export function UserDashboard({
   authSession,
   githubApp,
+  userPreferences,
   runners,
   selectedKey,
   page,
@@ -72,6 +76,8 @@ export function UserDashboard({
   authorizedRepositories,
   loadingRepositoriesFor,
   onLoadAuthorizedRepositories,
+  onSaveSandboxConfig,
+  onDeleteSandboxAPIKey,
   onNavigate,
   onNavigateAccountSettings,
   onSelectKey,
@@ -79,6 +85,7 @@ export function UserDashboard({
 }: {
   authSession: AuthSession
   githubApp: GitHubAppConfig | null
+  userPreferences: UserPreferences | null
   runners: RunnerState[]
   selectedKey: string
   page: UserPage
@@ -86,6 +93,8 @@ export function UserDashboard({
   authorizedRepositories: Record<number, string[]>
   loadingRepositoriesFor: number | null
   onLoadAuthorizedRepositories: (id: number) => void
+  onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number) => Promise<void>
+  onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   onNavigate: (page: UserPage) => void
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
   onSelectKey: (key: string) => void
@@ -158,11 +167,15 @@ export function UserDashboard({
       ) : page === "settings" ? (
         <AccountsPage
           githubApp={githubApp}
+          userPreferences={userPreferences}
           installations={installations}
           authorizedRepositories={authorizedRepositories}
           loadingRepositoriesFor={loadingRepositoriesFor}
           route={accountSettingsRoute}
           onLoadAuthorizedRepositories={onLoadAuthorizedRepositories}
+          onSaveSandboxConfig={onSaveSandboxConfig}
+          onDeleteSandboxAPIKey={onDeleteSandboxAPIKey}
+          currentLogin={authSession.login}
           onNavigateAccountSettings={onNavigateAccountSettings}
         />
       ) : (
@@ -278,25 +291,35 @@ function ActivityRepositoriesPage({
 
 function AccountsPage({
   githubApp,
+  userPreferences,
   installations,
   authorizedRepositories,
   loadingRepositoriesFor,
   route,
   onLoadAuthorizedRepositories,
+  onSaveSandboxConfig,
+  onDeleteSandboxAPIKey,
+  currentLogin,
   onNavigateAccountSettings,
 }: {
   githubApp: GitHubAppConfig | null
+  userPreferences: UserPreferences | null
   installations: NonNullable<GitHubAppConfig["installations"]>
   authorizedRepositories: Record<number, string[]>
   loadingRepositoriesFor: number | null
   route: AccountSettingsRoute
   onLoadAuthorizedRepositories: (id: number) => void
+  onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number) => Promise<void>
+  onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
+  currentLogin?: string
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
 }) {
   const [filter, setFilter] = useState("")
   const selected =
     installations.find((installation) => installation.account_login === route.accountLogin) || installations[0]
   const authorized = selected ? authorizedRepositories[selected.id] : undefined
+  const preferenceInstallationID =
+    selected && selected.account_login && selected.account_login !== currentLogin ? selected.id : undefined
   const filteredRepositories = useMemo(() => {
     const query = filter.trim().toLowerCase()
     const repositories = authorized || []
@@ -451,28 +474,158 @@ function AccountsPage({
                 </TabsContent>
 
                 <TabsContent value="preferences">
-                  <Card className="rounded-lg">
-                    <CardHeader>
-                      <CardTitle className="text-base">Runner preferences</CardTitle>
-                      <CardDescription>Runner platform preferences for this account.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
-                        No runner platform settings are configured for this account yet.
-                      </div>
-                    </CardContent>
-                  </Card>
+                  <SandboxAPIKeyCard
+                    preferences={userPreferences}
+                    onSave={(apiURL, apiKey) => onSaveSandboxConfig(apiURL, apiKey, preferenceInstallationID)}
+                    onDelete={() => onDeleteSandboxAPIKey(preferenceInstallationID)}
+                  />
                 </TabsContent>
               </Tabs>
             </div>
           ) : (
-            <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
-              Install the GitHub App to connect a user or organization.
-            </div>
+            route.tab === "preferences" ? (
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-semibold">Account preferences</h2>
+                  <div className="mt-1 text-sm text-muted-foreground">Settings for the signed-in account.</div>
+                </div>
+                <SandboxAPIKeyCard
+                  preferences={userPreferences}
+                  onSave={onSaveSandboxConfig}
+                  onDelete={onDeleteSandboxAPIKey}
+                />
+              </div>
+            ) : (
+              <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
+                Install the GitHub App to connect a user or organization.
+              </div>
+            )
           )}
         </section>
       </div>
     </>
+  )
+}
+
+function SandboxAPIKeyCard({
+  preferences,
+  onSave,
+  onDelete,
+}: {
+  preferences: UserPreferences | null
+  onSave: (apiURL: string, apiKey: string) => Promise<void>
+  onDelete: () => Promise<void>
+}) {
+  const [apiURL, setAPIURL] = useState("")
+  const [apiKey, setAPIKey] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState("")
+  const configured = preferences?.sandbox.api_key.configured ?? false
+  const updatedAt = preferences?.sandbox.api_key.updated_at
+
+  useEffect(() => {
+    setAPIURL(preferences?.sandbox.api_url ?? "")
+  }, [preferences?.sandbox.api_url])
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const nextAPIURL = apiURL.trim()
+    const nextAPIKey = apiKey.trim()
+    if (!nextAPIURL) {
+      setError("Sandbox service API URL is required.")
+      return
+    }
+    if (!configured && !nextAPIKey) {
+      setError("Sandbox API Key is required.")
+      return
+    }
+    setSaving(true)
+    setError("")
+    try {
+      await onSave(nextAPIURL, nextAPIKey)
+      setAPIKey("")
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to save Sandbox service settings.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const remove = async () => {
+    setDeleting(true)
+    setError("")
+    try {
+      await onDelete()
+      setAPIKey("")
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to remove Sandbox API Key.")
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Card className="gap-0 rounded-lg py-0">
+      <form className="p-3" onSubmit={submit}>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-base font-semibold leading-none">
+              <KeyRound className="h-4 w-4 shrink-0" />
+              <span>Sandbox service</span>
+            </div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              Configure the account Sandbox service endpoint and encrypted API Key.
+            </div>
+          </div>
+          <Badge variant={configured ? "secondary" : "outline"}>{configured ? "Configured" : "Not configured"}</Badge>
+        </div>
+
+        <div className="mt-2.5 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
+          <div className="grid min-w-0 gap-1.5">
+            <Label htmlFor="sandbox-api-url">API URL</Label>
+            <Input
+              id="sandbox-api-url"
+              value={apiURL}
+              onChange={(event) => setAPIURL(event.target.value)}
+              autoComplete="off"
+              placeholder="https://api.e2b.dev"
+            />
+          </div>
+
+          <div className="grid min-w-0 gap-1.5">
+            <Label htmlFor="sandbox-api-key">API Key</Label>
+            <Input
+              id="sandbox-api-key"
+              type="password"
+              value={apiKey}
+              onChange={(event) => setAPIKey(event.target.value)}
+              autoComplete="off"
+              placeholder={configured ? "••••••••••••••••" : "Enter Sandbox API Key"}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {configured ? (
+              <Button type="button" variant="outline" size="sm" onClick={remove} disabled={deleting || saving}>
+                <X className="h-4 w-4" />
+                {deleting ? "Removing" : "Remove"}
+              </Button>
+            ) : null}
+            <Button type="submit" size="sm" disabled={saving || deleting || !apiURL.trim() || (!configured && !apiKey.trim())}>
+              <ShieldCheck className="h-4 w-4" />
+              {saving ? "Saving" : configured ? "Save changes" : "Save settings"}
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-1.5 text-sm text-muted-foreground">
+          {configured && updatedAt ? `Last updated ${formatTime(updatedAt)}` : "No Sandbox API Key is saved."}
+        </div>
+
+        {error ? <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+      </form>
+    </Card>
   )
 }
 
@@ -491,6 +644,8 @@ function PullRequestsPage({
 }) {
   const currentJobs = selected ? currentBuildJobs(selected) : []
   const previousJobs = selected ? previousBuildJobs(selected, currentJobs) : []
+  const selectedTitleClass = selected ? userBuildGroupTitleClass(selected) : ""
+  const shouldCollapsePreviousJobs = previousJobs.length > 2
 
   return (
     <>
@@ -540,8 +695,8 @@ function PullRequestsPage({
             <div className="space-y-4">
               <div>
                 <h2 className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-2xl font-semibold">
-                  <span>{selected.repository}</span>
-                  <span className={userBuildGroupTitleClass(selected)}>{selected.title}</span>
+                  <span className={selectedTitleClass}>{selected.repository}</span>
+                  <span className={selectedTitleClass}>{selected.title}</span>
                 </h2>
                 <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
                   <JobField label="Branch" value={selected.headBranch || selected.subtitle || "unknown"} />
@@ -554,7 +709,7 @@ function PullRequestsPage({
                 {currentJobs.map((job) => (
                   <RunnerJobCard key={job.id} job={job} />
                 ))}
-                {previousJobs.length ? (
+                {shouldCollapsePreviousJobs ? (
                   <Collapsible>
                     <CollapsibleTrigger asChild>
                       <Button type="button" variant="outline" className="w-full justify-between">
@@ -571,6 +726,13 @@ function PullRequestsPage({
                       ))}
                     </CollapsibleContent>
                   </Collapsible>
+                ) : previousJobs.length ? (
+                  <div className="grid gap-3">
+                    <div className="text-sm font-medium text-muted-foreground">Previous jobs</div>
+                    {previousJobs.map((job) => (
+                      <RunnerJobCard key={job.id} job={job} />
+                    ))}
+                  </div>
                 ) : null}
               </div>
             </div>
@@ -688,6 +850,9 @@ function RunnerJobCard({ job }: { job: RunnerState }) {
         <JobField label="Runner spec" value={job.runner_spec_name || "matched by labels"} />
         <JobField label="Workflow" value={job.workflow_name || "unknown"} />
         <JobField label="Workflow run" value={workflowRunValue(job)} />
+        <JobField label="Queued" value={formatTime(job.created_at)} />
+        <JobField label="Started" value={formatTime(job.running_at)} />
+        <JobField label="Finished" value={formatTime(job.completed_at || job.failed_at)} />
       </CardContent>
     </Card>
   )
@@ -759,7 +924,7 @@ function BuildGroupListItem({
             </span>
           </span>
           <span className="flex shrink-0 items-baseline gap-1 font-mono text-sm leading-5">
-            <span className="text-muted-foreground">#</span>
+            <span className={statusClasses.title}>#</span>
             <span className={cn("text-sm font-semibold", statusClasses.title)}>{reference}</span>
           </span>
         </span>
@@ -794,8 +959,9 @@ function BuildGroupStatusIcon({ status }: { status: RunnerStatusSummary }) {
 }
 
 function buildGroupStatus(group: BuildGroup): RunnerStatusSummary {
-  if (group.jobs.some((job) => job.status === "failed")) return "failed"
-  if (group.jobs.some((job) => job.status === "queued" || job.status === "creating" || job.status === "running" || job.status === "stopping")) {
+  const jobs = currentBuildJobs(group)
+  if (jobs.some((job) => job.status === "failed")) return "failed"
+  if (jobs.some((job) => job.status === "queued" || job.status === "creating" || job.status === "running" || job.status === "stopping")) {
     return "active"
   }
   return "completed"
@@ -839,6 +1005,7 @@ function runnerJobTitle(job: RunnerState) {
 }
 
 function groupRunnersByBuildContext(runners: RunnerState[]): BuildGroup[] {
+  const visibleRunners = runners.filter(isUserVisibleRunnerJob)
   const prByRepositoryAndSHA = new Map<string, number>()
   for (const runner of runners) {
     if (runner.repository_full_name && runner.head_sha && runner.pull_request_number) {
@@ -847,7 +1014,7 @@ function groupRunnersByBuildContext(runners: RunnerState[]): BuildGroup[] {
   }
 
   const groups = new Map<string, BuildGroup>()
-  for (const runner of runners) {
+  for (const runner of visibleRunners) {
     const repository = runner.repository_full_name || "unknown/repository"
     const inferredPR = runner.pull_request_number || (runner.head_sha ? prByRepositoryAndSHA.get(`${repository}:${runner.head_sha}`) : undefined)
     const group = buildGroupSeed(runner, repository, inferredPR)
@@ -874,6 +1041,10 @@ function groupRunnersByBuildContext(runners: RunnerState[]): BuildGroup[] {
   return Array.from(groups.values())
     .map((group) => ({ ...group, jobs: orderJobs(group.jobs) }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+}
+
+function isUserVisibleRunnerJob(job: RunnerState) {
+  return !(job.failure_stage === "admission" && job.failure_reason === "profile_labels_not_matched")
 }
 
 function buildGroupSeed(runner: RunnerState, repository: string, pullRequestNumber?: number): BuildGroup {
