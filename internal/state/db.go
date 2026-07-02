@@ -203,13 +203,15 @@ func backfillRunnerRequestGitHubContext(db *gorm.DB) error {
 		Where("github_payload_json <> ''").
 		Where("github_context_backfilled IS NULL OR github_context_backfilled = ?", false).
 		FindInBatches(&records, runnerRequestGitHubContextBackfillBatchSize, func(tx *gorm.DB, _ int) error {
-			for _, record := range records {
-				updates := runnerRequestGitHubContextBackfill(record)
-				if err := tx.Model(&runnerRequestRecord{}).Where("id = ?", record.ID).Updates(updates).Error; err != nil {
-					return err
+			return tx.Transaction(func(batchTx *gorm.DB) error {
+				for _, record := range records {
+					updates := runnerRequestGitHubContextBackfill(record)
+					if err := batchTx.Model(&runnerRequestRecord{}).Where("id = ?", record.ID).Updates(updates).Error; err != nil {
+						return err
+					}
 				}
-			}
-			return nil
+				return nil
+			})
 		}).Error
 }
 
