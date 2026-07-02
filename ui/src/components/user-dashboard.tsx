@@ -520,12 +520,12 @@ function SandboxAPIKeyCard({
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState("")
-  const configured = preferences?.sandbox.api_key.configured ?? false
-  const updatedAt = preferences?.sandbox.api_key.updated_at
+  const configured = preferences?.sandbox?.api_key?.configured ?? false
+  const updatedAt = preferences?.sandbox?.api_key?.updated_at
 
   useEffect(() => {
-    setAPIURL(preferences?.sandbox.api_url ?? "")
-  }, [preferences?.sandbox.api_url])
+    setAPIURL(preferences?.sandbox?.api_url ?? "")
+  }, [preferences?.sandbox?.api_url])
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -850,8 +850,8 @@ function RunnerJobCard({ job }: { job: RunnerState }) {
         <JobField label="Workflow" value={job.workflow_name || "unknown"} />
         <JobField label="Workflow run" value={workflowRunValue(job)} />
         <JobField label="Queued" value={formatTime(job.created_at)} />
-        <JobField label="Started" value={formatTime(job.running_at)} />
-        <JobField label="Finished" value={formatTime(job.completed_at || job.failed_at)} />
+        <JobField label="Started" value={job.running_at ? formatTime(job.running_at) : "-"} />
+        <JobField label="Finished" value={job.completed_at || job.failed_at ? formatTime(job.completed_at || job.failed_at) : "-"} />
       </CardContent>
     </Card>
   )
