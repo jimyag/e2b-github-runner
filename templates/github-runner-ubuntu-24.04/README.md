@@ -21,17 +21,16 @@ Reference:
 ## Build with qshell
 
 ```bash
-cd templates/github-runner-ubuntu-24.04
-qshell sandbox template build --wait
+task template-build-prod
 ```
 
 For an isolated development tag:
 
 ```bash
-qshell sandbox template build --name github-runner-ubuntu-24-04-dev --wait
+task template-build-dev
 ```
 
-`qshell` reads `qshell.sandbox.toml` in this directory. Both production and development template builds request `8` vCPUs and `8192` MiB of memory. New sandboxes inherit those resources from the rebuilt template.
+The Taskfile copies `qshell.sandbox.toml` to a temporary file before calling `qshell sandbox template build`, so any generated `template_id` is not written back into the tracked config. Both production and development template builds request `8` vCPUs and `8192` MiB of memory. New sandboxes inherit those resources from the rebuilt template.
 
 The build prints a template ID and template name. Use the production template name or ID as:
 

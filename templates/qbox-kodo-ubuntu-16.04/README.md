@@ -27,4 +27,4 @@ Build the Qiniu sandbox template with:
 task qbox-kodo-template-build-prod
 ```
 
-`qshell` reads `qshell.sandbox.toml` in this directory. The production template name is `qbox-kodo-ubuntu-16-04`.
+The Taskfile copies `qshell.sandbox.toml` to a temporary file before calling `qshell sandbox template build`, so any generated `template_id` is not written back into the tracked config. The production template name is `qbox-kodo-ubuntu-16-04`.

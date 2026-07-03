@@ -1,11 +1,10 @@
 # GitHub runner Ubuntu 24.04 Qiniu sandbox template.
 #
-# qshell reads this file when running from this directory:
-#   qshell sandbox template build --wait
+# This tracked file is the stable build input. Use Taskfile build targets so
+# qshell writes any generated template_id only to a temporary copy:
+#   task template-build-prod
 #
-# Prefer a stable name over a committed environment-specific template_id. qshell
-# looks up an existing template by name, rebuilds it when found, and creates one
-# when it does not exist.
+# Prefer a stable name over a committed environment-specific template_id.
 
 name = "github-runner-ubuntu-24-04"
 dockerfile = "./Dockerfile"

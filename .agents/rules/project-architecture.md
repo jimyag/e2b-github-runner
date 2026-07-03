@@ -2,7 +2,7 @@
 
 ## Runtime Shape
 
-- `runnerd` is a single Go service that receives GitHub `workflow_job` webhooks, admits jobs by repository and labels, creates E2B sandboxes, registers ephemeral GitHub Actions self-hosted runners, and cleans them up.
+- `runnerd` is a single Go service that receives GitHub `workflow_job` webhooks, admits jobs by repository and labels, creates Qiniu sandboxes, registers ephemeral GitHub Actions self-hosted runners, and cleans them up.
 - Runtime config is file-first. `runnerd` reads `./runnerd.yaml` by default, or another path passed with `--config`.
 - Local development should use `runnerd.local.yaml` for secrets and sqlite state.
 - Relative sqlite `database.dsn` and `github.app.private_key_file` paths resolve from the directory containing the config file. Legacy `database.url` remains a deprecated alias when `database.dsn` is empty.
@@ -38,5 +38,5 @@
 
 - Runner request states are `queued`, `creating`, `running`, `stopping`, `completed`, and `failed`.
 - Global `worker.max_concurrent_runners` and per-spec `max_concurrency` are enforced by worker processing; excess work stays queued.
-- Transient E2B placement failures, HTTP 429s, and GitHub secondary rate limits are queue deferrals. Deterministic auth/config/template failures should fail immediately.
+- Transient Qiniu sandbox placement failures, HTTP 429s, and GitHub secondary rate limits are queue deferrals. Deterministic auth/config/template failures should fail immediately.
 - Control/stdout/stderr logs are persisted as runner events and exposed through the admin API/UI.

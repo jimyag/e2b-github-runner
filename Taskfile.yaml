@@ -229,13 +229,21 @@ tasks:
     desc: Build the development Qiniu sandbox template
     dir: "{{.TEMPLATE_DIR}}"
     cmds:
-      - qshell sandbox template build --name github-runner-ubuntu-24-04-dev --wait
+      - |
+        tmp_config="$(mktemp "./.qshell-sandbox.XXXXXX")"
+        cp qshell.sandbox.toml "$tmp_config"
+        trap 'rm -f "$tmp_config"' EXIT
+        qshell sandbox template build --config "$tmp_config" --name github-runner-ubuntu-24-04-dev --wait
 
   template-build-prod:
     desc: Build the production Qiniu sandbox template
     dir: "{{.TEMPLATE_DIR}}"
     cmds:
-      - qshell sandbox template build --wait
+      - |
+        tmp_config="$(mktemp "./.qshell-sandbox.XXXXXX")"
+        cp qshell.sandbox.toml "$tmp_config"
+        trap 'rm -f "$tmp_config"' EXIT
+        qshell sandbox template build --config "$tmp_config" --wait
 
   qbox-kodo-base-build:
     desc: Build the qbox kodo Ubuntu 16.04 base Docker image locally
@@ -259,7 +267,11 @@ tasks:
     desc: Build the qbox kodo production Qiniu sandbox template
     dir: "{{.QBOX_KODO_TEMPLATE_DIR}}"
     cmds:
-      - qshell sandbox template build --wait
+      - |
+        tmp_config="$(mktemp "./.qshell-sandbox.XXXXXX")"
+        cp qshell.sandbox.toml "$tmp_config"
+        trap 'rm -f "$tmp_config"' EXIT
+        qshell sandbox template build --config "$tmp_config" --wait
 
   release-check:
     desc: Validate the GoReleaser configuration

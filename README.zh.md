@@ -110,7 +110,7 @@ task docker-build
 task template-build-prod
 ```
 
-`templates/github-runner-ubuntu-24.04` 是默认 GitHub runner image，包含 runner runtime、Docker support、helper tools 和 `rclone`。Qiniu sandbox template 构建使用 `qshell sandbox template build`，参数来自各模板目录下的 `qshell.sandbox.toml`。`templates/qbox-kodo-ubuntu-16.04` 是额外的 legacy Ubuntu 16.04 template，用于仍需要旧 Go toolchains、apt packages、Docker support 和 `rclone` 的 qbox/kodo-style jobs。它的 Docker base image 定义在 `templates/qbox-kodo-ubuntu-16.04/base.Dockerfile`，可先运行 `task qbox-kodo-base-build` 重建，再重建 Qiniu sandbox template。
+`templates/github-runner-ubuntu-24.04` 是默认 GitHub runner image，包含 runner runtime、Docker support、helper tools 和 `rclone`。Qiniu sandbox template 构建使用 Taskfile target 调用 `qshell sandbox template build`，并使用各模板目录下 `qshell.sandbox.toml` 的临时副本，避免 qshell 生成的 `template_id` 写回已跟踪配置。`templates/qbox-kodo-ubuntu-16.04` 是额外的 legacy Ubuntu 16.04 template，用于仍需要旧 Go toolchains、apt packages、Docker support 和 `rclone` 的 qbox/kodo-style jobs。它的 Docker base image 定义在 `templates/qbox-kodo-ubuntu-16.04/base.Dockerfile`，可先运行 `task qbox-kodo-base-build` 重建，再重建 Qiniu sandbox template。
 
 常用验证命令：
 

@@ -219,16 +219,16 @@ flowchart LR
 
 ## 对比
 
-| Dimension | runnerd now | Fireactions | Actions Runner Controller |
+| 维度 | runnerd now | Fireactions | Actions Runner Controller |
 | --- | --- | --- | --- |
-| Deployment | Single Go service | Runner orchestration service | Kubernetes operator |
-| Compute | Qiniu sandbox | Firecracker microVM | Kubernetes pod |
-| State source | SQLite/Postgres/MySQL DB | Service-managed pool state | Kubernetes API / CRD status |
-| Scheduling input | GitHub webhooks + admin API | Pool desired/current state | Scale set/listener reconciliation |
-| Runner selection | Runner specs, groups, policies, label matching | Pool/profile selection | Runner groups and scale sets |
-| Auth | GitHub App, token, or basic auth | GitHub App | GitHub App / scale set auth |
-| Diagnostics | Admin diagnostics + pprof/expvar | Pool metrics | Controller/workflow metrics |
-| Operational scope | Lightweight service for Qiniu sandbox runners | Dedicated VM runner platform | Full Kubernetes-native controller |
+| 部署方式 | 单个 Go 服务 | Runner 编排服务 | Kubernetes Operator |
+| 计算资源 | Qiniu 沙箱 | Firecracker 微型虚拟机 (microVM) | Kubernetes Pod |
+| 状态事实源 | SQLite/Postgres/MySQL 数据库 | 服务管理的连接池状态 | Kubernetes API / CRD 状态 |
+| 调度输入 | GitHub Webhooks + 管理 API | 连接池期望/当前状态 | 伸缩组/监听器调和 |
+| Runner 选择 | Runner 规格、组、策略、标签匹配 | 连接池/配置选择 | Runner 组和伸缩组 |
+| 鉴权方式 | GitHub App、Token 或 Basic 鉴权 | GitHub App | GitHub App / scale set 鉴权 |
+| 诊断信息 | 管理端诊断 + pprof/expvar | 连接池指标 | 控制器/工作流指标 |
+| 运维范围 | 适用于 Qiniu 沙箱 Runner 的轻量级服务 | 专用的虚拟机 Runner 平台 | 完整的 Kubernetes 原生控制器 |
 
 runnerd 有意保留 Qiniu sandbox execution model，避免 ARC 的 Kubernetes control-plane complexity。吸收的有用思想包括 reconciliation mindset、repository visibility rules、profile/spec-based runner selection 和 workflow job metrics。
 

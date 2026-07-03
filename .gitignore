@@ -7,6 +7,7 @@ node_modules/
 ui/node_modules/
 internal/server/ui/
 templates/*/node_modules/
+templates/*/.qshell-sandbox.*
 *.local.yaml
 secrets/
 .smee-url
