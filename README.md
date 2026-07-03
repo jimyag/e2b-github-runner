@@ -110,7 +110,7 @@ task docker-build
 task template-build-prod
 ```
 
-`templates/github-runner-ubuntu-24.04` is the default GitHub runner image and includes the runner runtime, Docker support, helper tools, and `rclone`. `templates/qbox-kodo-ubuntu-16.04` is an additional legacy Ubuntu 16.04 template for qbox/kodo-style jobs with the required old Go toolchains, apt packages, Docker support, and `rclone`. Its Docker base image is defined by `templates/qbox-kodo-ubuntu-16.04/base.Dockerfile` and can be rebuilt with `task qbox-kodo-base-build` before rebuilding the Qiniu sandbox template.
+`templates/github-runner-ubuntu-24.04` is the default GitHub runner image and includes the runner runtime, Docker support, helper tools, and `rclone`. Qiniu sandbox template builds use `qshell sandbox template build` and the `qshell.sandbox.toml` in each template directory. `templates/qbox-kodo-ubuntu-16.04` is an additional legacy Ubuntu 16.04 template for qbox/kodo-style jobs with the required old Go toolchains, apt packages, Docker support, and `rclone`. Its Docker base image is defined by `templates/qbox-kodo-ubuntu-16.04/base.Dockerfile` and can be rebuilt with `task qbox-kodo-base-build` before rebuilding the Qiniu sandbox template.
 
 Useful validation commands:
 

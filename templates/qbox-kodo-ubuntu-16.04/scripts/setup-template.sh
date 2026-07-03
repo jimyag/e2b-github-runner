@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eux
 
-setup_marker="/usr/local/share/e2b-runner-template/.setup-complete"
+setup_marker="/usr/local/share/qiniu-sandbox-runner-template/.setup-complete"
 
 is_setup_complete() {
   [ -f "$setup_marker" ] || return 1
@@ -106,7 +106,7 @@ echo "user ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-user
 chmod 0440 /etc/sudoers.d/90-user
 mkdir -p /home/user/.config/git /tmp/runner-home/.config/git /opt/hostedtoolcache /opt/actions-runner /var/lib/docker
 chown -R user:user /home/user /tmp/runner-home /opt/hostedtoolcache /opt/actions-runner
-install -m 0755 /usr/local/share/e2b-runner-template/ensure-docker /usr/local/bin/ensure-docker
+install -m 0755 /usr/local/share/qiniu-sandbox-runner-template/ensure-docker /usr/local/bin/ensure-docker
 
 runner_arch="x64"
 if [ ! -x /opt/actions-runner/config.sh ] || [ ! -x /opt/actions-runner/run.sh ]; then

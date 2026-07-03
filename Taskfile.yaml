@@ -215,27 +215,27 @@ tasks:
     desc: Check Dockerfiles without building image layers
     cmds:
       - docker build --check -f Dockerfile .
-      - docker build --check --platform=linux/amd64 -f {{.TEMPLATE_DIR}}/e2b.Dockerfile {{.TEMPLATE_DIR}}
+      - docker build --check --platform=linux/amd64 -f {{.TEMPLATE_DIR}}/Dockerfile {{.TEMPLATE_DIR}}
       - docker build --check --platform=linux/amd64 -f {{.QBOX_KODO_TEMPLATE_DIR}}/base.Dockerfile {{.QBOX_KODO_TEMPLATE_DIR}}
-      - docker build --check --platform=linux/amd64 -f {{.QBOX_KODO_TEMPLATE_DIR}}/e2b.Dockerfile {{.QBOX_KODO_TEMPLATE_DIR}}
+      - docker build --check --platform=linux/amd64 -f {{.QBOX_KODO_TEMPLATE_DIR}}/Dockerfile {{.QBOX_KODO_TEMPLATE_DIR}}
 
   template-deps:
-    desc: Install E2B template dependencies
+    desc: Check Qiniu sandbox template build dependencies
     dir: "{{.TEMPLATE_DIR}}"
     cmds:
-      - npm install
+      - qshell sandbox template build --help >/dev/null
 
   template-build-dev:
-    desc: Build the development E2B sandbox template
+    desc: Build the development Qiniu sandbox template
     dir: "{{.TEMPLATE_DIR}}"
     cmds:
-      - npm run build:dev
+      - qshell sandbox template build --name github-runner-ubuntu-24-04-dev --wait
 
   template-build-prod:
-    desc: Build the production E2B sandbox template
+    desc: Build the production Qiniu sandbox template
     dir: "{{.TEMPLATE_DIR}}"
     cmds:
-      - npm run build:prod
+      - qshell sandbox template build --wait
 
   qbox-kodo-base-build:
     desc: Build the qbox kodo Ubuntu 16.04 base Docker image locally
@@ -250,16 +250,16 @@ tasks:
       - docker push {{.QBOX_KODO_BASE_IMAGE}}
 
   qbox-kodo-template-deps:
-    desc: Install qbox kodo E2B template dependencies
+    desc: Check qbox kodo Qiniu sandbox template build dependencies
     dir: "{{.QBOX_KODO_TEMPLATE_DIR}}"
     cmds:
-      - npm install
+      - qshell sandbox template build --help >/dev/null
 
   qbox-kodo-template-build-prod:
-    desc: Build the qbox kodo production E2B sandbox template
+    desc: Build the qbox kodo production Qiniu sandbox template
     dir: "{{.QBOX_KODO_TEMPLATE_DIR}}"
     cmds:
-      - npm run build:prod
+      - qshell sandbox template build --wait
 
   release-check:
     desc: Validate the GoReleaser configuration

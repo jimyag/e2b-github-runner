@@ -1,0 +1,15 @@
+# GitHub runner Ubuntu 24.04 Qiniu sandbox template.
+#
+# qshell reads this file when running from this directory:
+#   qshell sandbox template build --wait
+#
+# Prefer a stable name over a committed environment-specific template_id. qshell
+# looks up an existing template by name, rebuilds it when found, and creates one
+# when it does not exist.
+
+name = "github-runner-ubuntu-24-04"
+dockerfile = "./Dockerfile"
+path = "."
+cpu_count = 8
+memory_mb = 8192
+no_cache = false

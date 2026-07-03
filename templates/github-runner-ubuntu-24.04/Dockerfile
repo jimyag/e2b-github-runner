@@ -21,9 +21,9 @@ ENV LANG=C.UTF-8 \
     TERRAFORM_CACHE_DIR=/opt/hostedtoolcache/terraform \
     PATH=/usr/local/go/bin:/usr/local/bin:/opt/go/bin:$PATH
 
-COPY scripts/setup-template.sh /usr/local/share/e2b-runner-template/setup-template.sh
-COPY scripts/ensure-docker /usr/local/share/e2b-runner-template/ensure-docker
+COPY scripts/setup-template.sh /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+COPY scripts/ensure-docker /usr/local/share/qiniu-sandbox-runner-template/ensure-docker
 
-RUN bash /usr/local/share/e2b-runner-template/setup-template.sh
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 
 WORKDIR /tmp

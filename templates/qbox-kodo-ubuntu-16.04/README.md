@@ -4,7 +4,7 @@ Legacy Qiniu sandbox runner template for qbox/kodo-style GitHub Actions jobs tha
 
 ## Base Image
 
-`e2b.Dockerfile` starts from:
+`Dockerfile` starts from:
 
 ```text
 jimyag/qbox-kodo-ubuntu-16.04-base:runner-docker
@@ -27,4 +27,4 @@ Build the Qiniu sandbox template with:
 task qbox-kodo-template-build-prod
 ```
 
-The production template name is `qbox-kodo-ubuntu-16-04`.
+`qshell` reads `qshell.sandbox.toml` in this directory. The production template name is `qbox-kodo-ubuntu-16-04`.

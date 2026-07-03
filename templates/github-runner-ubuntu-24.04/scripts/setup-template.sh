@@ -105,7 +105,7 @@ unzip -qo /tmp/terraform.zip -d "${TERRAFORM_CACHE_DIR}/${TERRAFORM_VERSION}"
 install -m 0755 "${TERRAFORM_CACHE_DIR}/${TERRAFORM_VERSION}/terraform" /usr/local/bin/terraform
 rm -f /tmp/tofu.zip /tmp/terraform.zip
 
-install -m 0755 /usr/local/share/e2b-runner-template/ensure-docker /usr/local/bin/ensure-docker
+install -m 0755 /usr/local/share/qiniu-sandbox-runner-template/ensure-docker /usr/local/bin/ensure-docker
 
 if ! id -u user >/dev/null 2>&1; then
   useradd -m -s /bin/bash user

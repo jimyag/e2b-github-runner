@@ -68,4 +68,4 @@ Keep `SMEE_TARGET` aligned with the runnerd port when testing webhook forwarding
 
 ## Deployment Smoke
 
-Real deployment readiness still requires `docs/deployment-smoke.md` with a GitHub.com App, webhook delivery, a usable E2B template, runner pickup, cleanup, and diagnostics. Do not claim production readiness from local tests alone.
+Real deployment readiness still requires `docs/deployment-smoke.md` with a GitHub.com App, webhook delivery, a usable Qiniu sandbox template, runner pickup, cleanup, and diagnostics. Do not claim production readiness from local tests alone.
