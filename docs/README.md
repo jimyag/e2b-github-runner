@@ -1,5 +1,7 @@
 # Documentation Index
 
+[中文文档](zh/README.md)
+
 Use these docs alongside the root `README.md`.
 
 - `testing.md`: local configuration, GitHub App/OAuth setup, webhook forwarding, admin API examples, and troubleshooting.

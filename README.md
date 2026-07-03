@@ -1,5 +1,7 @@
 # Qiniu Sandbox GitHub Runner
 
+[中文](README.zh.md)
+
 Small Go service that starts ephemeral GitHub Actions self-hosted runners inside Qiniu sandbox instances.
 
 ## Configuration
