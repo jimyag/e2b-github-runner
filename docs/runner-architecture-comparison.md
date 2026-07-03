@@ -17,6 +17,7 @@ Implemented pieces:
 - DB claim/lease processing with retry metadata (`retry_count`, `next_retry_at`, `lease_owner`, `lease_expires_at`).
 - GitHub App auth with optional dynamic installation resolution, plus token and basic auth compatibility modes.
 - GitHub App OAuth login for the admin console, with local roles and signed HttpOnly sessions.
+- Ordinary-user UI for PR/job views, local activity repositories, GitHub App installations, authorized repositories, and account or organization scoped Sandbox service Preferences.
 - Admin API and UI for runner requests, specs, groups, policies, retry/stop actions, match tests, audit history, and diagnostics.
 - Production UI assets built from `ui/` into `internal/server/ui/`; development assets are proxied to Vite.
 - Diagnostics through `github.com/jimmicro/pprof`, `/diagnostics/pprof`, `/diagnostics/vars`, and expvar metrics.
@@ -84,7 +85,7 @@ The admin UI should display diagnostics summaries, not expose raw pprof directly
 ## Remaining Design Decisions
 
 - Decide whether GitHub token and basic auth remain supported compatibility modes or should be removed for production.
-- Define the ordinary-user UI surface before adding non-admin routes under `ui/`.
+- Decide whether ordinary-user Activity repositories should include policy-configured repositories before runnerd has observed jobs from them.
 - Add an effective-config or config-validation workflow only if operators need UI-based runtime config inspection.
 - Verify shared-database lease behavior with two runnerd processes before documenting multi-instance support.
 - Decide whether expvar is enough or whether a Prometheus/export adapter is needed.

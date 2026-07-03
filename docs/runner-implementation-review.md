@@ -1,18 +1,18 @@
 # Runnerd Implementation Review
 
-Date: 2026-06-29
+Date: 2026-07-03
 
 Scope:
 
-- Current branch at refresh time: `refactor/gorm-state-migrations`
-- Review target: implementation status after file-based config, GORM-backed DB schema migration, retry/lease/audit handling, admin console, embedded UI assets, and local development workflow updates.
+- Current branch at refresh time: current working tree on `main`.
+- Review target: implementation status after file-based config, GORM-backed DB schema migration, retry/lease/audit handling, ordinary-user UI, admin console, embedded UI assets, and local development workflow updates.
 - Local references still useful for future comparison: actions-runner-controller style reconciliation and fireactions style pool/config modeling.
 
 ## Executive Summary
 
-Runnerd has moved past the original 2026-05-19 gap list. Runtime configuration is now file-first, runner state is DB-backed, schema creation is mostly driven by GORM model tags, retry/lease/audit fields exist, GitHub App auth can resolve installations dynamically, the admin console covers the core management workflow, diagnostics expose pprof/expvar state, and the documented local workflow includes `task dev`.
+Runnerd has moved past the original 2026-05-19 gap list. Runtime configuration is now file-first, runner state is DB-backed, schema creation is mostly driven by GORM model tags, retry/lease/audit fields exist, GitHub App auth can resolve installations dynamically, the ordinary-user UI covers job/repository/account setup flows, the admin console covers the core management workflow, diagnostics expose pprof/expvar state, and the documented local workflow includes `task dev`.
 
-The remaining work is no longer a basic architecture catch-up. The next decisions are product and operations hardening: whether to keep token/basic auth as local compatibility modes, how to introduce non-admin UI surfaces under the shared `ui/` tree, how much config management belongs in the admin console, and what deployment smoke tests are required before treating the service as production-ready.
+The remaining work is no longer a basic architecture catch-up. The next decisions are product and operations hardening: whether to keep token/basic auth as local compatibility modes, whether Activity repositories should include policy-configured repositories before jobs are observed, how much config management belongs in the admin console, and what deployment smoke tests are required before treating the service as production-ready.
 
 ## Current Baseline
 
@@ -24,6 +24,7 @@ The remaining work is no longer a basic architecture catch-up. The next decision
 - Worker processing uses DB claim/lease semantics and retry scheduling instead of only in-memory queue ownership.
 - Transient E2B, GitHub, rate-limit, timeout, and temporary network failures are classified for retry or queue deferral. Deterministic auth/config/template failures fail immediately.
 - Admin routes expose runner request management, retry/stop/log access, runner specs, runner groups, repository policies, match tests, audit events, and diagnostics.
+- Ordinary-user routes expose the PR/job dashboard at `/`, local activity repositories at `/repositories`, GitHub App account setup at `/account/repositories`, and account or organization Sandbox service Preferences at `/account/preferences` and `/organizations/{login}/preferences`.
 - The React UI in `ui/` is embedded for production from `internal/server/ui/*`; development builds proxy UI assets to Vite through `internal/server/ui_assets_development.go`.
 - `task dev` starts Vite and the Go service together in development mode. `task build` builds the UI first, then compiles `bin/runnerd` with embedded production assets.
 - Diagnostics are available through the admin UI and `/diagnostics/pprof` / `/diagnostics/vars`, backed by `github.com/jimmicro/pprof` and expvar.
@@ -34,9 +35,9 @@ The remaining work is no longer a basic architecture catch-up. The next decision
 
 Token and basic auth are still supported alongside GitHub App auth. That is useful for local verification or legacy credentials, but it means the product is not GitHub-App-only. Decide whether these modes are intentional compatibility paths or should be removed before production hardening.
 
-### 2. UI Product Boundary
+### 2. Ordinary-User Repository Scope
 
-The asset package has been generalized from admin-only assets to `ui/*`, which leaves room for future ordinary-user screens. The current routed product is still admin-focused under `/admin/*`. Before adding non-admin UI, define route ownership, role-aware navigation, and API permissions so the shared UI tree does not become an accidental admin surface.
+The ordinary-user UI is now routed outside `/admin/*`. Activity repositories currently come from runnerd-observed jobs, while authorized repositories can be loaded on demand from GitHub App installations. Decide whether the Activity repositories view should also include repository-policy configured repositories before any jobs have been observed.
 
 ### 3. Config Management
 
@@ -59,7 +60,7 @@ The current migration path intentionally avoids a full handwritten migration his
 1. Keep `task dev`, `task build`, `task lint`, and `task test` green on every branch that touches backend/UI boundaries.
 2. Run and maintain the deployment smoke checklist using a real GitHub App, one repository, and one E2B template.
 3. Decide whether token/basic auth remain supported modes.
-4. Define the non-admin UI route and permission model before adding ordinary-user screens.
+4. Decide whether Activity repositories should include policy-configured repositories before jobs are observed.
 5. Add an effective-config diagnostics view only after the desired config operations model is clear.
 6. Stress DB lease behavior with concurrent runnerd processes before advertising multi-instance support.
 7. Preserve old-schema upgrade coverage whenever state records or GORM migration tags change.

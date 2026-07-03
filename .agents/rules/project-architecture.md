@@ -9,11 +9,13 @@
 
 ## Admin And UI
 
+- The current browser entry for the ordinary-user UI is `/`.
+- Ordinary-user account settings live under `/account/repositories`, `/account/preferences`, and `/organizations/{login}/...`.
 - The current browser entry for the admin console is `/admin/`.
 - UI source lives in `ui/`.
 - Production UI assets are generated into `internal/server/ui/` by `task ui-build` and embedded by `internal/server/ui_assets_production.go`.
 - Development UI assets are proxied to Vite by `internal/server/ui_assets_development.go`.
-- The `ui/` tree may later host ordinary-user UI. If adding non-admin UI, keep admin routes and role-gated APIs explicit.
+- Shared `ui/` code serves both ordinary-user and admin screens. Keep admin routes and role-gated APIs explicit when changing shared components.
 
 ## Auth And Routing
 

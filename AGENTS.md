@@ -9,7 +9,8 @@ Use this guide for future Codex or agent work in this repository.
 - UI source lives in `ui/`.
 - Production UI assets are generated into `internal/server/ui/` by `task ui-build` and embedded by `internal/server/ui_assets_production.go`.
 - Development UI assets are proxied to Vite by `internal/server/ui_assets_development.go`.
-- Current browser entry for the admin console is `/admin/`; the `ui/` tree may also host ordinary-user UI later.
+- Current browser entry for the ordinary-user UI is `/`; account settings live under `/account/repositories`, `/account/preferences`, and `/organizations/{login}/...`.
+- Current browser entry for the admin console is `/admin/`; keep admin routes and role-gated APIs explicit when changing shared `ui/` code.
 - Runtime state can use sqlite, Postgres, or MySQL. Do not document multi-instance support until two runnerd processes have been verified against the same database.
 - State schema is defined mostly by GORM tags in `internal/state/records.go`; startup migration runs `AutoMigrate` plus narrow legacy-column backfills in `internal/state/db.go`.
 - Runner specs, runner groups, and repository policies are admin API/UI data, not `runnerd.yaml` fields.
@@ -53,4 +54,4 @@ When changing state records, GORM tags, indexes, or migration helpers, run `go t
 - Keep `README.md`, `docs/testing.md`, and `TODO.md` aligned when changing config, build, development, or deployment workflows.
 - Keep `docs/README.md` and `docs/deployment-smoke.md` aligned when adding or removing docs or deployment verification steps.
 - Keep `.agents/rules/` and `.agents/skills/` aligned when a change creates durable agent rules or repeatable project workflows.
-- If adding non-admin UI, keep admin routes and role-gated APIs explicit instead of assuming everything under `ui/` is admin-only.
+- When changing ordinary-user UI, keep the account/organization Preferences scope and admin-only management APIs separate instead of assuming everything under `ui/` is admin-only.

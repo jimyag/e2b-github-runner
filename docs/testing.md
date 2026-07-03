@@ -154,10 +154,16 @@ http://127.0.0.1:25500/
 http://127.0.0.1:25500/repositories
 ```
 
-普通用户 Accounts 页面：
+普通用户 account repositories 页面：
 
 ```text
-http://127.0.0.1:25500/accounts
+http://127.0.0.1:25500/account/repositories
+```
+
+普通用户 personal Preferences 页面：
+
+```text
+http://127.0.0.1:25500/account/preferences
 ```
 
 管理员界面：
@@ -202,13 +208,13 @@ http://127.0.0.1:25500/
 go run ./cmd/runnerd --config ./runnerd.yaml --bootstrap-admin github:<your-github-user-id>
 ```
 
-`<your-github-user-id>` 是 GitHub `/user` 返回的稳定 numeric `id`，不是可修改的 login。role 属于本地 account，OAuth identity 只保存 provider、stable subject 和 login 展示信息，因此后续可以把其他 provider identity 绑定到同一个 account。普通用户登录后可以在 `/accounts` 安装配置文件中定义的 GitHub App；GitHub 带 `installation_id` 回调后，runnerd 会记录该 account 绑定的 GitHub App installation。普通用户能看到的 job 按 workflow job payload 里的 installation id 过滤，runnerd 不会把该 installation 授权的全部仓库列表复制到本地状态中；Accounts 页面点击安装账户时，会按需通过 GitHub App API 获取该账户当前授权的 repositories。管理员登录后，浏览器会保存 signed HttpOnly session cookie，并自动带上该 cookie 访问 `/runner_requests` 等管理接口。需要用 `curl` 调管理 API 时，可以从浏览器或 OAuth 调试流程导出 cookie 到 `COOKIE_JAR`，后续示例统一使用：
+`<your-github-user-id>` 是 GitHub `/user` 返回的稳定 numeric `id`，不是可修改的 login。role 属于本地 account，OAuth identity 只保存 provider、stable subject 和 login 展示信息，因此后续可以把其他 provider identity 绑定到同一个 account。普通用户登录后可以在 `/account/repositories` 安装配置文件中定义的 GitHub App，并在 `/account/preferences` 或 `/organizations/{login}/preferences` 配置 Sandbox service。GitHub 带 `installation_id` 回调后，runnerd 会记录该 account 绑定的 GitHub App installation。普通用户能看到的 job 按 workflow job payload 里的 installation id 过滤，runnerd 不会把该 installation 授权的全部仓库列表复制到本地状态中；account repositories 页面点击安装账户时，会按需通过 GitHub App API 获取该账户当前授权的 repositories。管理员登录后，浏览器会保存 signed HttpOnly session cookie，并自动带上该 cookie 访问 `/runner_requests` 等管理接口。需要用 `curl` 调管理 API 时，可以从浏览器或 OAuth 调试流程导出 cookie 到 `COOKIE_JAR`，后续示例统一使用：
 
 ```bash
 export COOKIE_JAR=./runnerd.cookies
 ```
 
-页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。开发模式下 `internal/server/ui_assets_development.go` 会把 UI 资源代理到 Vite；生产构建下 `internal/server/ui_assets_production.go` 会嵌入 `internal/server/ui/*`。普通用户界面包含 `/accounts` 的 GitHub App accounts 和按需加载的授权 repositories、`/repositories` 的本地 activity repositories，以及 `/` 的 Repo/PR 列表和 PR job 明细；管理面包含 runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面。
+页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。开发模式下 `internal/server/ui_assets_development.go` 会把 UI 资源代理到 Vite；生产构建下 `internal/server/ui_assets_production.go` 会嵌入 `internal/server/ui/*`。普通用户界面包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/repositories` 的本地 activity repositories，以及 `/` 的 Repo/PR 列表和 PR job 明细；管理面包含 runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面。
 
 先创建一个默认 runner spec：
 

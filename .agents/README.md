@@ -5,7 +5,7 @@ This directory contains project-local guidance for future agents.
 ## Rules
 
 - `rules/development-workflow.md`: repository workflow, command selection, generated-file boundaries, and documentation sync expectations.
-- `rules/project-architecture.md`: durable runnerd architecture facts and implementation boundaries.
+- `rules/project-architecture.md`: durable runnerd architecture facts, ordinary-user/admin UI boundaries, and implementation constraints.
 - `rules/testing-and-verification.md`: verification matrix for docs, state schema, UI, build, Docker, release, and deployment smoke work.
 
 ## Skills
