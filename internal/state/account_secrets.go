@@ -34,6 +34,10 @@ func (s *DBStore) UpsertAccountSecret(secret AccountSecret) (AccountSecret, erro
 	if err != nil {
 		return AccountSecret{}, err
 	}
+	return upsertAccountSecret(db, secret)
+}
+
+func upsertAccountSecret(db *gorm.DB, secret AccountSecret) (AccountSecret, error) {
 	scopeType := normalizeAccountScopeType(secret.ScopeType)
 	keyType := normalizeAccountSecretKeyType(secret.KeyType)
 	if scopeType == "" {

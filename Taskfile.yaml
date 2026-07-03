@@ -230,7 +230,7 @@ tasks:
     dir: "{{.TEMPLATE_DIR}}"
     cmds:
       - |
-        tmp_config="$(mktemp "./.qshell-sandbox.XXXXXX")"
+        tmp_config="$(mktemp ".qshell-sandbox.XXXXXX")"
         trap 'rm -f "$tmp_config"' EXIT
         cp qshell.sandbox.toml "$tmp_config"
         qshell sandbox template build --config "$tmp_config" --name github-runner-ubuntu-24-04-dev --wait
@@ -240,7 +240,7 @@ tasks:
     dir: "{{.TEMPLATE_DIR}}"
     cmds:
       - |
-        tmp_config="$(mktemp "./.qshell-sandbox.XXXXXX")"
+        tmp_config="$(mktemp ".qshell-sandbox.XXXXXX")"
         trap 'rm -f "$tmp_config"' EXIT
         cp qshell.sandbox.toml "$tmp_config"
         qshell sandbox template build --config "$tmp_config" --wait
@@ -268,7 +268,7 @@ tasks:
     dir: "{{.QBOX_KODO_TEMPLATE_DIR}}"
     cmds:
       - |
-        tmp_config="$(mktemp "./.qshell-sandbox.XXXXXX")"
+        tmp_config="$(mktemp ".qshell-sandbox.XXXXXX")"
         trap 'rm -f "$tmp_config"' EXIT
         cp qshell.sandbox.toml "$tmp_config"
         qshell sandbox template build --config "$tmp_config" --wait

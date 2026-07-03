@@ -273,31 +273,30 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if _, err := s.store.UpsertAccountPreference(state.AccountPreference{
+	preference := state.AccountPreference{
 		ScopeType: scope.Type,
 		ScopeID:   scope.ID,
 		Namespace: accountPreferenceNamespaceSandbox,
 		Key:       accountPreferenceKeySandboxService,
 		ValueJSON: string(valueJSON),
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
 	}
+	var secret *state.AccountSecret
 	if apiKey != "" {
 		encryptedAPIKey, err := encryptSecret(apiKey, s.cfg.AuthEncryptionKey)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if _, err := s.store.UpsertAccountSecret(state.AccountSecret{
+		secret = &state.AccountSecret{
 			ScopeType:      scope.Type,
 			ScopeID:        scope.ID,
 			KeyType:        state.AccountSecretTypeSandboxAPIKey,
 			EncryptedValue: encryptedAPIKey,
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
 		}
+	}
+	if _, _, err := s.store.UpsertAccountPreferenceAndSecret(preference, secret); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
 	s.recordAudit("github:"+session.Subject, "sandbox.configure", scope.Type, strconv.FormatInt(scope.ID, 10), map[string]any{
 		"api_url":        apiURL,

@@ -1260,6 +1260,35 @@ func TestAccountPreferencesAreScopedToAccountNamespaceAndKey(t *testing.T) {
 	}
 }
 
+func TestUpsertAccountPreferenceAndSecretRollsBackTogether(t *testing.T) {
+	store := New(t.TempDir())
+	account, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = store.UpsertAccountPreferenceAndSecret(AccountPreference{
+		ScopeType: AccountScopeTypeAccount,
+		ScopeID:   account.ID,
+		Namespace: "sandbox",
+		Key:       "service",
+		ValueJSON: `{"api_url":"https://sandbox.example.test"}`,
+	}, &AccountSecret{
+		ScopeType:      AccountScopeTypeAccount,
+		ScopeID:        account.ID,
+		KeyType:        AccountSecretTypeSandboxAPIKey,
+		EncryptedValue: "",
+	})
+	if err == nil {
+		t.Fatal("expected invalid secret to fail")
+	}
+	if _, err := store.GetAccountPreference(AccountScopeTypeAccount, account.ID, "sandbox", "service"); err != ErrNotFound {
+		t.Fatalf("expected preference rollback, got %v", err)
+	}
+	if _, err := store.GetAccountSecret(AccountScopeTypeAccount, account.ID, AccountSecretTypeSandboxAPIKey); err != ErrNotFound {
+		t.Fatalf("expected secret rollback, got %v", err)
+	}
+}
+
 func TestListActiveStatesExcludesTerminalStates(t *testing.T) {
 	store := New(t.TempDir())
 	for _, tc := range []struct {

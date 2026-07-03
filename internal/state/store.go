@@ -262,6 +262,7 @@ type AccountSecretStore interface {
 type AccountPreferenceStore interface {
 	GetAccountPreference(scopeType string, scopeID int64, namespace, key string) (AccountPreference, error)
 	UpsertAccountPreference(preference AccountPreference) (AccountPreference, error)
+	UpsertAccountPreferenceAndSecret(preference AccountPreference, secret *AccountSecret) (AccountPreference, *AccountSecret, error)
 }
 
 type AuditStore interface {
