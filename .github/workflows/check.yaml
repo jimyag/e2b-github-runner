@@ -177,5 +177,5 @@ jobs:
       - run: cd ui && bun install --frozen-lockfile && bun run build
       - name: Check service Dockerfile
         run: docker build --check -f Dockerfile .
-      - name: Check E2B template Dockerfile
-        run: docker build --check --platform=linux/amd64 -f templates/github-runner-ubuntu-24.04/e2b.Dockerfile templates/github-runner-ubuntu-24.04
+      - name: Check Qiniu sandbox template Dockerfile
+        run: docker build --check --platform=linux/amd64 -f templates/github-runner-ubuntu-24.04/Dockerfile templates/github-runner-ubuntu-24.04
