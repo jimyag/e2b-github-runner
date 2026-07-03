@@ -66,8 +66,8 @@ func TestStartScriptReportsSandboxIDInJobStartedHook(t *testing.T) {
 	for _, want := range []string{
 		"export ACTIONS_RUNNER_HOOK_JOB_STARTED=/tmp/runnerd-hooks/job-started.sh",
 		"RUNNERD_JOB_STARTED",
-		"::notice title=E2B sandbox::sandbox_id=${RUNNERD_SANDBOX_ID} runner_request_id=${RUNNERD_REQUEST_ID} runner_name=${RUNNERD_RUNNER_NAME}",
-		"E2B sandbox id: ${RUNNERD_SANDBOX_ID}",
+		"::notice title=Qiniu sandbox::sandbox_id=${RUNNERD_SANDBOX_ID} runner_request_id=${RUNNERD_REQUEST_ID} runner_name=${RUNNERD_RUNNER_NAME}",
+		"Qiniu sandbox id: ${RUNNERD_SANDBOX_ID}",
 		"Runner request id: ${RUNNERD_REQUEST_ID}",
 		"Runner name: ${RUNNERD_RUNNER_NAME}",
 		base64.StdEncoding.EncodeToString([]byte("78433740691")),

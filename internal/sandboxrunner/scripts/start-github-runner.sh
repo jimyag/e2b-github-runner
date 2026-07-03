@@ -44,8 +44,8 @@ export RUNNERD_RUNNER_NAME="$runner_name"
 cat >/tmp/runnerd-hooks/job-started.sh <<'HOOK'
 #!/usr/bin/env bash
 echo "RUNNERD_JOB_STARTED"
-echo "::notice title=E2B sandbox::sandbox_id=${RUNNERD_SANDBOX_ID} runner_request_id=${RUNNERD_REQUEST_ID} runner_name=${RUNNERD_RUNNER_NAME}"
-echo "E2B sandbox id: ${RUNNERD_SANDBOX_ID}"
+echo "::notice title=Qiniu sandbox::sandbox_id=${RUNNERD_SANDBOX_ID} runner_request_id=${RUNNERD_REQUEST_ID} runner_name=${RUNNERD_RUNNER_NAME}"
+echo "Qiniu sandbox id: ${RUNNERD_SANDBOX_ID}"
 echo "Runner request id: ${RUNNERD_REQUEST_ID}"
 echo "Runner name: ${RUNNERD_RUNNER_NAME}"
 HOOK

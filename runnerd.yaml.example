@@ -71,4 +71,4 @@ worker:
 
 # Runner specs, runner groups, and runner policies are managed through the
 # admin API/UI. Create specs with meaningful names, for example "ubuntu-24-04",
-# and set template_id to the E2B template that contains the GitHub runner image.
+# and set template_id to the Qiniu sandbox template that contains the GitHub runner image.
