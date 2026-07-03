@@ -230,6 +230,7 @@ tasks:
     dir: "{{.TEMPLATE_DIR}}"
     cmds:
       - |
+        set -e
         tmp_config="$(mktemp ".qshell-sandbox.XXXXXX")"
         trap 'rm -f "$tmp_config"' EXIT
         cp qshell.sandbox.toml "$tmp_config"
@@ -240,6 +241,7 @@ tasks:
     dir: "{{.TEMPLATE_DIR}}"
     cmds:
       - |
+        set -e
         tmp_config="$(mktemp ".qshell-sandbox.XXXXXX")"
         trap 'rm -f "$tmp_config"' EXIT
         cp qshell.sandbox.toml "$tmp_config"
@@ -268,6 +270,7 @@ tasks:
     dir: "{{.QBOX_KODO_TEMPLATE_DIR}}"
     cmds:
       - |
+        set -e
         tmp_config="$(mktemp ".qshell-sandbox.XXXXXX")"
         trap 'rm -f "$tmp_config"' EXIT
         cp qshell.sandbox.toml "$tmp_config"
