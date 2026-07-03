@@ -1,6 +1,6 @@
 # qbox kodo Ubuntu 16.04 Runner Template
 
-Legacy E2B runner template for qbox/kodo-style GitHub Actions jobs that still need Ubuntu 16.04 era system dependencies.
+Legacy Qiniu sandbox runner template for qbox/kodo-style GitHub Actions jobs that still need Ubuntu 16.04 era system dependencies.
 
 ## Base Image
 
@@ -10,18 +10,18 @@ Legacy E2B runner template for qbox/kodo-style GitHub Actions jobs that still ne
 jimyag/qbox-kodo-ubuntu-16.04-base:runner-docker
 ```
 
-The base image is defined by `base.Dockerfile` in this directory. It installs the Ubuntu 16.04 apt dependencies, Docker, the default `user` account, sudo access, and shared runner directories. The E2B template layer then runs `scripts/setup-template.sh` to install the GitHub Actions runner, pinned Go toolchains, and final validation.
+The base image is defined by `base.Dockerfile` in this directory. It installs the Ubuntu 16.04 apt dependencies, Docker, the default `user` account, sudo access, and shared runner directories. The Qiniu sandbox template layer then runs `scripts/setup-template.sh` to install the GitHub Actions runner, pinned Go toolchains, and final validation.
 
-Build and push the base image before rebuilding the E2B template when `base.Dockerfile` changes:
+Build and push the base image before rebuilding the Qiniu sandbox template when `base.Dockerfile` changes:
 
 ```bash
 task qbox-kodo-base-build
 task qbox-kodo-base-push
 ```
 
-## E2B Template
+## Qiniu Sandbox Template
 
-Build the E2B template with:
+Build the Qiniu sandbox template with:
 
 ```bash
 task qbox-kodo-template-build-prod

@@ -14,7 +14,7 @@ This file tracks active project work. Completed behavior should move into `READM
 ## Maintenance
 
 - Keep `README.md`, `docs/testing.md`, and this roadmap in sync when build, dev, config, or UI asset workflows change.
-- Keep `docs/deployment-smoke.md` aligned with real GitHub App, webhook, E2B template, runner pickup, cleanup, and diagnostics behavior.
+- Keep `docs/deployment-smoke.md` aligned with real GitHub App, webhook, Qiniu sandbox template, runner pickup, cleanup, and diagnostics behavior.
 - Keep generated production UI assets under `internal/server/ui/` out of hand edits; change source files in `ui/` and rebuild with `task build`.
 - When changing `internal/state/records.go` tags or migration helpers in `internal/state/db.go`, run `go test ./internal/state -count=1` before the broader test suite.
 - Keep `.agents/` focused on agent-only rules and repeatable workflows; keep operator, architecture, and deployment content in `README.md` and `docs/`.

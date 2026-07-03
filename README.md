@@ -1,6 +1,6 @@
-# E2B GitHub Runner
+# Qiniu Sandbox GitHub Runner
 
-Small Go service that starts ephemeral GitHub Actions self-hosted runners inside E2B sandbox instances.
+Small Go service that starts ephemeral GitHub Actions self-hosted runners inside Qiniu sandbox instances.
 
 ## Configuration
 
@@ -86,15 +86,15 @@ Open the ordinary-user console at `http://127.0.0.1:25500/` or the admin console
 
 The admin console manages runner requests, runner specs, runner groups, runner policies, retry actions, audit history, runner-spec match tests, and diagnostics. Runner specs, groups, and repository policies are created through the admin API/UI rather than `runnerd.yaml`. runnerd creates repository runners by default; when a matched runner spec has a GitHub runner group, it creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
 
-Create runner specs with meaningful names such as `ubuntu-24-04` or `ubuntu-24-04-large`; set each spec `template_id` to the E2B template that contains the GitHub runner image. Template access is checked when runnerd starts a sandbox with the repository owner's Sandbox service Preferences. Runner specs with `default_available: true` are globally available to allowed installed repositories. Use `github.allowed_repositories` to limit which repositories can use this runnerd instance, and use runner policies when a repository needs access to an additional/special spec.
+Create runner specs with meaningful names such as `ubuntu-24-04` or `ubuntu-24-04-large`; set each spec `template_id` to the Qiniu sandbox template that contains the GitHub runner image. Template access is checked when runnerd starts a sandbox with the repository owner's Sandbox service Preferences. Runner specs with `default_available: true` are globally available to allowed installed repositories. Use `github.allowed_repositories` to limit which repositories can use this runnerd instance, and use runner policies when a repository needs access to an additional/special spec.
 
 Runner requests are paginated by default: `GET /runner_requests` returns the most recent 100 rows unless `limit` and `offset` are provided, with `X-Total-Count`, `X-Limit`, `X-Offset`, and `Link` response headers. The admin console adds status, repository, and runner-spec filters on top of the current page and links each managed request to the GitHub Actions job when GitHub provides a job URL.
 
-runnerd enforces both `worker.max_concurrent_runners` and per-spec `max_concurrency`. Requests above those limits remain in the DB as `queued` and are retried later; they are not dropped. Transient capacity signals such as E2B placement failures, HTTP 429, and GitHub secondary rate limits are treated as queue deferrals, so they keep waiting even after the normal retry counter reaches its configured cap. Other transient failures still use the configured retry backoff and eventually become `failed`; deterministic auth/config/template errors fail immediately.
+runnerd enforces both `worker.max_concurrent_runners` and per-spec `max_concurrency`. Requests above those limits remain in the DB as `queued` and are retried later; they are not dropped. Transient capacity signals such as Qiniu sandbox placement failures, HTTP 429, and GitHub secondary rate limits are treated as queue deferrals, so they keep waiting even after the normal retry counter reaches its configured cap. Other transient failures still use the configured retry backoff and eventually become `failed`; deterministic auth/config/template errors fail immediately.
 
 runnerd caches valid GitHub registration tokens per repository or organization, retries runner registration inside the sandbox, and best-effort removes the GitHub runner registration when a sandbox is stopped or recovered.
 
-The sandbox runner installs a pre-job hook that prints the E2B sandbox id, runner request id, and runner name in the GitHub Actions `Set up runner` log. Use that sandbox id to find the matching instance in the E2B console when debugging a job.
+The sandbox runner installs a pre-job hook that prints the Qiniu sandbox id, runner request id, and runner name in the GitHub Actions `Set up runner` log. Use that sandbox id to find the matching instance in the Qiniu sandbox console when debugging a job.
 
 The binary also imports `github.com/jimmicro/pprof`, so a local-only pprof/expvar service is started automatically and discovered through generated `.pprof` address files and dump scripts. The admin console exposes a diagnostics page that summarizes the discovered pprof endpoint, `/debug/vars`, DB state, GitHub auth mode, retry/lease metrics, and recent failures. The expvar metrics include ARC-style workflow job counts, conclusions, failures, queue/run duration totals and counts, runner registration/cleanup counters, GitHub API operation counters, and Fireactions-style profile current/busy/idle/pending/desired gauges.
 
@@ -108,7 +108,7 @@ task docker-build
 task template-build-prod
 ```
 
-`templates/github-runner-ubuntu-24.04` is the default GitHub runner image and includes the runner runtime, Docker support, helper tools, and `rclone`. `templates/qbox-kodo-ubuntu-16.04` is an additional legacy Ubuntu 16.04 template for qbox/kodo-style jobs with the required old Go toolchains, apt packages, Docker support, and `rclone`. Its Docker base image is defined by `templates/qbox-kodo-ubuntu-16.04/base.Dockerfile` and can be rebuilt with `task qbox-kodo-base-build` before rebuilding the E2B template.
+`templates/github-runner-ubuntu-24.04` is the default GitHub runner image and includes the runner runtime, Docker support, helper tools, and `rclone`. `templates/qbox-kodo-ubuntu-16.04` is an additional legacy Ubuntu 16.04 template for qbox/kodo-style jobs with the required old Go toolchains, apt packages, Docker support, and `rclone`. Its Docker base image is defined by `templates/qbox-kodo-ubuntu-16.04/base.Dockerfile` and can be rebuilt with `task qbox-kodo-base-build` before rebuilding the Qiniu sandbox template.
 
 Useful validation commands:
 

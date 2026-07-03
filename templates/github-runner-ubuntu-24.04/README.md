@@ -1,6 +1,6 @@
-# GitHub Runner Ubuntu 24.04 E2B Template
+# GitHub Runner Ubuntu 24.04 Qiniu Sandbox Template
 
-This template is a lightweight GitHub Actions self-hosted runner image for E2B sandboxes.
+This template is a lightweight GitHub Actions self-hosted runner image for Qiniu sandboxes.
 
 It intentionally does not copy the full GitHub-hosted Ubuntu 24.04 image. The official image includes many heavy stacks, browsers, SDKs, Android tooling, databases, and cloud CLIs. For this runner service, the template focuses on the pieces needed for stable Go CI jobs:
 
@@ -16,9 +16,9 @@ It intentionally does not copy the full GitHub-hosted Ubuntu 24.04 image. The of
 Reference:
 
 - GitHub hosted runner software list: https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md
-- E2B template CLI: https://e2b.dev/docs/sdk-reference/cli/v2.7.3/template
+- Template CLI reference: https://developer.qiniu.com/las/13442/sandbox-qshell
 
-## Build with E2B template build v2
+## Build with Qiniu sandbox template build v2
 
 ```bash
 cd templates/github-runner-ubuntu-24.04
@@ -40,7 +40,7 @@ The build prints a template ID and template name. Use the production template na
 export SANDBOX_TEMPLATE_ID="<template-id>"
 ```
 
-Do not use `e2b template build -d e2b.Dockerfile` for this template; that command uses E2B's deprecated v1 build system.
+Do not use `e2b template build -d e2b.Dockerfile` for this template; that command uses legacy v1 build system.
 
 The Dockerfile defaults the base image platform with:
 

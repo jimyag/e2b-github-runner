@@ -4,7 +4,7 @@ This note records the design comparison that shaped runnerd. It should be read a
 
 ## Current Baseline
 
-runnerd is a single Go service that receives GitHub `workflow_job` webhooks, admits matching jobs by repository and labels, creates E2B sandboxes, registers ephemeral GitHub Actions self-hosted runners, and cleans them up after completion or stop.
+runnerd is a single Go service that receives GitHub `workflow_job` webhooks, admits matching jobs by repository and labels, creates Qiniu sandboxes, registers ephemeral GitHub Actions self-hosted runners, and cleans them up after completion or stop.
 
 Implemented pieces:
 
@@ -29,20 +29,206 @@ Known boundaries:
 - Token and basic auth still exist as compatibility modes. Product policy has not decided whether to keep them for production.
 - Multi-instance behavior should not be advertised until two runnerd processes have been verified against the same database.
 
+## Architecture Overview
+
+runnerd keeps the control plane in one Go process and stores durable state in the configured database. GitHub webhooks and the manual admin API create runner requests; background loops claim queued work, start Qiniu sandboxes, and reconcile or clean up runners after GitHub job events.
+
+```mermaid
+flowchart LR
+  GitHub["GitHub.com<br/>workflow_job / workflow_run webhooks"]
+  Browser["Browser UI<br/>ordinary user + admin"]
+  Runnerd["runnerd Go service"]
+  DB[("SQLite / Postgres / MySQL<br/>runner state + catalog + accounts")]
+  QiniuSandbox["Qiniu Sandbox service"]
+  Sandbox["Ephemeral sandbox<br/>GitHub Actions runner"]
+  Pprof["local pprof / expvar"]
+
+  GitHub -->|"POST /webhooks/github<br/>HMAC verified"| Runnerd
+  Browser -->|"OAuth session cookie"| Runnerd
+  Runnerd <-->|"GORM store"| DB
+  Runnerd -->|"create sandbox with template_id"| QiniuSandbox
+  QiniuSandbox --> Sandbox
+  Sandbox -->|"registers with token"| GitHub
+  Sandbox -->|"stdout / stderr / control events"| Runnerd
+  Runnerd -->|"diagnostics summary"| Browser
+  Runnerd -->|"discover /debug/vars"| Pprof
+```
+
+### Runtime Modules
+
+The server package wires HTTP routes, GitHub clients, the state store, the sandbox service, and background loops. UI assets come from `ui/` and are either embedded production files or proxied to Vite in development.
+
+```mermaid
+flowchart TB
+  Config["config.Load<br/>runnerd.yaml / --config"]
+  Main["cmd/runnerd"]
+  Server["internal/server<br/>routes + auth + lifecycle"]
+  GitHubClient["internal/github<br/>REST + webhook signature"]
+  State["internal/state<br/>GORM records + store"]
+  SandboxRunner["internal/sandboxrunner<br/>Qiniu sandbox runner process"]
+  Metrics["internal/metrics<br/>expvar counters + gauges"]
+  UI["ui/ React app"]
+  UIProd["internal/server/ui<br/>generated production assets"]
+
+  Config --> Main
+  Main --> Server
+  Server --> GitHubClient
+  Server --> State
+  Server --> SandboxRunner
+  Server --> Metrics
+  UI -->|"task ui-build"| UIProd
+  UIProd --> Server
+```
+
+### Runner Request Lifecycle
+
+Admission and capacity are separate steps. Webhooks admit a request only after repository and label/spec policy checks pass. Capacity is checked later by the worker when it claims a queued request, so over-capacity work remains queued instead of being rejected.
+
+```mermaid
+sequenceDiagram
+  participant GH as GitHub
+  participant HTTP as runnerd HTTP handlers
+  participant Store as State DB
+  participant Worker as Worker loop
+  participant QiniuSandbox as Qiniu sandbox
+  participant Runner as Sandbox runner
+
+  GH->>HTTP: workflow_job queued
+  HTTP->>HTTP: verify HMAC and parse labels
+  HTTP->>Store: MatchProfile(repository, labels)
+  alt no matching spec or repository rejected
+    HTTP->>Store: record failed admission
+    HTTP-->>GH: 202 with failed runner request
+  else matched
+    HTTP->>Store: create queued runner request
+    HTTP-->>GH: 202 accepted
+    Worker->>Store: ClaimNextRunnable with lease
+    Worker->>Store: check global/spec concurrency
+    alt capacity reached
+      Worker->>Store: keep queued with next_retry_at
+    else capacity available
+      Worker->>GH: create registration token
+      Worker->>QiniuSandbox: start template with runner labels
+      QiniuSandbox->>Runner: launch actions runner
+      Runner->>GH: register and pick up job
+      Worker->>Store: mark running and append logs
+      GH->>HTTP: workflow_job completed
+      HTTP->>QiniuSandbox: stop sandbox
+      HTTP->>GH: remove runner registration best effort
+      HTTP->>Store: mark completed or failed cleanup
+    end
+  end
+```
+
+### State Model
+
+The configured database is the durable source for runner requests and control-plane objects. Logs are stored as runner events, and account or GitHub-installation scoped Sandbox API keys are encrypted before they enter the store.
+
+```mermaid
+erDiagram
+  RUNNER_REQUESTS ||--o{ RUNNER_EVENTS : records
+  RUNNER_PROFILES ||--o{ RUNNER_GROUP_SPECS : member
+  RUNNER_GROUPS ||--o{ RUNNER_GROUP_SPECS : contains
+  RUNNER_PROFILES ||--o{ REPOSITORY_POLICIES : grants
+  RUNNER_GROUPS ||--o{ REPOSITORY_POLICIES : grants
+  ACCOUNTS ||--o{ OAUTH_IDENTITIES : links
+  ACCOUNTS ||--o{ GITHUB_INSTALLATIONS : owns
+  ACCOUNTS ||--o{ AUDIT_EVENTS : acts
+  GITHUB_INSTALLATIONS ||--o{ ACCOUNT_PREFERENCES : scopes
+  GITHUB_INSTALLATIONS ||--o{ ACCOUNT_SECRETS : scopes
+  ACCOUNTS ||--o{ ACCOUNT_PREFERENCES : scopes
+  ACCOUNTS ||--o{ ACCOUNT_SECRETS : scopes
+
+  RUNNER_REQUESTS {
+    string id PK
+    string status
+    string repository_full_name
+    string profile_name
+    string runner_group
+    string lease_owner
+    datetime next_retry_at
+  }
+  RUNNER_EVENTS {
+    int id PK
+    string request_id
+    string event_type
+    string message
+  }
+  RUNNER_PROFILES {
+    string name PK
+    string template_id
+    bool default_available
+    int max_concurrency
+  }
+  ACCOUNTS {
+    int id PK
+    string role
+  }
+  ACCOUNT_SECRETS {
+    int id PK
+    string scope_type
+    int scope_id
+    string key_type
+  }
+```
+
+### Request State Machine
+
+The status values are intentionally small. Retryable failures move a request back to `queued` with retry metadata, while deterministic admission or configuration failures end at `failed`.
+
+```mermaid
+stateDiagram-v2
+  [*] --> queued: webhook or manual API
+  queued --> creating: worker claims lease
+  queued --> failed: admission rejection
+  creating --> running: sandbox runner started
+  creating --> queued: retryable start failure
+  creating --> failed: deterministic start failure
+  running --> stopping: completed webhook, timeout, idle stop, or manual stop
+  running --> failed: unrecoverable runner failure
+  stopping --> completed: sandbox stopped and cleanup finished
+  stopping --> failed: cleanup/recovery exhausted
+  failed --> queued: manual retry when allowed
+  completed --> [*]
+  failed --> [*]
+```
+
+### Configuration And Secret Boundaries
+
+`runnerd.yaml` configures service behavior, GitHub auth, OAuth login, database, and worker policy. Sandbox service credentials are not file config: ordinary users configure them per account or GitHub App installation through Preferences, and API keys are stored encrypted.
+
+```mermaid
+flowchart LR
+  File["runnerd.yaml<br/>server, database, GitHub, OAuth, worker"]
+  OAuth["GitHub OAuth callback<br/>/auth/github/callback"]
+  UserPrefs["User Preferences UI<br/>account or organization scope"]
+  SecretBox["secretbox encryption<br/>auth.encryption_key"]
+  Store[("State DB")]
+  Runnerd["runnerd"]
+  QiniuSandbox["Qiniu Sandbox service"]
+
+  File --> Runnerd
+  OAuth -->|"signed HttpOnly session"| Runnerd
+  UserPrefs -->|"Sandbox API URL + API key"| Runnerd
+  Runnerd --> SecretBox
+  SecretBox -->|"encrypted API key"| Store
+  Runnerd -->|"decrypt at runner start"| QiniuSandbox
+```
+
 ## Comparison
 
 | Dimension | runnerd now | Fireactions | Actions Runner Controller |
 | --- | --- | --- | --- |
 | Deployment | Single Go service | Runner orchestration service | Kubernetes operator |
-| Compute | E2B sandbox | Firecracker microVM | Kubernetes pod |
+| Compute | Qiniu sandbox | Firecracker microVM | Kubernetes pod |
 | State source | SQLite/Postgres/MySQL DB | Service-managed pool state | Kubernetes API / CRD status |
 | Scheduling input | GitHub webhooks + admin API | Pool desired/current state | Scale set/listener reconciliation |
 | Runner selection | Runner specs, groups, policies, label matching | Pool/profile selection | Runner groups and scale sets |
 | Auth | GitHub App, token, or basic auth | GitHub App | GitHub App / scale set auth |
 | Diagnostics | Admin diagnostics + pprof/expvar | Pool metrics | Controller/workflow metrics |
-| Operational scope | Lightweight service for E2B runners | Dedicated VM runner platform | Full Kubernetes-native controller |
+| Operational scope | Lightweight service for Qiniu sandbox runners | Dedicated VM runner platform | Full Kubernetes-native controller |
 
-runnerd intentionally keeps the E2B execution model and avoids the Kubernetes control-plane complexity of ARC. The useful ideas carried over are the reconciliation mindset, repository visibility rules, profile/spec-based runner selection, and workflow job metrics.
+runnerd intentionally keeps the Qiniu sandbox execution model and avoids the Kubernetes control-plane complexity of ARC. The useful ideas carried over are the reconciliation mindset, repository visibility rules, profile/spec-based runner selection, and workflow job metrics.
 
 ## Scheduling Model
 

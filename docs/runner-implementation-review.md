@@ -22,7 +22,7 @@ The remaining work is no longer a basic architecture catch-up. The next decision
 - Runner requests, events, specs, groups, policies, retry metadata, leases, and audit events are stored in the configured database backend.
 - State schema creation runs through GORM `AutoMigrate` after a small compatibility pass for older schema columns that cannot be safely added as `NOT NULL` without defaults.
 - Worker processing uses DB claim/lease semantics and retry scheduling instead of only in-memory queue ownership.
-- Transient E2B, GitHub, rate-limit, timeout, and temporary network failures are classified for retry or queue deferral. Deterministic auth/config/template failures fail immediately.
+- Transient Qiniu sandbox, GitHub, rate-limit, timeout, and temporary network failures are classified for retry or queue deferral. Deterministic auth/config/template failures fail immediately.
 - Admin routes expose runner request management, retry/stop/log access, runner specs, runner groups, repository policies, match tests, audit events, and diagnostics.
 - Ordinary-user routes expose the PR/job dashboard at `/`, local activity repositories at `/repositories`, GitHub App account setup at `/account/repositories`, and account or organization Sandbox service Preferences at `/account/preferences` and `/organizations/{login}/preferences`.
 - The React UI in `ui/` is embedded for production from `internal/server/ui/*`; development builds proxy UI assets to Vite through `internal/server/ui_assets_development.go`.
@@ -45,7 +45,7 @@ Runtime config is file-first, but the admin console does not yet provide an effe
 
 ### 4. Deployment Smoke
 
-Local build/lint/test coverage validates the code path, but production readiness still depends on a real GitHub App installation, real E2B templates, webhook delivery, and sandbox runner execution. Use `docs/deployment-smoke.md` for the real-deployment checklist covering webhook signature handling, installation resolution, runner spec matching, sandbox creation, GitHub job pickup, cleanup, and diagnostics.
+Local build/lint/test coverage validates the code path, but production readiness still depends on a real GitHub App installation, real Qiniu sandbox templates, webhook delivery, and sandbox runner execution. Use `docs/deployment-smoke.md` for the real-deployment checklist covering webhook signature handling, installation resolution, runner spec matching, sandbox creation, GitHub job pickup, cleanup, and diagnostics.
 
 ### 5. Multi-Instance And Operations
 
@@ -58,7 +58,7 @@ The current migration path intentionally avoids a full handwritten migration his
 ## Suggested Next Order
 
 1. Keep `task dev`, `task build`, `task lint`, and `task test` green on every branch that touches backend/UI boundaries.
-2. Run and maintain the deployment smoke checklist using a real GitHub App, one repository, and one E2B template.
+2. Run and maintain the deployment smoke checklist using a real GitHub App, one repository, and one Qiniu sandbox template.
 3. Decide whether token/basic auth remain supported modes.
 4. Decide whether Activity repositories should include policy-configured repositories before jobs are observed.
 5. Add an effective-config diagnostics view only after the desired config operations model is clear.

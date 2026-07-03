@@ -10,7 +10,7 @@ Use this checklist before treating a runnerd deployment as ready for real GitHub
 - A GitHub App OAuth callback URL pointing at `/auth/github/callback` on the runnerd origin.
 - A repository webhook delivering `workflow_job` events to `POST /webhooks/github`.
 - Sandbox service API URL and API key configured in the target account or organization Preferences page.
-- At least one E2B template that contains `/opt/actions-runner/config.sh` and `/opt/actions-runner/run.sh`.
+- At least one Qiniu sandbox template that contains `/opt/actions-runner/config.sh` and `/opt/actions-runner/run.sh`.
 - An admin account bootstrapped with `runnerd --bootstrap-admin github:<github-user-id>`.
 
 Do not use real secrets in this document or commit deployment-local files such as `runnerd.local.yaml`, `.smee-url`, sqlite databases, private keys, or cookie jars.
@@ -110,14 +110,14 @@ Expected result:
 
 - A runner request appears as `queued`, then `creating`, then `running`.
 - The GitHub Actions job leaves the queued state and runs on an `e2b-*` runner.
-- The job's `Set up runner` log includes the E2B sandbox id, runner request id, and runner name.
+- The job's `Set up runner` log includes the Qiniu sandbox id, runner request id, and runner name.
 - After the job finishes, the runner request becomes `completed`.
 
 ## 6. Cleanup
 
 After the workflow completes, verify:
 
-- The E2B sandbox has stopped or is no longer active.
+- The Qiniu sandbox has stopped or is no longer active.
 - The GitHub self-hosted runner registration has been removed or is offline and cleaned up by runnerd.
 - The runner request has control/stdout/stderr logs available from the admin UI or `/runner_requests/{id}/logs/{name}`.
 - `/diagnostics/vars` shows updated workflow job, runner registration, cleanup, and duration counters.
