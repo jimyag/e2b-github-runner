@@ -176,6 +176,7 @@ tasks:
         SMEE_PID="$!"
         kill_tree() {
           pid="$1"
+          [ -z "$pid" ] && return
           if command -v pgrep >/dev/null 2>&1; then
             for child_pid in $(pgrep -P "$pid" 2>/dev/null || true); do
               kill_tree "$child_pid"
@@ -187,7 +188,8 @@ tasks:
           trap - EXIT
           kill_tree "$UI_PID"
           kill_tree "$SMEE_PID"
-          wait "$UI_PID" "$SMEE_PID" 2>/dev/null || true
+          [ -n "$UI_PID" ] && wait "$UI_PID" 2>/dev/null || true
+          [ -n "$SMEE_PID" ] && wait "$SMEE_PID" 2>/dev/null || true
         }
         trap cleanup_dev EXIT
         UI_READY=0
