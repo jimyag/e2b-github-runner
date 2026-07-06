@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -401,6 +402,67 @@ func TestGetWorkflowJob(t *testing.T) {
 	}
 	if job.ID != 1001 || job.Status != "completed" || job.Conclusion != "cancelled" {
 		t.Fatalf("unexpected job: %#v", job)
+	}
+}
+
+func TestDownloadWorkflowJobLogs(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/actions/jobs/1001/logs" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("github log\n"))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, ts.Client())
+	body, contentType, err := client.DownloadWorkflowJobLogs(t.Context(), "o/r", 1001)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "github log\n" || !strings.HasPrefix(contentType, "text/plain") {
+		t.Fatalf("unexpected logs body=%q contentType=%q", string(body), contentType)
+	}
+}
+
+func TestDownloadWorkflowJobLogsFollowsRedirectWithoutGitHubAuth(t *testing.T) {
+	var ts *httptest.Server
+	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/actions/jobs/1001/logs":
+			if r.Header.Get("Authorization") != "Bearer github-token" {
+				t.Fatalf("expected github authorization on api request, got %q", r.Header.Get("Authorization"))
+			}
+			http.Redirect(w, r, ts.URL+"/download/logs.zip?sig=temporary", http.StatusFound)
+		case "/download/logs.zip":
+			if r.Header.Get("Authorization") != "" {
+				t.Fatalf("expected redirect download without github authorization, got %q", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Content-Type", "application/zip")
+			w.Write([]byte("zip bytes\n"))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer ts.Close()
+
+	client := NewTokenClient(ts.URL, "github-token", ts.Client())
+	body, contentType, err := client.DownloadWorkflowJobLogs(t.Context(), "o/r", 1001)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "zip bytes\n" || !strings.HasPrefix(contentType, "application/zip") {
+		t.Fatalf("unexpected logs body=%q contentType=%q", string(body), contentType)
+	}
+}
+
+func TestReadActionsLogBodyRejectsOversizedLog(t *testing.T) {
+	_, err := readActionsLogBody(strings.NewReader("123456"), 5)
+	if err == nil {
+		t.Fatal("expected oversized log error")
+	}
+	if !strings.Contains(err.Error(), "exceeds 5 bytes") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

@@ -33,6 +33,11 @@ type StartResult struct {
 	PID       uint32
 }
 
+type PtySize struct {
+	Cols uint32
+	Rows uint32
+}
+
 type ExitResult struct {
 	ExitCode int
 	Stdout   string
@@ -40,10 +45,18 @@ type ExitResult struct {
 	Error    string
 }
 
+type TerminalSession interface {
+	PID() uint32
+	SendInput(ctx context.Context, data []byte) error
+	Resize(ctx context.Context, size PtySize) error
+	Close(ctx context.Context) error
+}
+
 type Service interface {
 	ValidateTemplate(ctx context.Context, templateID string) error
 	StartRunner(ctx context.Context, input StartInput) (StartResult, error)
 	StopRunner(ctx context.Context, sandboxID string, pid uint32) error
+	StartTerminal(ctx context.Context, sandboxID string, size PtySize, onData func([]byte)) (TerminalSession, error)
 }
 
 var (
@@ -164,6 +177,62 @@ func (s *E2BService) StopRunner(ctx context.Context, sandboxID string, pid uint3
 		_ = sb.Commands().Kill(ctx, pid)
 	}
 	return sb.Kill(ctx)
+}
+
+type e2bTerminalSession struct {
+	sandboxID string
+	pty       interface {
+		SendInput(context.Context, uint32, []byte) error
+		Resize(context.Context, uint32, qnsandbox.PtySize) error
+		Kill(context.Context, uint32) error
+	}
+	pid uint32
+}
+
+func (s *E2BService) StartTerminal(ctx context.Context, sandboxID string, size PtySize, onData func([]byte)) (TerminalSession, error) {
+	sb, err := s.client.Connect(ctx, sandboxID, qnsandbox.ConnectParams{Timeout: 30})
+	if err != nil {
+		return nil, err
+	}
+	if size.Cols == 0 {
+		size.Cols = 100
+	}
+	if size.Rows == 0 {
+		size.Rows = 28
+	}
+	handle, err := sb.Pty().Create(
+		ctx,
+		qnsandbox.PtySize{Cols: size.Cols, Rows: size.Rows},
+		qnsandbox.WithTag("runnerd-web-terminal"),
+		qnsandbox.WithOnPtyData(onData),
+	)
+	if err != nil {
+		return nil, err
+	}
+	pid, err := handle.WaitPID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &e2bTerminalSession{sandboxID: sandboxID, pty: sb.Pty(), pid: pid}, nil
+}
+
+func (s *e2bTerminalSession) PID() uint32 {
+	return s.pid
+}
+
+func (s *e2bTerminalSession) SendInput(ctx context.Context, data []byte) error {
+	return s.pty.SendInput(ctx, s.pid, data)
+}
+
+func (s *e2bTerminalSession) Resize(ctx context.Context, size PtySize) error {
+	if size.Cols == 0 || size.Rows == 0 {
+		return nil
+	}
+	return s.pty.Resize(ctx, s.pid, qnsandbox.PtySize{Cols: size.Cols, Rows: size.Rows})
+}
+
+func (s *e2bTerminalSession) Close(ctx context.Context) error {
+	return s.pty.Kill(ctx, s.pid)
 }
 
 func startScript(input StartInput, sandboxID string) string {

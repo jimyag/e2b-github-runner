@@ -80,6 +80,7 @@ export function UserDashboard({
   onDeleteSandboxAPIKey,
   onNavigate,
   onNavigateAccountSettings,
+  onOpenJob,
   onSelectKey,
   onSignOut,
 }: {
@@ -97,6 +98,7 @@ export function UserDashboard({
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   onNavigate: (page: UserPage) => void
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
+  onOpenJob: (id: string) => void
   onSelectKey: (key: string) => void
   onSignOut: () => void
 }) {
@@ -185,6 +187,7 @@ export function UserDashboard({
           selected={selected}
           onSelectKey={onSelectKey}
           onNavigate={onNavigate}
+          onOpenJob={onOpenJob}
         />
       )}
     </main>
@@ -634,12 +637,14 @@ function PullRequestsPage({
   selected,
   onSelectKey,
   onNavigate,
+  onOpenJob,
 }: {
   groups: BuildGroup[]
   hasInstallations: boolean
   selected: BuildGroup | undefined
   onSelectKey: (key: string) => void
   onNavigate: (page: UserPage) => void
+  onOpenJob: (id: string) => void
 }) {
   const currentJobs = selected ? currentBuildJobs(selected) : []
   const previousJobs = selected ? previousBuildJobs(selected, currentJobs) : []
@@ -706,7 +711,7 @@ function PullRequestsPage({
               </div>
               <div className="grid gap-3">
                 {currentJobs.map((job) => (
-                  <RunnerJobCard key={job.id} job={job} />
+                  <RunnerJobCard key={job.id} job={job} onOpen={() => onOpenJob(job.id)} />
                 ))}
                 {shouldCollapsePreviousJobs ? (
                   <Collapsible>
@@ -721,7 +726,7 @@ function PullRequestsPage({
                     </CollapsibleTrigger>
                     <CollapsibleContent className="mt-3 grid gap-3">
                       {previousJobs.map((job) => (
-                        <RunnerJobCard key={job.id} job={job} />
+                        <RunnerJobCard key={job.id} job={job} onOpen={() => onOpenJob(job.id)} />
                       ))}
                     </CollapsibleContent>
                   </Collapsible>
@@ -729,7 +734,7 @@ function PullRequestsPage({
                   <div className="grid gap-3">
                     <div className="text-sm font-medium text-muted-foreground">Previous jobs</div>
                     {previousJobs.map((job) => (
-                      <RunnerJobCard key={job.id} job={job} />
+                      <RunnerJobCard key={job.id} job={job} onOpen={() => onOpenJob(job.id)} />
                     ))}
                   </div>
                 ) : null}
@@ -834,7 +839,7 @@ function JobField({ label, value }: { label: string; value: ReactNode }) {
   )
 }
 
-function RunnerJobCard({ job }: { job: RunnerState }) {
+function RunnerJobCard({ job, onOpen }: { job: RunnerState; onOpen: () => void }) {
   return (
     <Card className="rounded-lg">
       <CardHeader className="gap-1 pb-0">
@@ -842,7 +847,12 @@ function RunnerJobCard({ job }: { job: RunnerState }) {
           <div>
             <CardTitle className="text-base">{runnerJobTitle(job)}</CardTitle>
           </div>
-          <Badge className={userStatusClass(job.status)}>{job.status}</Badge>
+          <div className="flex items-center gap-2">
+            <Badge className={userStatusClass(job.status)}>{job.status}</Badge>
+            <Button type="button" variant="outline" size="sm" onClick={onOpen}>
+              Open
+            </Button>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="grid gap-3 pt-0 text-sm md:grid-cols-3">

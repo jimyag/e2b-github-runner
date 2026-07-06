@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { AppSidebar } from "@/components/app-sidebar"
 import { AuditSection, DiagnosticsSection, MatchSection, OverviewSection } from "@/components/admin-sections"
 import { LoginPage } from "@/components/login-page"
+import { RunnerJobDetail } from "@/components/runner-job-detail"
 import { RunnerGroupsSection } from "@/components/runner-groups-section"
 import { RunnerPoliciesSection } from "@/components/runner-policies-section"
 import { RunnerRequestsSection } from "@/components/runner-requests-section"
@@ -148,6 +149,7 @@ function App() {
 
   const hasAccess = authSession.authenticated && authSession.role === "admin"
   const isAdminRoute = locationPath === "/admin" || locationPath.startsWith("/admin/")
+  const userJobID = userJobIDFromPath(locationPath)
   const accountSettingsRoute = parseAccountSettingsRoute(locationPath, authSession.login)
   const userPage = accountSettingsRoute ? "settings" : locationPath === "/repositories" ? "repositories" : "home"
 
@@ -548,6 +550,17 @@ function App() {
     toast.success("Runner ID copied")
   }
 
+  const openUserJob = (id: string) => {
+    const nextPath = `/jobs/${encodeURIComponent(id)}`
+    window.history.pushState(null, "", nextPath)
+    setLocationPath(nextPath)
+  }
+
+  const backToUserJobs = () => {
+    window.history.pushState(null, "", "/")
+    setLocationPath("/")
+  }
+
   if (!authSession.authenticated || !authSession.oauth_enabled) {
     return (
       <>
@@ -563,6 +576,20 @@ function App() {
   }
 
   if (!hasAccess || !isAdminRoute) {
+    if (userJobID) {
+      return (
+        <>
+          <RunnerJobDetail
+            id={userJobID}
+            apiBase="/user/runner_requests"
+            onBack={backToUserJobs}
+            onOpenJob={openUserJob}
+            request={request}
+          />
+          <Toaster richColors />
+        </>
+      )
+    }
     return (
       <>
         <UserDashboard
@@ -580,6 +607,7 @@ function App() {
           onDeleteSandboxAPIKey={deleteSandboxAPIKey}
           onNavigate={setUserPage}
           onNavigateAccountSettings={setAccountSettingsRoute}
+          onOpenJob={openUserJob}
           onSelectKey={setUserSelectedKey}
           onSignOut={signOut}
         />
@@ -793,6 +821,11 @@ function safeDecodePathSegment(value: string): string | null {
   } catch {
     return null
   }
+}
+
+function userJobIDFromPath(path: string) {
+	const match = path.match(/^\/jobs\/([^/]+)$/)
+	return match ? safeDecodePathSegment(match[1]) || "" : ""
 }
 
 function accountSettingsPathForInstallation(

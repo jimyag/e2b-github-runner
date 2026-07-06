@@ -1,0 +1,612 @@
+package server
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/qiniu/ci-runner/internal/sandboxrunner"
+	"github.com/qiniu/ci-runner/internal/state"
+)
+
+type terminalCreateRequest struct {
+	Cols uint32 `json:"cols"`
+	Rows uint32 `json:"rows"`
+}
+
+type terminalInputRequest struct {
+	Data string `json:"data"`
+}
+
+type terminalResizeRequest struct {
+	Cols uint32 `json:"cols"`
+	Rows uint32 `json:"rows"`
+}
+
+type userRunnerSiblingsResponse struct {
+	Group string              `json:"group"`
+	Jobs  []state.RunnerState `json:"jobs"`
+}
+
+const terminalIdleCloseDelay = 30 * time.Second
+
+type terminalHub struct {
+	mu       sync.Mutex
+	sessions map[string]*terminalSession
+	logger   *slog.Logger
+}
+
+type terminalSession struct {
+	id        string
+	requestID string
+	sandboxID string
+	terminal  sandboxrunner.TerminalSession
+	createdAt time.Time
+
+	mu       sync.Mutex
+	buffer   []byte
+	watchers map[chan []byte]struct{}
+	closed   bool
+}
+
+func newTerminalHub(logger *slog.Logger) *terminalHub {
+	return &terminalHub{
+		sessions: map[string]*terminalSession{},
+		logger:   logger,
+	}
+}
+
+func (h *terminalHub) Add(requestID, sandboxID string, terminal sandboxrunner.TerminalSession) *terminalSession {
+	session := &terminalSession{
+		id:        newID(),
+		requestID: requestID,
+		sandboxID: sandboxID,
+		terminal:  terminal,
+		createdAt: time.Now().UTC(),
+		watchers:  map[chan []byte]struct{}{},
+	}
+	h.mu.Lock()
+	h.sessions[session.id] = session
+	h.mu.Unlock()
+	return session
+}
+
+func (h *terminalHub) Get(sessionID string) (*terminalSession, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	session, ok := h.sessions[sessionID]
+	return session, ok
+}
+
+func (h *terminalHub) CloseSession(ctx context.Context, sessionID string) error {
+	h.mu.Lock()
+	session, ok := h.sessions[sessionID]
+	if ok {
+		delete(h.sessions, sessionID)
+	}
+	h.mu.Unlock()
+	if !ok {
+		return state.ErrNotFound
+	}
+	session.closeWatchers()
+	return session.terminal.Close(ctx)
+}
+
+func (h *terminalHub) CloseSessionWhenIdle(sessionID string, delay time.Duration) {
+	if delay < 0 {
+		delay = 0
+	}
+	go func() {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		<-timer.C
+
+		h.mu.Lock()
+		session, ok := h.sessions[sessionID]
+		h.mu.Unlock()
+		if !ok || !session.idle() {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := h.CloseSession(ctx, sessionID); err != nil && !errors.Is(err, state.ErrNotFound) && h.logger != nil {
+			h.logger.Warn("close idle terminal session", "session_id", sessionID, "request_id", session.requestID, "error", err)
+		}
+	}()
+}
+
+func (h *terminalHub) Close() {
+	h.mu.Lock()
+	sessions := make([]*terminalSession, 0, len(h.sessions))
+	for id, session := range h.sessions {
+		sessions = append(sessions, session)
+		delete(h.sessions, id)
+	}
+	h.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, session := range sessions {
+		session.closeWatchers()
+		if err := session.terminal.Close(ctx); err != nil && h.logger != nil {
+			h.logger.Warn("close terminal session", "session_id", session.id, "request_id", session.requestID, "error", err)
+		}
+	}
+}
+
+func (s *terminalSession) append(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	s.mu.Lock()
+	s.buffer = append(s.buffer, data...)
+	const maxBuffer = 64 << 10
+	if len(s.buffer) > maxBuffer {
+		s.buffer = append([]byte(nil), s.buffer[len(s.buffer)-maxBuffer:]...)
+	}
+	for watcher := range s.watchers {
+		select {
+		case watcher <- append([]byte(nil), data...):
+		default:
+		}
+	}
+	s.mu.Unlock()
+}
+
+func (s *terminalSession) Subscribe() ([]byte, <-chan []byte, func()) {
+	ch := make(chan []byte, 32)
+	s.mu.Lock()
+	initial := append([]byte(nil), s.buffer...)
+	if s.closed {
+		close(ch)
+		s.mu.Unlock()
+		return initial, ch, func() {}
+	}
+	s.watchers[ch] = struct{}{}
+	s.mu.Unlock()
+	cancel := func() {
+		s.mu.Lock()
+		if _, ok := s.watchers[ch]; ok {
+			delete(s.watchers, ch)
+			close(ch)
+		}
+		s.mu.Unlock()
+	}
+	return initial, ch, cancel
+}
+
+func (s *terminalSession) idle() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.closed && len(s.watchers) == 0
+}
+
+func (s *terminalSession) closeWatchers() {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.closed = true
+	for watcher := range s.watchers {
+		close(watcher)
+		delete(s.watchers, watcher)
+	}
+	s.mu.Unlock()
+}
+
+func (s *Server) userRunnerState(w http.ResponseWriter, r *http.Request) (state.RunnerState, bool) {
+	_, account, ok := s.requireUserSession(w, r)
+	if !ok {
+		return state.RunnerState{}, false
+	}
+	st, err := s.store.ReadState(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runner not found")
+		return state.RunnerState{}, false
+	}
+	installations, err := s.store.ListGitHubInstallations(account.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return state.RunnerState{}, false
+	}
+	for _, installation := range installations {
+		if installation.InstallationID == st.GitHubInstallationID {
+			return st, true
+		}
+	}
+	writeError(w, http.StatusNotFound, "runner not found")
+	return state.RunnerState{}, false
+}
+
+func (s *Server) handleUserGetRunner(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.userRunnerState(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
+}
+
+func (s *Server) handleUserListRunnerSiblings(w http.ResponseWriter, r *http.Request) {
+	_, account, ok := s.requireUserSession(w, r)
+	if !ok {
+		return
+	}
+	st, err := s.store.ReadState(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runner not found")
+		return
+	}
+	installations, err := s.store.ListGitHubInstallations(account.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	installationIDs := installationIDsForUserInstallations(installations)
+	if !hasInt64(installationIDs, st.GitHubInstallationID) {
+		writeError(w, http.StatusNotFound, "runner not found")
+		return
+	}
+	states, err := s.store.ListStatesForGitHubInstallations(installationIDs, 500)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	group, siblings := runnerSiblings(st, states)
+	writeJSON(w, http.StatusOK, userRunnerSiblingsResponse{Group: group, Jobs: siblings})
+}
+
+func (s *Server) handleUserGetRunnerLog(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.userRunnerState(w, r); !ok {
+		return
+	}
+	writeRunnerLog(w, s.store, r.PathValue("id"), r.PathValue("name"))
+}
+
+func (s *Server) handleUserGetRunnerGitHubLog(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.userRunnerState(w, r)
+	if !ok {
+		return
+	}
+	if s.gh == nil {
+		writeError(w, http.StatusBadGateway, "github client is not configured")
+		return
+	}
+	if strings.TrimSpace(st.RepositoryFullName) == "" {
+		writeError(w, http.StatusConflict, "runner has no github repository")
+		return
+	}
+	jobID := st.AssignedJobID
+	if jobID == 0 {
+		jobID = st.WorkflowJobID
+	}
+	var (
+		data        []byte
+		contentType string
+		err         error
+	)
+	if jobID != 0 {
+		data, contentType, err = s.gh.DownloadWorkflowJobLogs(r.Context(), st.RepositoryFullName, jobID)
+	} else if st.WorkflowRunID != 0 {
+		data, contentType, err = s.gh.DownloadWorkflowRunLogs(r.Context(), st.RepositoryFullName, st.WorkflowRunID)
+	} else {
+		writeError(w, http.StatusConflict, "runner has no github workflow job or run id")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	text, err := formatGitHubActionsLog(data)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	if strings.TrimSpace(text) == "" {
+		text = "GitHub log is empty"
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-GitHub-Log-Content-Type", contentType)
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, text)
+}
+
+func (s *Server) handleUserCreateRunnerTerminal(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.userRunnerState(w, r)
+	if !ok {
+		return
+	}
+	if !runnerTerminalAvailable(st) {
+		writeError(w, http.StatusConflict, "terminal is only available while a sandbox job is active")
+		return
+	}
+	var input terminalCreateRequest
+	if r.Body != nil {
+		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "invalid terminal size")
+			return
+		}
+	}
+	req := state.RunnerRequest{
+		ID:                     st.ID,
+		SandboxAPIURL:          st.SandboxAPIURL,
+		SandboxAPIKeyEncrypted: st.SandboxAPIKeyEncrypted,
+		GitHubInstallationID:   st.GitHubInstallationID,
+	}
+	svc, err := s.sandboxServiceForRunnerRequest(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	var session *terminalSession
+	var sessionMu sync.Mutex
+	var pending [][]byte
+	terminal, err := svc.StartTerminal(r.Context(), st.SandboxID, sandboxrunner.PtySize{Cols: input.Cols, Rows: input.Rows}, func(data []byte) {
+		sessionMu.Lock()
+		defer sessionMu.Unlock()
+		if session != nil {
+			session.append(data)
+			return
+		}
+		pending = append(pending, append([]byte(nil), data...))
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	sessionMu.Lock()
+	session = s.terminals.Add(st.ID, st.SandboxID, terminal)
+	s.terminals.CloseSessionWhenIdle(session.id, terminalIdleCloseDelay)
+	for _, data := range pending {
+		session.append(data)
+	}
+	pending = nil
+	sessionMu.Unlock()
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"session_id": session.id,
+		"pid":        terminal.PID(),
+		"sandbox_id": st.SandboxID,
+	})
+}
+
+func (s *Server) handleUserRunnerTerminalEvents(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.userRunnerState(w, r)
+	if !ok {
+		return
+	}
+	session, ok := s.authorizedTerminalSession(w, r, st)
+	if !ok {
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "streaming is not supported")
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Accel-Buffering", "no")
+	initial, ch, cancel := session.Subscribe()
+	defer func() {
+		cancel()
+		s.terminals.CloseSessionWhenIdle(session.id, terminalIdleCloseDelay)
+	}()
+	if len(initial) > 0 {
+		writeTerminalEvent(w, initial)
+		flusher.Flush()
+	}
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case data, ok := <-ch:
+			if !ok {
+				return
+			}
+			writeTerminalEvent(w, data)
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) handleUserRunnerTerminalInput(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.userRunnerState(w, r)
+	if !ok {
+		return
+	}
+	session, ok := s.authorizedTerminalSession(w, r, st)
+	if !ok {
+		return
+	}
+	var input terminalInputRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid terminal input")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := session.terminal.SendInput(ctx, []byte(input.Data)); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleUserRunnerTerminalResize(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.userRunnerState(w, r)
+	if !ok {
+		return
+	}
+	session, ok := s.authorizedTerminalSession(w, r, st)
+	if !ok {
+		return
+	}
+	var input terminalResizeRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid terminal size")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := session.terminal.Resize(ctx, sandboxrunner.PtySize{Cols: input.Cols, Rows: input.Rows}); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleUserCloseRunnerTerminal(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.userRunnerState(w, r)
+	if !ok {
+		return
+	}
+	if _, ok := s.authorizedTerminalSession(w, r, st); !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := s.terminals.CloseSession(ctx, r.PathValue("sessionID")); err != nil && !errors.Is(err, state.ErrNotFound) {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) authorizedTerminalSession(w http.ResponseWriter, r *http.Request, st state.RunnerState) (*terminalSession, bool) {
+	session, ok := s.terminals.Get(r.PathValue("sessionID"))
+	if !ok || session.requestID != st.ID || session.sandboxID != st.SandboxID {
+		writeError(w, http.StatusNotFound, "terminal session not found")
+		return nil, false
+	}
+	return session, true
+}
+
+func runnerTerminalAvailable(st state.RunnerState) bool {
+	if strings.TrimSpace(st.SandboxID) == "" {
+		return false
+	}
+	switch st.Status {
+	case state.StatusCreating, state.StatusRunning, state.StatusStopping:
+		return true
+	default:
+		return false
+	}
+}
+
+func runnerSiblings(current state.RunnerState, states []state.RunnerState) (string, []state.RunnerState) {
+	group := "repository"
+	matches := func(candidate state.RunnerState) bool {
+		if candidate.RepositoryFullName != current.RepositoryFullName {
+			return false
+		}
+		if current.WorkflowRunID != 0 {
+			group = "workflow_run"
+			return candidate.WorkflowRunID == current.WorkflowRunID
+		}
+		if current.PullRequestNumber != 0 {
+			group = "pull_request"
+			return candidate.PullRequestNumber == current.PullRequestNumber
+		}
+		return true
+	}
+	siblings := make([]state.RunnerState, 0, len(states))
+	for _, candidate := range states {
+		if matches(candidate) {
+			siblings = append(siblings, candidate)
+		}
+	}
+	if !hasRunnerStateID(siblings, current.ID) {
+		siblings = append(siblings, current)
+	}
+	sort.SliceStable(siblings, func(i, j int) bool {
+		if group == "repository" {
+			return siblings[i].CreatedAt.After(siblings[j].CreatedAt)
+		}
+		if siblings[i].WorkflowRunID != siblings[j].WorkflowRunID {
+			return siblings[i].WorkflowRunID > siblings[j].WorkflowRunID
+		}
+		return siblings[i].CreatedAt.Before(siblings[j].CreatedAt)
+	})
+	return group, siblings
+}
+
+func hasRunnerStateID(states []state.RunnerState, id string) bool {
+	for _, st := range states {
+		if st.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func hasInt64(values []int64, needle int64) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func formatGitHubActionsLog(data []byte) (string, error) {
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return string(data), nil
+	}
+	files := append([]*zip.File(nil), reader.File...)
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Name < files[j].Name
+	})
+	var out strings.Builder
+	for _, file := range files {
+		if file.FileInfo().IsDir() {
+			continue
+		}
+		rc, err := file.Open()
+		if err != nil {
+			return "", fmt.Errorf("open github log %s: %w", file.Name, err)
+		}
+		const maxLogFileBytes = 8 << 20
+		chunk, readErr := io.ReadAll(io.LimitReader(rc, maxLogFileBytes+1))
+		closeErr := rc.Close()
+		if readErr != nil {
+			return "", fmt.Errorf("read github log %s: %w", file.Name, readErr)
+		}
+		if closeErr != nil {
+			return "", fmt.Errorf("close github log %s: %w", file.Name, closeErr)
+		}
+		if out.Len() > 0 {
+			out.WriteByte('\n')
+		}
+		out.WriteString("===== ")
+		out.WriteString(file.Name)
+		out.WriteString(" =====\n")
+		truncated := len(chunk) > maxLogFileBytes
+		if truncated {
+			chunk = chunk[:maxLogFileBytes]
+		}
+		out.Write(chunk)
+		if len(chunk) == 0 || chunk[len(chunk)-1] != '\n' {
+			out.WriteByte('\n')
+		}
+		if truncated {
+			out.WriteString("[runnerd] GitHub log file truncated after 8388608 bytes.\n")
+		}
+	}
+	return out.String(), nil
+}
+
+func writeTerminalEvent(w io.Writer, data []byte) {
+	payload, _ := json.Marshal(string(data))
+	_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+}

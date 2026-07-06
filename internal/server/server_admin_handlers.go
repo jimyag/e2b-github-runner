@@ -161,14 +161,17 @@ func (s *Server) handleGetRunnerLog(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	name := r.PathValue("name")
+	writeRunnerLog(w, s.store, r.PathValue("id"), r.PathValue("name"))
+}
+
+func writeRunnerLog(w http.ResponseWriter, store state.Store, id, name string) {
 	switch name {
 	case "control.log", "stdout.log", "stderr.log":
 	default:
 		writeError(w, http.StatusBadRequest, "unsupported log name")
 		return
 	}
-	data, err := s.store.ReadLog(r.PathValue("id"), name, 256<<10)
+	data, err := store.ReadLog(id, name, 256<<10)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")

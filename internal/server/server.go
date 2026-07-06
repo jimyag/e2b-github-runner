@@ -28,6 +28,7 @@ type Server struct {
 	slots       chan struct{}
 	oauth       *http.Client
 	diagnostics *http.Client
+	terminals   *terminalHub
 
 	admissionMu sync.Mutex
 	locks       [64]sync.Mutex
@@ -117,6 +118,7 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		queueNotify: make(chan struct{}, 1),
 		oauth:       &http.Client{Timeout: 10 * time.Second},
 		diagnostics: &http.Client{Timeout: 5 * time.Second},
+		terminals:   newTerminalHub(logger),
 	}
 	hostname, _ := os.Hostname()
 	s.workerID = fmt.Sprintf("%s-%d", hostname, os.Getpid())
@@ -164,6 +166,9 @@ func (w *loggingResponseWriter) Unwrap() http.ResponseWriter {
 }
 
 func (s *Server) Close() {
+	if s.terminals != nil {
+		s.terminals.Close()
+	}
 	if s.loopCancel != nil {
 		s.logger.Info("stopping background loops")
 		s.loopCancel()
@@ -211,6 +216,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /user/github-app/installations/{id}/repositories", s.handleUserListGitHubInstallationRepositories)
 	s.mux.HandleFunc("DELETE /user/github-app/installations/{id}", s.handleUserDeleteGitHubInstallation)
 	s.mux.HandleFunc("GET /user/runner_requests", s.handleUserListRunners)
+	s.mux.HandleFunc("GET /user/runner_requests/{id}", s.handleUserGetRunner)
+	s.mux.HandleFunc("GET /user/runner_requests/{id}/siblings", s.handleUserListRunnerSiblings)
+	s.mux.HandleFunc("GET /user/runner_requests/{id}/logs/{name}", s.handleUserGetRunnerLog)
+	s.mux.HandleFunc("GET /user/runner_requests/{id}/github-log", s.handleUserGetRunnerGitHubLog)
+	s.mux.HandleFunc("POST /user/runner_requests/{id}/terminal", s.handleUserCreateRunnerTerminal)
+	s.mux.HandleFunc("GET /user/runner_requests/{id}/terminal/{sessionID}/events", s.handleUserRunnerTerminalEvents)
+	s.mux.HandleFunc("POST /user/runner_requests/{id}/terminal/{sessionID}/input", s.handleUserRunnerTerminalInput)
+	s.mux.HandleFunc("POST /user/runner_requests/{id}/terminal/{sessionID}/resize", s.handleUserRunnerTerminalResize)
+	s.mux.HandleFunc("DELETE /user/runner_requests/{id}/terminal/{sessionID}", s.handleUserCloseRunnerTerminal)
 	s.mux.HandleFunc("GET /user/preferences", s.handleUserPreferences)
 	s.mux.HandleFunc("PUT /user/preferences/sandbox", s.handleUserSaveSandboxConfig)
 	s.mux.HandleFunc("DELETE /user/preferences/sandbox-api-key", s.handleUserDeleteSandboxAPIKey)
