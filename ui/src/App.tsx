@@ -52,6 +52,7 @@ type AccountSettingsRoute = {
 function App() {
   const [authSession, setAuthSession] = useState<AuthSession>({ authenticated: false, oauth_enabled: false })
   const [locationPath, setLocationPath] = useState(() => window.location.pathname)
+  const [locationSearch, setLocationSearch] = useState(() => window.location.search)
   const [section, setSectionState] = useState<AdminSection>(() => sectionFromPath())
   const [runners, setRunners] = useState<RunnerState[]>([])
   const [runnerSpecs, setRunnerSpecs] = useState<RunnerSpec[]>([])
@@ -81,7 +82,7 @@ function App() {
   const [userPreferences, setUserPreferences] = useState<UserPreferences | null>(null)
   const [authorizedRepositories, setAuthorizedRepositories] = useState<Record<number, string[]>>({})
   const [loadingRepositoriesFor, setLoadingRepositoriesFor] = useState<number | null>(null)
-  const [userSelectedKey, setUserSelectedKey] = useState("")
+  const [userSelectedKey, setUserSelectedKey] = useState(() => userJobsGroupKeyFromLocation(window.location.pathname, window.location.search))
 
   const setSection = useCallback((next: string) => {
     const section = adminSections.includes(next as AdminSection) ? (next as AdminSection) : "overview"
@@ -94,12 +95,13 @@ function App() {
   }, [])
 
   const setUserPage = useCallback((next: "home" | "repositories" | "settings") => {
-    const nextPath = next === "settings" ? "/account/repositories" : next === "repositories" ? "/repositories" : "/"
-    if (window.location.pathname !== nextPath) {
+    const nextPath = next === "settings" ? "/account/repositories" : next === "repositories" ? "/repositories" : userJobsPath(userSelectedKey)
+    if (window.location.pathname + window.location.search !== nextPath) {
       window.history.pushState(null, "", nextPath)
     }
-    setLocationPath(nextPath)
-  }, [])
+    setLocationPath(window.location.pathname)
+    setLocationSearch(window.location.search)
+  }, [userSelectedKey])
 
   const setAccountSettingsRoute = useCallback(
     (accountLogin: string | undefined, tab: AccountSettingsTab) => {
@@ -107,10 +109,21 @@ function App() {
       if (window.location.pathname !== nextPath) {
         window.history.pushState(null, "", nextPath)
       }
-      setLocationPath(nextPath)
+      setLocationPath(window.location.pathname)
+      setLocationSearch(window.location.search)
     },
     [authSession.login]
   )
+
+  const setUserJobsSelection = useCallback((key: string) => {
+    setUserSelectedKey(key)
+    const nextPath = userJobsPath(key)
+    if (window.location.pathname + window.location.search !== nextPath) {
+      window.history.pushState(null, "", nextPath)
+    }
+    setLocationPath(window.location.pathname)
+    setLocationSearch(window.location.search)
+  }, [])
 
   const selected = useMemo(
     () => runners.find((runner) => runner.id === selectedID),
@@ -294,7 +307,8 @@ function App() {
       toast.success("GitHub App account connected")
       const nextPath = accountSettingsPathForInstallation(installation, authSession.login, "repositories")
       window.history.replaceState(null, "", nextPath)
-      setLocationPath(nextPath)
+      setLocationPath(window.location.pathname)
+      setLocationSearch(window.location.search)
       await loadUserAll()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to sync GitHub App repositories")
@@ -389,6 +403,8 @@ function App() {
   useEffect(() => {
     const handlePopState = () => {
       setLocationPath(window.location.pathname)
+      setLocationSearch(window.location.search)
+      setUserSelectedKey(userJobsGroupKeyFromLocation(window.location.pathname, window.location.search))
       setSectionState(sectionFromPath())
     }
     window.addEventListener("popstate", handlePopState)
@@ -400,7 +416,19 @@ function App() {
     const nextPath = `/account/repositories${window.location.search}`
     window.history.replaceState(null, "", nextPath)
     setLocationPath("/account/repositories")
+    setLocationSearch(window.location.search)
   }, [locationPath])
+
+  useEffect(() => {
+    if (!isUserJobsRoute(locationPath)) return
+    const key = userJobsGroupKeyFromLocation(locationPath, locationSearch)
+    setUserSelectedKey(key)
+    if (locationPath === "/" && locationSearch && key) {
+      window.history.replaceState(null, "", userJobsPath(key))
+      setLocationPath(window.location.pathname)
+      setLocationSearch(window.location.search)
+    }
+  }, [locationPath, locationSearch])
 
   useEffect(() => {
     void loadAll()
@@ -554,11 +582,14 @@ function App() {
     const nextPath = `/jobs/${encodeURIComponent(id)}`
     window.history.pushState(null, "", nextPath)
     setLocationPath(nextPath)
+    setLocationSearch("")
   }
 
   const backToUserJobs = () => {
-    window.history.pushState(null, "", "/")
-    setLocationPath("/")
+    const nextPath = userJobsPath(userSelectedKey)
+    window.history.pushState(null, "", nextPath)
+    setLocationPath(window.location.pathname)
+    setLocationSearch(window.location.search)
   }
 
   if (!authSession.authenticated || !authSession.oauth_enabled) {
@@ -608,7 +639,7 @@ function App() {
           onNavigate={setUserPage}
           onNavigateAccountSettings={setAccountSettingsRoute}
           onOpenJob={openUserJob}
-          onSelectKey={setUserSelectedKey}
+          onSelectKey={setUserJobsSelection}
           onSignOut={signOut}
         />
         <Toaster richColors />
@@ -824,8 +855,80 @@ function safeDecodePathSegment(value: string): string | null {
 }
 
 function userJobIDFromPath(path: string) {
-	const match = path.match(/^\/jobs\/([^/]+)$/)
-	return match ? safeDecodePathSegment(match[1]) || "" : ""
+  const match = path.match(/^\/jobs\/([^/]+)$/)
+  return match ? safeDecodePathSegment(match[1]) || "" : ""
+}
+
+function isUserJobsRoute(path: string) {
+  return path === "/" || Boolean(userJobsGroupKeyFromPath(path))
+}
+
+function userJobsGroupKeyFromLocation(path: string, search: string) {
+  const pathKey = userJobsGroupKeyFromPath(path)
+  if (pathKey) return pathKey
+  if (path !== "/") return ""
+  return new URLSearchParams(search).get("group") || ""
+}
+
+function userJobsGroupKeyFromPath(path: string) {
+  const pullRequestMatch = path.match(/^\/jobs\/pulls\/([^/]+)\/([^/]+)\/(\d+)$/)
+  if (pullRequestMatch) {
+    return `pr:${decodeRepositoryPath(pullRequestMatch[1], pullRequestMatch[2])}:${pullRequestMatch[3]}`
+  }
+
+  const runMatch = path.match(/^\/jobs\/runs\/([^/]+)\/([^/]+)\/(\d+)$/)
+  if (runMatch) {
+    return `run:${decodeRepositoryPath(runMatch[1], runMatch[2])}:${runMatch[3]}`
+  }
+
+  const branchMatch = path.match(/^\/jobs\/branches\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/)
+  if (branchMatch) {
+    const repository = decodeRepositoryPath(branchMatch[1], branchMatch[2])
+    const branch = safeDecodePathSegment(branchMatch[3])
+    const sha = safeDecodePathSegment(branchMatch[4])
+    if (!branch || !sha) return ""
+    return `branch:${repository}:${branch}:${sha}`
+  }
+
+  const manualMatch = path.match(/^\/jobs\/manual\/([^/]+)\/([^/]+)\/([^/]+)$/)
+  if (manualMatch) {
+    const repository = decodeRepositoryPath(manualMatch[1], manualMatch[2])
+    const id = safeDecodePathSegment(manualMatch[3])
+    if (!id) return ""
+    return `manual:${repository}:${id}`
+  }
+
+  return ""
+}
+
+function userJobsPath(groupKey: string) {
+  if (!groupKey) return "/"
+  const pullRequestMatch = groupKey.match(/^pr:(.+):(\d+)$/)
+  if (pullRequestMatch) return `/jobs/pulls/${encodeRepositoryPath(pullRequestMatch[1])}/${pullRequestMatch[2]}`
+
+  const runMatch = groupKey.match(/^run:(.+):(\d+)$/)
+  if (runMatch) return `/jobs/runs/${encodeRepositoryPath(runMatch[1])}/${runMatch[2]}`
+
+  const branchMatch = groupKey.match(/^branch:(.+):([^:]+):([^:]+)$/)
+  if (branchMatch) {
+    return `/jobs/branches/${encodeRepositoryPath(branchMatch[1])}/${encodeURIComponent(branchMatch[2])}/${encodeURIComponent(branchMatch[3])}`
+  }
+
+  const manualMatch = groupKey.match(/^manual:(.+):([^:]+)$/)
+  if (manualMatch) return `/jobs/manual/${encodeRepositoryPath(manualMatch[1])}/${encodeURIComponent(manualMatch[2])}`
+
+  return `/?group=${encodeURIComponent(groupKey)}`
+}
+
+function encodeRepositoryPath(repository: string) {
+  return repository.split("/").map((segment) => encodeURIComponent(segment)).join("/")
+}
+
+function decodeRepositoryPath(ownerSegment: string, repoSegment: string) {
+  const owner = safeDecodePathSegment(ownerSegment)
+  const repo = safeDecodePathSegment(repoSegment)
+  if (!owner || !repo) return "unknown/repository"
+  return `${owner}/${repo}`
 }
 
 function accountSettingsPathForInstallation(
