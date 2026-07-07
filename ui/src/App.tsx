@@ -593,6 +593,11 @@ function App() {
     setLocationSearch(window.location.search)
   }
 
+  const loadUserJobGroup = useCallback((key: string) => {
+    const path = userJobGroupAPIPath(key)
+    return path ? request(path) : Promise.resolve(null)
+  }, [request])
+
   if (!authSession.authenticated || !authSession.oauth_enabled) {
     return (
       <>
@@ -640,6 +645,7 @@ function App() {
           onNavigate={setUserPage}
           onNavigateAccountSettings={setAccountSettingsRoute}
           onOpenJob={openUserJob}
+          onLoadJobGroup={loadUserJobGroup}
           onSelectKey={setUserJobsSelection}
           onSignOut={signOut}
         />
@@ -938,6 +944,22 @@ function userJobsPath(groupKey: string) {
   if (manualMatch) return `/jobs/manual/${encodeRepositoryPath(manualMatch[1])}/${encodeURIComponent(manualMatch[2])}`
 
   return `/?group=${encodeURIComponent(groupKey)}`
+}
+
+function userJobGroupAPIPath(groupKey: string) {
+  if (!groupKey) return ""
+  const pullRequestMatch = groupKey.match(/^pr:(.+):(\d+)$/)
+  if (pullRequestMatch) return `/user/github/pulls/${encodeRepositoryPath(pullRequestMatch[1])}/${pullRequestMatch[2]}/jobs`
+
+  const runMatch = groupKey.match(/^run:(.+):(\d+)$/)
+  if (runMatch) return `/user/github/runs/${encodeRepositoryPath(runMatch[1])}/${runMatch[2]}/jobs`
+
+  const branchMatch = groupKey.match(/^branch:(.+):([^:]+):([^:]+)$/)
+  if (branchMatch) {
+    return `/user/github/branches/${encodeRepositoryPath(branchMatch[1])}/${encodeURIComponent(branchMatch[2])}/${encodeURIComponent(branchMatch[3])}/jobs`
+  }
+
+  return ""
 }
 
 function encodeRepositoryPath(repository: string) {

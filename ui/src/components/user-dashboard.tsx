@@ -20,7 +20,7 @@ import {
 import { useTheme } from "next-themes"
 import { type FormEvent, type MouseEvent, type ReactNode, useEffect, useMemo, useState } from "react"
 
-import type { AuthSession, GitHubAppConfig, RunnerState, UserPreferences } from "@/admin-types"
+import type { AuthSession, GitHubAppConfig, RunnerJobGroup, RunnerState, UserPreferences } from "@/admin-types"
 import { formatTime } from "@/admin-format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -81,6 +81,7 @@ export function UserDashboard({
   onNavigate,
   onNavigateAccountSettings,
   onOpenJob,
+  onLoadJobGroup,
   onSelectKey,
   onSignOut,
 }: {
@@ -99,11 +100,14 @@ export function UserDashboard({
   onNavigate: (page: UserPage) => void
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
   onOpenJob: (id: string) => void
+  onLoadJobGroup: (key: string) => Promise<unknown>
   onSelectKey: (key: string) => void
   onSignOut: () => void
 }) {
   const groups = useMemo(() => groupRunnersByBuildContext(runners), [runners])
   const selected = groups.find((group) => group.key === selectedKey) || groups[0]
+  const [loadedJobGroup, setLoadedJobGroup] = useState<{ key: string; group: RunnerJobGroup } | null>(null)
+  const selectedJobGroup = loadedJobGroup?.key === selected?.key ? loadedJobGroup.group : null
   const installations = useMemo(
     () => orderInstallationsByCurrentAccount(githubApp?.installations ?? [], authSession.login),
     [authSession.login, githubApp?.installations]
@@ -118,6 +122,23 @@ export function UserDashboard({
     event.preventDefault()
     onNavigate(next)
   }
+
+  useEffect(() => {
+    let cancelled = false
+    if (!selected?.key) return
+    void onLoadJobGroup(selected.key)
+      .then((group) => {
+        if (!cancelled) {
+          setLoadedJobGroup(isRunnerJobGroup(group) ? { key: selected.key, group } : null)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedJobGroup(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [onLoadJobGroup, selected?.jobs.length, selected?.key, selected?.updatedAt])
 
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
@@ -185,6 +206,7 @@ export function UserDashboard({
           groups={groups}
           hasInstallations={hasInstallations}
           selected={selected}
+          selectedJobGroup={selectedJobGroup}
           onSelectKey={onSelectKey}
           onNavigate={onNavigate}
           onOpenJob={onOpenJob}
@@ -635,6 +657,7 @@ function PullRequestsPage({
   groups,
   hasInstallations,
   selected,
+  selectedJobGroup,
   onSelectKey,
   onNavigate,
   onOpenJob,
@@ -642,12 +665,14 @@ function PullRequestsPage({
   groups: BuildGroup[]
   hasInstallations: boolean
   selected: BuildGroup | undefined
+  selectedJobGroup: RunnerJobGroup | null
   onSelectKey: (key: string) => void
   onNavigate: (page: UserPage) => void
   onOpenJob: (id: string) => void
 }) {
-  const currentJobs = selected ? currentBuildJobs(selected) : []
-  const previousJobs = selected ? previousBuildJobs(selected, currentJobs) : []
+  const currentJobs = selectedJobGroup?.current_jobs || (selected ? currentBuildJobs(selected) : [])
+  const previousJobs = selectedJobGroup?.previous_jobs || (selected ? previousBuildJobs(selected, currentJobs) : [])
+  const workflowRunCount = selectedJobGroup?.workflow_run_ids.length || selected?.workflowRunIDs.length || 1
   const selectedTitleClass = selected ? userBuildGroupTitleClass(selected) : ""
   const shouldCollapsePreviousJobs = previousJobs.length > 2
 
@@ -700,13 +725,13 @@ function PullRequestsPage({
               <div>
                 <h2 className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-2xl font-semibold">
                   <span className={selectedTitleClass}>{selected.repository}</span>
-                  <span className={selectedTitleClass}>{selected.title}</span>
+                  <span className={selectedTitleClass}>{selectedJobGroup?.title || selected.title}</span>
                 </h2>
                 <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                  <JobField label="Branch" value={selected.headBranch || selected.subtitle || "unknown"} />
-                  <JobField label="Commit" value={shortSHA(selected.headSHA) || "unknown"} />
-                  <JobField label="Workflow runs" value={String(selected.workflowRunIDs.length || 1)} />
-                  <JobField label="Last updated" value={formatTime(selected.updatedAt)} />
+                  <JobField label="Branch" value={selectedJobGroup?.head_branch || selected.headBranch || selected.subtitle || "unknown"} />
+                  <JobField label="Commit" value={shortSHA(selectedJobGroup?.head_sha || selected.headSHA) || "unknown"} />
+                  <JobField label="Workflow runs" value={String(workflowRunCount)} />
+                  <JobField label="Last updated" value={formatTime(selectedJobGroup?.updated_at || selected.updatedAt)} />
                 </div>
               </div>
               <div className="grid gap-3">
@@ -1061,6 +1086,12 @@ function groupRunnersByBuildContext(runners: RunnerState[]): BuildGroup[] {
 
 function isUserVisibleRunnerJob(job: RunnerState) {
   return !(job.failure_stage === "admission" && job.failure_reason === "profile_labels_not_matched")
+}
+
+function isRunnerJobGroup(value: unknown): value is RunnerJobGroup {
+  if (!value || typeof value !== "object") return false
+  const candidate = value as Partial<RunnerJobGroup>
+  return Array.isArray(candidate.jobs) && Array.isArray(candidate.current_jobs) && Array.isArray(candidate.previous_jobs)
 }
 
 function buildGroupSeed(runner: RunnerState, repository: string, pullRequestNumber?: number): BuildGroup {

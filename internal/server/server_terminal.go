@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,22 @@ type terminalResizeRequest struct {
 type userRunnerSiblingsResponse struct {
 	Group string              `json:"group"`
 	Jobs  []state.RunnerState `json:"jobs"`
+}
+
+type userRunnerJobGroupResponse struct {
+	Key               string              `json:"key"`
+	Group             string              `json:"group"`
+	Repository        string              `json:"repository"`
+	Title             string              `json:"title"`
+	Subtitle          string              `json:"subtitle"`
+	UpdatedAt         time.Time           `json:"updated_at"`
+	Jobs              []state.RunnerState `json:"jobs"`
+	CurrentJobs       []state.RunnerState `json:"current_jobs"`
+	PreviousJobs      []state.RunnerState `json:"previous_jobs"`
+	WorkflowRunIDs    []int64             `json:"workflow_run_ids"`
+	HeadSHA           string              `json:"head_sha,omitempty"`
+	HeadBranch        string              `json:"head_branch,omitempty"`
+	PullRequestNumber int64               `json:"pull_request_number,omitempty"`
 }
 
 const terminalIdleCloseDelay = 30 * time.Second
@@ -236,6 +253,61 @@ func (s *Server) handleUserGetRunner(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, st)
 }
 
+func (s *Server) handleUserGetRunnerJobGroup(w http.ResponseWriter, r *http.Request) {
+	st, states, ok := s.userRunnerStates(w, r)
+	if !ok {
+		return
+	}
+	group, ok := runnerJobGroupForRunner(st, states)
+	if !ok {
+		writeError(w, http.StatusNotFound, "job group not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, group)
+}
+
+func (s *Server) handleUserGetGitHubPullJobGroup(w http.ResponseWriter, r *http.Request) {
+	number, err := strconv.ParseInt(r.PathValue("number"), 10, 64)
+	if err != nil || number <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid pull request number")
+		return
+	}
+	s.handleUserGetRunnerJobGroupByKey(w, r, fmt.Sprintf("pr:%s:%d", repositoryFromPath(r), number))
+}
+
+func (s *Server) handleUserGetGitHubRunJobGroup(w http.ResponseWriter, r *http.Request) {
+	runID, err := strconv.ParseInt(r.PathValue("runID"), 10, 64)
+	if err != nil || runID <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid workflow run id")
+		return
+	}
+	s.handleUserGetRunnerJobGroupByKey(w, r, fmt.Sprintf("run:%s:%d", repositoryFromPath(r), runID))
+}
+
+func (s *Server) handleUserGetGitHubBranchJobGroup(w http.ResponseWriter, r *http.Request) {
+	branch := strings.TrimSpace(r.PathValue("branch"))
+	sha := strings.TrimSpace(r.PathValue("sha"))
+	if branch == "" || sha == "" {
+		writeError(w, http.StatusBadRequest, "branch and sha are required")
+		return
+	}
+	s.handleUserGetRunnerJobGroupByKey(w, r, fmt.Sprintf("branch:%s:%s:%s", repositoryFromPath(r), branch, sha))
+}
+
+func (s *Server) handleUserGetRunnerJobGroupByKey(w http.ResponseWriter, r *http.Request, key string) {
+	states, ok := s.userRunnerStatesForRequest(w, r)
+	if !ok {
+		return
+	}
+	for _, group := range runnerJobGroups(states) {
+		if group.Key == key {
+			writeJSON(w, http.StatusOK, group)
+			return
+		}
+	}
+	writeError(w, http.StatusNotFound, "job group not found")
+}
+
 func (s *Server) handleUserListRunnerSiblings(w http.ResponseWriter, r *http.Request) {
 	_, account, ok := s.requireUserSession(w, r)
 	if !ok {
@@ -263,6 +335,37 @@ func (s *Server) handleUserListRunnerSiblings(w http.ResponseWriter, r *http.Req
 	}
 	group, siblings := runnerSiblings(st, states)
 	writeJSON(w, http.StatusOK, userRunnerSiblingsResponse{Group: group, Jobs: siblings})
+}
+
+func (s *Server) userRunnerStates(w http.ResponseWriter, r *http.Request) (state.RunnerState, []state.RunnerState, bool) {
+	st, ok := s.userRunnerState(w, r)
+	if !ok {
+		return state.RunnerState{}, nil, false
+	}
+	states, ok := s.userRunnerStatesForRequest(w, r)
+	if !ok {
+		return state.RunnerState{}, nil, false
+	}
+	return st, states, true
+}
+
+func (s *Server) userRunnerStatesForRequest(w http.ResponseWriter, r *http.Request) ([]state.RunnerState, bool) {
+	_, account, ok := s.requireUserSession(w, r)
+	if !ok {
+		return nil, false
+	}
+	installations, err := s.store.ListGitHubInstallations(account.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return nil, false
+	}
+	installationIDs := installationIDsForUserInstallations(installations)
+	states, err := s.store.ListStatesForGitHubInstallations(installationIDs, 500)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return nil, false
+	}
+	return states, true
 }
 
 func (s *Server) handleUserGetRunnerLog(w http.ResponseWriter, r *http.Request) {
@@ -503,19 +606,212 @@ func runnerTerminalAvailable(st state.RunnerState) bool {
 	}
 }
 
+func runnerJobGroups(states []state.RunnerState) []userRunnerJobGroupResponse {
+	prByRepositoryAndSHA := map[string]int64{}
+	for _, st := range states {
+		if st.RepositoryFullName != "" && st.HeadSHA != "" && st.PullRequestNumber != 0 {
+			prByRepositoryAndSHA[st.RepositoryFullName+":"+st.HeadSHA] = st.PullRequestNumber
+		}
+	}
+
+	groupsByKey := map[string]*userRunnerJobGroupResponse{}
+	for _, st := range states {
+		if !isUserVisibleRunnerJob(st) {
+			continue
+		}
+		repository := st.RepositoryFullName
+		if repository == "" {
+			repository = "unknown/repository"
+		}
+		pullRequestNumber := st.PullRequestNumber
+		if pullRequestNumber == 0 && st.HeadSHA != "" {
+			pullRequestNumber = prByRepositoryAndSHA[repository+":"+st.HeadSHA]
+		}
+		seed := runnerJobGroupSeed(st, repository, pullRequestNumber)
+		current, ok := groupsByKey[seed.Key]
+		if !ok {
+			group := seed
+			group.Jobs = append([]state.RunnerState(nil), seed.Jobs...)
+			groupsByKey[group.Key] = &group
+			continue
+		}
+		current.Jobs = append(current.Jobs, st)
+		if st.UpdatedAt.After(current.UpdatedAt) {
+			current.UpdatedAt = st.UpdatedAt
+			current.Subtitle = seed.Subtitle
+			if st.HeadSHA != "" {
+				current.HeadSHA = st.HeadSHA
+			}
+			if st.HeadBranch != "" {
+				current.HeadBranch = st.HeadBranch
+			}
+		}
+		if st.HeadSHA != "" && current.HeadSHA == "" {
+			current.HeadSHA = st.HeadSHA
+		}
+		if st.HeadBranch != "" && current.HeadBranch == "" {
+			current.HeadBranch = st.HeadBranch
+		}
+		if st.WorkflowRunID != 0 && !hasInt64(current.WorkflowRunIDs, st.WorkflowRunID) {
+			current.WorkflowRunIDs = append(current.WorkflowRunIDs, st.WorkflowRunID)
+			sort.Slice(current.WorkflowRunIDs, func(i, j int) bool {
+				return current.WorkflowRunIDs[i] > current.WorkflowRunIDs[j]
+			})
+		}
+	}
+
+	groups := make([]userRunnerJobGroupResponse, 0, len(groupsByKey))
+	for _, group := range groupsByKey {
+		group.Jobs = orderRunnerJobs(group.Jobs)
+		group.CurrentJobs = currentRunnerGroupJobs(*group)
+		group.PreviousJobs = previousRunnerGroupJobs(group.Jobs, group.CurrentJobs)
+		groups = append(groups, *group)
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].UpdatedAt.After(groups[j].UpdatedAt)
+	})
+	return groups
+}
+
+func runnerJobGroupForRunner(current state.RunnerState, states []state.RunnerState) (userRunnerJobGroupResponse, bool) {
+	for _, group := range runnerJobGroups(states) {
+		for _, job := range group.Jobs {
+			if job.ID == current.ID {
+				return group, true
+			}
+		}
+	}
+	return userRunnerJobGroupResponse{}, false
+}
+
+func runnerJobGroupSeed(st state.RunnerState, repository string, pullRequestNumber int64) userRunnerJobGroupResponse {
+	workflowRunIDs := []int64{}
+	if st.WorkflowRunID != 0 {
+		workflowRunIDs = append(workflowRunIDs, st.WorkflowRunID)
+	}
+	if pullRequestNumber != 0 {
+		return userRunnerJobGroupResponse{
+			Key:               fmt.Sprintf("pr:%s:%d", repository, pullRequestNumber),
+			Group:             "pull_request",
+			Repository:        repository,
+			Title:             fmt.Sprintf("PR #%d", pullRequestNumber),
+			Subtitle:          firstNonEmpty(st.HeadBranch, shortSHA(st.HeadSHA), st.WorkflowName, "Pull request checks"),
+			UpdatedAt:         st.UpdatedAt,
+			Jobs:              []state.RunnerState{st},
+			WorkflowRunIDs:    workflowRunIDs,
+			HeadSHA:           st.HeadSHA,
+			HeadBranch:        st.HeadBranch,
+			PullRequestNumber: pullRequestNumber,
+		}
+	}
+	if st.HeadSHA != "" {
+		branch := firstNonEmpty(st.HeadBranch, "detached")
+		return userRunnerJobGroupResponse{
+			Key:            fmt.Sprintf("branch:%s:%s:%s", repository, branch, st.HeadSHA),
+			Group:          "branch",
+			Repository:     repository,
+			Title:          firstNonEmpty(st.HeadBranch, "Commit "+shortSHA(st.HeadSHA)),
+			Subtitle:       firstNonEmpty(shortSHA(st.HeadSHA), st.WorkflowName, "Branch checks"),
+			UpdatedAt:      st.UpdatedAt,
+			Jobs:           []state.RunnerState{st},
+			WorkflowRunIDs: workflowRunIDs,
+			HeadSHA:        st.HeadSHA,
+			HeadBranch:     st.HeadBranch,
+		}
+	}
+	if st.WorkflowRunID != 0 {
+		return userRunnerJobGroupResponse{
+			Key:            fmt.Sprintf("run:%s:%d", repository, st.WorkflowRunID),
+			Group:          "workflow_run",
+			Repository:     repository,
+			Title:          firstNonEmpty(st.WorkflowName, "Workflow run"),
+			Subtitle:       fmt.Sprintf("Run %d", st.WorkflowRunID),
+			UpdatedAt:      st.UpdatedAt,
+			Jobs:           []state.RunnerState{st},
+			WorkflowRunIDs: workflowRunIDs,
+		}
+	}
+	return userRunnerJobGroupResponse{
+		Key:            fmt.Sprintf("manual:%s:%s", repository, st.ID),
+		Group:          "manual",
+		Repository:     repository,
+		Title:          "Manual runner",
+		Subtitle:       firstNonEmpty(st.ProfileName, st.RunnerName, st.ID),
+		UpdatedAt:      st.UpdatedAt,
+		Jobs:           []state.RunnerState{st},
+		WorkflowRunIDs: workflowRunIDs,
+	}
+}
+
+func isUserVisibleRunnerJob(st state.RunnerState) bool {
+	return !(st.FailureStage == "admission" && st.FailureReason == "profile_labels_not_matched")
+}
+
+func orderRunnerJobs(jobs []state.RunnerState) []state.RunnerState {
+	ordered := append([]state.RunnerState(nil), jobs...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].WorkflowRunID != ordered[j].WorkflowRunID {
+			return ordered[i].WorkflowRunID > ordered[j].WorkflowRunID
+		}
+		return ordered[i].UpdatedAt.After(ordered[j].UpdatedAt)
+	})
+	return ordered
+}
+
+func currentRunnerGroupJobs(group userRunnerJobGroupResponse) []state.RunnerState {
+	if group.HeadSHA != "" {
+		current := make([]state.RunnerState, 0, len(group.Jobs))
+		for _, job := range group.Jobs {
+			if job.HeadSHA == group.HeadSHA {
+				current = append(current, job)
+			}
+		}
+		if len(current) > 0 {
+			return current
+		}
+	}
+	if len(group.WorkflowRunIDs) > 0 {
+		latestRunID := group.WorkflowRunIDs[0]
+		current := make([]state.RunnerState, 0, len(group.Jobs))
+		for _, job := range group.Jobs {
+			if job.WorkflowRunID == latestRunID {
+				current = append(current, job)
+			}
+		}
+		if len(current) > 0 {
+			return current
+		}
+	}
+	return group.Jobs
+}
+
+func previousRunnerGroupJobs(jobs, currentJobs []state.RunnerState) []state.RunnerState {
+	currentIDs := map[string]struct{}{}
+	for _, job := range currentJobs {
+		currentIDs[job.ID] = struct{}{}
+	}
+	previous := make([]state.RunnerState, 0, len(jobs))
+	for _, job := range jobs {
+		if _, ok := currentIDs[job.ID]; !ok {
+			previous = append(previous, job)
+		}
+	}
+	return previous
+}
+
 func runnerSiblings(current state.RunnerState, states []state.RunnerState) (string, []state.RunnerState) {
 	group := "repository"
 	matches := func(candidate state.RunnerState) bool {
 		if candidate.RepositoryFullName != current.RepositoryFullName {
 			return false
 		}
-		if current.WorkflowRunID != 0 {
-			group = "workflow_run"
-			return candidate.WorkflowRunID == current.WorkflowRunID
-		}
 		if current.PullRequestNumber != 0 {
 			group = "pull_request"
 			return candidate.PullRequestNumber == current.PullRequestNumber
+		}
+		if current.WorkflowRunID != 0 {
+			group = "workflow_run"
+			return candidate.WorkflowRunID == current.WorkflowRunID
 		}
 		return true
 	}
@@ -538,6 +834,26 @@ func runnerSiblings(current state.RunnerState, states []state.RunnerState) (stri
 		return siblings[i].CreatedAt.Before(siblings[j].CreatedAt)
 	})
 	return group, siblings
+}
+
+func repositoryFromPath(r *http.Request) string {
+	return strings.TrimSpace(r.PathValue("owner")) + "/" + strings.TrimSpace(r.PathValue("repo"))
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func shortSHA(value string) string {
+	if len(value) > 7 {
+		return value[:7]
+	}
+	return value
 }
 
 func hasRunnerStateID(states []state.RunnerState, id string) bool {

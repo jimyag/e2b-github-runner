@@ -618,14 +618,16 @@ func TestUserRunnerSiblings(t *testing.T) {
 		installationID int64
 		repository     string
 		runID          int64
+		prNumber       int
 	}{
-		{id: "current", jobID: 1001, installationID: 987, repository: "o/r", runID: 28582191510},
-		{id: "same-run", jobID: 1002, installationID: 987, repository: "o/r", runID: 28582191510},
-		{id: "other-run", jobID: 1003, installationID: 987, repository: "o/r", runID: 1},
-		{id: "hidden", jobID: 1004, installationID: 456, repository: "o/r", runID: 28582191510},
+		{id: "current", jobID: 1001, installationID: 987, repository: "o/r", runID: 28582191510, prNumber: 1},
+		{id: "same-run", jobID: 1002, installationID: 987, repository: "o/r", runID: 28582191510, prNumber: 1},
+		{id: "same-pr-other-run", jobID: 1003, installationID: 987, repository: "o/r", runID: 1, prNumber: 1},
+		{id: "other-pr", jobID: 1004, installationID: 987, repository: "o/r", runID: 2, prNumber: 2},
+		{id: "hidden", jobID: 1005, installationID: 456, repository: "o/r", runID: 28582191510, prNumber: 1},
 	}
 	for _, item := range requests {
-		payload := []byte(fmt.Sprintf(`{"workflow_job":{"id":%d,"run_id":%d,"workflow_name":"CI","run_attempt":1}}`, item.jobID, item.runID))
+		payload := []byte(fmt.Sprintf(`{"workflow_job":{"id":%d,"run_id":%d,"workflow_name":"CI","run_attempt":1,"pull_requests":[{"number":%d}]}}`, item.jobID, item.runID, item.prNumber))
 		if _, _, err := store.CreateRequest(state.RunnerRequest{
 			ID:                   item.id,
 			Source:               "github_webhook",
@@ -650,16 +652,60 @@ func TestUserRunnerSiblings(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Group != "workflow_run" {
+	if got.Group != "pull_request" {
 		t.Fatalf("unexpected siblings group: %q", got.Group)
 	}
 	var ids []string
 	for _, job := range got.Jobs {
 		ids = append(ids, job.ID)
 	}
-	if !reflect.DeepEqual(ids, []string{"current", "same-run"}) {
+	if !reflect.DeepEqual(ids, []string{"current", "same-run", "same-pr-other-run"}) {
 		t.Fatalf("unexpected sibling ids: %#v", ids)
 	}
+
+	req = httptest.NewRequest(http.MethodGet, "/user/runner_requests/current/group", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected runner job group, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var group userRunnerJobGroupResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &group); err != nil {
+		t.Fatal(err)
+	}
+	if group.Key != "pr:o/r:1" || group.Group != "pull_request" {
+		t.Fatalf("unexpected job group key=%q group=%q", group.Key, group.Group)
+	}
+	if ids := runnerStateIDs(group.CurrentJobs); !reflect.DeepEqual(ids, []string{"same-run", "current"}) {
+		t.Fatalf("unexpected current job ids: %#v", ids)
+	}
+	if ids := runnerStateIDs(group.PreviousJobs); !reflect.DeepEqual(ids, []string{"same-pr-other-run"}) {
+		t.Fatalf("unexpected previous job ids: %#v", ids)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/user/github/pulls/o/r/1/jobs", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected github pull job group, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var pullGroup userRunnerJobGroupResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &pullGroup); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(runnerStateIDs(pullGroup.Jobs), runnerStateIDs(group.Jobs)) {
+		t.Fatalf("pull route jobs differ: route=%#v runner=%#v", runnerStateIDs(pullGroup.Jobs), runnerStateIDs(group.Jobs))
+	}
+}
+
+func runnerStateIDs(states []state.RunnerState) []string {
+	ids := make([]string, 0, len(states))
+	for _, st := range states {
+		ids = append(ids, st.ID)
+	}
+	return ids
 }
 
 func TestUserRunnerGitHubLog(t *testing.T) {

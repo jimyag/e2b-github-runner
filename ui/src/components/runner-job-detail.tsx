@@ -4,7 +4,7 @@ import { Terminal } from "xterm"
 import { FitAddon } from "xterm-addon-fit"
 import "xterm/css/xterm.css"
 
-import type { RunnerState } from "@/admin-types"
+import type { RunnerJobGroup, RunnerState } from "@/admin-types"
 import { logNames } from "@/admin-types"
 import { formatTime } from "@/admin-format"
 import { Badge } from "@/components/ui/badge"
@@ -29,15 +29,9 @@ type TerminalCreateResponse = {
   sandbox_id: string
 }
 
-type RunnerSiblingsResponse = {
-  group: "workflow_run" | "pull_request" | "repository"
-  jobs: RunnerState[]
-}
-
 export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: RunnerJobDetailProps) {
   const [job, setJob] = useState<RunnerState | null>(null)
-  const [siblings, setSiblings] = useState<RunnerState[]>([])
-  const [siblingGroup, setSiblingGroup] = useState<RunnerSiblingsResponse["group"]>("repository")
+  const [jobGroup, setJobGroup] = useState<RunnerJobGroup | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedLog, setSelectedLog] = useState<LogName>("control.log")
   const [logText, setLogText] = useState("Loading log...")
@@ -64,14 +58,11 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
     }
   }, [endpoint, request])
 
-  const loadSiblings = useCallback(async () => {
+  const loadJobGroup = useCallback(async () => {
     try {
-      const response = (await request(`${endpoint}/siblings`)) as RunnerSiblingsResponse
-      setSiblingGroup(response.group || "repository")
-      setSiblings(response.jobs || [])
+      setJobGroup((await request(`${endpoint}/group`)) as RunnerJobGroup)
     } catch {
-      setSiblingGroup("repository")
-      setSiblings([])
+      setJobGroup(null)
     }
   }, [endpoint, request])
 
@@ -96,8 +87,8 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
 
   useEffect(() => {
     void loadJob()
-    void loadSiblings()
-  }, [loadJob, loadSiblings])
+    void loadJobGroup()
+  }, [loadJob, loadJobGroup])
 
   useEffect(() => {
     void loadLog(selectedLog)
@@ -130,7 +121,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
 
   const refreshPage = () => {
     void loadJob()
-    void loadSiblings()
+    void loadJobGroup()
   }
 
   const openSibling = (jobID: string) => {
@@ -228,6 +219,8 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
     return () => observer.disconnect()
   }, [terminalSession, endpoint, resizeTerminal])
 
+  const groupJobs = jobGroup ? [...jobGroup.current_jobs, ...jobGroup.previous_jobs] : job ? [job] : []
+
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <header className="border-b bg-background/95 px-4 py-3 lg:px-6">
@@ -268,16 +261,16 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
           <div className="border-b px-4 py-4">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="truncate text-sm font-semibold">{siblingGroupTitle(siblingGroup)}</h2>
-                <p className="text-xs text-muted-foreground">{siblings.length || (job ? 1 : 0)} jobs</p>
+                <h2 className="truncate text-sm font-semibold">{jobGroupTitle(jobGroup)}</h2>
+                <p className="text-xs text-muted-foreground">{jobGroup?.jobs.length || (job ? 1 : 0)} jobs</p>
               </div>
-              <Button type="button" variant="outline" size="icon" onClick={() => void loadSiblings()} title="Refresh jobs">
+              <Button type="button" variant="outline" size="icon" onClick={() => void loadJobGroup()} title="Refresh jobs">
                 <RefreshCw />
               </Button>
             </div>
           </div>
           <div className="max-h-72 overflow-auto p-2 lg:max-h-[calc(100vh-133px)]">
-            {(siblings.length ? siblings : job ? [job] : []).map((item) => (
+            {groupJobs.map((item) => (
               <JobListItem key={item.id} job={item} selected={item.id === id} onOpen={() => openSibling(item.id)} />
             ))}
           </div>
@@ -496,15 +489,9 @@ function isTerminalAvailable(job: RunnerState) {
   return Boolean(job.sandbox_id && ["creating", "running", "stopping"].includes(job.status))
 }
 
-function siblingGroupTitle(group: RunnerSiblingsResponse["group"]) {
-  switch (group) {
-    case "workflow_run":
-      return "Workflow run jobs"
-    case "pull_request":
-      return "Pull request jobs"
-    default:
-      return "Repository jobs"
-  }
+function jobGroupTitle(group: RunnerJobGroup | null) {
+  if (!group) return "Workflow jobs"
+  return group.title ? `${group.title} jobs` : "Workflow jobs"
 }
 
 function jobStatusIcon(status: RunnerState["status"]) {
