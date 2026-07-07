@@ -423,8 +423,9 @@ function App() {
     if (!isUserJobsRoute(locationPath)) return
     const key = userJobsGroupKeyFromLocation(locationPath, locationSearch)
     setUserSelectedKey(key)
-    if (locationPath === "/" && locationSearch && key) {
-      window.history.replaceState(null, "", userJobsPath(key))
+    const canonicalPath = userJobsPath(key)
+    if (key && window.location.pathname + window.location.search !== canonicalPath) {
+      window.history.replaceState(null, "", canonicalPath)
       setLocationPath(window.location.pathname)
       setLocationSearch(window.location.search)
     }
@@ -871,21 +872,40 @@ function userJobsGroupKeyFromLocation(path: string, search: string) {
 }
 
 function userJobsGroupKeyFromPath(path: string) {
-  const pullRequestMatch = path.match(/^\/jobs\/pulls\/([^/]+)\/([^/]+)\/(\d+)$/)
+  const pullRequestMatch = path.match(/^\/github\/pulls\/([^/]+)\/([^/]+)\/(\d+)\/jobs$/)
   if (pullRequestMatch) {
     return `pr:${decodeRepositoryPath(pullRequestMatch[1], pullRequestMatch[2])}:${pullRequestMatch[3]}`
   }
 
-  const runMatch = path.match(/^\/jobs\/runs\/([^/]+)\/([^/]+)\/(\d+)$/)
+  const legacyPullRequestMatch = path.match(/^\/jobs\/pulls\/([^/]+)\/([^/]+)\/(\d+)$/)
+  if (legacyPullRequestMatch) {
+    return `pr:${decodeRepositoryPath(legacyPullRequestMatch[1], legacyPullRequestMatch[2])}:${legacyPullRequestMatch[3]}`
+  }
+
+  const runMatch = path.match(/^\/github\/runs\/([^/]+)\/([^/]+)\/(\d+)\/jobs$/)
   if (runMatch) {
     return `run:${decodeRepositoryPath(runMatch[1], runMatch[2])}:${runMatch[3]}`
   }
 
-  const branchMatch = path.match(/^\/jobs\/branches\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/)
+  const legacyRunMatch = path.match(/^\/jobs\/runs\/([^/]+)\/([^/]+)\/(\d+)$/)
+  if (legacyRunMatch) {
+    return `run:${decodeRepositoryPath(legacyRunMatch[1], legacyRunMatch[2])}:${legacyRunMatch[3]}`
+  }
+
+  const branchMatch = path.match(/^\/github\/branches\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/jobs$/)
   if (branchMatch) {
     const repository = decodeRepositoryPath(branchMatch[1], branchMatch[2])
     const branch = safeDecodePathSegment(branchMatch[3])
     const sha = safeDecodePathSegment(branchMatch[4])
+    if (!branch || !sha) return ""
+    return `branch:${repository}:${branch}:${sha}`
+  }
+
+  const legacyBranchMatch = path.match(/^\/jobs\/branches\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/)
+  if (legacyBranchMatch) {
+    const repository = decodeRepositoryPath(legacyBranchMatch[1], legacyBranchMatch[2])
+    const branch = safeDecodePathSegment(legacyBranchMatch[3])
+    const sha = safeDecodePathSegment(legacyBranchMatch[4])
     if (!branch || !sha) return ""
     return `branch:${repository}:${branch}:${sha}`
   }
@@ -904,14 +924,14 @@ function userJobsGroupKeyFromPath(path: string) {
 function userJobsPath(groupKey: string) {
   if (!groupKey) return "/"
   const pullRequestMatch = groupKey.match(/^pr:(.+):(\d+)$/)
-  if (pullRequestMatch) return `/jobs/pulls/${encodeRepositoryPath(pullRequestMatch[1])}/${pullRequestMatch[2]}`
+  if (pullRequestMatch) return `/github/pulls/${encodeRepositoryPath(pullRequestMatch[1])}/${pullRequestMatch[2]}/jobs`
 
   const runMatch = groupKey.match(/^run:(.+):(\d+)$/)
-  if (runMatch) return `/jobs/runs/${encodeRepositoryPath(runMatch[1])}/${runMatch[2]}`
+  if (runMatch) return `/github/runs/${encodeRepositoryPath(runMatch[1])}/${runMatch[2]}/jobs`
 
   const branchMatch = groupKey.match(/^branch:(.+):([^:]+):([^:]+)$/)
   if (branchMatch) {
-    return `/jobs/branches/${encodeRepositoryPath(branchMatch[1])}/${encodeURIComponent(branchMatch[2])}/${encodeURIComponent(branchMatch[3])}`
+    return `/github/branches/${encodeRepositoryPath(branchMatch[1])}/${encodeURIComponent(branchMatch[2])}/${encodeURIComponent(branchMatch[3])}/jobs`
   }
 
   const manualMatch = groupKey.match(/^manual:(.+):([^:]+)$/)

@@ -24,7 +24,7 @@ The remaining work is no longer a basic architecture catch-up. The next decision
 - Worker processing uses DB claim/lease semantics and retry scheduling instead of only in-memory queue ownership.
 - Transient Qiniu sandbox, GitHub, rate-limit, timeout, and temporary network failures are classified for retry or queue deferral. Deterministic auth/config/template failures fail immediately.
 - Admin routes expose runner request management, retry/stop/log access, runner specs, runner groups, repository policies, match tests, audit events, and diagnostics.
-- Ordinary-user routes expose the PR/job dashboard at `/`, local activity repositories at `/repositories`, GitHub App account setup at `/account/repositories`, and account or organization Sandbox service Preferences at `/account/preferences` and `/organizations/{login}/preferences`.
+- Ordinary-user routes expose the PR/job dashboard at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, local activity repositories at `/repositories`, GitHub App account setup at `/account/repositories`, and account or organization Sandbox service Preferences at `/account/preferences` and `/organizations/{login}/preferences`.
 - The React UI in `ui/` is embedded for production from `internal/server/ui/*`; development builds proxy UI assets to Vite through `internal/server/ui_assets_development.go`.
 - `task dev` starts Vite and the Go service together in development mode. `task build` builds the UI first, then compiles `bin/runnerd` with embedded production assets.
 - Diagnostics are available through the admin UI and `/diagnostics/pprof` / `/diagnostics/vars`, backed by `github.com/jimmicro/pprof` and expvar.

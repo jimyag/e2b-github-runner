@@ -830,11 +830,17 @@ function UserMenu({ authSession, onSignOut }: { authSession: AuthSession; onSign
   )
 }
 
-function JobField({ label, value }: { label: string; value: ReactNode }) {
+function JobField({ label, value, onOpen }: { label: string; value: ReactNode; onOpen?: () => void }) {
   return (
     <div>
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 break-words font-medium">{value}</div>
+      {onOpen ? (
+        <button type="button" className="mt-1 break-words text-left font-medium hover:text-primary hover:underline" onClick={onOpen}>
+          {value}
+        </button>
+      ) : (
+        <div className="mt-1 break-words font-medium">{value}</div>
+      )}
     </div>
   )
 }
@@ -845,23 +851,24 @@ function RunnerJobCard({ job, onOpen }: { job: RunnerState; onOpen: () => void }
       <CardHeader className="gap-1 pb-0">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <CardTitle className="text-base">{runnerJobTitle(job)}</CardTitle>
+            <CardTitle className="text-base">
+              <button type="button" className="text-left hover:text-primary hover:underline" onClick={onOpen}>
+                {runnerJobTitle(job)}
+              </button>
+            </CardTitle>
           </div>
           <div className="flex items-center gap-2">
             <Badge className={userStatusClass(job.status)}>{job.status}</Badge>
-            <Button type="button" variant="outline" size="sm" onClick={onOpen}>
-              Open
-            </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent className="grid gap-3 pt-0 text-sm md:grid-cols-3">
-        <JobField label="Runner spec" value={job.runner_spec_name || "matched by labels"} />
-        <JobField label="Workflow" value={job.workflow_name || "unknown"} />
+        <JobField label="Runner spec" value={job.runner_spec_name || "matched by labels"} onOpen={onOpen} />
+        <JobField label="Workflow" value={job.workflow_name || "unknown"} onOpen={onOpen} />
         <JobField label="Workflow run" value={workflowRunValue(job)} />
-        <JobField label="Queued" value={formatTime(job.created_at)} />
-        <JobField label="Started" value={job.running_at ? formatTime(job.running_at) : "-"} />
-        <JobField label="Finished" value={job.completed_at || job.failed_at ? formatTime(job.completed_at || job.failed_at) : "-"} />
+        <JobField label="Queued" value={formatTime(job.created_at)} onOpen={onOpen} />
+        <JobField label="Started" value={job.running_at ? formatTime(job.running_at) : "-"} onOpen={onOpen} />
+        <JobField label="Finished" value={job.completed_at || job.failed_at ? formatTime(job.completed_at || job.failed_at) : "-"} onOpen={onOpen} />
       </CardContent>
     </Card>
   )

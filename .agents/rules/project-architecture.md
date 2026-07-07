@@ -10,6 +10,7 @@
 ## Admin And UI
 
 - The current browser entry for the ordinary-user UI is `/`.
+- Ordinary-user job group routes use a source-context path with the jobs view as the terminal resource, such as `/github/pulls/{owner}/{repo}/{number}/jobs`; individual runner job details remain `/jobs/{id}`.
 - Ordinary-user account settings live under `/account/repositories`, `/account/preferences`, and `/organizations/{login}/...`.
 - The current browser entry for the admin console is `/admin/`.
 - UI source lives in `ui/`.
