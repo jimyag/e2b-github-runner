@@ -107,7 +107,7 @@ export function UserDashboard({
   const groups = useMemo(() => groupRunnersByBuildContext(runners), [runners])
   const selected = groups.find((group) => group.key === selectedKey) || groups[0]
   const [loadedJobGroup, setLoadedJobGroup] = useState<{ key: string; group: RunnerJobGroup } | null>(null)
-  const selectedJobGroup = loadedJobGroup?.key === selected?.key ? loadedJobGroup.group : null
+  const selectedJobGroup = loadedJobGroup && selected && loadedJobGroup.key === selected.key ? loadedJobGroup.group : null
   const installations = useMemo(
     () => orderInstallationsByCurrentAccount(githubApp?.installations ?? [], authSession.login),
     [authSession.login, githubApp?.installations]
