@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import { AppSidebar } from "@/components/app-sidebar"
@@ -163,6 +163,7 @@ function App() {
   const hasAccess = authSession.authenticated && authSession.role === "admin"
   const isAdminRoute = locationPath === "/admin" || locationPath.startsWith("/admin/")
   const userJobID = userJobIDFromPath(locationPath)
+  const userSelectedJobID = userJobIDFromSearch(locationSearch)
   const accountSettingsRoute = parseAccountSettingsRoute(locationPath, authSession.login)
   const userPage = accountSettingsRoute ? "settings" : locationPath === "/repositories" ? "repositories" : "home"
 
@@ -424,8 +425,9 @@ function App() {
     const key = userJobsGroupKeyFromLocation(locationPath, locationSearch)
     setUserSelectedKey(key)
     const canonicalPath = userJobsPath(key)
-    if (key && window.location.pathname + window.location.search !== canonicalPath) {
-      window.history.replaceState(null, "", canonicalPath)
+    if (key && locationPath !== canonicalPath) {
+      const nextPath = `${canonicalPath}${locationSearch}`
+      window.history.replaceState(null, "", nextPath)
       setLocationPath(window.location.pathname)
       setLocationSearch(window.location.search)
     }
@@ -580,10 +582,11 @@ function App() {
   }
 
   const openUserJob = (id: string) => {
-    const nextPath = `/jobs/${encodeURIComponent(id)}`
+    const groupPath = userSelectedKey ? userJobsPath(userSelectedKey) : ""
+    const nextPath = groupPath && groupPath !== "/" ? `${groupPath}?job=${encodeURIComponent(id)}` : `/jobs/${encodeURIComponent(id)}`
     window.history.pushState(null, "", nextPath)
-    setLocationPath(nextPath)
-    setLocationSearch("")
+    setLocationPath(window.location.pathname)
+    setLocationSearch(window.location.search)
   }
 
   const backToUserJobs = () => {
@@ -616,12 +619,25 @@ function App() {
     if (userJobID) {
       return (
         <>
-          <RunnerJobDetail
+          <UserJobRedirect
             id={userJobID}
-            apiBase="/user/runner_requests"
-            onBack={backToUserJobs}
-            onOpenJob={openUserJob}
             request={request}
+            onResolved={(key) => {
+              setUserSelectedKey(key)
+              const nextPath = `${userJobsPath(key)}?job=${encodeURIComponent(userJobID)}`
+              window.history.replaceState(null, "", nextPath)
+              setLocationPath(window.location.pathname)
+              setLocationSearch(window.location.search)
+            }}
+            fallback={
+              <RunnerJobDetail
+                id={userJobID}
+                apiBase="/user/runner_requests"
+                onBack={backToUserJobs}
+                onOpenJob={openUserJob}
+                request={request}
+              />
+            }
           />
           <Toaster richColors />
         </>
@@ -635,6 +651,7 @@ function App() {
           userPreferences={userPreferences}
           runners={userRunners}
           selectedKey={userSelectedKey}
+          selectedJobID={userSelectedJobID}
           page={userPage}
           accountSettingsRoute={accountSettingsRoute || defaultAccountSettingsRoute(authSession.login)}
           authorizedRepositories={authorizedRepositories}
@@ -646,6 +663,7 @@ function App() {
           onNavigateAccountSettings={setAccountSettingsRoute}
           onOpenJob={openUserJob}
           onLoadJobGroup={loadUserJobGroup}
+          request={request}
           onSelectKey={setUserJobsSelection}
           onSignOut={signOut}
         />
@@ -807,6 +825,47 @@ function App() {
   )
 }
 
+function UserJobRedirect({
+  id,
+  request,
+  onResolved,
+  fallback,
+}: {
+  id: string
+  request: (url: string, options?: RequestInit) => Promise<unknown>
+  onResolved: (key: string) => void
+  fallback: ReactNode
+}) {
+  const [failedID, setFailedID] = useState("")
+
+  useEffect(() => {
+    let cancelled = false
+    void request(`/user/runner_requests/${encodeURIComponent(id)}/group`)
+      .then((group) => {
+        if (cancelled) return
+        const key = isRunnerJobGroupResponse(group) ? group.key : ""
+        if (key) {
+          onResolved(key)
+          return
+        }
+        setFailedID(id)
+      })
+      .catch(() => {
+        if (!cancelled) setFailedID(id)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [id, onResolved, request])
+
+  if (failedID === id) return <>{fallback}</>
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+      Opening job in its build context...
+    </div>
+  )
+}
+
 function defaultAccountSettingsRoute(currentLogin?: string): AccountSettingsRoute {
   return { accountLogin: currentLogin, tab: "repositories" }
 }
@@ -864,6 +923,14 @@ function safeDecodePathSegment(value: string): string | null {
 function userJobIDFromPath(path: string) {
   const match = path.match(/^\/jobs\/([^/]+)$/)
   return match ? safeDecodePathSegment(match[1]) || "" : ""
+}
+
+function userJobIDFromSearch(search: string) {
+  return new URLSearchParams(search).get("job") || ""
+}
+
+function isRunnerJobGroupResponse(value: unknown): value is { key: string } {
+  return Boolean(value && typeof value === "object" && typeof (value as { key?: unknown }).key === "string")
 }
 
 function isUserJobsRoute(path: string) {

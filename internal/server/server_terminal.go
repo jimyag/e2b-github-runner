@@ -40,19 +40,21 @@ type userRunnerSiblingsResponse struct {
 }
 
 type userRunnerJobGroupResponse struct {
-	Key               string              `json:"key"`
-	Group             string              `json:"group"`
-	Repository        string              `json:"repository"`
-	Title             string              `json:"title"`
-	Subtitle          string              `json:"subtitle"`
-	UpdatedAt         time.Time           `json:"updated_at"`
-	Jobs              []state.RunnerState `json:"jobs"`
-	CurrentJobs       []state.RunnerState `json:"current_jobs"`
-	PreviousJobs      []state.RunnerState `json:"previous_jobs"`
-	WorkflowRunIDs    []int64             `json:"workflow_run_ids"`
-	HeadSHA           string              `json:"head_sha,omitempty"`
-	HeadBranch        string              `json:"head_branch,omitempty"`
-	PullRequestNumber int64               `json:"pull_request_number,omitempty"`
+	Key                   string              `json:"key"`
+	Group                 string              `json:"group"`
+	Repository            string              `json:"repository"`
+	Title                 string              `json:"title"`
+	Subtitle              string              `json:"subtitle"`
+	UpdatedAt             time.Time           `json:"updated_at"`
+	Jobs                  []state.RunnerState `json:"jobs"`
+	CurrentJobs           []state.RunnerState `json:"current_jobs"`
+	PreviousJobs          []state.RunnerState `json:"previous_jobs"`
+	WorkflowRunIDs        []int64             `json:"workflow_run_ids"`
+	HeadSHA               string              `json:"head_sha,omitempty"`
+	HeadBranch            string              `json:"head_branch,omitempty"`
+	PullRequestNumber     int64               `json:"pull_request_number,omitempty"`
+	PullRequestTitle      string              `json:"pull_request_title,omitempty"`
+	PullRequestTitleError string              `json:"pull_request_title_error,omitempty"`
 }
 
 const terminalIdleCloseDelay = 30 * time.Second
@@ -263,6 +265,7 @@ func (s *Server) handleUserGetRunnerJobGroup(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusNotFound, "job group not found")
 		return
 	}
+	s.enrichUserRunnerJobGroup(r.Context(), &group)
 	writeJSON(w, http.StatusOK, group)
 }
 
@@ -301,11 +304,30 @@ func (s *Server) handleUserGetRunnerJobGroupByKey(w http.ResponseWriter, r *http
 	}
 	for _, group := range runnerJobGroups(states) {
 		if group.Key == key {
+			s.enrichUserRunnerJobGroup(r.Context(), &group)
 			writeJSON(w, http.StatusOK, group)
 			return
 		}
 	}
 	writeError(w, http.StatusNotFound, "job group not found")
+}
+
+func (s *Server) enrichUserRunnerJobGroup(ctx context.Context, group *userRunnerJobGroupResponse) {
+	if group == nil || group.Group != "pull_request" || group.Repository == "" || group.PullRequestNumber == 0 {
+		return
+	}
+	pull, err := s.gh.GetPullRequest(ctx, group.Repository, group.PullRequestNumber)
+	if err != nil {
+		issue, issueErr := s.gh.GetIssue(ctx, group.Repository, group.PullRequestNumber)
+		if issueErr != nil {
+			slog.Debug("load github pull request title", "repository", group.Repository, "number", group.PullRequestNumber, "pull_error", err, "issue_error", issueErr)
+			group.PullRequestTitleError = fmt.Sprintf("pull request title unavailable: %v; issue fallback: %v", err, issueErr)
+			return
+		}
+		group.PullRequestTitle = strings.TrimSpace(issue.Title)
+		return
+	}
+	group.PullRequestTitle = strings.TrimSpace(pull.Title)
 }
 
 func (s *Server) handleUserListRunnerSiblings(w http.ResponseWriter, r *http.Request) {

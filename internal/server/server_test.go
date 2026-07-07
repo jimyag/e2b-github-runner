@@ -600,6 +600,22 @@ func TestUserRunnerDetailLogAndTerminal(t *testing.T) {
 }
 
 func TestUserRunnerSiblings(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/pulls/1":
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/issues/1":
+			w.Write([]byte(`{"number":1,"title":"Add runner smoke coverage"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/pulls/2":
+			w.Write([]byte(`{"number":2,"title":"Other pull request"}`))
+		default:
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer ghServer.Close()
+
 	store := state.New(t.TempDir())
 	account, _, err := store.UpsertAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "hubot-id", OAuthLogin: "hubot"}, "user")
 	if err != nil {
@@ -639,7 +655,7 @@ func TestUserRunnerSiblings(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
 
 	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests/current/siblings", nil)
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
@@ -676,6 +692,9 @@ func TestUserRunnerSiblings(t *testing.T) {
 	}
 	if group.Key != "pr:o/r:1" || group.Group != "pull_request" {
 		t.Fatalf("unexpected job group key=%q group=%q", group.Key, group.Group)
+	}
+	if group.PullRequestTitle != "Add runner smoke coverage" {
+		t.Fatalf("unexpected pull request title: %q", group.PullRequestTitle)
 	}
 	if ids := runnerStateIDs(group.CurrentJobs); !reflect.DeepEqual(ids, []string{"same-run", "current"}) {
 		t.Fatalf("unexpected current job ids: %#v", ids)

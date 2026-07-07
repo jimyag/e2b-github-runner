@@ -49,6 +49,8 @@ export type RunnerJobGroup = {
   head_sha?: string
   head_branch?: string
   pull_request_number?: number
+  pull_request_title?: string
+  pull_request_title_error?: string
 }
 
 export type RunnerSpec = {

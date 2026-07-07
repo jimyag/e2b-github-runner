@@ -2,7 +2,6 @@ import {
   AlertCircle,
   BookOpen,
   CalendarDays,
-  ChevronDown,
   Check,
   ExternalLink,
   Github,
@@ -11,6 +10,7 @@ import {
   Monitor,
   Moon,
   Play,
+  RefreshCw,
   Settings,
   ShieldCheck,
   Sun,
@@ -18,14 +18,14 @@ import {
   X,
 } from "lucide-react"
 import { useTheme } from "next-themes"
-import { type FormEvent, type MouseEvent, type ReactNode, useEffect, useMemo, useState } from "react"
+import { type CSSProperties, type FormEvent, type MouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
 
 import type { AuthSession, GitHubAppConfig, RunnerJobGroup, RunnerState, UserPreferences } from "@/admin-types"
+import { logNames } from "@/admin-types"
 import { formatTime } from "@/admin-format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -71,6 +71,7 @@ export function UserDashboard({
   userPreferences,
   runners,
   selectedKey,
+  selectedJobID,
   page,
   accountSettingsRoute,
   authorizedRepositories,
@@ -82,6 +83,7 @@ export function UserDashboard({
   onNavigateAccountSettings,
   onOpenJob,
   onLoadJobGroup,
+  request,
   onSelectKey,
   onSignOut,
 }: {
@@ -90,6 +92,7 @@ export function UserDashboard({
   userPreferences: UserPreferences | null
   runners: RunnerState[]
   selectedKey: string
+  selectedJobID: string
   page: UserPage
   accountSettingsRoute: AccountSettingsRoute
   authorizedRepositories: Record<number, string[]>
@@ -101,6 +104,7 @@ export function UserDashboard({
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
   onOpenJob: (id: string) => void
   onLoadJobGroup: (key: string) => Promise<unknown>
+  request: (url: string, options?: RequestInit) => Promise<unknown>
   onSelectKey: (key: string) => void
   onSignOut: () => void
 }) {
@@ -207,9 +211,11 @@ export function UserDashboard({
           hasInstallations={hasInstallations}
           selected={selected}
           selectedJobGroup={selectedJobGroup}
+          selectedJobID={selectedJobID}
           onSelectKey={onSelectKey}
           onNavigate={onNavigate}
           onOpenJob={onOpenJob}
+          request={request}
         />
       )}
     </main>
@@ -658,23 +664,29 @@ function PullRequestsPage({
   hasInstallations,
   selected,
   selectedJobGroup,
+  selectedJobID,
   onSelectKey,
   onNavigate,
   onOpenJob,
+  request,
 }: {
   groups: BuildGroup[]
   hasInstallations: boolean
   selected: BuildGroup | undefined
   selectedJobGroup: RunnerJobGroup | null
+  selectedJobID: string
   onSelectKey: (key: string) => void
   onNavigate: (page: UserPage) => void
   onOpenJob: (id: string) => void
+  request: (url: string, options?: RequestInit) => Promise<unknown>
 }) {
   const currentJobs = selectedJobGroup?.current_jobs || (selected ? currentBuildJobs(selected) : [])
   const previousJobs = selectedJobGroup?.previous_jobs || (selected ? previousBuildJobs(selected, currentJobs) : [])
-  const workflowRunCount = selectedJobGroup?.workflow_run_ids.length || selected?.workflowRunIDs.length || 1
+  const allJobs = [...currentJobs, ...previousJobs]
+  const selectedJob = allJobs.find((job) => job.id === selectedJobID) || allJobs[0] || null
+  const effectiveSelectedJobID = selectedJob?.id || ""
+  const workflows = workflowGroups(allJobs)
   const selectedTitleClass = selected ? userBuildGroupTitleClass(selected) : ""
-  const shouldCollapsePreviousJobs = previousJobs.length > 2
 
   return (
     <>
@@ -692,14 +704,28 @@ function PullRequestsPage({
           <div className="flex h-full flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto">
               {groups.length ? (
-                groups.map((group) => (
-                  <BuildGroupListItem
-                    key={group.key}
-                    group={group}
-                    selected={selected?.key === group.key}
-                    onSelect={() => onSelectKey(group.key)}
-                  />
-                ))
+                groups.map((group) => {
+                  const isSelected = selected?.key === group.key
+                  return (
+                    <div key={group.key} className="border-b">
+                      <BuildGroupListItem
+                        group={group}
+                        selected={isSelected}
+                        expanded={isSelected && workflows.length > 0}
+                        onSelect={() => onSelectKey(group.key)}
+                      />
+                      {isSelected && workflows.length ? (
+                        <div className="bg-background px-4 pb-4 pl-10 pt-1">
+                          <WorkflowJobExplorer
+                            workflows={workflows}
+                            selectedJobID={effectiveSelectedJobID}
+                            onOpenJob={onOpenJob}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })
               ) : (
                 <div className="p-4 text-sm text-muted-foreground">
                   {hasInstallations ? (
@@ -719,50 +745,61 @@ function PullRequestsPage({
           </div>
         </aside>
 
-        <section className="min-h-0 overflow-y-auto p-4 lg:p-6">
+        <section className="min-h-0 overflow-y-auto">
           {selected ? (
-            <div className="space-y-4">
-              <div>
-                <h2 className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-2xl font-semibold">
-                  <span className={selectedTitleClass}>{selected.repository}</span>
-                  <span className={selectedTitleClass}>{selectedJobGroup?.title || selected.title}</span>
-                </h2>
-                <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
-                  <JobField label="Branch" value={selectedJobGroup?.head_branch || selected.headBranch || selected.subtitle || "unknown"} />
-                  <JobField label="Commit" value={shortSHA(selectedJobGroup?.head_sha || selected.headSHA) || "unknown"} />
-                  <JobField label="Workflow runs" value={String(workflowRunCount)} />
-                  <JobField label="Last updated" value={formatTime(selectedJobGroup?.updated_at || selected.updatedAt)} />
-                </div>
+            <div>
+              <div className="border-b px-4 py-4 lg:px-6">
+                <h2 className="truncate text-2xl font-semibold">{selected.repository}</h2>
               </div>
-              <div className="grid gap-3">
-                {currentJobs.map((job) => (
-                  <RunnerJobCard key={job.id} job={job} onOpen={() => onOpenJob(job.id)} />
-                ))}
-                {shouldCollapsePreviousJobs ? (
-                  <Collapsible>
-                    <CollapsibleTrigger asChild>
-                      <Button type="button" variant="outline" className="w-full justify-between">
-                        Previous jobs
-                        <span className="inline-flex items-center gap-2 text-muted-foreground">
-                          {previousJobs.length} jobs
-                          <ChevronDown className="h-4 w-4" />
-                        </span>
-                      </Button>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="mt-3 grid gap-3">
-                      {previousJobs.map((job) => (
-                        <RunnerJobCard key={job.id} job={job} onOpen={() => onOpenJob(job.id)} />
-                      ))}
-                    </CollapsibleContent>
-                  </Collapsible>
-                ) : previousJobs.length ? (
-                  <div className="grid gap-3">
-                    <div className="text-sm font-medium text-muted-foreground">Previous jobs</div>
-                    {previousJobs.map((job) => (
-                      <RunnerJobCard key={job.id} job={job} onOpen={() => onOpenJob(job.id)} />
-                    ))}
+              <div className="space-y-4 p-4 lg:p-6">
+                <div className="border-b pb-4">
+                  <h3 className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-2xl font-semibold">
+                    <span className={selectedTitleClass}>{pullRequestHeading(selected, selectedJobGroup)}</span>
+                  </h3>
+                  <div className="mt-3 space-y-4 text-sm">
+                    <section>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        <JobField label="Branch" value={selectedJobGroup?.head_branch || selected.headBranch || selected.subtitle || "unknown"} />
+                        <JobField label="Commit" value={shortSHA(selectedJobGroup?.head_sha || selected.headSHA) || "unknown"} />
+                        <JobField label="Last updated" value={formatTime(selectedJobGroup?.updated_at || selected.updatedAt)} />
+                      </div>
+                    </section>
+                    <section>
+                      <div className="grid gap-3 sm:grid-cols-3">
+                        {selectedJob ? (
+                          <>
+                            <JobField
+                              label="Job Name"
+                              value={selectedJob.github_job_url ? (
+                                <a className="inline-flex min-w-0 items-center gap-1 text-primary hover:underline" href={selectedJob.github_job_url} target="_blank" rel="noreferrer">
+                                  <span className="truncate">{runnerJobTitle(selectedJob)}</span>
+                                  <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                                </a>
+                              ) : runnerJobTitle(selectedJob)}
+                            />
+                            <JobField
+                              label="Workflow"
+                              value={workflowRunURL(selectedJob) ? (
+                                <a className="inline-flex min-w-0 items-center gap-1 text-primary hover:underline" href={workflowRunURL(selectedJob)} target="_blank" rel="noreferrer">
+                                  <span className="truncate">{selectedJob.workflow_name || "Workflow"}</span>
+                                  <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                                </a>
+                              ) : selectedJob.workflow_name || "Workflow"}
+                            />
+                            <JobField label="Duration" value={durationLabel(selectedJob) || "-"} />
+                          </>
+                        ) : (
+                          <div className="text-muted-foreground">Select a job to inspect its logs.</div>
+                        )}
+                      </div>
+                    </section>
                   </div>
-                ) : null}
+                </div>
+                {selectedJob ? <RunnerJobLogPanel job={selectedJob} request={request} /> : (
+                  <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
+                    Select a job to inspect its logs.
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -857,46 +894,388 @@ function UserMenu({ authSession, onSignOut }: { authSession: AuthSession; onSign
 
 function JobField({ label, value, onOpen }: { label: string; value: ReactNode; onOpen?: () => void }) {
   return (
-    <div>
+    <div className="grid grid-cols-[88px_minmax(0,1fr)] items-baseline gap-2">
       <div className="text-xs text-muted-foreground">{label}</div>
       {onOpen ? (
-        <button type="button" className="mt-1 break-words text-left font-medium hover:text-primary hover:underline" onClick={onOpen}>
+        <button type="button" className="min-w-0 break-words text-left font-medium hover:text-primary hover:underline" onClick={onOpen}>
           {value}
         </button>
       ) : (
-        <div className="mt-1 break-words font-medium">{value}</div>
+        <div className="min-w-0 break-words font-medium">{value}</div>
       )}
     </div>
   )
 }
 
-function RunnerJobCard({ job, onOpen }: { job: RunnerState; onOpen: () => void }) {
+function WorkflowJobExplorer({
+  workflows,
+  selectedJobID,
+  onOpenJob,
+}: {
+  workflows: ReturnType<typeof workflowGroups>
+  selectedJobID: string
+  onOpenJob: (id: string) => void
+}) {
   return (
-    <Card className="rounded-lg">
-      <CardHeader className="gap-1 pb-0">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="text-base">
-              <button type="button" className="text-left hover:text-primary hover:underline" onClick={onOpen}>
-                {runnerJobTitle(job)}
-              </button>
-            </CardTitle>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge className={userStatusClass(job.status)}>{job.status}</Badge>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="grid gap-3 pt-0 text-sm md:grid-cols-3">
-        <JobField label="Runner spec" value={job.runner_spec_name || "matched by labels"} onOpen={onOpen} />
-        <JobField label="Workflow" value={job.workflow_name || "unknown"} onOpen={onOpen} />
-        <JobField label="Workflow run" value={workflowRunValue(job)} />
-        <JobField label="Queued" value={formatTime(job.created_at)} onOpen={onOpen} />
-        <JobField label="Started" value={job.running_at ? formatTime(job.running_at) : "-"} onOpen={onOpen} />
-        <JobField label="Finished" value={job.completed_at || job.failed_at ? formatTime(job.completed_at || job.failed_at) : "-"} onOpen={onOpen} />
-      </CardContent>
-    </Card>
+    <div className="grid gap-2">
+      {workflows.map((workflow) => (
+        workflow.jobs.length === 1 ? (
+          <WorkflowRunListItem
+            key={workflow.id}
+            workflow={workflow}
+            selectedJobID={selectedJobID}
+            onOpenJob={onOpenJob}
+          />
+        ) : (
+          <section key={workflow.id} className="grid gap-1.5">
+            <div className="flex items-center justify-between gap-3 px-1 pt-2">
+              <div className="min-w-0">
+                <h4 className="truncate text-xs font-semibold text-muted-foreground">{workflow.name}</h4>
+                <div className="mt-0.5 text-xs text-muted-foreground">
+                  Run {workflow.id} · {workflow.jobs.length} jobs
+                </div>
+              </div>
+              <span className={cn("text-xs font-medium", buildGroupStatusClasses(workflowStatus(workflow.jobs)).title)}>
+                {workflowStatus(workflow.jobs)}
+              </span>
+            </div>
+            <div className="grid gap-1">
+              {workflow.jobs.map((job) => (
+                <RunnerJobListItem key={job.id} job={job} selected={job.id === selectedJobID} onOpen={() => onOpenJob(job.id)} />
+              ))}
+            </div>
+          </section>
+        )
+      ))}
+    </div>
   )
+}
+
+function WorkflowRunListItem({
+  workflow,
+  selectedJobID,
+  onOpenJob,
+}: {
+  workflow: ReturnType<typeof workflowGroups>[number]
+  selectedJobID: string
+  onOpenJob: (id: string) => void
+}) {
+  const job = workflow.jobs[0]
+  const selected = job.id === selectedJobID
+  const status = workflowStatus(workflow.jobs)
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenJob(job.id)}
+      className={cn(
+        "grid w-full grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
+        selected ? "bg-primary/5 text-primary" : "hover:bg-muted"
+      )}
+    >
+      <span className={cn(buildGroupStatusClasses(status).icon)}>{jobStatusMark(job.status)}</span>
+      <span className="min-w-0">
+        <span className="block truncate font-medium">{workflow.name}</span>
+      </span>
+      <span className="shrink-0 text-xs text-muted-foreground">{durationLabel(job)}</span>
+    </button>
+  )
+}
+
+function RunnerJobListItem({ job, selected, onOpen }: { job: RunnerState; selected: boolean; onOpen: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className={cn(
+        "grid w-full grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
+        selected ? "bg-primary/5 text-primary" : "hover:bg-muted"
+      )}
+    >
+      <span className={cn(buildGroupStatusClasses(jobStatusSummary(job.status)).icon)}>{jobStatusMark(job.status)}</span>
+      <span className="min-w-0">
+        <span className="block truncate font-medium">{runnerJobTitle(job)}</span>
+      </span>
+      <span className="shrink-0 text-xs text-muted-foreground">{durationLabel(job)}</span>
+    </button>
+  )
+}
+
+function RunnerJobLogPanel({
+  job,
+  request,
+}: {
+  job: RunnerState
+  request: (url: string, options?: RequestInit) => Promise<unknown>
+}) {
+  const [selectedLog, setSelectedLog] = useState<(typeof logNames)[number]>("control.log")
+  const [runnerLogText, setRunnerLogText] = useState("Loading runner log...")
+  const [githubLogText, setGithubLogText] = useState("Loading GitHub log...")
+  const [githubLogLoading, setGithubLogLoading] = useState(false)
+  const endpoint = `/user/runner_requests/${encodeURIComponent(job.id)}`
+  const endpointRef = useRef(endpoint)
+
+  useEffect(() => {
+    endpointRef.current = endpoint
+  }, [endpoint])
+
+  useEffect(() => {
+    let active = true
+    queueMicrotask(() => {
+      if (active) {
+        setRunnerLogText("Loading runner log...")
+      }
+    })
+    void request(`${endpoint}/logs/${encodeURIComponent(selectedLog)}`)
+      .then((text) => {
+        if (active) {
+          setRunnerLogText(logResponseText(text, "Log is empty"))
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setRunnerLogText(error instanceof Error ? error.message : "Failed to load runner log")
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [endpoint, request, selectedLog])
+
+  useEffect(() => {
+    let active = true
+    queueMicrotask(() => {
+      if (active) {
+        setGithubLogLoading(true)
+        setGithubLogText("Loading GitHub log...")
+      }
+    })
+    void request(`${endpoint}/github-log`)
+      .then((text) => {
+        if (active) {
+          setGithubLogText(logResponseText(text, "GitHub log is empty"))
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setGithubLogText(error instanceof Error ? error.message : "Failed to load GitHub log")
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setGithubLogLoading(false)
+        }
+      })
+    return () => {
+      active = false
+    }
+  }, [endpoint, request])
+
+  const refreshGithubLog = () => {
+    const refreshEndpoint = endpoint
+    setGithubLogLoading(true)
+    setGithubLogText("Loading GitHub log...")
+    void request(`${refreshEndpoint}/github-log`)
+      .then((text) => {
+        if (endpointRef.current === refreshEndpoint) {
+          setGithubLogText(logResponseText(text, "GitHub log is empty"))
+        }
+      })
+      .catch((error) => {
+        if (endpointRef.current === refreshEndpoint) {
+          setGithubLogText(error instanceof Error ? error.message : "Failed to load GitHub log")
+        }
+      })
+      .finally(() => {
+        if (endpointRef.current === refreshEndpoint) {
+          setGithubLogLoading(false)
+        }
+      })
+  }
+
+  return (
+    <div>
+      <Tabs defaultValue="github-logs">
+        <div className="border-b pt-3">
+          <TabsList>
+            <TabsTrigger value="github-logs">GitHub logs</TabsTrigger>
+            <TabsTrigger value="runner-logs">Runner logs</TabsTrigger>
+            <TabsTrigger value="details">Details</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="github-logs" className="m-0">
+          <LogOutput
+            text={githubLogText}
+            description="Workflow job output downloaded from GitHub Actions."
+            actions={(
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="border-white/15 bg-white/5 text-slate-100 hover:bg-white/10 hover:text-white"
+                onClick={refreshGithubLog}
+                disabled={githubLogLoading}
+              >
+                <RefreshCw className={cn(githubLogLoading && "animate-spin")} />
+                Refresh
+              </Button>
+            )}
+          />
+        </TabsContent>
+        <TabsContent value="runner-logs" className="m-0">
+          <div className="border-b py-4">
+            <Tabs value={selectedLog} onValueChange={(value) => setSelectedLog(value as (typeof logNames)[number])}>
+              <TabsList>
+                {logNames.map((name) => (
+                  <TabsTrigger key={name} value={name}>
+                    {name.replace(".log", "")}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          </div>
+          <LogOutput text={runnerLogText} description={`Runner ${selectedLog.replace(".log", "")} output captured by runnerd.`} />
+        </TabsContent>
+        <TabsContent value="details" className="m-0 py-5">
+          <div className="grid gap-2 text-sm">
+            <JobField label="Status" value={job.status} />
+            <JobField label="Runner spec" value={job.runner_spec_name || "matched by labels"} />
+            <JobField label="Workflow run" value={workflowRunValue(job)} />
+            <JobField label="Queued" value={formatTime(job.created_at)} />
+            <JobField label="Started" value={job.running_at ? formatTime(job.running_at) : "-"} />
+            <JobField label="Finished" value={job.completed_at || job.failed_at ? formatTime(job.completed_at || job.failed_at) : "-"} />
+            <JobField label="Commit" value={job.head_sha || "-"} />
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+function logResponseText(text: unknown, emptyMessage: string) {
+  return typeof text === "string" ? text || emptyMessage : JSON.stringify(text, null, 2)
+}
+
+function LogOutput({ text, description, actions }: { text: string; description: string; actions?: ReactNode }) {
+  const logRef = useRef<HTMLDivElement | null>(null)
+  const [collapseState, setCollapseState] = useState<{ text: string; groups: Set<number> }>(() => ({ text, groups: new Set() }))
+  const collapsedGroups = useMemo(() => (collapseState.text === text ? collapseState.groups : new Set<number>()), [collapseState, text])
+  const lines = useMemo(() => text.split(/\r?\n/), [text])
+  const logLines = useMemo(() => parseLogLines(lines, collapsedGroups), [lines, collapsedGroups])
+  const numberWidth = `${Math.max(2, String(lines.length).length)}ch`
+
+  const scrollToBottom = () => {
+    logRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+  }
+
+  const toggleGroup = (groupID: number) => {
+    setCollapseState((current) => {
+      const next = new Set(current.text === text ? current.groups : [])
+      if (next.has(groupID)) {
+        next.delete(groupID)
+      } else {
+        next.add(groupID)
+      }
+      return { text, groups: next }
+    })
+  }
+
+  return (
+    <div className="mt-4 overflow-hidden border-y border-emerald-500/15 bg-slate-950 text-slate-100 shadow-[inset_3px_0_0_theme(colors.emerald.500/0.35)]">
+      <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-900/95 px-4 py-3 backdrop-blur">
+        <div className="text-xs text-slate-400">{description}</div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="border-white/15 bg-white/5 text-slate-100 hover:bg-white/10 hover:text-white"
+            onClick={scrollToBottom}
+          >
+            Scroll to Bottom
+          </Button>
+          {actions}
+        </div>
+      </div>
+      <div ref={logRef} className="py-3 font-mono text-xs leading-relaxed">
+        {logLines.map((logLine) => {
+          const rowStyle = { "--line-number-width": numberWidth } as CSSProperties
+          const rowClassName = "grid grid-cols-[12px_var(--line-number-width)_minmax(0,1fr)] gap-1 px-4"
+          if (logLine.groupID !== undefined && logLine.kind === "group-start") {
+            return (
+              <button
+                key={`${logLine.index}-${logLine.text.slice(0, 16)}`}
+                type="button"
+                className={cn(rowClassName, "group text-left")}
+                style={rowStyle}
+                onClick={() => toggleGroup(logLine.groupID ?? logLine.index)}
+                aria-expanded={!collapsedGroups.has(logLine.groupID ?? logLine.index)}
+              >
+                <span className="flex h-[1.625em] select-none items-center justify-center text-slate-300 group-hover:text-emerald-200">
+                  <Play
+                    className={cn(
+                      "h-3 w-3 max-w-none fill-current stroke-current",
+                      !collapsedGroups.has(logLine.groupID ?? logLine.index) && "rotate-90"
+                    )}
+                  />
+                </span>
+                <span className="select-none text-right text-slate-500">{logLine.index + 1}</span>
+                <span className={cn("min-w-0 whitespace-pre-wrap break-words text-left text-slate-200 group-hover:text-emerald-200", logLineClass(logLine.text))}>{logLine.displayText || " "}</span>
+              </button>
+            )}
+          return (
+            <div key={`${logLine.index}-${logLine.text.slice(0, 16)}`} className={rowClassName} style={rowStyle}>
+              <span />
+              <span className="select-none text-right text-slate-500">{logLine.index + 1}</span>
+              <span className={cn("min-w-0 whitespace-pre-wrap break-words text-slate-200", logLineClass(logLine.text))}>{logLine.displayText || " "}</span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function logLineClass(line: string) {
+  if (line.includes("##[group]") || line.includes("##[endgroup]")) return "font-semibold text-emerald-300"
+  if (line.trimStart().startsWith("$ ")) return "font-semibold text-cyan-200"
+  return ""
+}
+
+type ParsedLogLine = {
+  index: number
+  text: string
+  displayText: string
+  kind: "line" | "group-start" | "group-end"
+  groupID?: number
+}
+
+function parseLogLines(lines: string[], collapsedGroups: Set<number>): ParsedLogLine[] {
+  const visible: ParsedLogLine[] = []
+  const stack: number[] = []
+
+  lines.forEach((text, index) => {
+    const hiddenByParent = stack.some((groupID) => collapsedGroups.has(groupID))
+
+    if (text.includes("##[group]")) {
+      if (!hiddenByParent) {
+        visible.push({ index, text, displayText: text.replace("##[group]", ""), kind: "group-start", groupID: index })
+      }
+      stack.push(index)
+      return
+    }
+
+    if (text.includes("##[endgroup]")) {
+      stack.pop()
+      return
+    }
+
+    if (!hiddenByParent) {
+      visible.push({ index, text, displayText: text, kind: "line" })
+    }
+  })
+
+  return visible
 }
 
 function workflowRunValue(job: RunnerState) {
@@ -931,13 +1310,45 @@ function workflowRunURL(job: RunnerState) {
   return job.github_job_url.slice(0, index + marker.length)
 }
 
+function pullRequestHeading(group: BuildGroup, jobGroup: RunnerJobGroup | null) {
+  const title = jobGroup?.pull_request_title?.trim()
+  const label = jobGroup?.title || group.title
+  return title ? `${label}: ${title}` : label
+}
+
+function workflowGroups(jobs: RunnerState[]) {
+  const groups = new Map<number | string, { id: number | string; name: string; jobs: RunnerState[] }>()
+  for (const job of jobs) {
+    const id = job.workflow_run_id || job.id
+    const group = groups.get(id)
+    if (group) {
+      group.jobs.push(job)
+      continue
+    }
+    groups.set(id, {
+      id,
+      name: job.workflow_name || "Workflow run",
+      jobs: [job],
+    })
+  }
+  return Array.from(groups.values())
+}
+
+function workflowStatus(jobs: RunnerState[]) {
+  if (jobs.some((job) => job.status === "failed")) return "failed"
+  if (jobs.some((job) => ["queued", "creating", "running", "stopping"].includes(job.status))) return "active"
+  return "completed"
+}
+
 function BuildGroupListItem({
   group,
   selected,
+  expanded = false,
   onSelect,
 }: {
   group: BuildGroup
   selected: boolean
+  expanded?: boolean
   onSelect: () => void
 }) {
   const status = buildGroupStatus(group)
@@ -949,7 +1360,8 @@ function BuildGroupListItem({
       type="button"
       onClick={onSelect}
       className={cn(
-        "group relative flex w-full gap-2 border-b bg-background/60 py-4 pl-3 pr-4 text-left transition-colors hover:bg-accent/70",
+        "group relative flex w-full gap-2 bg-background/60 py-4 pl-3 pr-4 text-left transition-colors hover:bg-accent/70",
+        !expanded && "border-b",
         selected ? "bg-accent" : ""
       )}
     >
@@ -1006,6 +1418,38 @@ function buildGroupStatus(group: BuildGroup): RunnerStatusSummary {
     return "active"
   }
   return "completed"
+}
+
+function jobStatusSummary(status: RunnerState["status"]): RunnerStatusSummary {
+  if (status === "failed") return "failed"
+  if (status === "queued" || status === "creating" || status === "running" || status === "stopping") return "active"
+  return "completed"
+}
+
+function jobStatusMark(status: RunnerState["status"]) {
+  const className = "h-4 w-4"
+  switch (status) {
+    case "failed":
+      return <X className={className} />
+    case "queued":
+    case "creating":
+    case "running":
+    case "stopping":
+      return <AlertCircle className={className} />
+    default:
+      return <Check className={className} />
+  }
+}
+
+function durationLabel(job: RunnerState) {
+  const start = Date.parse(job.running_at || job.created_at || "")
+  const end = Date.parse(job.completed_at || job.failed_at || job.updated_at || "")
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return ""
+  const totalSeconds = Math.max(0, Math.round((end - start) / 1000))
+  if (totalSeconds < 60) return `${totalSeconds}s`
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`
 }
 
 function buildGroupStatusClasses(status: RunnerStatusSummary) {
@@ -1250,21 +1694,4 @@ function userInitials(login: string) {
       .map((part) => part[0]?.toUpperCase())
       .join("") || "GH"
   )
-}
-
-function userStatusClass(status: RunnerState["status"]) {
-  switch (status) {
-    case "running":
-      return "bg-emerald-500 text-white"
-    case "queued":
-    case "creating":
-    case "stopping":
-      return "bg-blue-500 text-white"
-    case "completed":
-      return "bg-muted text-foreground"
-    case "failed":
-      return "bg-destructive text-white"
-    default:
-      return ""
-  }
 }

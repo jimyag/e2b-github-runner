@@ -431,6 +431,76 @@ func (c *Client) GetWorkflowJob(ctx context.Context, repositoryFullName string, 
 	return job, nil
 }
 
+func (c *Client) GetPullRequest(ctx context.Context, repositoryFullName string, number int64) (PullRequest, error) {
+	startedAt := time.Now()
+	result := "error"
+	defer func() { metrics.RecordGitHubAPI("get_pull_request", result, time.Since(startedAt)) }()
+	repositoryFullName = c.repositoryFullName(repositoryFullName)
+	if repositoryFullName == "" {
+		return PullRequest{}, fmt.Errorf("repository full name is required")
+	}
+	if number <= 0 {
+		return PullRequest{}, fmt.Errorf("pull request number is required")
+	}
+	url := fmt.Sprintf("%s/repos/%s/pulls/%d", c.baseURL, repositoryFullName, number)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return PullRequest{}, err
+	}
+	setGitHubHeaders(req)
+
+	resp, err := c.do(req, repositoryFullName)
+	if err != nil {
+		return PullRequest{}, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return PullRequest{}, fmt.Errorf("github pull request: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var pull PullRequest
+	if err := json.Unmarshal(body, &pull); err != nil {
+		return PullRequest{}, err
+	}
+	result = "success"
+	return pull, nil
+}
+
+func (c *Client) GetIssue(ctx context.Context, repositoryFullName string, number int64) (Issue, error) {
+	startedAt := time.Now()
+	result := "error"
+	defer func() { metrics.RecordGitHubAPI("get_issue", result, time.Since(startedAt)) }()
+	repositoryFullName = c.repositoryFullName(repositoryFullName)
+	if repositoryFullName == "" {
+		return Issue{}, fmt.Errorf("repository full name is required")
+	}
+	if number <= 0 {
+		return Issue{}, fmt.Errorf("issue number is required")
+	}
+	url := fmt.Sprintf("%s/repos/%s/issues/%d", c.baseURL, repositoryFullName, number)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return Issue{}, err
+	}
+	setGitHubHeaders(req)
+
+	resp, err := c.do(req, repositoryFullName)
+	if err != nil {
+		return Issue{}, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return Issue{}, fmt.Errorf("github issue: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var issue Issue
+	if err := json.Unmarshal(body, &issue); err != nil {
+		return Issue{}, err
+	}
+	result = "success"
+	return issue, nil
+}
+
 func (c *Client) DownloadWorkflowJobLogs(ctx context.Context, repositoryFullName string, jobID int64) ([]byte, string, error) {
 	if jobID == 0 {
 		return nil, "", fmt.Errorf("workflow job id is required")
@@ -782,6 +852,16 @@ type WorkflowJob struct {
 	WorkflowName string `json:"workflow_name"`
 	HeadBranch   string `json:"head_branch"`
 	Labels       Labels `json:"labels"`
+}
+
+type PullRequest struct {
+	Number int64  `json:"number"`
+	Title  string `json:"title"`
+}
+
+type Issue struct {
+	Number int64  `json:"number"`
+	Title  string `json:"title"`
 }
 
 type Repository struct {
