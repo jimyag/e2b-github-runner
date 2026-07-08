@@ -362,9 +362,11 @@ func (s *Server) enrichUserRunnerJobGroup(ctx context.Context, group *userRunner
 			s.cachePullTitle(cacheKey, "", errorText)
 			return pullTitleResult{errorText: errorText}, nil
 		}
-		pull, err := s.gh.GetPullRequest(ctx, group.Repository, group.PullRequestNumber)
+		apiCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		pull, err := s.gh.GetPullRequest(apiCtx, group.Repository, group.PullRequestNumber)
 		if err != nil {
-			issue, issueErr := s.gh.GetIssue(ctx, group.Repository, group.PullRequestNumber)
+			issue, issueErr := s.gh.GetIssue(apiCtx, group.Repository, group.PullRequestNumber)
 			if issueErr != nil {
 				s.logger.DebugContext(ctx, "load github pull request title", "repository", group.Repository, "number", group.PullRequestNumber, "pull_error", err, "issue_error", issueErr)
 				errorText := fmt.Sprintf("pull request title unavailable: %v; issue fallback: %v", err, issueErr)
