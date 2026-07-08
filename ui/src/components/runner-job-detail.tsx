@@ -207,13 +207,40 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
         setTerminalError("Terminal stream disconnected")
         closeTerminalSession(session)
       }
-      terminalDataDisposableRef.current = term.onData((data) => {
-        void request(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}/input`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ data }),
-        }).catch((error) => setTerminalError(error instanceof Error ? error.message : "Failed to send input"))
+      let inputClosed = false
+      let inputSending = false
+      const inputQueue: string[] = []
+      const sendNextInput = async () => {
+        if (inputClosed || inputSending || inputQueue.length === 0) return
+        inputSending = true
+        const data = inputQueue.join("")
+        inputQueue.length = 0
+        try {
+          await request(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}/input`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ data }),
+          })
+        } catch (error) {
+          if (!inputClosed) {
+            setTerminalError(error instanceof Error ? error.message : "Failed to send input")
+          }
+        } finally {
+          inputSending = false
+          void sendNextInput()
+        }
+      }
+      const inputDisposable = term.onData((data) => {
+        inputQueue.push(data)
+        void sendNextInput()
       })
+      terminalDataDisposableRef.current = {
+        dispose: () => {
+          inputClosed = true
+          inputQueue.length = 0
+          inputDisposable.dispose()
+        },
+      }
     } catch (error) {
       setTerminalError(error instanceof Error ? error.message : "Failed to connect terminal")
       closeTerminalSession()
