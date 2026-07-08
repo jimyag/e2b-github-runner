@@ -966,7 +966,7 @@ function userJobsGroupKeyFromPath(path: string, search = "") {
     return `run:${decodeRepositoryPath(legacyRunMatch[1], legacyRunMatch[2])}:${legacyRunMatch[3]}`
   }
 
-  const branchMatch = path.match(/^\/github\/branches\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)\/jobs$/)
+  const branchMatch = path.match(/^\/github\/branches\/([^/]+)\/([^/]+)\/(.+)\/([^/]+)\/jobs$/)
   if (branchMatch) {
     const repository = decodeRepositoryPath(branchMatch[1], branchMatch[2])
     const branch = safeDecodePathSegment(branchMatch[3])
@@ -984,7 +984,7 @@ function userJobsGroupKeyFromPath(path: string, search = "") {
     return `branch:${repository}:${branch}:${sha}`
   }
 
-  const legacyBranchMatch = path.match(/^\/jobs\/branches\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/)
+  const legacyBranchMatch = path.match(/^\/jobs\/branches\/([^/]+)\/([^/]+)\/(.+)\/([^/]+)$/)
   if (legacyBranchMatch) {
     const repository = decodeRepositoryPath(legacyBranchMatch[1], legacyBranchMatch[2])
     const branch = safeDecodePathSegment(legacyBranchMatch[3])
@@ -1012,7 +1012,7 @@ function userJobsPath(groupKey: string) {
   const runMatch = groupKey.match(/^run:(.+):(\d+)$/)
   if (runMatch) return `/github/runs/${encodeRepositoryPath(runMatch[1])}/${runMatch[2]}/jobs`
 
-  const branchMatch = groupKey.match(/^branch:(.+):([^:]+):([^:]+)$/)
+  const branchMatch = groupKey.match(/^branch:([^:]+):(.+):([^:]+)$/)
   if (branchMatch) {
     return withSearchParam(`/github/branches/${encodeRepositoryPath(branchMatch[1])}/${encodeURIComponent(branchMatch[3])}/jobs`, "branch", branchMatch[2])
   }
@@ -1031,7 +1031,7 @@ function userJobGroupAPIPath(groupKey: string) {
   const runMatch = groupKey.match(/^run:(.+):(\d+)$/)
   if (runMatch) return `/user/github/runs/${encodeRepositoryPath(runMatch[1])}/${runMatch[2]}/jobs`
 
-  const branchMatch = groupKey.match(/^branch:(.+):([^:]+):([^:]+)$/)
+  const branchMatch = groupKey.match(/^branch:([^:]+):(.+):([^:]+)$/)
   if (branchMatch) {
     return withSearchParam(`/user/github/branches/${encodeRepositoryPath(branchMatch[1])}/${encodeURIComponent(branchMatch[3])}/jobs`, "branch", branchMatch[2])
   }
