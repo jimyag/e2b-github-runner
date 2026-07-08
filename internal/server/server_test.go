@@ -45,6 +45,7 @@ type fakeSandbox struct {
 	commandContext context.Context
 	repositoryURL  string
 	runnerGroup    string
+	terminal       *fakeTerminalSession
 }
 
 func (f *fakeSandbox) ValidateTemplate(ctx context.Context, templateID string) error {
@@ -80,11 +81,13 @@ func (f *fakeSandbox) StopRunner(ctx context.Context, sandboxID string, pid uint
 func (f *fakeSandbox) StartTerminal(ctx context.Context, sandboxID string, size sandboxrunner.PtySize, onData func([]byte)) (sandboxrunner.TerminalSession, error) {
 	f.mu.Lock()
 	f.terminals++
+	terminal := &fakeTerminalSession{pid: 99}
+	f.terminal = terminal
 	f.mu.Unlock()
 	if onData != nil {
 		onData([]byte("terminal ready\n"))
 	}
-	return &fakeTerminalSession{pid: 99}, nil
+	return terminal, nil
 }
 
 type fakeTerminalSession struct {
@@ -596,6 +599,25 @@ func TestUserRunnerDetailLogAndTerminal(t *testing.T) {
 	}
 	if fake.terminals != 1 {
 		t.Fatalf("expected one terminal start, got %d", fake.terminals)
+	}
+
+	latest, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest.Status = state.StatusCompleted
+	if err := store.WriteState(latest); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/user/runner_requests/job-detail-1/terminal/"+terminal.SessionID+"/input", strings.NewReader(`{"data":"ls\n"}`))
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected inactive terminal to be rejected, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if fake.terminal == nil || !fake.terminal.isClosed() {
+		t.Fatalf("expected inactive terminal session to be closed")
 	}
 }
 

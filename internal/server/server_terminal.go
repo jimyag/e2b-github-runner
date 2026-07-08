@@ -628,7 +628,7 @@ func (s *Server) handleUserRunnerTerminalEvents(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	session, ok := s.authorizedTerminalSession(w, r, st)
+	session, ok := s.authorizedTerminalSession(w, r, st, true)
 	if !ok {
 		return
 	}
@@ -672,7 +672,7 @@ func (s *Server) handleUserRunnerTerminalInput(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	session, ok := s.authorizedTerminalSession(w, r, st)
+	session, ok := s.authorizedTerminalSession(w, r, st, true)
 	if !ok {
 		return
 	}
@@ -695,7 +695,7 @@ func (s *Server) handleUserRunnerTerminalResize(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	session, ok := s.authorizedTerminalSession(w, r, st)
+	session, ok := s.authorizedTerminalSession(w, r, st, true)
 	if !ok {
 		return
 	}
@@ -718,7 +718,7 @@ func (s *Server) handleUserCloseRunnerTerminal(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	if _, ok := s.authorizedTerminalSession(w, r, st); !ok {
+	if _, ok := s.authorizedTerminalSession(w, r, st, false); !ok {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -730,10 +730,20 @@ func (s *Server) handleUserCloseRunnerTerminal(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) authorizedTerminalSession(w http.ResponseWriter, r *http.Request, st state.RunnerState) (*terminalSession, bool) {
-	session, ok := s.terminals.Get(r.PathValue("sessionID"))
+func (s *Server) authorizedTerminalSession(w http.ResponseWriter, r *http.Request, st state.RunnerState, requireAvailable bool) (*terminalSession, bool) {
+	sessionID := r.PathValue("sessionID")
+	session, ok := s.terminals.Get(sessionID)
 	if !ok || session.requestID != st.ID || session.sandboxID != st.SandboxID {
 		writeError(w, http.StatusNotFound, "terminal session not found")
+		return nil, false
+	}
+	if requireAvailable && !runnerTerminalAvailable(st) {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+		defer cancel()
+		if err := s.terminals.CloseSession(ctx, sessionID); err != nil && !errors.Is(err, state.ErrNotFound) {
+			s.logger.DebugContext(ctx, "close inactive terminal session", "session", sessionID, "request", st.ID, "error", err)
+		}
+		writeError(w, http.StatusConflict, "terminal is no longer available")
 		return nil, false
 	}
 	return session, true
