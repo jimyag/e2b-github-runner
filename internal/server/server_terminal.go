@@ -484,7 +484,11 @@ func (s *Server) handleUserCreateRunnerTerminal(w http.ResponseWriter, r *http.R
 	var session *terminalSession
 	var sessionMu sync.Mutex
 	var pending [][]byte
-	terminal, err := svc.StartTerminal(context.WithoutCancel(r.Context()), st.SandboxID, sandboxrunner.PtySize{Cols: input.Cols, Rows: input.Rows}, func(data []byte) {
+	terminalCtx := s.loopCtx
+	if terminalCtx == nil {
+		terminalCtx = context.Background()
+	}
+	terminal, err := svc.StartTerminal(terminalCtx, st.SandboxID, sandboxrunner.PtySize{Cols: input.Cols, Rows: input.Rows}, func(data []byte) {
 		sessionMu.Lock()
 		defer sessionMu.Unlock()
 		if session != nil {
@@ -521,16 +525,14 @@ func (s *Server) handleUserRunnerTerminalEvents(w http.ResponseWriter, r *http.R
 	if !ok {
 		return
 	}
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		writeError(w, http.StatusInternalServerError, "streaming is not supported")
-		return
-	}
+	controller := http.NewResponseController(w)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
-	flusher.Flush()
+	if err := controller.Flush(); err != nil {
+		return
+	}
 	initial, ch, cancel := session.Subscribe()
 	defer func() {
 		cancel()
@@ -538,7 +540,9 @@ func (s *Server) handleUserRunnerTerminalEvents(w http.ResponseWriter, r *http.R
 	}()
 	if len(initial) > 0 {
 		writeTerminalEvent(w, initial)
-		flusher.Flush()
+		if err := controller.Flush(); err != nil {
+			return
+		}
 	}
 	for {
 		select {
@@ -549,7 +553,9 @@ func (s *Server) handleUserRunnerTerminalEvents(w http.ResponseWriter, r *http.R
 				return
 			}
 			writeTerminalEvent(w, data)
-			flusher.Flush()
+			if err := controller.Flush(); err != nil {
+				return
+			}
 		}
 	}
 }

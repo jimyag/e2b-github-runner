@@ -114,6 +114,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
         void fetch(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}`, {
           method: "DELETE",
           credentials: "same-origin",
+          keepalive: true,
         })
       }
     },

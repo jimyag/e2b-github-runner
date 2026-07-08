@@ -1063,6 +1063,7 @@ function RunnerJobLogPanel({
         void fetch(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}`, {
           method: "DELETE",
           credentials: "same-origin",
+          keepalive: true,
         })
       }
     },
