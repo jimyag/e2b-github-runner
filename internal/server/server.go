@@ -15,6 +15,7 @@ import (
 	"github.com/qiniu/ci-runner/internal/github"
 	"github.com/qiniu/ci-runner/internal/sandboxrunner"
 	"github.com/qiniu/ci-runner/internal/state"
+	"golang.org/x/sync/singleflight"
 )
 
 type Server struct {
@@ -41,6 +42,7 @@ type Server struct {
 
 	pullTitleMu    sync.Mutex
 	pullTitleCache map[string]cachedPullTitle
+	pullTitleGroup singleflight.Group
 }
 
 type cachedPullTitle struct {

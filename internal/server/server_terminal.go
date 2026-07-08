@@ -57,10 +57,16 @@ type userRunnerJobGroupResponse struct {
 	PullRequestTitleError string              `json:"pull_request_title_error,omitempty"`
 }
 
+type pullTitleResult struct {
+	title     string
+	errorText string
+}
+
 const (
 	terminalIdleCloseDelay  = 30 * time.Second
 	maxGitHubLogFileBytes   = 8 << 20
 	maxGitHubLogOutputBytes = 16 << 20
+	maxPullTitleCacheItems  = 512
 )
 
 type terminalHub struct {
@@ -347,26 +353,39 @@ func (s *Server) enrichUserRunnerJobGroup(ctx context.Context, group *userRunner
 		group.PullRequestTitleError = errorText
 		return
 	}
-	if s.gh == nil {
-		group.PullRequestTitleError = "github client is not configured"
-		s.cachePullTitle(cacheKey, "", group.PullRequestTitleError)
-		return
-	}
-	pull, err := s.gh.GetPullRequest(ctx, group.Repository, group.PullRequestNumber)
-	if err != nil {
-		issue, issueErr := s.gh.GetIssue(ctx, group.Repository, group.PullRequestNumber)
-		if issueErr != nil {
-			s.logger.DebugContext(ctx, "load github pull request title", "repository", group.Repository, "number", group.PullRequestNumber, "pull_error", err, "issue_error", issueErr)
-			group.PullRequestTitleError = fmt.Sprintf("pull request title unavailable: %v; issue fallback: %v", err, issueErr)
-			s.cachePullTitle(cacheKey, "", group.PullRequestTitleError)
-			return
+	value, _, _ := s.pullTitleGroup.Do(cacheKey, func() (any, error) {
+		if title, errorText, ok := s.cachedPullTitle(cacheKey); ok {
+			return pullTitleResult{title: title, errorText: errorText}, nil
 		}
-		group.PullRequestTitle = strings.TrimSpace(issue.Title)
-		s.cachePullTitle(cacheKey, group.PullRequestTitle, "")
+		if s.gh == nil {
+			errorText := "github client is not configured"
+			s.cachePullTitle(cacheKey, "", errorText)
+			return pullTitleResult{errorText: errorText}, nil
+		}
+		pull, err := s.gh.GetPullRequest(ctx, group.Repository, group.PullRequestNumber)
+		if err != nil {
+			issue, issueErr := s.gh.GetIssue(ctx, group.Repository, group.PullRequestNumber)
+			if issueErr != nil {
+				s.logger.DebugContext(ctx, "load github pull request title", "repository", group.Repository, "number", group.PullRequestNumber, "pull_error", err, "issue_error", issueErr)
+				errorText := fmt.Sprintf("pull request title unavailable: %v; issue fallback: %v", err, issueErr)
+				s.cachePullTitle(cacheKey, "", errorText)
+				return pullTitleResult{errorText: errorText}, nil
+			}
+			title := strings.TrimSpace(issue.Title)
+			s.cachePullTitle(cacheKey, title, "")
+			return pullTitleResult{title: title}, nil
+		}
+		title := strings.TrimSpace(pull.Title)
+		s.cachePullTitle(cacheKey, title, "")
+		return pullTitleResult{title: title}, nil
+	})
+	result, ok := value.(pullTitleResult)
+	if !ok {
+		group.PullRequestTitleError = "pull request title unavailable"
 		return
 	}
-	group.PullRequestTitle = strings.TrimSpace(pull.Title)
-	s.cachePullTitle(cacheKey, group.PullRequestTitle, "")
+	group.PullRequestTitle = result.title
+	group.PullRequestTitleError = result.errorText
 }
 
 func (s *Server) cachedPullTitle(key string) (string, string, bool) {
@@ -391,10 +410,30 @@ func (s *Server) cachePullTitle(key, title, errorText string) {
 	if s.pullTitleCache == nil {
 		s.pullTitleCache = map[string]cachedPullTitle{}
 	}
+	now := time.Now().UTC()
+	for cacheKey, cached := range s.pullTitleCache {
+		if now.After(cached.expiresAt) {
+			delete(s.pullTitleCache, cacheKey)
+		}
+	}
+	for len(s.pullTitleCache) >= maxPullTitleCacheItems {
+		var oldestKey string
+		var oldestExpiresAt time.Time
+		for cacheKey, cached := range s.pullTitleCache {
+			if oldestKey == "" || cached.expiresAt.Before(oldestExpiresAt) {
+				oldestKey = cacheKey
+				oldestExpiresAt = cached.expiresAt
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		delete(s.pullTitleCache, oldestKey)
+	}
 	s.pullTitleCache[key] = cachedPullTitle{
 		title:     title,
 		errorText: errorText,
-		expiresAt: time.Now().UTC().Add(5 * time.Minute),
+		expiresAt: now.Add(5 * time.Minute),
 	}
 }
 
@@ -999,7 +1038,12 @@ func formatGitHubActionsLog(data []byte) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("open github log %s: %w", file.Name, err)
 		}
-		chunk, readErr := io.ReadAll(io.LimitReader(rc, maxGitHubLogFileBytes+1))
+		remainingLimit := int64(maxGitHubLogOutputBytes-out.Len()) + 1
+		readLimit := int64(maxGitHubLogFileBytes) + 1
+		if remainingLimit < readLimit {
+			readLimit = remainingLimit
+		}
+		chunk, readErr := io.ReadAll(io.LimitReader(rc, readLimit))
 		closeErr := rc.Close()
 		if readErr != nil {
 			return "", fmt.Errorf("read github log %s: %w", file.Name, readErr)

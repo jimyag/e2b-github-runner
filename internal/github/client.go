@@ -575,7 +575,11 @@ func (c *Client) downloadActionsLog(ctx context.Context, repositoryFullName, api
 	if err != nil {
 		return nil, "", err
 	}
-	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther {
+	if resp.StatusCode == http.StatusMovedPermanently ||
+		resp.StatusCode == http.StatusFound ||
+		resp.StatusCode == http.StatusSeeOther ||
+		resp.StatusCode == http.StatusTemporaryRedirect ||
+		resp.StatusCode == http.StatusPermanentRedirect {
 		location := strings.TrimSpace(resp.Header.Get("Location"))
 		resp.Body.Close()
 		if location == "" {
