@@ -57,9 +57,11 @@ type userRunnerJobGroupResponse struct {
 	PullRequestTitleError string              `json:"pull_request_title_error,omitempty"`
 }
 
-const terminalIdleCloseDelay = 30 * time.Second
-const maxGitHubLogFileBytes = 8 << 20
-const maxGitHubLogOutputBytes = 16 << 20
+const (
+	terminalIdleCloseDelay  = 30 * time.Second
+	maxGitHubLogFileBytes   = 8 << 20
+	maxGitHubLogOutputBytes = 16 << 20
+)
 
 type terminalHub struct {
 	mu       sync.Mutex
