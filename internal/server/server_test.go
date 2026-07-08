@@ -655,6 +655,17 @@ func TestUserRunnerSiblings(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	branchPayload := []byte(`{"workflow_job":{"id":2001,"run_id":3,"workflow_name":"CI","run_attempt":1,"head_branch":"feature/job-detail-page","head_sha":"def","pull_requests":[]}}`)
+	if _, _, err := store.CreateRequest(state.RunnerRequest{
+		ID:                   "slash-branch",
+		Source:               "github_webhook",
+		JobID:                2001,
+		GitHubInstallationID: 987,
+		RepositoryFullName:   "o/r",
+		Labels:               []string{"self-hosted"},
+	}, branchPayload); err != nil {
+		t.Fatal(err)
+	}
 	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
 
 	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests/current/siblings", nil)
@@ -716,6 +727,14 @@ func TestUserRunnerSiblings(t *testing.T) {
 	}
 	if !reflect.DeepEqual(runnerStateIDs(pullGroup.Jobs), runnerStateIDs(group.Jobs)) {
 		t.Fatalf("pull route jobs differ: route=%#v runner=%#v", runnerStateIDs(pullGroup.Jobs), runnerStateIDs(group.Jobs))
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/user/github/branches/o/r/def/jobs?branch=feature%2Fjob-detail-page", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected github slash branch job group, got %d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1516,6 +1535,7 @@ func TestAdminUIIsServedWithoutAPIAccess(t *testing.T) {
 		"/jobs/runner-123",
 		"/github/pulls/qiniu/ci-runner/22/jobs",
 		"/github/runs/qiniu/ci-runner/123/jobs",
+		"/github/branches/qiniu/ci-runner/abc123/jobs?branch=feature%2Fjob-detail-page",
 		"/github/branches/qiniu/ci-runner/main/abc123/jobs",
 		"/settings",
 		"/accounts",

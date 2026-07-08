@@ -425,8 +425,9 @@ function App() {
     const key = userJobsGroupKeyFromLocation(locationPath, locationSearch)
     setUserSelectedKey(key)
     const canonicalPath = userJobsPath(key)
-    if (key && locationPath !== canonicalPath) {
-      const nextPath = `${canonicalPath}${locationSearch}`
+    const currentLocation = `${locationPath}${locationSearch}`
+    const nextPath = withPreservedJobSearch(canonicalPath, locationSearch)
+    if (key && currentLocation !== nextPath) {
       window.history.replaceState(null, "", nextPath)
       setLocationPath(window.location.pathname)
       setLocationSearch(window.location.search)
@@ -583,7 +584,7 @@ function App() {
 
   const openUserJob = (id: string) => {
     const groupPath = userSelectedKey ? userJobsPath(userSelectedKey) : ""
-    const nextPath = groupPath && groupPath !== "/" ? `${groupPath}?job=${encodeURIComponent(id)}` : `/jobs/${encodeURIComponent(id)}`
+    const nextPath = groupPath && groupPath !== "/" ? withSearchParam(groupPath, "job", id) : `/jobs/${encodeURIComponent(id)}`
     window.history.pushState(null, "", nextPath)
     setLocationPath(window.location.pathname)
     setLocationSearch(window.location.search)
@@ -624,7 +625,7 @@ function App() {
             request={request}
             onResolved={(key) => {
               setUserSelectedKey(key)
-              const nextPath = `${userJobsPath(key)}?job=${encodeURIComponent(userJobID)}`
+              const nextPath = withSearchParam(userJobsPath(key), "job", userJobID)
               window.history.replaceState(null, "", nextPath)
               setLocationPath(window.location.pathname)
               setLocationSearch(window.location.search)
@@ -938,13 +939,13 @@ function isUserJobsRoute(path: string) {
 }
 
 function userJobsGroupKeyFromLocation(path: string, search: string) {
-  const pathKey = userJobsGroupKeyFromPath(path)
+  const pathKey = userJobsGroupKeyFromPath(path, search)
   if (pathKey) return pathKey
   if (path !== "/") return ""
   return new URLSearchParams(search).get("group") || ""
 }
 
-function userJobsGroupKeyFromPath(path: string) {
+function userJobsGroupKeyFromPath(path: string, search = "") {
   const pullRequestMatch = path.match(/^\/github\/pulls\/([^/]+)\/([^/]+)\/(\d+)\/jobs$/)
   if (pullRequestMatch) {
     return `pr:${decodeRepositoryPath(pullRequestMatch[1], pullRequestMatch[2])}:${pullRequestMatch[3]}`
@@ -970,6 +971,15 @@ function userJobsGroupKeyFromPath(path: string) {
     const repository = decodeRepositoryPath(branchMatch[1], branchMatch[2])
     const branch = safeDecodePathSegment(branchMatch[3])
     const sha = safeDecodePathSegment(branchMatch[4])
+    if (!branch || !sha) return ""
+    return `branch:${repository}:${branch}:${sha}`
+  }
+
+  const branchQueryMatch = path.match(/^\/github\/branches\/([^/]+)\/([^/]+)\/([^/]+)\/jobs$/)
+  if (branchQueryMatch) {
+    const repository = decodeRepositoryPath(branchQueryMatch[1], branchQueryMatch[2])
+    const sha = safeDecodePathSegment(branchQueryMatch[3])
+    const branch = new URLSearchParams(search).get("branch") || ""
     if (!branch || !sha) return ""
     return `branch:${repository}:${branch}:${sha}`
   }
@@ -1004,7 +1014,7 @@ function userJobsPath(groupKey: string) {
 
   const branchMatch = groupKey.match(/^branch:(.+):([^:]+):([^:]+)$/)
   if (branchMatch) {
-    return `/github/branches/${encodeRepositoryPath(branchMatch[1])}/${encodeURIComponent(branchMatch[2])}/${encodeURIComponent(branchMatch[3])}/jobs`
+    return withSearchParam(`/github/branches/${encodeRepositoryPath(branchMatch[1])}/${encodeURIComponent(branchMatch[3])}/jobs`, "branch", branchMatch[2])
   }
 
   const manualMatch = groupKey.match(/^manual:(.+):([^:]+)$/)
@@ -1023,7 +1033,7 @@ function userJobGroupAPIPath(groupKey: string) {
 
   const branchMatch = groupKey.match(/^branch:(.+):([^:]+):([^:]+)$/)
   if (branchMatch) {
-    return `/user/github/branches/${encodeRepositoryPath(branchMatch[1])}/${encodeURIComponent(branchMatch[2])}/${encodeURIComponent(branchMatch[3])}/jobs`
+    return withSearchParam(`/user/github/branches/${encodeRepositoryPath(branchMatch[1])}/${encodeURIComponent(branchMatch[3])}/jobs`, "branch", branchMatch[2])
   }
 
   return ""
@@ -1031,6 +1041,19 @@ function userJobGroupAPIPath(groupKey: string) {
 
 function encodeRepositoryPath(repository: string) {
   return repository.split("/").map((segment) => encodeURIComponent(segment)).join("/")
+}
+
+function withSearchParam(path: string, key: string, value: string) {
+  const [pathname, search = ""] = path.split("?")
+  const params = new URLSearchParams(search)
+  params.set(key, value)
+  const query = params.toString()
+  return query ? `${pathname}?${query}` : pathname
+}
+
+function withPreservedJobSearch(path: string, search: string) {
+  const job = new URLSearchParams(search).get("job")
+  return job ? withSearchParam(path, "job", job) : path
 }
 
 function decodeRepositoryPath(ownerSegment: string, repoSegment: string) {

@@ -305,6 +305,9 @@ func (s *Server) handleUserGetGitHubRunJobGroup(w http.ResponseWriter, r *http.R
 
 func (s *Server) handleUserGetGitHubBranchJobGroup(w http.ResponseWriter, r *http.Request) {
 	branch := strings.TrimSpace(r.PathValue("branch"))
+	if branch == "" {
+		branch = strings.TrimSpace(r.URL.Query().Get("branch"))
+	}
 	sha := strings.TrimSpace(r.PathValue("sha"))
 	if branch == "" || sha == "" {
 		writeError(w, http.StatusBadRequest, "branch and sha are required")

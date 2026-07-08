@@ -230,6 +230,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /user/runner_requests/{id}/group", s.handleUserGetRunnerJobGroup)
 	s.mux.HandleFunc("GET /user/github/pulls/{owner}/{repo}/{number}/jobs", s.handleUserGetGitHubPullJobGroup)
 	s.mux.HandleFunc("GET /user/github/runs/{owner}/{repo}/{runID}/jobs", s.handleUserGetGitHubRunJobGroup)
+	s.mux.HandleFunc("GET /user/github/branches/{owner}/{repo}/{sha}/jobs", s.handleUserGetGitHubBranchJobGroup)
 	s.mux.HandleFunc("GET /user/github/branches/{owner}/{repo}/{branch}/{sha}/jobs", s.handleUserGetGitHubBranchJobGroup)
 	s.mux.HandleFunc("GET /user/runner_requests/{id}/siblings", s.handleUserListRunnerSiblings)
 	s.mux.HandleFunc("GET /user/runner_requests/{id}/logs/{name}", s.handleUserGetRunnerLog)
