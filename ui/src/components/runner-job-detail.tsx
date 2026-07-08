@@ -44,6 +44,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
   const terminalRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
+  const terminalDataDisposableRef = useRef<{ dispose: () => void } | null>(null)
   const terminalSessionRef = useRef<TerminalCreateResponse | null>(null)
 
   const endpoint = useMemo(() => `${apiBase}/${encodeURIComponent(id)}`, [apiBase, id])
@@ -98,26 +99,34 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
     void loadGithubLog()
   }, [loadGithubLog])
 
-  useEffect(() => {
-    setTerminalSession(null)
-    setTerminalError("")
-    eventSourceRef.current?.close()
-    terminalRef.current?.dispose()
-    terminalRef.current = null
-    fitRef.current = null
-    terminalSessionRef.current = null
-    return () => {
+  const closeTerminalSession = useCallback(
+    (session = terminalSessionRef.current) => {
       eventSourceRef.current?.close()
+      eventSourceRef.current = null
+      terminalDataDisposableRef.current?.dispose()
+      terminalDataDisposableRef.current = null
       terminalRef.current?.dispose()
-      const session = terminalSessionRef.current
+      terminalRef.current = null
+      fitRef.current = null
+      terminalSessionRef.current = null
+      setTerminalSession(null)
       if (session) {
         void fetch(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}`, {
           method: "DELETE",
           credentials: "same-origin",
         })
       }
+    },
+    [endpoint],
+  )
+
+  useEffect(() => {
+    setTerminalError("")
+    closeTerminalSession()
+    return () => {
+      closeTerminalSession()
     }
-  }, [endpoint])
+  }, [closeTerminalSession])
 
   const refreshPage = () => {
     void loadJob()
@@ -182,8 +191,9 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
       }
       events.onerror = () => {
         setTerminalError("Terminal stream disconnected")
+        closeTerminalSession(session)
       }
-      term.onData((data) => {
+      terminalDataDisposableRef.current = term.onData((data) => {
         void request(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}/input`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -192,8 +202,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
       })
     } catch (error) {
       setTerminalError(error instanceof Error ? error.message : "Failed to connect terminal")
-      terminalRef.current?.dispose()
-      terminalRef.current = null
+      closeTerminalSession()
     } finally {
       setTerminalConnecting(false)
     }

@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -454,6 +455,52 @@ func TestDownloadWorkflowJobLogsFollowsRedirectWithoutGitHubAuth(t *testing.T) {
 	if string(body) != "zip bytes\n" || !strings.HasPrefix(contentType, "application/zip") {
 		t.Fatalf("unexpected logs body=%q contentType=%q", string(body), contentType)
 	}
+}
+
+func TestDownloadWorkflowJobLogsRedirectUsesConfiguredTransport(t *testing.T) {
+	client := NewTokenClient("https://api.github.test", "github-token", &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.String() {
+			case "https://api.github.test/repos/o/r/actions/jobs/1001/logs":
+				if r.Header.Get("Authorization") != "Bearer github-token" {
+					t.Fatalf("expected github authorization on api request, got %q", r.Header.Get("Authorization"))
+				}
+				return textResponse(http.StatusFound, "", map[string]string{
+					"Location": "https://actions-results.test/download/logs.zip?sig=temporary",
+				}), nil
+			case "https://actions-results.test/download/logs.zip?sig=temporary":
+				if r.Header.Get("Authorization") != "" {
+					t.Fatalf("expected redirect download without github authorization, got %q", r.Header.Get("Authorization"))
+				}
+				return textResponse(http.StatusOK, "zip bytes\n", map[string]string{
+					"Content-Type": "application/zip",
+				}), nil
+			default:
+				t.Fatalf("unexpected request: %s", r.URL.String())
+				return nil, nil
+			}
+		}),
+		Timeout: time.Second,
+	})
+	body, contentType, err := client.DownloadWorkflowJobLogs(t.Context(), "o/r", 1001)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "zip bytes\n" || !strings.HasPrefix(contentType, "application/zip") {
+		t.Fatalf("unexpected logs body=%q contentType=%q", string(body), contentType)
+	}
+}
+
+func textResponse(status int, body string, headers map[string]string) *http.Response {
+	resp := &http.Response{
+		StatusCode: status,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+	for key, value := range headers {
+		resp.Header.Set(key, value)
+	}
+	return resp
 }
 
 func TestReadActionsLogBodyRejectsOversizedLog(t *testing.T) {

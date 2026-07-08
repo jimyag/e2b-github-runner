@@ -22,11 +22,12 @@ import (
 )
 
 type Client struct {
-	baseURL   string
-	http      *http.Client
-	appAuth   *appAuthenticator
-	tokensMu  sync.Mutex
-	regTokens map[string]RegistrationToken
+	baseURL      string
+	http         *http.Client
+	downloadHTTP *http.Client
+	appAuth      *appAuthenticator
+	tokensMu     sync.Mutex
+	regTokens    map[string]RegistrationToken
 }
 
 type AppAuth struct {
@@ -167,10 +168,21 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
+	return newClient(baseURL, httpClient, httpClient)
+}
+
+func newClient(baseURL string, httpClient, downloadHTTP *http.Client) *Client {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	if downloadHTTP == nil {
+		downloadHTTP = httpClient
+	}
 	return &Client{
-		baseURL:   strings.TrimRight(baseURL, "/"),
-		http:      httpClient,
-		regTokens: map[string]RegistrationToken{},
+		baseURL:      strings.TrimRight(baseURL, "/"),
+		http:         httpClient,
+		downloadHTTP: downloadHTTP,
+		regTokens:    map[string]RegistrationToken{},
 	}
 }
 
@@ -195,7 +207,7 @@ func NewAppClient(baseURL string, auth AppAuth, httpClient *http.Client) (*Clien
 	appHTTP.Transport = appTransport
 	cloned := *httpClient
 	cloned.Transport = baseTransport
-	client := NewClient(baseURL, &cloned)
+	client := newClient(baseURL, &cloned, &cloned)
 	client.appAuth = &appAuthenticator{
 		baseURL:              strings.TrimRight(baseURL, "/"),
 		staticInstallationID: auth.InstallationID,
@@ -209,16 +221,18 @@ func NewAppClient(baseURL string, auth AppAuth, httpClient *http.Client) (*Clien
 }
 
 func NewTokenClient(baseURL, token string, httpClient *http.Client) *Client {
-	return NewClient(baseURL, clientWithTransport(httpClient, bearerTransport{
+	downloadHTTP := cloneHTTPClient(httpClient)
+	return newClient(baseURL, clientWithTransport(downloadHTTP, bearerTransport{
 		token: strings.TrimSpace(token),
-	}))
+	}), downloadHTTP)
 }
 
 func NewBasicAuthClient(baseURL, username, password string, httpClient *http.Client) *Client {
-	return NewClient(baseURL, clientWithTransport(httpClient, basicAuthTransport{
+	downloadHTTP := cloneHTTPClient(httpClient)
+	return newClient(baseURL, clientWithTransport(downloadHTTP, basicAuthTransport{
 		username: username,
 		password: password,
-	}))
+	}), downloadHTTP)
 }
 
 func (c *Client) RunnerURL(repositoryFullName, runnerGroup string) (string, error) {
@@ -577,7 +591,8 @@ func (c *Client) downloadRedirect(ctx context.Context, location string) (*http.R
 	if err != nil {
 		return nil, err
 	}
-	client := http.Client{Timeout: c.http.Timeout}
+	client := *c.downloadHTTP
+	client.CheckRedirect = nil
 	return client.Do(req)
 }
 
@@ -761,15 +776,21 @@ type authTransport interface {
 }
 
 func clientWithTransport(httpClient *http.Client, auth authTransport) *http.Client {
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
-	}
+	httpClient = cloneHTTPClient(httpClient)
 	baseTransport := httpClient.Transport
 	if baseTransport == nil {
 		baseTransport = http.DefaultTransport
 	}
 	cloned := *httpClient
 	cloned.Transport = auth.RoundTripper(baseTransport)
+	return &cloned
+}
+
+func cloneHTTPClient(httpClient *http.Client) *http.Client {
+	if httpClient == nil {
+		return &http.Client{Timeout: 30 * time.Second}
+	}
+	cloned := *httpClient
 	return &cloned
 }
 

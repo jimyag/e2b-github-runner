@@ -1507,7 +1507,18 @@ func TestAdminUIIsServedWithoutAPIAccess(t *testing.T) {
 		t.Fatalf("root user ui did not serve vite shell")
 	}
 
-	for _, path := range []string{"/repositories", "/account/repositories", "/account/preferences", "/organizations/qiniu/repositories", "/organizations/qiniu/preferences", "/settings", "/accounts"} {
+	for _, path := range []string{
+		"/repositories",
+		"/account/repositories",
+		"/account/preferences",
+		"/organizations/qiniu/repositories",
+		"/organizations/qiniu/preferences",
+		"/github/pulls/qiniu/ci-runner/22/jobs",
+		"/github/runs/qiniu/ci-runner/123/jobs",
+		"/github/branches/qiniu/ci-runner/main/abc123/jobs",
+		"/settings",
+		"/accounts",
+	} {
 		req = httptest.NewRequest(http.MethodGet, path, nil)
 		rec = httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)

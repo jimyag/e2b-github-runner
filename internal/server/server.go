@@ -274,11 +274,28 @@ func (s *Server) handleUserRedirect(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/")
-	if name == "accounts" || name == "repositories" || name == "settings" ||
-		strings.HasPrefix(name, "account/") || strings.HasPrefix(name, "organizations/") {
+	if isUserUIRoute(name) {
 		name = "index.html"
 	}
 	s.handleUI(w, r, name)
+}
+
+func isUserUIRoute(name string) bool {
+	if name == "accounts" || name == "repositories" || name == "settings" {
+		return true
+	}
+	for _, prefix := range []string{
+		"account/",
+		"organizations/",
+		"github/pulls/",
+		"github/runs/",
+		"github/branches/",
+	} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleUI(w http.ResponseWriter, r *http.Request, name string) {

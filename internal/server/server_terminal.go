@@ -320,6 +320,10 @@ func (s *Server) enrichUserRunnerJobGroup(ctx context.Context, group *userRunner
 	if group == nil || group.Group != "pull_request" || group.Repository == "" || group.PullRequestNumber == 0 {
 		return
 	}
+	if s.gh == nil {
+		group.PullRequestTitleError = "github client is not configured"
+		return
+	}
 	pull, err := s.gh.GetPullRequest(ctx, group.Repository, group.PullRequestNumber)
 	if err != nil {
 		issue, issueErr := s.gh.GetIssue(ctx, group.Repository, group.PullRequestNumber)
@@ -480,7 +484,7 @@ func (s *Server) handleUserCreateRunnerTerminal(w http.ResponseWriter, r *http.R
 	var session *terminalSession
 	var sessionMu sync.Mutex
 	var pending [][]byte
-	terminal, err := svc.StartTerminal(r.Context(), st.SandboxID, sandboxrunner.PtySize{Cols: input.Cols, Rows: input.Rows}, func(data []byte) {
+	terminal, err := svc.StartTerminal(context.WithoutCancel(r.Context()), st.SandboxID, sandboxrunner.PtySize{Cols: input.Cols, Rows: input.Rows}, func(data []byte) {
 		sessionMu.Lock()
 		defer sessionMu.Unlock()
 		if session != nil {
@@ -525,6 +529,8 @@ func (s *Server) handleUserRunnerTerminalEvents(w http.ResponseWriter, r *http.R
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
 	initial, ch, cancel := session.Subscribe()
 	defer func() {
 		cancel()
