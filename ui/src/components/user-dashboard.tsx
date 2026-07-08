@@ -1085,11 +1085,7 @@ function RunnerJobLogPanel({
 
   useEffect(() => {
     let active = true
-    queueMicrotask(() => {
-      if (active) {
-        setRunnerLogText("Loading runner log...")
-      }
-    })
+    setRunnerLogText("Loading runner log...")
     void request(`${endpoint}/logs/${encodeURIComponent(selectedLog)}`)
       .then((text) => {
         if (active) {
@@ -1108,12 +1104,8 @@ function RunnerJobLogPanel({
 
   useEffect(() => {
     let active = true
-    queueMicrotask(() => {
-      if (active) {
-        setGithubLogLoading(true)
-        setGithubLog({ kind: "log", text: "Loading GitHub log..." })
-      }
-    })
+    setGithubLogLoading(true)
+    setGithubLog({ kind: "log", text: "Loading GitHub log..." })
     void request(`${endpoint}/github-log`)
       .then((text) => {
         if (active) {
