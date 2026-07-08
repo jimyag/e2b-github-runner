@@ -548,20 +548,18 @@ func (c *Client) downloadActionsLog(ctx context.Context, repositoryFullName, api
 	if err != nil {
 		return nil, "", err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther {
 		location := strings.TrimSpace(resp.Header.Get("Location"))
+		resp.Body.Close()
 		if location == "" {
 			return nil, "", fmt.Errorf("%s: redirect missing location", errorLabel)
 		}
-		resp.Body.Close()
-		redirectResp, err := c.downloadRedirect(ctx, location)
+		resp, err = c.downloadRedirect(ctx, location)
 		if err != nil {
 			return nil, "", err
 		}
-		defer redirectResp.Body.Close()
-		resp = redirectResp
 	}
+	defer resp.Body.Close()
 	body, readErr := readActionsLogBody(resp.Body, 32<<20)
 	if readErr != nil {
 		return nil, "", fmt.Errorf("%s: %w", errorLabel, readErr)

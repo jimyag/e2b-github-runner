@@ -120,7 +120,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
           method: "DELETE",
           credentials: "same-origin",
           keepalive: true,
-        })
+        }).catch(() => undefined)
       }
     },
     [endpoint],
@@ -186,7 +186,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
           method: "DELETE",
           credentials: "same-origin",
           keepalive: true,
-        })
+        }).catch(() => undefined)
         return
       }
       setTerminalSession(session)

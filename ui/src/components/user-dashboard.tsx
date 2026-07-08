@@ -1069,7 +1069,7 @@ function RunnerJobLogPanel({
           method: "DELETE",
           credentials: "same-origin",
           keepalive: true,
-        })
+        }).catch(() => undefined)
       }
     },
     [endpoint],
@@ -1195,7 +1195,7 @@ function RunnerJobLogPanel({
           method: "DELETE",
           credentials: "same-origin",
           keepalive: true,
-        })
+        }).catch(() => undefined)
         return
       }
       setTerminalSession(session)
