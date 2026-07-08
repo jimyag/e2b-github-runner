@@ -75,6 +75,10 @@ type TerminalCreateResponse = {
   sandbox_id: string
 }
 
+type GitHubLogState =
+  | { kind: "log"; text: string }
+  | { kind: "unavailable"; detail: string }
+
 const jobLogTabsListClassName = "h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0 text-muted-foreground"
 const jobLogTabsTriggerClassName = "h-10 flex-none rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0 py-2 text-sm font-medium shadow-none hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
 
@@ -760,12 +764,12 @@ function PullRequestsPage({
 
         <section className="min-h-0 overflow-y-auto">
           {selected ? (
-            <div>
+            <div className="flex min-h-full flex-col">
               <div className="border-b px-4 py-4 lg:px-6">
                 <h2 className="truncate text-2xl font-semibold">{selected.repository}</h2>
               </div>
-              <div className="space-y-4 p-4 lg:p-6">
-                <div className="border-b pb-4">
+              <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 lg:p-6">
+                <div className="shrink-0 border-b pb-4">
                   <h3 className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-2xl font-semibold">
                     <span className={selectedTitleClass}>{pullRequestHeading(selected, selectedJobGroup)}</span>
                   </h3>
@@ -1023,7 +1027,7 @@ function RunnerJobLogPanel({
 }) {
   const [selectedLog, setSelectedLog] = useState<(typeof logNames)[number]>("control.log")
   const [runnerLogText, setRunnerLogText] = useState("Loading runner log...")
-  const [githubLogText, setGithubLogText] = useState("Loading GitHub log...")
+  const [githubLog, setGithubLog] = useState<GitHubLogState>({ kind: "log", text: "Loading GitHub log..." })
   const [githubLogLoading, setGithubLogLoading] = useState(false)
   const [terminalSession, setTerminalSession] = useState<TerminalCreateResponse | null>(null)
   const [terminalError, setTerminalError] = useState("")
@@ -1090,18 +1094,18 @@ function RunnerJobLogPanel({
     queueMicrotask(() => {
       if (active) {
         setGithubLogLoading(true)
-        setGithubLogText("Loading GitHub log...")
+        setGithubLog({ kind: "log", text: "Loading GitHub log..." })
       }
     })
     void request(`${endpoint}/github-log`)
       .then((text) => {
         if (active) {
-          setGithubLogText(logResponseText(text, "GitHub log is empty"))
+          setGithubLog(githubLogResponseState(text, "GitHub log is empty"))
         }
       })
       .catch((error) => {
         if (active) {
-          setGithubLogText(error instanceof Error ? error.message : "Failed to load GitHub log")
+          setGithubLog(githubLogErrorState(error))
         }
       })
       .finally(() => {
@@ -1117,16 +1121,16 @@ function RunnerJobLogPanel({
   const refreshGithubLog = () => {
     const refreshEndpoint = endpoint
     setGithubLogLoading(true)
-    setGithubLogText("Loading GitHub log...")
+    setGithubLog({ kind: "log", text: "Loading GitHub log..." })
     void request(`${refreshEndpoint}/github-log`)
       .then((text) => {
         if (endpointRef.current === refreshEndpoint) {
-          setGithubLogText(logResponseText(text, "GitHub log is empty"))
+          setGithubLog(githubLogResponseState(text, "GitHub log is empty"))
         }
       })
       .catch((error) => {
         if (endpointRef.current === refreshEndpoint) {
-          setGithubLogText(error instanceof Error ? error.message : "Failed to load GitHub log")
+          setGithubLog(githubLogErrorState(error))
         }
       })
       .finally(() => {
@@ -1222,33 +1226,39 @@ function RunnerJobLogPanel({
     return () => observer.disconnect()
   }, [terminalSession, resizeTerminal])
 
+  const githubLogActions = (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="border-white/15 bg-white/5 text-slate-100 hover:bg-white/10 hover:text-white"
+      onClick={refreshGithubLog}
+      disabled={githubLogLoading}
+    >
+      <RefreshCw className={cn(githubLogLoading && "animate-spin")} />
+      Refresh
+    </Button>
+  )
+
   return (
-    <div>
-      <Tabs defaultValue="github-logs" className="gap-0">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <Tabs defaultValue="github-logs" className="flex min-h-0 flex-1 flex-col gap-0">
         <TabsList className={jobLogTabsListClassName}>
           <TabsTrigger className={jobLogTabsTriggerClassName} value="github-logs">GitHub logs</TabsTrigger>
           <TabsTrigger className={jobLogTabsTriggerClassName} value="runner-logs">Runner logs</TabsTrigger>
-          {terminalAvailable ? <TabsTrigger className={jobLogTabsTriggerClassName} value="web-console">Web Console</TabsTrigger> : null}
+          <TabsTrigger className={jobLogTabsTriggerClassName} value="web-console">Web Console</TabsTrigger>
           <TabsTrigger className={jobLogTabsTriggerClassName} value="details">Details</TabsTrigger>
         </TabsList>
         <TabsContent value="github-logs" className="m-0 pt-2">
-          <LogOutput
-            text={githubLogText}
-            description="Workflow job output downloaded from GitHub Actions."
-            actions={(
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="border-white/15 bg-white/5 text-slate-100 hover:bg-white/10 hover:text-white"
-                onClick={refreshGithubLog}
-                disabled={githubLogLoading}
-              >
-                <RefreshCw className={cn(githubLogLoading && "animate-spin")} />
-                Refresh
-              </Button>
-            )}
-          />
+          {githubLog.kind === "unavailable" ? (
+            <GitHubLogsUnavailable detail={githubLog.detail} actions={githubLogActions} />
+          ) : (
+            <LogOutput
+              text={githubLog.text}
+              description="Workflow job output downloaded from GitHub Actions."
+              actions={githubLogActions}
+            />
+          )}
         </TabsContent>
         <TabsContent value="runner-logs" className="m-0 pt-2">
           <LogOutput
@@ -1277,37 +1287,39 @@ function RunnerJobLogPanel({
             )}
           />
         </TabsContent>
-        {terminalAvailable ? (
-          <TabsContent value="web-console" className="m-0 pt-2">
-            <div className="overflow-hidden border-y border-emerald-500/15 bg-[#111318] text-slate-100 shadow-[inset_3px_0_0_theme(colors.emerald.500/0.35)]">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-900/95 px-4 py-3">
-                <div className="min-w-0">
-                  <div className="truncate text-xs text-slate-400">{job.sandbox_id || "No active sandbox"}</div>
-                </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="border-white/15 bg-white/5 text-slate-100 hover:bg-white/10 hover:text-white"
-                  variant="outline"
-                  onClick={() => void connectTerminal()}
-                  disabled={!terminalAvailable || terminalConnecting || Boolean(terminalSession)}
-                >
-                  <SquareTerminal />
-                  {terminalSession ? "Connected" : terminalConnecting ? "Connecting" : "Connect"}
-                </Button>
+        <TabsContent value="web-console" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden pt-2">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-y border-emerald-500/15 bg-[#111318] text-slate-100 shadow-[inset_3px_0_0_theme(colors.emerald.500/0.35)]">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-900/95 px-4 py-3">
+              <div className="min-w-0">
+                <div className="truncate text-xs text-slate-400">{job.sandbox_id || "No active sandbox"}</div>
               </div>
-              <div className="relative min-h-[520px] p-2">
-                <div ref={terminalEl} className="h-[500px] overflow-hidden rounded-md" />
+              <Button
+                type="button"
+                size="sm"
+                className="border-white/15 bg-white/5 text-slate-100 hover:bg-white/10 hover:text-white disabled:opacity-60"
+                variant="outline"
+                onClick={() => void connectTerminal()}
+                disabled={!terminalAvailable || terminalConnecting || Boolean(terminalSession)}
+              >
+                <SquareTerminal />
+                {terminalSession ? "Connected" : terminalConnecting ? "Connecting" : "Connect"}
+              </Button>
+            </div>
+            {terminalError ? <WebConsoleError message={terminalError} /> : null}
+            {terminalAvailable ? (
+              <div className="relative min-h-0 flex-1 p-2">
+                <div ref={terminalEl} className="h-full min-h-0 overflow-hidden rounded-md" />
                 {!terminalSession ? (
-                  <div className="absolute inset-2 flex items-center justify-center rounded-md border border-white/10 bg-[#111318] text-sm text-slate-300">
+                  <div className="absolute inset-2 flex items-center justify-center rounded-md bg-[#111318] text-sm text-slate-300">
                     Connect when you need an interactive shell.
                   </div>
                 ) : null}
               </div>
-              {terminalError ? <div className="border-t border-white/10 px-4 py-3 text-sm text-red-300">{terminalError}</div> : null}
-            </div>
-          </TabsContent>
-        ) : null}
+            ) : (
+              <WebConsoleUnavailable job={job} />
+            )}
+          </div>
+        </TabsContent>
         <TabsContent value="details" className="m-0 py-5">
           <div className="grid gap-2 text-sm">
             <JobField label="Status" value={job.status} />
@@ -1326,6 +1338,93 @@ function RunnerJobLogPanel({
 
 function logResponseText(text: unknown, emptyMessage: string) {
   return typeof text === "string" ? text || emptyMessage : JSON.stringify(text, null, 2)
+}
+
+function githubLogResponseState(text: unknown, emptyMessage: string): GitHubLogState {
+  const raw = logResponseText(text, emptyMessage)
+  return isGitHubLogUnavailable(raw) ? { kind: "unavailable", detail: raw } : { kind: "log", text: raw }
+}
+
+function githubLogErrorState(error: unknown): GitHubLogState {
+  const raw = error instanceof Error ? error.message : "Failed to load GitHub log"
+  return isGitHubLogUnavailable(raw) ? { kind: "unavailable", detail: raw } : { kind: "log", text: raw }
+}
+
+function isGitHubLogUnavailable(text: string) {
+  const value = text.toLowerCase()
+  return (
+    value.includes("github workflow job logs: status 404") ||
+    value.includes("blobnotfound") ||
+    value.includes("the specified blob does not exist") ||
+    value.includes("job logs: status 404")
+  )
+}
+
+function GitHubLogsUnavailable({ detail, actions }: { detail: string; actions: ReactNode }) {
+  return (
+    <div className="overflow-hidden border-y border-emerald-500/15 bg-slate-950 text-slate-100 shadow-[inset_3px_0_0_theme(colors.emerald.500/0.35)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-900/95 px-4 py-3">
+        <div className="text-xs text-slate-400">Workflow job output downloaded from GitHub Actions.</div>
+        <div className="flex items-center gap-2">{actions}</div>
+      </div>
+      <div className="flex min-h-[260px] items-center justify-center px-4 py-12">
+        <div className="max-w-xl text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md border border-white/10 bg-white/5 text-amber-200">
+            <AlertCircle className="h-5 w-5" />
+          </div>
+          <h3 className="mt-4 text-sm font-semibold text-slate-100">GitHub logs are not available yet</h3>
+          <p className="mt-2 text-sm leading-6 text-slate-400">
+            GitHub may not have generated downloadable logs for this job. This can happen when a job never reached a runner, was cancelled before producing logs, or GitHub has not published the log archive yet.
+          </p>
+          <details className="mt-5 rounded-md border border-white/10 bg-white/[0.03] text-left">
+            <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-slate-300 hover:text-slate-100">
+              Show technical details
+            </summary>
+            <pre className="max-h-48 overflow-auto border-t border-white/10 px-3 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-slate-400">
+              {detail}
+            </pre>
+          </details>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WebConsoleError({ message }: { message: string }) {
+  return (
+    <div className="border-b border-red-400/15 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+      <div className="flex min-w-0 items-start gap-2">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-200" />
+        <div className="min-w-0">
+          <div className="font-medium">Web Console connection failed</div>
+          <div className="mt-1 break-words font-mono text-xs leading-relaxed text-red-100/80">{message}</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WebConsoleUnavailable({ job }: { job: RunnerState }) {
+  const reason = job.sandbox_id
+    ? "The sandbox is no longer accepting web console sessions for this job state."
+    : "The sandbox has already been cleaned up, so a web console session cannot be opened."
+  return (
+    <div className="flex min-h-[320px] items-center justify-center px-4 py-12">
+      <div className="max-w-md text-center">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md border border-white/10 bg-white/5 text-emerald-200">
+          <SquareTerminal className="h-5 w-5" />
+        </div>
+        <h3 className="mt-4 text-sm font-semibold text-slate-100">Web Console unavailable</h3>
+        <p className="mt-2 text-sm leading-6 text-slate-400">
+          Web Console is available while a sandbox job is creating, running, or stopping. {reason}
+        </p>
+        <div className="mt-4 inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300">
+          <span className="text-slate-500">Status</span>
+          <span className="font-medium text-slate-100">{job.status}</span>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function LogOutput({
