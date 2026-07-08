@@ -58,6 +58,8 @@ type userRunnerJobGroupResponse struct {
 }
 
 const terminalIdleCloseDelay = 30 * time.Second
+const maxGitHubLogFileBytes = 8 << 20
+const maxGitHubLogOutputBytes = 16 << 20
 
 type terminalHub struct {
 	mu       sync.Mutex
@@ -907,6 +909,9 @@ func formatGitHubActionsLog(data []byte) (string, error) {
 	})
 	var out strings.Builder
 	for _, file := range files {
+		if out.Len() >= maxGitHubLogOutputBytes {
+			break
+		}
 		if file.FileInfo().IsDir() {
 			continue
 		}
@@ -914,8 +919,7 @@ func formatGitHubActionsLog(data []byte) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("open github log %s: %w", file.Name, err)
 		}
-		const maxLogFileBytes = 8 << 20
-		chunk, readErr := io.ReadAll(io.LimitReader(rc, maxLogFileBytes+1))
+		chunk, readErr := io.ReadAll(io.LimitReader(rc, maxGitHubLogFileBytes+1))
 		closeErr := rc.Close()
 		if readErr != nil {
 			return "", fmt.Errorf("read github log %s: %w", file.Name, readErr)
@@ -929,16 +933,30 @@ func formatGitHubActionsLog(data []byte) (string, error) {
 		out.WriteString("===== ")
 		out.WriteString(file.Name)
 		out.WriteString(" =====\n")
-		truncated := len(chunk) > maxLogFileBytes
-		if truncated {
-			chunk = chunk[:maxLogFileBytes]
+		fileTruncated := len(chunk) > maxGitHubLogFileBytes
+		if fileTruncated {
+			chunk = chunk[:maxGitHubLogFileBytes]
+		}
+		outputTruncated := false
+		remaining := maxGitHubLogOutputBytes - out.Len()
+		if remaining <= 0 {
+			out.WriteString(fmt.Sprintf("[runnerd] GitHub log output truncated after %d bytes.\n", maxGitHubLogOutputBytes))
+			break
+		}
+		if len(chunk) > remaining {
+			chunk = chunk[:remaining]
+			outputTruncated = true
 		}
 		out.Write(chunk)
 		if len(chunk) == 0 || chunk[len(chunk)-1] != '\n' {
 			out.WriteByte('\n')
 		}
-		if truncated {
-			out.WriteString("[runnerd] GitHub log file truncated after 8388608 bytes.\n")
+		if fileTruncated {
+			out.WriteString(fmt.Sprintf("[runnerd] GitHub log file truncated after %d bytes.\n", maxGitHubLogFileBytes))
+		}
+		if outputTruncated || out.Len() >= maxGitHubLogOutputBytes {
+			out.WriteString(fmt.Sprintf("[runnerd] GitHub log output truncated after %d bytes.\n", maxGitHubLogOutputBytes))
+			break
 		}
 	}
 	return out.String(), nil

@@ -126,7 +126,7 @@ export function UserDashboard({
   onSignOut: () => void
 }) {
   const groups = useMemo(() => groupRunnersByBuildContext(runners), [runners])
-  const selected = groups.find((group) => group.key === selectedKey) || groups[0]
+  const selected = groups.find((group) => group.key === selectedKey) || (selectedKey ? undefined : groups[0])
   const [loadedJobGroup, setLoadedJobGroup] = useState<{ key: string; group: RunnerJobGroup } | null>(null)
   const selectedJobGroup = loadedJobGroup && selected && loadedJobGroup.key === selected.key ? loadedJobGroup.group : null
   const installations = useMemo(
@@ -821,7 +821,9 @@ function PullRequestsPage({
             </div>
           ) : (
             <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
-              {hasInstallations ? (
+              {groups.length ? (
+                "This job group was not found. It may have aged out of the local runner history or belongs to an account that is not connected."
+              ) : hasInstallations ? (
                 "No runner jobs are available yet. Trigger a workflow in an installed repository to see jobs here."
               ) : (
                 <button

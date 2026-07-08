@@ -813,6 +813,33 @@ func TestFormatGitHubActionsLogMarksTruncatedFiles(t *testing.T) {
 	}
 }
 
+func TestFormatGitHubActionsLogCapsTotalOutput(t *testing.T) {
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	for i := 0; i < 3; i++ {
+		file, err := zw.Create(fmt.Sprintf("%d_large.txt", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write(bytes.Repeat([]byte("x"), 9<<20)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	text, err := formatGitHubActionsLog(archive.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "[runnerd] GitHub log output truncated after 16777216 bytes.") {
+		t.Fatalf("expected total truncation marker, got suffix %q", text[len(text)-128:])
+	}
+	if strings.Contains(text, "===== 2_large.txt =====") {
+		t.Fatal("expected formatter to stop before appending every log file")
+	}
+}
+
 func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 	var gotTokenAuth string
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
