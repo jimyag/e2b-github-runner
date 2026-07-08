@@ -92,7 +92,10 @@ func (c *Client) GetInstallation(ctx context.Context, installationID int64) (Ins
 		return Installation{}, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return Installation{}, fmt.Errorf("read github installation response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return Installation{}, fmt.Errorf("github installation: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -141,8 +144,11 @@ func (c *Client) ListInstallationRepositories(ctx context.Context, installationI
 		if err != nil {
 			return nil, err
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read github installation repositories response: %w", readErr)
+		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("github installation repositories: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
@@ -268,7 +274,10 @@ func (c *Client) CreateRegistrationToken(ctx context.Context, repositoryFullName
 		return RegistrationToken{}, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return RegistrationToken{}, fmt.Errorf("read github registration token response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return RegistrationToken{}, fmt.Errorf("github registration token: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -304,8 +313,11 @@ func (c *Client) ListRunners(ctx context.Context, repositoryFullName, runnerGrou
 		if err != nil {
 			return nil, err
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read github list runners response: %w", readErr)
+		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("github list runners: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
@@ -348,7 +360,10 @@ func (c *Client) RemoveRunner(ctx context.Context, repositoryFullName, runnerGro
 		result = "not_found"
 		return nil
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("read github remove runner response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("github remove runner: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -395,8 +410,11 @@ func (c *Client) ListWorkflowRunJobs(ctx context.Context, repositoryFullName str
 		if err != nil {
 			return nil, err
 		}
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read github workflow run jobs response: %w", readErr)
+		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			return nil, fmt.Errorf("github workflow run jobs: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 		}
@@ -433,7 +451,10 @@ func (c *Client) GetWorkflowJob(ctx context.Context, repositoryFullName string, 
 		return WorkflowJob{}, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return WorkflowJob{}, fmt.Errorf("read github workflow job response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return WorkflowJob{}, fmt.Errorf("github workflow job: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -468,7 +489,10 @@ func (c *Client) GetPullRequest(ctx context.Context, repositoryFullName string, 
 		return PullRequest{}, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return PullRequest{}, fmt.Errorf("read github pull request response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return PullRequest{}, fmt.Errorf("github pull request: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -503,7 +527,10 @@ func (c *Client) GetIssue(ctx context.Context, repositoryFullName string, number
 		return Issue{}, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return Issue{}, fmt.Errorf("read github issue response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return Issue{}, fmt.Errorf("github issue: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
@@ -673,7 +700,10 @@ func (a *appAuthenticator) installationID(ctx context.Context, repositoryFullNam
 		return 0, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return 0, fmt.Errorf("read github repository installation response: %w", err)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return 0, fmt.Errorf("github repository installation: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
