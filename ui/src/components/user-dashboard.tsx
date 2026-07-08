@@ -1240,10 +1240,9 @@ function githubLogErrorState(error: unknown): GitHubLogState {
 function isGitHubLogUnavailable(text: string) {
   const value = text.toLowerCase()
   return (
-    value.includes("github workflow job logs: status 404") ||
+    value.includes("status 404") ||
     value.includes("blobnotfound") ||
-    value.includes("the specified blob does not exist") ||
-    value.includes("job logs: status 404")
+    value.includes("the specified blob does not exist")
   )
 }
 

@@ -21,6 +21,10 @@ type RunnerJobDetailProps = {
   request: (url: string, options?: RequestInit) => Promise<unknown>
 }
 
+type ActiveGuard = {
+  current: boolean
+}
+
 export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: RunnerJobDetailProps) {
   const [job, setJob] = useState<RunnerState | null>(null)
   const [jobGroup, setJobGroup] = useState<RunnerJobGroup | null>(null)
@@ -40,53 +44,89 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
     connectErrorMessage: "Failed to connect terminal",
   })
 
-  const loadJob = useCallback(async () => {
+  const loadJob = useCallback(async (active: ActiveGuard = { current: true }) => {
     setLoading(true)
     try {
-      setJob((await request(endpoint)) as RunnerState)
+      const data = await request(endpoint)
+      if (active.current) {
+        setJob(data as RunnerState)
+      }
     } finally {
-      setLoading(false)
+      if (active.current) {
+        setLoading(false)
+      }
     }
   }, [endpoint, request])
 
-  const loadJobGroup = useCallback(async () => {
+  const loadJobGroup = useCallback(async (active: ActiveGuard = { current: true }) => {
     try {
-      setJobGroup((await request(`${endpoint}/group`)) as RunnerJobGroup)
+      const data = await request(`${endpoint}/group`)
+      if (active.current) {
+        setJobGroup(data as RunnerJobGroup)
+      }
     } catch {
-      setJobGroup(null)
+      if (active.current) {
+        setJobGroup(null)
+      }
     }
   }, [endpoint, request])
 
-  const loadLog = useCallback(async (name = selectedLog) => {
+  const loadLog = useCallback(async (name = selectedLog, active: ActiveGuard = { current: true }) => {
     setLogText("Loading log...")
-    const text = await request(`${endpoint}/logs/${encodeURIComponent(name)}`)
-    setLogText(typeof text === "string" ? text || "Log is empty" : JSON.stringify(text, null, 2))
+    try {
+      const text = await request(`${endpoint}/logs/${encodeURIComponent(name)}`)
+      if (active.current) {
+        setLogText(typeof text === "string" ? text || "Log is empty" : JSON.stringify(text, null, 2))
+      }
+    } catch (error) {
+      if (active.current) {
+        setLogText(error instanceof Error ? error.message : "Failed to load log")
+      }
+    }
   }, [endpoint, request, selectedLog])
 
-  const loadGithubLog = useCallback(async () => {
+  const loadGithubLog = useCallback(async (active: ActiveGuard = { current: true }) => {
     setGithubLogLoading(true)
     setGithubLogText("Loading GitHub log...")
     try {
       const text = await request(`${endpoint}/github-log`)
-      setGithubLogText(typeof text === "string" ? text || "GitHub log is empty" : JSON.stringify(text, null, 2))
+      if (active.current) {
+        setGithubLogText(typeof text === "string" ? text || "GitHub log is empty" : JSON.stringify(text, null, 2))
+      }
     } catch (error) {
-      setGithubLogText(error instanceof Error ? error.message : "Failed to load GitHub log")
+      if (active.current) {
+        setGithubLogText(error instanceof Error ? error.message : "Failed to load GitHub log")
+      }
     } finally {
-      setGithubLogLoading(false)
+      if (active.current) {
+        setGithubLogLoading(false)
+      }
     }
   }, [endpoint, request])
 
   useEffect(() => {
-    void loadJob()
-    void loadJobGroup()
+    const active = { current: true }
+    void loadJob(active)
+    void loadJobGroup(active)
+    return () => {
+      active.current = false
+    }
   }, [loadJob, loadJobGroup])
 
   useEffect(() => {
-    void loadLog(selectedLog)
+    const active = { current: true }
+    void loadLog(selectedLog, active)
+    return () => {
+      active.current = false
+    }
   }, [loadLog, selectedLog])
 
   useEffect(() => {
-    void loadGithubLog()
+    const active = { current: true }
+    void loadGithubLog(active)
+    return () => {
+      active.current = false
+    }
   }, [loadGithubLog])
 
   const refreshPage = () => {
