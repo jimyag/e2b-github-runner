@@ -203,7 +203,7 @@ func (s *terminalSession) append(data []byte) {
 	s.mu.Lock()
 	s.buffer = append(s.buffer, data...)
 	const maxBuffer = 64 << 10
-	if len(s.buffer) > maxBuffer {
+	if len(s.buffer) > maxBuffer*2 {
 		s.buffer = append([]byte(nil), s.buffer[len(s.buffer)-maxBuffer:]...)
 	}
 	for watcher := range s.watchers {
