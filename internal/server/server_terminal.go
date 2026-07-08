@@ -372,6 +372,9 @@ func (s *Server) enrichUserRunnerJobGroup(ctx context.Context, group *userRunner
 func (s *Server) cachedPullTitle(key string) (string, string, bool) {
 	s.pullTitleMu.Lock()
 	defer s.pullTitleMu.Unlock()
+	if s.pullTitleCache == nil {
+		return "", "", false
+	}
 	cached, ok := s.pullTitleCache[key]
 	if !ok || time.Now().UTC().After(cached.expiresAt) {
 		if ok {
