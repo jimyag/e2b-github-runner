@@ -13,12 +13,16 @@ import {
   RefreshCw,
   Settings,
   ShieldCheck,
+  SquareTerminal,
   Sun,
   Workflow,
   X,
 } from "lucide-react"
 import { useTheme } from "next-themes"
-import { type CSSProperties, type FormEvent, type MouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { type CSSProperties, type FormEvent, type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Terminal } from "xterm"
+import { FitAddon } from "xterm-addon-fit"
+import "xterm/css/xterm.css"
 
 import type { AuthSession, GitHubAppConfig, RunnerJobGroup, RunnerState, UserPreferences } from "@/admin-types"
 import { logNames } from "@/admin-types"
@@ -64,6 +68,15 @@ type AccountSettingsRoute = {
   accountLogin?: string
   tab: AccountSettingsTab
 }
+
+type TerminalCreateResponse = {
+  session_id: string
+  pid: number
+  sandbox_id: string
+}
+
+const jobLogTabsListClassName = "h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0 text-muted-foreground"
+const jobLogTabsTriggerClassName = "h-10 flex-none rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0 py-2 text-sm font-medium shadow-none hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
 
 export function UserDashboard({
   authSession,
@@ -706,16 +719,16 @@ function PullRequestsPage({
               {groups.length ? (
                 groups.map((group) => {
                   const isSelected = selected?.key === group.key
+                  const showSubmenu = isSelected && allJobs.length > 1
                   return (
                     <div key={group.key} className="border-b">
                       <BuildGroupListItem
                         group={group}
                         selected={isSelected}
-                        expanded={isSelected && workflows.length > 0}
                         onSelect={() => onSelectKey(group.key)}
                       />
-                      {isSelected && workflows.length ? (
-                        <div className="bg-background px-4 pb-4 pl-10 pt-1">
+                      {showSubmenu ? (
+                        <div className="border-t border-border/40 bg-background/70 py-1">
                           <WorkflowJobExplorer
                             workflows={workflows}
                             selectedJobID={effectiveSelectedJobID}
@@ -917,7 +930,7 @@ function WorkflowJobExplorer({
   onOpenJob: (id: string) => void
 }) {
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-0">
       {workflows.map((workflow) => (
         workflow.jobs.length === 1 ? (
           <WorkflowRunListItem
@@ -927,8 +940,8 @@ function WorkflowJobExplorer({
             onOpenJob={onOpenJob}
           />
         ) : (
-          <section key={workflow.id} className="grid gap-1.5">
-            <div className="flex items-center justify-between gap-3 px-1 pt-2">
+          <section key={workflow.id} className="grid gap-0">
+            <div className="flex items-center justify-between gap-3 px-4 pb-1 pt-2 pl-12">
               <div className="min-w-0">
                 <h4 className="truncate text-xs font-semibold text-muted-foreground">{workflow.name}</h4>
                 <div className="mt-0.5 text-xs text-muted-foreground">
@@ -939,7 +952,7 @@ function WorkflowJobExplorer({
                 {workflowStatus(workflow.jobs)}
               </span>
             </div>
-            <div className="grid gap-1">
+            <div className="grid gap-0">
               {workflow.jobs.map((job) => (
                 <RunnerJobListItem key={job.id} job={job} selected={job.id === selectedJobID} onOpen={() => onOpenJob(job.id)} />
               ))}
@@ -969,11 +982,11 @@ function WorkflowRunListItem({
       type="button"
       onClick={() => onOpenJob(job.id)}
       className={cn(
-        "grid w-full grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
-        selected ? "bg-primary/5 text-primary" : "hover:bg-muted"
+        "grid w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-2 px-4 py-1.5 text-left text-sm transition-colors",
+        selected ? "bg-primary/10 text-primary shadow-[inset_3px_0_0_hsl(var(--primary))]" : "hover:bg-muted/80"
       )}
     >
-      <span className={cn(buildGroupStatusClasses(status).icon)}>{jobStatusMark(job.status)}</span>
+      <span className={cn("flex justify-center", buildGroupStatusClasses(status).icon)}>{jobStatusMark(job.status)}</span>
       <span className="min-w-0">
         <span className="block truncate font-medium">{workflow.name}</span>
       </span>
@@ -988,11 +1001,11 @@ function RunnerJobListItem({ job, selected, onOpen }: { job: RunnerState; select
       type="button"
       onClick={onOpen}
       className={cn(
-        "grid w-full grid-cols-[18px_minmax(0,1fr)_auto] items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors",
-        selected ? "bg-primary/5 text-primary" : "hover:bg-muted"
+        "grid w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-2 px-4 py-1.5 text-left text-sm transition-colors",
+        selected ? "bg-primary/10 text-primary shadow-[inset_3px_0_0_hsl(var(--primary))]" : "hover:bg-muted/80"
       )}
     >
-      <span className={cn(buildGroupStatusClasses(jobStatusSummary(job.status)).icon)}>{jobStatusMark(job.status)}</span>
+      <span className={cn("flex justify-center", buildGroupStatusClasses(jobStatusSummary(job.status)).icon)}>{jobStatusMark(job.status)}</span>
       <span className="min-w-0">
         <span className="block truncate font-medium">{runnerJobTitle(job)}</span>
       </span>
@@ -1012,11 +1025,41 @@ function RunnerJobLogPanel({
   const [runnerLogText, setRunnerLogText] = useState("Loading runner log...")
   const [githubLogText, setGithubLogText] = useState("Loading GitHub log...")
   const [githubLogLoading, setGithubLogLoading] = useState(false)
+  const [terminalSession, setTerminalSession] = useState<TerminalCreateResponse | null>(null)
+  const [terminalError, setTerminalError] = useState("")
+  const [terminalConnecting, setTerminalConnecting] = useState(false)
+  const terminalEl = useRef<HTMLDivElement | null>(null)
+  const terminalRef = useRef<Terminal | null>(null)
+  const fitRef = useRef<FitAddon | null>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
+  const terminalSessionRef = useRef<TerminalCreateResponse | null>(null)
   const endpoint = `/user/runner_requests/${encodeURIComponent(job.id)}`
   const endpointRef = useRef(endpoint)
+  const terminalAvailable = isTerminalAvailable(job)
 
   useEffect(() => {
     endpointRef.current = endpoint
+  }, [endpoint])
+
+  useEffect(() => {
+    setTerminalSession(null)
+    setTerminalError("")
+    eventSourceRef.current?.close()
+    terminalRef.current?.dispose()
+    terminalRef.current = null
+    fitRef.current = null
+    terminalSessionRef.current = null
+    return () => {
+      eventSourceRef.current?.close()
+      terminalRef.current?.dispose()
+      const session = terminalSessionRef.current
+      if (session) {
+        void fetch(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+        })
+      }
+    }
   }, [endpoint])
 
   useEffect(() => {
@@ -1093,17 +1136,102 @@ function RunnerJobLogPanel({
       })
   }
 
+  const connectTerminal = async () => {
+    if (!terminalAvailable || terminalConnecting || terminalSession) return
+    setTerminalConnecting(true)
+    setTerminalError("")
+    try {
+      const term = new Terminal({
+        cursorBlink: true,
+        convertEol: true,
+        fontFamily: "var(--font-mono)",
+        fontSize: 13,
+        theme: {
+          background: "#111318",
+          foreground: "#e6edf3",
+          cursor: "#36d399",
+          selectionBackground: "#334155",
+        },
+      })
+      const fit = new FitAddon()
+      term.loadAddon(fit)
+      terminalRef.current = term
+      fitRef.current = fit
+      if (terminalEl.current) {
+        term.open(terminalEl.current)
+        fit.fit()
+      }
+      term.writeln("Connecting to sandbox web console...")
+      const cols = term.cols || 100
+      const rows = term.rows || 28
+      const session = (await request(`${endpoint}/terminal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cols, rows }),
+      })) as TerminalCreateResponse
+      setTerminalSession(session)
+      terminalSessionRef.current = session
+      term.writeln(`Connected to ${session.sandbox_id} pid=${session.pid}`)
+      const events = new EventSource(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}/events`, {
+        withCredentials: true,
+      })
+      eventSourceRef.current = events
+      events.onmessage = (event) => {
+        try {
+          term.write(JSON.parse(event.data) as string)
+        } catch {
+          term.write(event.data)
+        }
+      }
+      events.onerror = () => {
+        setTerminalError("Web console stream disconnected")
+      }
+      term.onData((data) => {
+        void request(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}/input`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data }),
+        }).catch((error) => setTerminalError(error instanceof Error ? error.message : "Failed to send input"))
+      })
+    } catch (error) {
+      setTerminalError(error instanceof Error ? error.message : "Failed to connect web console")
+      terminalRef.current?.dispose()
+      terminalRef.current = null
+    } finally {
+      setTerminalConnecting(false)
+    }
+  }
+
+  const resizeTerminal = useCallback(() => {
+    const session = terminalSession
+    const term = terminalRef.current
+    const fit = fitRef.current
+    if (!session || !term || !fit) return
+    fit.fit()
+    void request(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}/resize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cols: term.cols, rows: term.rows }),
+    }).catch(() => undefined)
+  }, [endpoint, request, terminalSession])
+
+  useEffect(() => {
+    if (!terminalSession) return
+    const observer = new ResizeObserver(resizeTerminal)
+    if (terminalEl.current) observer.observe(terminalEl.current)
+    return () => observer.disconnect()
+  }, [terminalSession, resizeTerminal])
+
   return (
     <div>
-      <Tabs defaultValue="github-logs">
-        <div className="border-b pt-3">
-          <TabsList>
-            <TabsTrigger value="github-logs">GitHub logs</TabsTrigger>
-            <TabsTrigger value="runner-logs">Runner logs</TabsTrigger>
-            <TabsTrigger value="details">Details</TabsTrigger>
-          </TabsList>
-        </div>
-        <TabsContent value="github-logs" className="m-0">
+      <Tabs defaultValue="github-logs" className="gap-0">
+        <TabsList className={jobLogTabsListClassName}>
+          <TabsTrigger className={jobLogTabsTriggerClassName} value="github-logs">GitHub logs</TabsTrigger>
+          <TabsTrigger className={jobLogTabsTriggerClassName} value="runner-logs">Runner logs</TabsTrigger>
+          {terminalAvailable ? <TabsTrigger className={jobLogTabsTriggerClassName} value="web-console">Web Console</TabsTrigger> : null}
+          <TabsTrigger className={jobLogTabsTriggerClassName} value="details">Details</TabsTrigger>
+        </TabsList>
+        <TabsContent value="github-logs" className="m-0 pt-2">
           <LogOutput
             text={githubLogText}
             description="Workflow job output downloaded from GitHub Actions."
@@ -1122,20 +1250,64 @@ function RunnerJobLogPanel({
             )}
           />
         </TabsContent>
-        <TabsContent value="runner-logs" className="m-0">
-          <div className="border-b py-4">
-            <Tabs value={selectedLog} onValueChange={(value) => setSelectedLog(value as (typeof logNames)[number])}>
-              <TabsList>
-                {logNames.map((name) => (
-                  <TabsTrigger key={name} value={name}>
-                    {name.replace(".log", "")}
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-          </div>
-          <LogOutput text={runnerLogText} description={`Runner ${selectedLog.replace(".log", "")} output captured by runnerd.`} />
+        <TabsContent value="runner-logs" className="m-0 pt-2">
+          <LogOutput
+            text={runnerLogText}
+            description={`Runner ${selectedLog.replace(".log", "")} output captured by runnerd.`}
+            leading={(
+              <div className="flex items-center gap-1 rounded-md border border-white/10 bg-white/5 p-1" aria-label="Runner log stream">
+                {logNames.map((name) => {
+                  const value = name.replace(".log", "")
+                  return (
+                    <button
+                      key={name}
+                      type="button"
+                      className={cn(
+                        "rounded px-2 py-1 text-xs font-medium text-slate-300 transition-colors hover:bg-white/10 hover:text-white",
+                        selectedLog === name && "bg-emerald-400/15 text-emerald-100"
+                      )}
+                      aria-pressed={selectedLog === name}
+                      onClick={() => setSelectedLog(name)}
+                    >
+                      {value}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          />
         </TabsContent>
+        {terminalAvailable ? (
+          <TabsContent value="web-console" className="m-0 pt-2">
+            <div className="overflow-hidden border-y border-emerald-500/15 bg-[#111318] text-slate-100 shadow-[inset_3px_0_0_theme(colors.emerald.500/0.35)]">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-900/95 px-4 py-3">
+                <div className="min-w-0">
+                  <div className="truncate text-xs text-slate-400">{job.sandbox_id || "No active sandbox"}</div>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="border-white/15 bg-white/5 text-slate-100 hover:bg-white/10 hover:text-white"
+                  variant="outline"
+                  onClick={() => void connectTerminal()}
+                  disabled={!terminalAvailable || terminalConnecting || Boolean(terminalSession)}
+                >
+                  <SquareTerminal />
+                  {terminalSession ? "Connected" : terminalConnecting ? "Connecting" : "Connect"}
+                </Button>
+              </div>
+              <div className="relative min-h-[520px] p-2">
+                <div ref={terminalEl} className="h-[500px] overflow-hidden rounded-md" />
+                {!terminalSession ? (
+                  <div className="absolute inset-2 flex items-center justify-center rounded-md border border-white/10 bg-[#111318] text-sm text-slate-300">
+                    Connect when you need an interactive shell.
+                  </div>
+                ) : null}
+              </div>
+              {terminalError ? <div className="border-t border-white/10 px-4 py-3 text-sm text-red-300">{terminalError}</div> : null}
+            </div>
+          </TabsContent>
+        ) : null}
         <TabsContent value="details" className="m-0 py-5">
           <div className="grid gap-2 text-sm">
             <JobField label="Status" value={job.status} />
@@ -1156,7 +1328,17 @@ function logResponseText(text: unknown, emptyMessage: string) {
   return typeof text === "string" ? text || emptyMessage : JSON.stringify(text, null, 2)
 }
 
-function LogOutput({ text, description, actions }: { text: string; description: string; actions?: ReactNode }) {
+function LogOutput({
+  text,
+  description,
+  actions,
+  leading,
+}: {
+  text: string
+  description: string
+  actions?: ReactNode
+  leading?: ReactNode
+}) {
   const logRef = useRef<HTMLDivElement | null>(null)
   const [collapseState, setCollapseState] = useState<{ text: string; groups: Set<number> }>(() => ({ text, groups: new Set() }))
   const collapsedGroups = useMemo(() => (collapseState.text === text ? collapseState.groups : new Set<number>()), [collapseState, text])
@@ -1181,9 +1363,12 @@ function LogOutput({ text, description, actions }: { text: string; description: 
   }
 
   return (
-    <div className="mt-4 overflow-hidden border-y border-emerald-500/15 bg-slate-950 text-slate-100 shadow-[inset_3px_0_0_theme(colors.emerald.500/0.35)]">
+    <div className="overflow-hidden border-y border-emerald-500/15 bg-slate-950 text-slate-100 shadow-[inset_3px_0_0_theme(colors.emerald.500/0.35)]">
       <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-900/95 px-4 py-3 backdrop-blur">
-        <div className="text-xs text-slate-400">{description}</div>
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          {leading}
+          <div className="min-w-0 text-xs text-slate-400">{description}</div>
+        </div>
         <div className="flex items-center gap-2">
           <Button
             type="button"
@@ -1343,12 +1528,10 @@ function workflowStatus(jobs: RunnerState[]) {
 function BuildGroupListItem({
   group,
   selected,
-  expanded = false,
   onSelect,
 }: {
   group: BuildGroup
   selected: boolean
-  expanded?: boolean
   onSelect: () => void
 }) {
   const status = buildGroupStatus(group)
@@ -1361,7 +1544,6 @@ function BuildGroupListItem({
       onClick={onSelect}
       className={cn(
         "group relative flex w-full gap-2 bg-background/60 py-4 pl-3 pr-4 text-left transition-colors hover:bg-accent/70",
-        !expanded && "border-b",
         selected ? "bg-accent" : ""
       )}
     >
@@ -1487,6 +1669,10 @@ function runnerJobTitle(job: RunnerState) {
     return job.assigned_job_name
   }
   return job.workflow_name || job.runner_name
+}
+
+function isTerminalAvailable(job: RunnerState) {
+  return Boolean(job.sandbox_id && ["creating", "running", "stopping"].includes(job.status))
 }
 
 function groupRunnersByBuildContext(runners: RunnerState[]): BuildGroup[] {
