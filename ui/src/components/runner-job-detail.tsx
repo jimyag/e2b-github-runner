@@ -6,7 +6,7 @@ import "xterm/css/xterm.css"
 
 import type { RunnerJobGroup, RunnerState } from "@/admin-types"
 import { logNames } from "@/admin-types"
-import { formatTime } from "@/admin-format"
+import { formatRunnerDuration, formatTime } from "@/admin-format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -46,6 +46,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
   const eventSourceRef = useRef<EventSource | null>(null)
   const terminalDataDisposableRef = useRef<{ dispose: () => void } | null>(null)
   const terminalSessionRef = useRef<TerminalCreateResponse | null>(null)
+  const resizeTimeoutRef = useRef<number | null>(null)
 
   const endpoint = useMemo(() => `${apiBase}/${encodeURIComponent(id)}`, [apiBase, id])
   const terminalAvailable = job ? isTerminalAvailable(job) : false
@@ -105,6 +106,10 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
       eventSourceRef.current = null
       terminalDataDisposableRef.current?.dispose()
       terminalDataDisposableRef.current = null
+      if (resizeTimeoutRef.current) {
+        window.clearTimeout(resizeTimeoutRef.current)
+        resizeTimeoutRef.current = null
+      }
       terminalRef.current?.dispose()
       terminalRef.current = null
       fitRef.current = null
@@ -223,11 +228,17 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
     const fit = fitRef.current
     if (!session || !term || !fit) return
     fit.fit()
-    void request(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}/resize`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cols: term.cols, rows: term.rows }),
-    }).catch(() => undefined)
+    if (resizeTimeoutRef.current) {
+      window.clearTimeout(resizeTimeoutRef.current)
+    }
+    resizeTimeoutRef.current = window.setTimeout(() => {
+      resizeTimeoutRef.current = null
+      void request(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}/resize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cols: term.cols, rows: term.rows }),
+      }).catch(() => undefined)
+    }, 250)
   }, [endpoint, request, terminalSession])
 
   useEffect(() => {
@@ -424,7 +435,7 @@ function JobListItem({ job, selected, onOpen }: { job: RunnerState; selected: bo
       <span className="min-w-0">
         <span className="flex min-w-0 items-center justify-between gap-2">
           <span className="truncate font-medium">{runnerJobTitle(job)}</span>
-          <span className="shrink-0 text-xs text-muted-foreground">{durationLabel(job)}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">{formatRunnerDuration(job)}</span>
         </span>
         <span className="mt-1 block truncate text-xs text-muted-foreground">{job.runner_spec_name || job.runner_name || job.id}</span>
       </span>
@@ -543,25 +554,6 @@ function jobStatusIconClass(status: RunnerState["status"]) {
     default:
       return "text-muted-foreground"
   }
-}
-
-function durationLabel(job: RunnerState) {
-  const start = timeValue(job.running_at || job.created_at)
-  const end = timeValue(job.completed_at || job.failed_at || job.updated_at)
-  if (!start || !end) return ""
-  const seconds = Math.max(0, Math.round((end - start) / 1000))
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  const rest = seconds % 60
-  if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`
-  const hours = Math.floor(minutes / 60)
-  return `${hours}h ${minutes % 60}m`
-}
-
-function timeValue(value?: string) {
-  if (!value) return 0
-  const time = Date.parse(value)
-  return Number.isFinite(time) ? time : 0
 }
 
 function statusClass(status: RunnerState["status"]) {

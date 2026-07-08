@@ -555,11 +555,12 @@ func (c *Client) downloadActionsLog(ctx context.Context, repositoryFullName, api
 			return nil, "", fmt.Errorf("%s: redirect missing location", errorLabel)
 		}
 		resp.Body.Close()
-		resp, err = c.downloadRedirect(ctx, location)
+		redirectResp, err := c.downloadRedirect(ctx, location)
 		if err != nil {
 			return nil, "", err
 		}
-		defer resp.Body.Close()
+		defer redirectResp.Body.Close()
+		resp = redirectResp
 	}
 	body, readErr := readActionsLogBody(resp.Body, 32<<20)
 	if readErr != nil {

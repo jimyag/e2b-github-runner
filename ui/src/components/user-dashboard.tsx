@@ -26,7 +26,7 @@ import "xterm/css/xterm.css"
 
 import type { AuthSession, GitHubAppConfig, RunnerJobGroup, RunnerState, UserPreferences } from "@/admin-types"
 import { logNames } from "@/admin-types"
-import { formatTime } from "@/admin-format"
+import { formatRunnerDuration, formatTime } from "@/admin-format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -803,7 +803,7 @@ function PullRequestsPage({
                                 </a>
                               ) : selectedJob.workflow_name || "Workflow"}
                             />
-                            <JobField label="Duration" value={durationLabel(selectedJob) || "-"} />
+                            <JobField label="Duration" value={formatRunnerDuration(selectedJob) || "-"} />
                           </>
                         ) : (
                           <div className="text-muted-foreground">Select a job to inspect its logs.</div>
@@ -996,7 +996,7 @@ function WorkflowRunListItem({
       <span className="min-w-0">
         <span className="block truncate font-medium">{workflow.name}</span>
       </span>
-      <span className="shrink-0 text-xs text-muted-foreground">{durationLabel(job)}</span>
+      <span className="shrink-0 text-xs text-muted-foreground">{formatRunnerDuration(job)}</span>
     </button>
   )
 }
@@ -1015,7 +1015,7 @@ function RunnerJobListItem({ job, selected, onOpen }: { job: RunnerState; select
       <span className="min-w-0">
         <span className="block truncate font-medium">{runnerJobTitle(job)}</span>
       </span>
-      <span className="shrink-0 text-xs text-muted-foreground">{durationLabel(job)}</span>
+      <span className="shrink-0 text-xs text-muted-foreground">{formatRunnerDuration(job)}</span>
     </button>
   )
 }
@@ -1040,6 +1040,7 @@ function RunnerJobLogPanel({
   const eventSourceRef = useRef<EventSource | null>(null)
   const terminalDataDisposableRef = useRef<{ dispose: () => void } | null>(null)
   const terminalSessionRef = useRef<TerminalCreateResponse | null>(null)
+  const resizeTimeoutRef = useRef<number | null>(null)
   const endpoint = `/user/runner_requests/${encodeURIComponent(job.id)}`
   const endpointRef = useRef(endpoint)
   const terminalAvailable = isTerminalAvailable(job)
@@ -1054,6 +1055,10 @@ function RunnerJobLogPanel({
       eventSourceRef.current = null
       terminalDataDisposableRef.current?.dispose()
       terminalDataDisposableRef.current = null
+      if (resizeTimeoutRef.current) {
+        window.clearTimeout(resizeTimeoutRef.current)
+        resizeTimeoutRef.current = null
+      }
       terminalRef.current?.dispose()
       terminalRef.current = null
       fitRef.current = null
@@ -1232,11 +1237,17 @@ function RunnerJobLogPanel({
     const fit = fitRef.current
     if (!session || !term || !fit) return
     fit.fit()
-    void request(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}/resize`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ cols: term.cols, rows: term.rows }),
-    }).catch(() => undefined)
+    if (resizeTimeoutRef.current) {
+      window.clearTimeout(resizeTimeoutRef.current)
+    }
+    resizeTimeoutRef.current = window.setTimeout(() => {
+      resizeTimeoutRef.current = null
+      void request(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}/resize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cols: term.cols, rows: term.rows }),
+      }).catch(() => undefined)
+    }, 250)
   }, [endpoint, request, terminalSession])
 
   useEffect(() => {
@@ -1740,17 +1751,6 @@ function jobStatusMark(status: RunnerState["status"]) {
     default:
       return <Check className={className} />
   }
-}
-
-function durationLabel(job: RunnerState) {
-  const start = Date.parse(job.running_at || job.created_at || "")
-  const end = Date.parse(job.completed_at || job.failed_at || job.updated_at || "")
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return ""
-  const totalSeconds = Math.max(0, Math.round((end - start) / 1000))
-  if (totalSeconds < 60) return `${totalSeconds}s`
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`
 }
 
 function buildGroupStatusClasses(status: RunnerStatusSummary) {

@@ -38,6 +38,15 @@ type Server struct {
 	loopCtx     context.Context
 	loopCancel  context.CancelFunc
 	loopWG      sync.WaitGroup
+
+	pullTitleMu    sync.Mutex
+	pullTitleCache map[string]cachedPullTitle
+}
+
+type cachedPullTitle struct {
+	title     string
+	errorText string
+	expiresAt time.Time
 }
 
 type manualCreateRequest struct {
@@ -107,18 +116,19 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		logger = slog.Default()
 	}
 	s := &Server{
-		cfg:         cfg,
-		store:       store,
-		gh:          gh,
-		sandbox:     sandbox,
-		sandboxHTTP: &http.Client{Timeout: 60 * time.Second},
-		logger:      logger,
-		mux:         http.NewServeMux(),
-		slots:       make(chan struct{}, cfg.MaxConcurrentRunners),
-		queueNotify: make(chan struct{}, 1),
-		oauth:       &http.Client{Timeout: 10 * time.Second},
-		diagnostics: &http.Client{Timeout: 5 * time.Second},
-		terminals:   newTerminalHub(logger),
+		cfg:            cfg,
+		store:          store,
+		gh:             gh,
+		sandbox:        sandbox,
+		sandboxHTTP:    &http.Client{Timeout: 60 * time.Second},
+		logger:         logger,
+		mux:            http.NewServeMux(),
+		slots:          make(chan struct{}, cfg.MaxConcurrentRunners),
+		queueNotify:    make(chan struct{}, 1),
+		oauth:          &http.Client{Timeout: 10 * time.Second},
+		diagnostics:    &http.Client{Timeout: 5 * time.Second},
+		terminals:      newTerminalHub(logger),
+		pullTitleCache: map[string]cachedPullTitle{},
 	}
 	hostname, _ := os.Hostname()
 	s.workerID = fmt.Sprintf("%s-%d", hostname, os.Getpid())

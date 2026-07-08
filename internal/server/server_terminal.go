@@ -134,25 +134,36 @@ func (h *terminalHub) CloseSessionWhenIdle(sessionID string, delay time.Duration
 		defer timer.Stop()
 		<-timer.C
 
-		h.mu.Lock()
-		session, ok := h.sessions[sessionID]
-		if !ok {
-			h.mu.Unlock()
-			return
-		}
-		if !session.idle() {
-			h.mu.Unlock()
-			return
-		}
-		delete(h.sessions, sessionID)
-		h.mu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		session.closeWatchers()
-		if err := session.terminal.Close(ctx); err != nil && h.logger != nil {
+		session, closed, err := h.closeSessionIfIdle(ctx, sessionID)
+		if !closed || session == nil {
+			return
+		}
+		if err != nil && h.logger != nil {
 			h.logger.Warn("close idle terminal session", "session_id", sessionID, "request_id", session.requestID, "error", err)
 		}
 	}()
+}
+
+func (h *terminalHub) closeSessionIfIdle(ctx context.Context, sessionID string) (*terminalSession, bool, error) {
+	h.mu.Lock()
+	session, ok := h.sessions[sessionID]
+	if !ok {
+		h.mu.Unlock()
+		return nil, false, state.ErrNotFound
+	}
+	session.mu.Lock()
+	if session.closed || len(session.watchers) > 0 {
+		session.mu.Unlock()
+		h.mu.Unlock()
+		return session, false, nil
+	}
+	delete(h.sessions, sessionID)
+	session.closed = true
+	session.mu.Unlock()
+	h.mu.Unlock()
+	return session, true, session.terminal.Close(ctx)
 }
 
 func (h *terminalHub) Close() {
@@ -212,12 +223,6 @@ func (s *terminalSession) Subscribe() ([]byte, <-chan []byte, func()) {
 		s.mu.Unlock()
 	}
 	return initial, ch, cancel
-}
-
-func (s *terminalSession) idle() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return !s.closed && len(s.watchers) == 0
 }
 
 func (s *terminalSession) closeWatchers() {
@@ -327,8 +332,15 @@ func (s *Server) enrichUserRunnerJobGroup(ctx context.Context, group *userRunner
 	if group == nil || group.Group != "pull_request" || group.Repository == "" || group.PullRequestNumber == 0 {
 		return
 	}
+	cacheKey := fmt.Sprintf("%s#%d", group.Repository, group.PullRequestNumber)
+	if title, errorText, ok := s.cachedPullTitle(cacheKey); ok {
+		group.PullRequestTitle = title
+		group.PullRequestTitleError = errorText
+		return
+	}
 	if s.gh == nil {
 		group.PullRequestTitleError = "github client is not configured"
+		s.cachePullTitle(cacheKey, "", group.PullRequestTitleError)
 		return
 	}
 	pull, err := s.gh.GetPullRequest(ctx, group.Repository, group.PullRequestNumber)
@@ -337,12 +349,41 @@ func (s *Server) enrichUserRunnerJobGroup(ctx context.Context, group *userRunner
 		if issueErr != nil {
 			s.logger.DebugContext(ctx, "load github pull request title", "repository", group.Repository, "number", group.PullRequestNumber, "pull_error", err, "issue_error", issueErr)
 			group.PullRequestTitleError = fmt.Sprintf("pull request title unavailable: %v; issue fallback: %v", err, issueErr)
+			s.cachePullTitle(cacheKey, "", group.PullRequestTitleError)
 			return
 		}
 		group.PullRequestTitle = strings.TrimSpace(issue.Title)
+		s.cachePullTitle(cacheKey, group.PullRequestTitle, "")
 		return
 	}
 	group.PullRequestTitle = strings.TrimSpace(pull.Title)
+	s.cachePullTitle(cacheKey, group.PullRequestTitle, "")
+}
+
+func (s *Server) cachedPullTitle(key string) (string, string, bool) {
+	s.pullTitleMu.Lock()
+	defer s.pullTitleMu.Unlock()
+	cached, ok := s.pullTitleCache[key]
+	if !ok || time.Now().UTC().After(cached.expiresAt) {
+		if ok {
+			delete(s.pullTitleCache, key)
+		}
+		return "", "", false
+	}
+	return cached.title, cached.errorText, true
+}
+
+func (s *Server) cachePullTitle(key, title, errorText string) {
+	s.pullTitleMu.Lock()
+	defer s.pullTitleMu.Unlock()
+	if s.pullTitleCache == nil {
+		s.pullTitleCache = map[string]cachedPullTitle{}
+	}
+	s.pullTitleCache[key] = cachedPullTitle{
+		title:     title,
+		errorText: errorText,
+		expiresAt: time.Now().UTC().Add(5 * time.Minute),
+	}
 }
 
 func (s *Server) handleUserListRunnerSiblings(w http.ResponseWriter, r *http.Request) {
@@ -699,14 +740,14 @@ func runnerJobGroups(states []state.RunnerState) []userRunnerJobGroupResponse {
 		}
 		if st.WorkflowRunID != 0 && !hasInt64(current.WorkflowRunIDs, st.WorkflowRunID) {
 			current.WorkflowRunIDs = append(current.WorkflowRunIDs, st.WorkflowRunID)
-			sort.Slice(current.WorkflowRunIDs, func(i, j int) bool {
-				return current.WorkflowRunIDs[i] > current.WorkflowRunIDs[j]
-			})
 		}
 	}
 
 	groups := make([]userRunnerJobGroupResponse, 0, len(groupsByKey))
 	for _, group := range groupsByKey {
+		sort.Slice(group.WorkflowRunIDs, func(i, j int) bool {
+			return group.WorkflowRunIDs[i] > group.WorkflowRunIDs[j]
+		})
 		group.Jobs = orderRunnerJobs(group.Jobs)
 		group.CurrentJobs = currentRunnerGroupJobs(*group)
 		group.PreviousJobs = previousRunnerGroupJobs(group.Jobs, group.CurrentJobs)
