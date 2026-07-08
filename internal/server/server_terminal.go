@@ -176,12 +176,18 @@ func (h *terminalHub) Close() {
 	h.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	var wg sync.WaitGroup
 	for _, session := range sessions {
 		session.closeWatchers()
-		if err := session.terminal.Close(ctx); err != nil && h.logger != nil {
-			h.logger.Warn("close terminal session", "session_id", session.id, "request_id", session.requestID, "error", err)
-		}
+		wg.Add(1)
+		go func(session *terminalSession) {
+			defer wg.Done()
+			if err := session.terminal.Close(ctx); err != nil && h.logger != nil {
+				h.logger.Warn("close terminal session", "session_id", session.id, "request_id", session.requestID, "error", err)
+			}
+		}(session)
 	}
+	wg.Wait()
 }
 
 func (s *terminalSession) append(data []byte) {
@@ -890,16 +896,19 @@ func previousRunnerGroupJobs(jobs, currentJobs []state.RunnerState) []state.Runn
 
 func runnerSiblings(current state.RunnerState, states []state.RunnerState) (string, []state.RunnerState) {
 	group := "repository"
+	if current.PullRequestNumber != 0 {
+		group = "pull_request"
+	} else if current.WorkflowRunID != 0 {
+		group = "workflow_run"
+	}
 	matches := func(candidate state.RunnerState) bool {
 		if candidate.RepositoryFullName != current.RepositoryFullName {
 			return false
 		}
-		if current.PullRequestNumber != 0 {
-			group = "pull_request"
+		if group == "pull_request" {
 			return candidate.PullRequestNumber == current.PullRequestNumber
 		}
-		if current.WorkflowRunID != 0 {
-			group = "workflow_run"
+		if group == "workflow_run" {
 			return candidate.WorkflowRunID == current.WorkflowRunID
 		}
 		return true

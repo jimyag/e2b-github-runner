@@ -1473,7 +1473,8 @@ function LogOutput({
   const [collapseState, setCollapseState] = useState<{ text: string; groups: Set<number> }>(() => ({ text, groups: new Set() }))
   const collapsedGroups = useMemo(() => (collapseState.text === text ? collapseState.groups : new Set<number>()), [collapseState, text])
   const lines = useMemo(() => text.split(/\r?\n/), [text])
-  const logLines = useMemo(() => parseLogLines(lines, collapsedGroups), [lines, collapsedGroups])
+  const largeLog = lines.length > 20000
+  const logLines = useMemo(() => (largeLog ? [] : parseLogLines(lines, collapsedGroups)), [lines, collapsedGroups, largeLog])
   const numberWidth = `${Math.max(2, String(lines.length).length)}ch`
 
   const scrollToBottom = () => {
@@ -1513,7 +1514,9 @@ function LogOutput({
         </div>
       </div>
       <div ref={logRef} className="py-3 font-mono text-xs leading-relaxed">
-        {logLines.map((logLine) => {
+        {largeLog ? (
+          <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words px-4 text-slate-200">{text}</pre>
+        ) : logLines.map((logLine) => {
           const rowStyle = { "--line-number-width": numberWidth } as CSSProperties
           const rowClassName = "grid grid-cols-[12px_var(--line-number-width)_minmax(0,1fr)] gap-1 px-4"
           if (logLine.groupID !== undefined && logLine.kind === "group-start") {
