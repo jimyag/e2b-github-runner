@@ -1400,7 +1400,7 @@ function logResponseText(text: unknown, emptyMessage: string) {
 
 function githubLogResponseState(text: unknown, emptyMessage: string): GitHubLogState {
   const raw = logResponseText(text, emptyMessage)
-  return isGitHubLogUnavailable(raw) ? { kind: "unavailable", detail: raw } : { kind: "log", text: raw }
+  return { kind: "log", text: raw }
 }
 
 function githubLogErrorState(error: unknown): GitHubLogState {

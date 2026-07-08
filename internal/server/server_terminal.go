@@ -975,6 +975,9 @@ func hasInt64(values []int64, needle int64) bool {
 func formatGitHubActionsLog(data []byte) (string, error) {
 	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
+		if len(data) > maxGitHubLogOutputBytes {
+			return string(data[:maxGitHubLogOutputBytes]) + fmt.Sprintf("\n[runnerd] GitHub log output truncated after %d bytes.\n", maxGitHubLogOutputBytes), nil
+		}
 		return string(data), nil
 	}
 	files := append([]*zip.File(nil), reader.File...)

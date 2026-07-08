@@ -859,6 +859,16 @@ func TestFormatGitHubActionsLogCapsTotalOutput(t *testing.T) {
 	}
 }
 
+func TestFormatGitHubActionsLogCapsPlainTextOutput(t *testing.T) {
+	text, err := formatGitHubActionsLog(bytes.Repeat([]byte("x"), maxGitHubLogOutputBytes+1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(text, "[runnerd] GitHub log output truncated after 16777216 bytes.") {
+		t.Fatalf("expected total truncation marker, got suffix %q", text[len(text)-128:])
+	}
+}
+
 func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 	var gotTokenAuth string
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
