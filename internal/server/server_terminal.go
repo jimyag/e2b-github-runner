@@ -136,13 +136,20 @@ func (h *terminalHub) CloseSessionWhenIdle(sessionID string, delay time.Duration
 
 		h.mu.Lock()
 		session, ok := h.sessions[sessionID]
-		h.mu.Unlock()
-		if !ok || !session.idle() {
+		if !ok {
+			h.mu.Unlock()
 			return
 		}
+		if !session.idle() {
+			h.mu.Unlock()
+			return
+		}
+		delete(h.sessions, sessionID)
+		h.mu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := h.CloseSession(ctx, sessionID); err != nil && !errors.Is(err, state.ErrNotFound) && h.logger != nil {
+		session.closeWatchers()
+		if err := session.terminal.Close(ctx); err != nil && h.logger != nil {
 			h.logger.Warn("close idle terminal session", "session_id", sessionID, "request_id", session.requestID, "error", err)
 		}
 	}()
@@ -328,7 +335,7 @@ func (s *Server) enrichUserRunnerJobGroup(ctx context.Context, group *userRunner
 	if err != nil {
 		issue, issueErr := s.gh.GetIssue(ctx, group.Repository, group.PullRequestNumber)
 		if issueErr != nil {
-			slog.Debug("load github pull request title", "repository", group.Repository, "number", group.PullRequestNumber, "pull_error", err, "issue_error", issueErr)
+			s.logger.DebugContext(ctx, "load github pull request title", "repository", group.Repository, "number", group.PullRequestNumber, "pull_error", err, "issue_error", issueErr)
 			group.PullRequestTitleError = fmt.Sprintf("pull request title unavailable: %v; issue fallback: %v", err, issueErr)
 			return
 		}

@@ -1513,6 +1513,7 @@ func TestAdminUIIsServedWithoutAPIAccess(t *testing.T) {
 		"/account/preferences",
 		"/organizations/qiniu/repositories",
 		"/organizations/qiniu/preferences",
+		"/jobs/runner-123",
 		"/github/pulls/qiniu/ci-runner/22/jobs",
 		"/github/runs/qiniu/ci-runner/123/jobs",
 		"/github/branches/qiniu/ci-runner/main/abc123/jobs",

@@ -1185,6 +1185,14 @@ function RunnerJobLogPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cols, rows }),
       })) as TerminalCreateResponse
+      if (terminalRef.current !== term) {
+        void fetch(`${endpoint}/terminal/${encodeURIComponent(session.session_id)}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+          keepalive: true,
+        })
+        return
+      }
       setTerminalSession(session)
       terminalSessionRef.current = session
       term.writeln(`Connected to ${session.sandbox_id} pid=${session.pid}`)

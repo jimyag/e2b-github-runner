@@ -287,6 +287,7 @@ func isUserUIRoute(name string) bool {
 	for _, prefix := range []string{
 		"account/",
 		"organizations/",
+		"jobs/",
 		"github/pulls/",
 		"github/runs/",
 		"github/branches/",
