@@ -368,7 +368,9 @@ func (s *Server) enrichUserRunnerJobGroup(ctx context.Context, group *userRunner
 			if issueErr != nil {
 				s.logger.DebugContext(ctx, "load github pull request title", "repository", group.Repository, "number", group.PullRequestNumber, "pull_error", err, "issue_error", issueErr)
 				errorText := fmt.Sprintf("pull request title unavailable: %v; issue fallback: %v", err, issueErr)
-				s.cachePullTitle(cacheKey, "", errorText)
+				if !isContextCanceled(err) && !isContextCanceled(issueErr) {
+					s.cachePullTitle(cacheKey, "", errorText)
+				}
 				return pullTitleResult{errorText: errorText}, nil
 			}
 			title := strings.TrimSpace(issue.Title)
@@ -386,6 +388,10 @@ func (s *Server) enrichUserRunnerJobGroup(ctx context.Context, group *userRunner
 	}
 	group.PullRequestTitle = result.title
 	group.PullRequestTitleError = result.errorText
+}
+
+func isContextCanceled(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (s *Server) cachedPullTitle(key string) (string, string, bool) {
