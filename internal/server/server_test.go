@@ -1301,11 +1301,12 @@ func TestSandboxServiceUsesInheritedAccountPreferencesForOrgInstallation(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+	installation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
 		AccountID:      account.ID,
 		InstallationID: 987,
 		AccountLogin:   "gitwikitree",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	valueJSON, err := json.Marshal(accountSandboxServicePreferenceValue{APIURL: "https://sandbox.example.test"})
@@ -1351,6 +1352,12 @@ func TestSandboxServiceUsesInheritedAccountPreferencesForOrgInstallation(t *test
 	}
 	if svc, err := srv.sandboxServiceForRunnerRequest(context.Background(), state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); err != nil || svc == nil {
 		t.Fatalf("expected sandbox service from inherited account preferences, service=%T err=%v", svc, err)
+	}
+	if err := store.DeleteGitHubInstallation(account.ID, installation.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.sandboxServiceForRunnerRequest(context.Background(), state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); !errors.Is(err, errSandboxServiceNotConfigured) {
+		t.Fatalf("expected inherited sandbox service to require current installation link, got %v", err)
 	}
 }
 
