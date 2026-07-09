@@ -88,6 +88,12 @@ func (s *Server) sandboxServiceForScope(scope accountPreferenceScope) (sandboxru
 	if err := json.Unmarshal([]byte(preference.ValueJSON), &value); err != nil {
 		return nil, sandboxServiceConfigSnapshot{}, err
 	}
+	if normalizeSandboxPreferenceMode(value.Mode, scope) == sandboxPreferenceModeInherit {
+		if value.SourceAccountID <= 0 {
+			return nil, sandboxServiceConfigSnapshot{}, fmt.Errorf("sandbox service inherited account is not configured for %s:%d: %w", scope.Type, scope.ID, errSandboxServiceNotConfigured)
+		}
+		return s.sandboxServiceForScope(accountPreferenceScope{Type: state.AccountScopeTypeAccount, ID: value.SourceAccountID})
+	}
 	apiURL := strings.TrimSpace(value.APIURL)
 	if apiURL == "" {
 		return nil, sandboxServiceConfigSnapshot{}, fmt.Errorf("sandbox service api_url is not configured for %s:%d", scope.Type, scope.ID)

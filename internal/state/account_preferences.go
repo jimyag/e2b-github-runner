@@ -66,6 +66,28 @@ func (s *DBStore) UpsertAccountPreferenceAndSecret(preference AccountPreference,
 	return savedPreference, savedSecret, nil
 }
 
+func (s *DBStore) UpsertAccountPreferenceAndDeleteSecret(preference AccountPreference, secret AccountSecret) (AccountPreference, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return AccountPreference{}, err
+	}
+	var savedPreference AccountPreference
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		var err error
+		savedPreference, err = upsertAccountPreference(tx, preference)
+		if err != nil {
+			return err
+		}
+		if err := deleteAccountSecret(tx, secret.ScopeType, secret.ScopeID, secret.KeyType); err != nil && err != ErrNotFound {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return AccountPreference{}, err
+	}
+	return savedPreference, nil
+}
+
 func upsertAccountPreference(db *gorm.DB, preference AccountPreference) (AccountPreference, error) {
 	scopeType := normalizeAccountScopeType(preference.ScopeType)
 	namespace := normalizeAccountPreferencePart(preference.Namespace)

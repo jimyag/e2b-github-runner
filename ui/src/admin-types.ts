@@ -139,7 +139,10 @@ export type GitHubAppConfig = {
 
 export type UserPreferences = {
   sandbox: {
+    mode: "custom" | "inherit"
     api_url: string
+    inherited?: boolean
+    source_account_id?: number
     api_key: {
       configured: boolean
       updated_at?: string

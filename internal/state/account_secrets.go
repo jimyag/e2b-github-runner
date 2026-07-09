@@ -79,6 +79,10 @@ func (s *DBStore) DeleteAccountSecret(scopeType string, scopeID int64, keyType s
 	if err != nil {
 		return err
 	}
+	return deleteAccountSecret(db, scopeType, scopeID, keyType)
+}
+
+func deleteAccountSecret(db *gorm.DB, scopeType string, scopeID int64, keyType string) error {
 	scopeType = normalizeAccountScopeType(scopeType)
 	keyType = normalizeAccountSecretKeyType(keyType)
 	if scopeType == "" || scopeID <= 0 || keyType == "" {

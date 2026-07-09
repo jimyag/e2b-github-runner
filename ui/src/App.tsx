@@ -332,11 +332,11 @@ function App() {
     }
   }, [request])
 
-  const saveSandboxConfig = useCallback(async (apiURL: string, apiKey: string, installationID?: number) => {
+  const saveSandboxConfig = useCallback(async (apiURL: string, apiKey: string, installationID?: number, mode: "custom" | "inherit" = "custom") => {
     const preferences = (await request(userPreferencesPath(installationID, "/user/preferences/sandbox"), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_url: apiURL, api_key: apiKey }),
+      body: JSON.stringify({ mode, api_url: apiURL, api_key: apiKey }),
     })) as UserPreferences
     setUserPreferences(preferences)
     toast.success("Sandbox service settings saved")

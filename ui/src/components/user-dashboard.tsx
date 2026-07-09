@@ -29,6 +29,15 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -40,6 +49,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useSandboxTerminal } from "@/hooks/use-sandbox-terminal"
 import { cn } from "@/lib/utils"
@@ -74,6 +85,28 @@ type GitHubLogState =
 
 const jobLogTabsListClassName = "h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0 text-muted-foreground"
 const jobLogTabsTriggerClassName = "h-10 flex-none rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0 py-2 text-sm font-medium shadow-none hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
+const sandboxRegions = [
+  {
+    id: "cn-yangzhou-1",
+    label: "China (Yangzhou 1)",
+    apiURL: "https://cn-yangzhou-1-sandbox.qiniuapi.com",
+  },
+  {
+    id: "us-south-1",
+    label: "United States (Dallas 1)",
+    apiURL: "https://us-south-1-sandbox.qiniuapi.com",
+  },
+]
+
+function normalizeSandboxAPIURL(value: string) {
+  return value.trim().replace(/\/+$/, "")
+}
+
+function resolveSandboxRegionAPIURL(value: string) {
+  const normalized = normalizeSandboxAPIURL(value)
+  const matchedRegion = sandboxRegions.find((region) => normalizeSandboxAPIURL(region.apiURL) === normalized)
+  return matchedRegion?.apiURL ?? ""
+}
 
 export function UserDashboard({
   authSession,
@@ -108,7 +141,7 @@ export function UserDashboard({
   authorizedRepositories: Record<number, string[]>
   loadingRepositoriesFor: number | null
   onLoadAuthorizedRepositories: (id: number) => void
-  onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number) => Promise<void>
+  onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit") => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   onNavigate: (page: UserPage) => void
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
@@ -350,7 +383,7 @@ function AccountsPage({
   loadingRepositoriesFor: number | null
   route: AccountSettingsRoute
   onLoadAuthorizedRepositories: (id: number) => void
-  onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number) => Promise<void>
+  onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit") => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   currentLogin?: string
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
@@ -516,7 +549,8 @@ function AccountsPage({
                 <TabsContent value="preferences">
                   <SandboxAPIKeyCard
                     preferences={userPreferences}
-                    onSave={(apiURL, apiKey) => onSaveSandboxConfig(apiURL, apiKey, preferenceInstallationID)}
+                    allowInheritance={Boolean(preferenceInstallationID)}
+                    onSave={(apiURL, apiKey, mode) => onSaveSandboxConfig(apiURL, apiKey, preferenceInstallationID, mode)}
                     onDelete={() => onDeleteSandboxAPIKey(preferenceInstallationID)}
                   />
                 </TabsContent>
@@ -531,7 +565,7 @@ function AccountsPage({
                 </div>
                 <SandboxAPIKeyCard
                   preferences={userPreferences}
-                  onSave={onSaveSandboxConfig}
+                  onSave={(apiURL, apiKey, mode) => onSaveSandboxConfig(apiURL, apiKey, undefined, mode)}
                   onDelete={onDeleteSandboxAPIKey}
                 />
               </div>
@@ -549,41 +583,65 @@ function AccountsPage({
 
 function SandboxAPIKeyCard({
   preferences,
+  allowInheritance = false,
   onSave,
   onDelete,
 }: {
   preferences: UserPreferences | null
-  onSave: (apiURL: string, apiKey: string) => Promise<void>
+  allowInheritance?: boolean
+  onSave: (apiURL: string, apiKey: string, mode?: "custom" | "inherit") => Promise<void>
   onDelete: () => Promise<void>
 }) {
   const [apiURL, setAPIURL] = useState("")
   const [apiKey, setAPIKey] = useState("")
+  const [credentialMode, setCredentialMode] = useState<"custom" | "inherit">("custom")
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false)
   const [error, setError] = useState("")
   const configured = preferences?.sandbox?.api_key?.configured ?? false
+  const customConfigured = configured && !preferences?.sandbox?.inherited
   const updatedAt = preferences?.sandbox?.api_key?.updated_at
+  const selectedRegion = sandboxRegions.find((region) => region.apiURL === apiURL)
 
   useEffect(() => {
-    setAPIURL(preferences?.sandbox?.api_url ?? "")
+    const savedAPIURL = preferences?.sandbox?.api_url ?? ""
+    setAPIURL(resolveSandboxRegionAPIURL(savedAPIURL))
   }, [preferences?.sandbox?.api_url])
+
+  useEffect(() => {
+    setCredentialMode(allowInheritance && preferences?.sandbox?.mode === "inherit" ? "inherit" : "custom")
+  }, [allowInheritance, preferences?.sandbox?.mode])
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const nextAPIURL = apiURL.trim()
     const nextAPIKey = apiKey.trim()
-    if (!nextAPIURL) {
-      setError("Sandbox service API URL is required.")
+    if (credentialMode === "inherit") {
+      setSaving(true)
+      setError("")
+      try {
+        await onSave("", "", "inherit")
+        setAPIKey("")
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "Failed to save Sandbox service settings.")
+      } finally {
+        setSaving(false)
+      }
       return
     }
-    if (!configured && !nextAPIKey) {
+    if (!nextAPIURL) {
+      setError("Sandbox service region is required.")
+      return
+    }
+    if (!customConfigured && !nextAPIKey) {
       setError("Sandbox API Key is required.")
       return
     }
     setSaving(true)
     setError("")
     try {
-      await onSave(nextAPIURL, nextAPIKey)
+      await onSave(nextAPIURL, nextAPIKey, "custom")
       setAPIKey("")
     } catch (error) {
       setError(error instanceof Error ? error.message : "Failed to save Sandbox service settings.")
@@ -598,6 +656,7 @@ function SandboxAPIKeyCard({
     try {
       await onDelete()
       setAPIKey("")
+      setRemoveConfirmOpen(false)
     } catch (error) {
       setError(error instanceof Error ? error.message : "Failed to remove Sandbox API Key.")
     } finally {
@@ -621,16 +680,48 @@ function SandboxAPIKeyCard({
           <Badge variant={configured ? "secondary" : "outline"}>{configured ? "Configured" : "Not configured"}</Badge>
         </div>
 
+        {allowInheritance ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/20 px-3 py-2">
+            <Switch
+              id="sandbox-use-account-default"
+              checked={credentialMode === "inherit"}
+              onCheckedChange={(checked) => {
+                setCredentialMode(checked ? "inherit" : "custom")
+                setError("")
+              }}
+              disabled={saving || deleting}
+            />
+            <Label htmlFor="sandbox-use-account-default" className="cursor-pointer text-sm font-medium">
+              Use account default credentials
+            </Label>
+            <span className="text-sm text-muted-foreground">
+              {credentialMode === "inherit" ? "This account uses the signed-in account Sandbox service settings." : "This account uses its own Sandbox service settings."}
+            </span>
+          </div>
+        ) : null}
+
         <div className="mt-2.5 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
           <div className="grid min-w-0 gap-1.5">
-            <Label htmlFor="sandbox-api-url">API URL</Label>
-            <Input
-              id="sandbox-api-url"
-              value={apiURL}
-              onChange={(event) => setAPIURL(event.target.value)}
-              autoComplete="off"
-              placeholder="https://api.e2b.dev"
-            />
+            <Label htmlFor="sandbox-api-region">Region</Label>
+            <Select
+              value={selectedRegion?.id ?? ""}
+              onValueChange={(regionID) => {
+                setAPIURL(sandboxRegions.find((region) => region.id === regionID)?.apiURL ?? "")
+              }}
+              disabled={saving || deleting || credentialMode === "inherit"}
+            >
+              <SelectTrigger id="sandbox-api-region" className="w-full">
+                <SelectValue placeholder="Select Sandbox region" />
+              </SelectTrigger>
+              <SelectContent>
+                {sandboxRegions.map((region) => (
+                  <SelectItem key={region.id} value={region.id}>
+                    <span>{region.label}</span>
+                    <span className="text-muted-foreground">{region.id}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid min-w-0 gap-1.5">
@@ -641,21 +732,22 @@ function SandboxAPIKeyCard({
               value={apiKey}
               onChange={(event) => setAPIKey(event.target.value)}
               autoComplete="off"
-              placeholder={configured ? "••••••••••••••••" : "Enter Sandbox API Key"}
+              disabled={saving || deleting || credentialMode === "inherit"}
+              placeholder={customConfigured ? "••••••••••••••••" : "Enter Sandbox API Key"}
             />
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {configured ? (
-              <Button type="button" variant="outline" size="sm" onClick={remove} disabled={deleting || saving}>
+            <Button type="submit" disabled={saving || deleting || (credentialMode === "custom" && (!apiURL.trim() || (!customConfigured && !apiKey.trim())))}>
+              <ShieldCheck className="h-4 w-4" />
+              {saving ? "Saving" : configured ? "Save changes" : "Save settings"}
+            </Button>
+            {customConfigured && credentialMode === "custom" ? (
+              <Button type="button" variant="outline" onClick={() => setRemoveConfirmOpen(true)} disabled={deleting || saving}>
                 <X className="h-4 w-4" />
                 {deleting ? "Removing" : "Remove"}
               </Button>
             ) : null}
-            <Button type="submit" size="sm" disabled={saving || deleting || !apiURL.trim() || (!configured && !apiKey.trim())}>
-              <ShieldCheck className="h-4 w-4" />
-              {saving ? "Saving" : configured ? "Save changes" : "Save settings"}
-            </Button>
           </div>
         </div>
 
@@ -665,6 +757,27 @@ function SandboxAPIKeyCard({
 
         {error ? <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
       </form>
+      <Dialog open={removeConfirmOpen} onOpenChange={(open) => !deleting && setRemoveConfirmOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove Sandbox API Key?</DialogTitle>
+            <DialogDescription>
+              This removes the saved Sandbox API Key for this account. Runner jobs cannot start new Sandbox instances until a key is saved again.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline" disabled={deleting}>
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="button" variant="destructive" onClick={remove} disabled={deleting}>
+              <X className="h-4 w-4" />
+              {deleting ? "Removing" : "Remove API Key"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   )
 }

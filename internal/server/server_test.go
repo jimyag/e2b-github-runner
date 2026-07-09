@@ -1018,8 +1018,11 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	}
 	var preferences struct {
 		Sandbox struct {
-			APIURL string `json:"api_url"`
-			APIKey struct {
+			Mode            string `json:"mode"`
+			APIURL          string `json:"api_url"`
+			Inherited       bool   `json:"inherited"`
+			SourceAccountID int64  `json:"source_account_id"`
+			APIKey          struct {
 				Configured bool   `json:"configured"`
 				UpdatedAt  string `json:"updated_at"`
 			} `json:"api_key"`
@@ -1028,7 +1031,7 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.APIURL != "" || preferences.Sandbox.APIKey.Configured {
+	if preferences.Sandbox.Mode != "custom" || preferences.Sandbox.APIURL != "" || preferences.Sandbox.APIKey.Configured {
 		t.Fatalf("expected sandbox api key to start unconfigured: %#v", preferences)
 	}
 
@@ -1046,7 +1049,7 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.APIURL != "https://sandbox.example.test" || !preferences.Sandbox.APIKey.Configured || preferences.Sandbox.APIKey.UpdatedAt == "" {
+	if preferences.Sandbox.Mode != "custom" || preferences.Sandbox.APIURL != "https://sandbox.example.test" || !preferences.Sandbox.APIKey.Configured || preferences.Sandbox.APIKey.UpdatedAt == "" {
 		t.Fatalf("expected configured sandbox response: %#v", preferences)
 	}
 
@@ -1094,8 +1097,55 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.APIURL != "" || preferences.Sandbox.APIKey.Configured {
-		t.Fatalf("expected org sandbox preferences to be isolated from account preferences: %#v", preferences)
+	if preferences.Sandbox.Mode != "custom" || preferences.Sandbox.Inherited || preferences.Sandbox.SourceAccountID != 0 || preferences.Sandbox.APIURL != "" || preferences.Sandbox.APIKey.Configured {
+		t.Fatalf("expected org sandbox preferences to start unconfigured: %#v", preferences)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", installation.ID), strings.NewReader(`{"api_url":"https://org-sandbox.example.test","api_key":"org-sandbox-secret-key"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected org custom save status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := store.GetAccountSecret(state.AccountScopeTypeGitHubInstall, installation.InstallationID, state.AccountSecretTypeSandboxAPIKey); err != nil {
+		t.Fatal(err)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", installation.ID), strings.NewReader(`{"mode":"inherit"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected org inherit save status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	config, err = store.GetAccountPreference(state.AccountScopeTypeGitHubInstall, installation.InstallationID, "sandbox", "service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedOrgConfig := fmt.Sprintf(`{"mode":"inherit","source_account_id":%d}`, account.ID)
+	if config.ValueJSON != expectedOrgConfig {
+		t.Fatalf("unexpected org inherited sandbox preference value: %q", config.ValueJSON)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
+		t.Fatal(err)
+	}
+	if preferences.Sandbox.Mode != "inherit" || !preferences.Sandbox.Inherited || preferences.Sandbox.APIURL != "https://sandbox.example.test" || !preferences.Sandbox.APIKey.Configured {
+		t.Fatalf("expected saved org sandbox preferences to inherit account preferences: %#v", preferences)
+	}
+	if _, err := store.GetAccountSecret(state.AccountScopeTypeGitHubInstall, installation.InstallationID, state.AccountSecretTypeSandboxAPIKey); err != state.ErrNotFound {
+		t.Fatalf("expected inherited org sandbox preference to delete scoped api key, got %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", installation.ID), strings.NewReader(`{"api_url":"https://org-sandbox-updated.example.test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected org custom save without new key to fail after inherit cleared scoped key, status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	req = httptest.NewRequest(http.MethodPut, "/user/preferences/sandbox", strings.NewReader(`{"api_url":"https://sandbox-updated.example.test"}`))
@@ -1112,7 +1162,7 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.APIURL != "https://sandbox-updated.example.test" || !preferences.Sandbox.APIKey.Configured {
+	if preferences.Sandbox.Mode != "custom" || preferences.Sandbox.APIURL != "https://sandbox-updated.example.test" || !preferences.Sandbox.APIKey.Configured {
 		t.Fatalf("expected updated url with existing api key: %#v", preferences)
 	}
 
@@ -1129,7 +1179,7 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.APIURL != "https://sandbox-updated.example.test" || preferences.Sandbox.APIKey.Configured {
+	if preferences.Sandbox.Mode != "custom" || preferences.Sandbox.APIURL != "https://sandbox-updated.example.test" || preferences.Sandbox.APIKey.Configured {
 		t.Fatalf("expected delete to preserve sandbox api url and clear key: %#v", preferences)
 	}
 }
@@ -1237,6 +1287,70 @@ func TestSandboxServiceFallsBackToPersonalAccountPreferences(t *testing.T) {
 	}
 	if svc, err := srv.sandboxServiceForRunnerRequest(context.Background(), state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); err != nil || svc == nil {
 		t.Fatalf("expected sandbox service from personal account preferences, service=%T err=%v", svc, err)
+	}
+}
+
+func TestSandboxServiceUsesInheritedAccountPreferencesForOrgInstallation(t *testing.T) {
+	store := state.New(t.TempDir())
+	cfg := config.Config{
+		AuthEncryptionKey:    "encryption-key",
+		MaxConcurrentRunners: 10,
+	}
+	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
+	account, _, err := store.EnsureAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "miclle"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "gitwikitree",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	valueJSON, err := json.Marshal(accountSandboxServicePreferenceValue{APIURL: "https://sandbox.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountPreference(state.AccountPreference{
+		ScopeType: state.AccountScopeTypeAccount,
+		ScopeID:   account.ID,
+		Namespace: accountPreferenceNamespaceSandbox,
+		Key:       accountPreferenceKeySandboxService,
+		ValueJSON: string(valueJSON),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	inheritedValueJSON, err := json.Marshal(accountSandboxServicePreferenceValue{
+		Mode:            sandboxPreferenceModeInherit,
+		SourceAccountID: account.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountPreference(state.AccountPreference{
+		ScopeType: state.AccountScopeTypeGitHubInstall,
+		ScopeID:   987,
+		Namespace: accountPreferenceNamespaceSandbox,
+		Key:       accountPreferenceKeySandboxService,
+		ValueJSON: string(inheritedValueJSON),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountSecret(state.AccountSecret{
+		ScopeType:      state.AccountScopeTypeAccount,
+		ScopeID:        account.ID,
+		KeyType:        state.AccountSecretTypeSandboxAPIKey,
+		EncryptedValue: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if svc, err := srv.sandboxServiceForRunnerRequest(context.Background(), state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); err != nil || svc == nil {
+		t.Fatalf("expected sandbox service from inherited account preferences, service=%T err=%v", svc, err)
 	}
 }
 
