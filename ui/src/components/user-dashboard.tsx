@@ -97,6 +97,7 @@ const sandboxRegions = [
     apiURL: "https://us-south-1-sandbox.qiniuapi.com",
   },
 ]
+const customSandboxRegionID = "__custom__"
 
 function normalizeSandboxAPIURL(value: string) {
   return value.trim().replace(/\/+$/, "")
@@ -105,7 +106,7 @@ function normalizeSandboxAPIURL(value: string) {
 function resolveSandboxRegionAPIURL(value: string) {
   const normalized = normalizeSandboxAPIURL(value)
   const matchedRegion = sandboxRegions.find((region) => normalizeSandboxAPIURL(region.apiURL) === normalized)
-  return matchedRegion?.apiURL ?? ""
+  return matchedRegion?.apiURL ?? value
 }
 
 export function UserDashboard({
@@ -602,7 +603,8 @@ function SandboxAPIKeyCard({
   const configured = preferences?.sandbox?.api_key?.configured ?? false
   const customConfigured = configured && !preferences?.sandbox?.inherited
   const updatedAt = preferences?.sandbox?.api_key?.updated_at
-  const selectedRegion = sandboxRegions.find((region) => region.apiURL === apiURL)
+  const selectedRegion = sandboxRegions.find((region) => normalizeSandboxAPIURL(region.apiURL) === normalizeSandboxAPIURL(apiURL))
+  const customAPIURL = apiURL.trim() && !selectedRegion ? apiURL.trim() : ""
 
   useEffect(() => {
     const savedAPIURL = preferences?.sandbox?.api_url ?? ""
@@ -704,8 +706,11 @@ function SandboxAPIKeyCard({
           <div className="grid min-w-0 gap-1.5">
             <Label htmlFor="sandbox-api-region">Region</Label>
             <Select
-              value={selectedRegion?.id ?? ""}
+              value={selectedRegion?.id ?? (customAPIURL ? customSandboxRegionID : "")}
               onValueChange={(regionID) => {
+                if (regionID === customSandboxRegionID) {
+                  return
+                }
                 setAPIURL(sandboxRegions.find((region) => region.id === regionID)?.apiURL ?? "")
               }}
               disabled={saving || deleting || credentialMode === "inherit"}
@@ -720,6 +725,12 @@ function SandboxAPIKeyCard({
                     <span className="text-muted-foreground">{region.id}</span>
                   </SelectItem>
                 ))}
+                {customAPIURL ? (
+                  <SelectItem value={customSandboxRegionID}>
+                    <span>Custom endpoint</span>
+                    <span className="text-muted-foreground">{customAPIURL}</span>
+                  </SelectItem>
+                ) : null}
               </SelectContent>
             </Select>
           </div>
