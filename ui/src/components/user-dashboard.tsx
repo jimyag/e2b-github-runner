@@ -697,6 +697,11 @@ function SandboxAPIKeyCard({
               checked={credentialMode === "inherit"}
               onCheckedChange={(checked) => {
                 setCredentialMode(checked ? "inherit" : "custom")
+                if (!checked && preferences?.sandbox?.inherited) {
+                  setAPIURL("")
+                  setAPIKey("")
+                  setRegionSelection("")
+                }
                 setError("")
               }}
               disabled={saving || deleting}
