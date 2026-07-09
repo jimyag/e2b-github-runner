@@ -939,17 +939,6 @@ function WorkflowJobExplorer({
           />
         ) : (
           <section key={workflow.id} className="grid gap-0">
-            <div className="flex items-center justify-between gap-3 px-4 pb-1 pt-2 pl-12">
-              <div className="min-w-0">
-                <h4 className="truncate text-xs font-semibold text-muted-foreground">{workflow.name}</h4>
-                <div className="mt-0.5 text-xs text-muted-foreground">
-                  Run {workflow.id} · {workflow.jobs.length} jobs
-                </div>
-              </div>
-              <span className={cn("text-xs font-medium", buildGroupStatusClasses(workflowStatus(workflow.jobs)).title)}>
-                {workflowStatus(workflow.jobs)}
-              </span>
-            </div>
             <div className="grid gap-0">
               {workflow.jobs.map((job) => (
                 <RunnerJobListItem key={job.id} job={job} selected={job.id === selectedJobID} onOpen={() => onOpenJob(job.id)} />
