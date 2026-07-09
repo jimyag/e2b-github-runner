@@ -157,10 +157,10 @@ export function UserDashboard({
     <main className="flex min-h-screen flex-col bg-background text-foreground">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 lg:px-6">
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground text-background">
-          <Github className="h-4 w-4" />
+          <Play className="h-5 w-5" />
         </div>
         <div>
-          <div className="text-sm font-semibold">Qiniu Runner</div>
+          <div className="text-sm font-semibold tracking-wide">Qiniu Runner</div>
         </div>
         <nav className="ml-3 hidden items-center gap-1 md:flex" aria-label="Workspace">
           <a href="/" className={navItemClass(page === "home")} onClick={(event) => goToPage(event, "home")}>
@@ -695,7 +695,7 @@ function PullRequestsPage({
   const selectedJob = allJobs.find((job) => job.id === selectedJobID) || allJobs[0] || null
   const effectiveSelectedJobID = selectedJob?.id || ""
   const workflows = workflowGroups(allJobs)
-  const selectedTitleClass = selected ? userBuildGroupTitleClass(selected) : ""
+  const selectedStatus = selected ? buildGroupStatus(selected) : null
 
   return (
     <>
@@ -762,8 +762,9 @@ function PullRequestsPage({
               </div>
               <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 lg:p-6">
                 <div className="shrink-0 border-b pb-4">
-                  <h3 className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-2xl font-semibold">
-                    <span className={selectedTitleClass}>{pullRequestHeading(selected, selectedJobGroup)}</span>
+                  <h3 className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xl font-semibold">
+                    <span>{pullRequestHeading(selected, selectedJobGroup)}</span>
+                    {selectedStatus ? <BuildGroupStatusBadge group={selected} status={selectedStatus} /> : null}
                   </h3>
                   <div className="mt-3 space-y-4 text-sm">
                     <section>
@@ -780,11 +781,13 @@ function PullRequestsPage({
                             <JobField
                               label="Job Name"
                               value={selectedJob.github_job_url ? (
-                                <a className="inline-flex min-w-0 items-center gap-1 text-primary hover:underline" href={selectedJob.github_job_url} target="_blank" rel="noreferrer">
+                                <a className={cn("inline-flex min-w-0 items-center gap-1 hover:underline", jobStatusTextClass(selectedJob.status))} href={selectedJob.github_job_url} target="_blank" rel="noreferrer">
                                   <span className="truncate">{runnerJobTitle(selectedJob)}</span>
                                   <ExternalLink className="h-3.5 w-3.5 shrink-0" />
                                 </a>
-                              ) : runnerJobTitle(selectedJob)}
+                              ) : (
+                                <span className={jobStatusTextClass(selectedJob.status)}>{runnerJobTitle(selectedJob)}</span>
+                              )}
                             />
                             <JobField
                               label="Workflow"
@@ -1559,15 +1562,49 @@ function BuildGroupListItem({
   )
 }
 
-function userBuildGroupTitleClass(group: BuildGroup) {
-  return buildGroupStatusClasses(buildGroupStatus(group)).title
-}
-
 function BuildGroupStatusIcon({ status }: { status: RunnerStatusSummary }) {
   const className = "h-4 w-4"
   if (status === "failed") return <X className={className} />
   if (status === "active") return <AlertCircle className={className} />
   return <Check className={className} />
+}
+
+function BuildGroupStatusBadge({ group, status }: { group: BuildGroup; status: RunnerStatusSummary }) {
+  if (status === "failed") {
+    return (
+      <Badge variant="danger" className="self-center">
+        <X />
+        {buildGroupStatusLabel(group, "failed")}
+      </Badge>
+    )
+  }
+  if (status === "active") {
+    return (
+      <Badge variant="warning" className="self-center">
+        <AlertCircle />
+        {buildGroupStatusLabel(group, "running")}
+      </Badge>
+    )
+  }
+  return (
+    <Badge variant="success" className="self-center">
+      <Check />
+      {buildGroupStatusLabel(group, "passed")}
+    </Badge>
+  )
+}
+
+function buildGroupStatusLabel(group: BuildGroup, statusText: "failed" | "running" | "passed") {
+  switch (group.kind) {
+    case "pull_request":
+      return `PR ${statusText}`
+    case "workflow_run":
+      return `run ${statusText}`
+    case "branch":
+      return `branch ${statusText}`
+    default:
+      return `job ${statusText}`
+  }
 }
 
 function buildGroupStatus(group: BuildGroup): RunnerStatusSummary {
@@ -1583,6 +1620,10 @@ function jobStatusSummary(status: RunnerState["status"]): RunnerStatusSummary {
   if (status === "failed") return "failed"
   if (status === "queued" || status === "creating" || status === "running" || status === "stopping") return "active"
   return "completed"
+}
+
+function jobStatusTextClass(status: RunnerState["status"]) {
+  return buildGroupStatusClasses(jobStatusSummary(status)).title
 }
 
 function jobStatusMark(status: RunnerState["status"]) {
