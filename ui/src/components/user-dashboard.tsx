@@ -6,6 +6,7 @@ import {
   ExternalLink,
   Github,
   KeyRound,
+  Loader2,
   LogOut,
   Monitor,
   Moon,
@@ -1565,7 +1566,7 @@ function BuildGroupListItem({
 function BuildGroupStatusIcon({ status }: { status: RunnerStatusSummary }) {
   const className = "h-4 w-4"
   if (status === "failed") return <X className={className} />
-  if (status === "active") return <AlertCircle className={className} />
+  if (status === "active") return <Loader2 className={cn(className, "animate-spin")} />
   return <Check className={className} />
 }
 
@@ -1581,7 +1582,7 @@ function BuildGroupStatusBadge({ group, status }: { group: BuildGroup; status: R
   if (status === "active") {
     return (
       <Badge variant="warning" className="self-center">
-        <AlertCircle />
+        <Loader2 className="animate-spin" />
         {buildGroupStatusLabel(group, "running")}
       </Badge>
     )
@@ -1635,7 +1636,7 @@ function jobStatusMark(status: RunnerState["status"]) {
     case "creating":
     case "running":
     case "stopping":
-      return <AlertCircle className={className} />
+      return <Loader2 className={cn(className, "animate-spin")} />
     default:
       return <Check className={className} />
   }
@@ -1651,9 +1652,9 @@ function buildGroupStatusClasses(status: RunnerStatusSummary) {
       }
     case "active":
       return {
-        bar: "bg-blue-500",
-        icon: "text-blue-500",
-        title: "text-blue-500",
+        bar: "bg-yellow-500",
+        icon: "text-yellow-700 dark:text-yellow-400",
+        title: "text-yellow-700 dark:text-yellow-400",
       }
     default:
       return {
