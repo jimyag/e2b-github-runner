@@ -103,9 +103,13 @@ function normalizeSandboxAPIURL(value: string) {
   return value.trim().replace(/\/+$/, "")
 }
 
-function resolveSandboxRegionAPIURL(value: string) {
+function findSandboxRegionByAPIURL(value: string) {
   const normalized = normalizeSandboxAPIURL(value)
-  const matchedRegion = sandboxRegions.find((region) => normalizeSandboxAPIURL(region.apiURL) === normalized)
+  return sandboxRegions.find((region) => normalizeSandboxAPIURL(region.apiURL) === normalized)
+}
+
+function resolveSandboxRegionAPIURL(value: string) {
+  const matchedRegion = findSandboxRegionByAPIURL(value)
   return matchedRegion?.apiURL ?? value
 }
 
@@ -596,6 +600,7 @@ function SandboxAPIKeyCard({
   const [apiURL, setAPIURL] = useState("")
   const [apiKey, setAPIKey] = useState("")
   const [credentialMode, setCredentialMode] = useState<"custom" | "inherit">("custom")
+  const [regionSelection, setRegionSelection] = useState("")
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false)
@@ -603,12 +608,15 @@ function SandboxAPIKeyCard({
   const configured = preferences?.sandbox?.api_key?.configured ?? false
   const customConfigured = configured && !preferences?.sandbox?.inherited
   const updatedAt = preferences?.sandbox?.api_key?.updated_at
-  const selectedRegion = sandboxRegions.find((region) => normalizeSandboxAPIURL(region.apiURL) === normalizeSandboxAPIURL(apiURL))
-  const customAPIURL = apiURL.trim() && !selectedRegion ? apiURL.trim() : ""
+  const selectedRegion = findSandboxRegionByAPIURL(apiURL)
+  const customAPIURL = regionSelection === customSandboxRegionID ? apiURL.trim() : ""
 
   useEffect(() => {
     const savedAPIURL = preferences?.sandbox?.api_url ?? ""
-    setAPIURL(resolveSandboxRegionAPIURL(savedAPIURL))
+    const resolvedAPIURL = resolveSandboxRegionAPIURL(savedAPIURL)
+    const savedRegion = findSandboxRegionByAPIURL(resolvedAPIURL)
+    setAPIURL(resolvedAPIURL)
+    setRegionSelection(savedRegion?.id ?? (savedAPIURL.trim() ? customSandboxRegionID : ""))
   }, [preferences?.sandbox?.api_url])
 
   useEffect(() => {
@@ -706,12 +714,18 @@ function SandboxAPIKeyCard({
           <div className="grid min-w-0 gap-1.5">
             <Label htmlFor="sandbox-api-region">Region</Label>
             <Select
-              value={selectedRegion?.id ?? (customAPIURL ? customSandboxRegionID : "")}
+              value={regionSelection}
               onValueChange={(regionID) => {
                 if (regionID === customSandboxRegionID) {
+                  setRegionSelection(customSandboxRegionID)
+                  if (selectedRegion) {
+                    setAPIURL("")
+                  }
                   return
                 }
-                setAPIURL(sandboxRegions.find((region) => region.id === regionID)?.apiURL ?? "")
+                const region = sandboxRegions.find((region) => region.id === regionID)
+                setRegionSelection(region?.id ?? "")
+                setAPIURL(region?.apiURL ?? "")
               }}
               disabled={saving || deleting || credentialMode === "inherit"}
             >
@@ -725,14 +739,22 @@ function SandboxAPIKeyCard({
                     <span className="text-muted-foreground">{region.id}</span>
                   </SelectItem>
                 ))}
-                {customAPIURL ? (
-                  <SelectItem value={customSandboxRegionID}>
-                    <span>Custom endpoint</span>
-                    <span className="text-muted-foreground">{customAPIURL}</span>
-                  </SelectItem>
-                ) : null}
+                <SelectItem value={customSandboxRegionID}>
+                  <span>Custom endpoint</span>
+                  {customAPIURL ? <span className="text-muted-foreground">{customAPIURL}</span> : null}
+                </SelectItem>
               </SelectContent>
             </Select>
+            {regionSelection === customSandboxRegionID && credentialMode === "custom" ? (
+              <Input
+                className="mt-1.5"
+                value={apiURL}
+                onChange={(event) => setAPIURL(event.target.value)}
+                placeholder="https://sandbox.example.test"
+                disabled={saving || deleting}
+                autoComplete="off"
+              />
+            ) : null}
           </div>
 
           <div className="grid min-w-0 gap-1.5">
