@@ -114,6 +114,7 @@ func (s *Server) sweepOnce(ctx context.Context) {
 		return
 	}
 	now := time.Now().UTC()
+	stoppedRunning := make(map[string]struct{})
 	for _, st := range states {
 		switch st.Status {
 		case state.StatusCreating:
@@ -122,15 +123,11 @@ func (s *Server) sweepOnce(ctx context.Context) {
 				s.retryOrFail(st, "sweeper_create_timeout", fmt.Errorf("runner create timed out"))
 			}
 		case state.StatusRunning:
-			if s.shouldStopIdleRunner(st, now) {
-				s.logger.Info("sweeper stopping idle runner", "id", st.ID, "sandbox_id", st.SandboxID, "running_at", st.RunningAt, "idle_timeout", s.cfg.RunnerIdleTimeout)
-				s.store.AppendLog(st.ID, "control.log", []byte("sweeper stopping idle runner that never accepted a job\n"))
-				s.stopIfExists(ctx, st.ID, github.WorkflowJob{})
-				continue
-			}
 			if !st.RunningAt.IsZero() && now.Sub(st.RunningAt) > s.cfg.SandboxTimeout {
 				s.logger.Info("sweeper stopping timed out runner", "id", st.ID, "sandbox_id", st.SandboxID, "running_at", st.RunningAt)
 				s.failAndStopRunner(ctx, st.ID, "sandbox_timeout", "timeout", "runner exceeded sandbox timeout")
+				stoppedRunning[st.ID] = struct{}{}
+				continue
 			}
 		case state.StatusStopping:
 			if !st.NextRetryAt.IsZero() && now.Before(st.NextRetryAt) {
@@ -140,6 +137,27 @@ func (s *Server) sweepOnce(ctx context.Context) {
 				s.logger.Info("sweeper retrying timed out stop", "id", st.ID, "sandbox_id", st.SandboxID, "stopping_at", st.StoppingAt)
 				s.stopIfExists(ctx, st.ID, github.WorkflowJob{})
 			}
+		}
+	}
+	for _, st := range states {
+		if st.Status != state.StatusRunning || !s.shouldStopIdleRunner(st, now) {
+			continue
+		}
+		if _, ok := stoppedRunning[st.ID]; ok {
+			continue
+		}
+		busy, err := s.githubRunnerBusy(ctx, st)
+		if err != nil {
+			s.logger.Warn("sweeper skipped idle runner stop because github runner status could not be verified", "id", st.ID, "runner_name", st.RunnerName, "error", err)
+			s.store.AppendLog(st.ID, "control.log", []byte("sweeper skipped idle stop because github runner status could not be verified: "+err.Error()+"\n"))
+		} else if busy {
+			s.logger.Info("sweeper keeping idle-timed-out runner because github reports it is busy", "id", st.ID, "runner_name", st.RunnerName)
+			s.store.AppendLog(st.ID, "control.log", []byte("sweeper kept runner because github reports it is running a job\n"))
+			s.markRunnerJobStarted(st.ID)
+		} else {
+			s.logger.Info("sweeper stopping idle runner", "id", st.ID, "sandbox_id", st.SandboxID, "running_at", st.RunningAt, "idle_timeout", s.cfg.RunnerIdleTimeout)
+			s.store.AppendLog(st.ID, "control.log", []byte("sweeper stopping idle runner that never accepted a job\n"))
+			s.stopIfExists(ctx, st.ID, github.WorkflowJob{})
 		}
 	}
 }
@@ -152,6 +170,25 @@ func (s *Server) shouldStopIdleRunner(st state.RunnerState, now time.Time) bool 
 		return false
 	}
 	return now.Sub(st.RunningAt) > s.cfg.RunnerIdleTimeout
+}
+
+func (s *Server) githubRunnerBusy(ctx context.Context, st state.RunnerState) (bool, error) {
+	runnerName := strings.TrimSpace(st.RunnerName)
+	if runnerName == "" || strings.TrimSpace(st.RepositoryFullName) == "" {
+		return false, nil
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, workflowJobLookupTimeout)
+	defer cancel()
+	runners, err := s.gh.ListRunners(lookupCtx, st.RepositoryFullName, st.RunnerGroup)
+	if err != nil {
+		return false, err
+	}
+	for _, runner := range runners {
+		if runner.Name == runnerName {
+			return runner.Busy, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Server) reconcileOnce(ctx context.Context) {

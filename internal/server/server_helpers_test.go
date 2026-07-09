@@ -1103,6 +1103,59 @@ func TestRunnerExitedWithNonZeroExitCodeTransitionsToFailed(t *testing.T) {
 	}
 }
 
+func TestRunnerExitedKeepsSandboxWhenGitHubRunnerIsBusy(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/runners" {
+			w.Write([]byte(`{"runners":[{"id":99,"name":"e2b-exited-busy","status":"online","busy":true}]}`))
+			return
+		}
+		t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "exited-busy",
+		Source:             "test",
+		Labels:             []string{"self-hosted"},
+		RunnerName:         "e2b-exited-busy",
+		RepositoryFullName: "o/r",
+		ProfileName:        "default",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-exited-busy"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	srv.runnerExited("exited-busy", sandboxrunner.ExitResult{ExitCode: -1, Error: "deadline_exceeded: context deadline exceeded"}, nil)
+
+	got, err := store.ReadState("exited-busy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusRunning {
+		t.Fatalf("runnerExited busy: expected status=running, got %s", got.Status)
+	}
+	if got.LastErrorCode != "github_runner_busy" || !got.LastErrorRetryable {
+		t.Fatalf("runnerExited busy: expected retryable busy marker, got code=%q retryable=%v", got.LastErrorCode, got.LastErrorRetryable)
+	}
+	if got.AssignedJobName != runnerJobStartedMarker {
+		t.Fatalf("runnerExited busy: expected job started marker, got %q", got.AssignedJobName)
+	}
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("runnerExited busy: expected sandbox to remain running, got %d stops", fake.stoppedCount())
+	}
+}
+
 // ---------- reconcileOnce ----------
 
 func TestReconcileOnceSignalsQueueForQueuedRunner(t *testing.T) {

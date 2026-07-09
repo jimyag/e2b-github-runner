@@ -2848,6 +2848,240 @@ func TestSweeperStopsIdleRunnerThatNeverAcceptedJob(t *testing.T) {
 	}
 }
 
+func TestSweeperKeepsIdleTimedOutRunnerWhenGitHubRunnerIsBusy(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/orgs/o/actions/runners" {
+			w.Write([]byte(`{"runners":[{"id":99,"name":"e2b-busy-on-github","status":"online","busy":true}]}`))
+			return
+		}
+		t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	if _, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "busy-on-github",
+		Source:             "test",
+		RepositoryFullName: "o/r",
+		Labels:             []string{"self-hosted", "e2b"},
+		ProfileName:        "default",
+		RunnerGroup:        "default",
+		RunnerName:         "e2b-busy-on-github",
+	}, nil); err != nil {
+		t.Fatal(err)
+	} else {
+		st.Status = state.StatusRunning
+		st.SandboxID = "sb-busy-on-github"
+		st.ProcessPID = 42
+		st.RunningAt = time.Now().Add(-10 * time.Minute).UTC()
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake := &fakeSandbox{}
+	srv := newTestServerWithLimit(t, store, ghServer.URL, fake, 10)
+	srv.cfg.RunnerIdleTimeout = time.Minute
+	srv.sweepOnce(t.Context())
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("expected sweeper to keep github-busy runner, got %d stops", fake.stoppedCount())
+	}
+	got, err := store.ReadState("busy-on-github")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusRunning {
+		t.Fatalf("expected runner to stay running, got %s", got.Status)
+	}
+	if got.AssignedJobName != runnerJobStartedMarker {
+		t.Fatalf("expected github busy runner to be marked started, got assigned job name %q", got.AssignedJobName)
+	}
+}
+
+func TestSweeperStillStopsSandboxTimedOutRunnerWhenGitHubBusyCheckFails(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/orgs/o/actions/runners" {
+			http.Error(w, `{"message":"server error"}`, http.StatusInternalServerError)
+			return
+		}
+		t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	if _, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "timeout-after-busy-check-error",
+		Source:             "test",
+		RepositoryFullName: "o/r",
+		Labels:             []string{"self-hosted", "e2b"},
+		ProfileName:        "default",
+		RunnerGroup:        "default",
+		RunnerName:         "e2b-timeout-after-busy-check-error",
+	}, nil); err != nil {
+		t.Fatal(err)
+	} else {
+		st.Status = state.StatusRunning
+		st.SandboxID = "sb-timeout-after-busy-check-error"
+		st.ProcessPID = 42
+		st.RunningAt = time.Now().Add(-10 * time.Minute).UTC()
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake := &fakeSandbox{}
+	srv := newTestServerWithLimit(t, store, ghServer.URL, fake, 10)
+	srv.cfg.RunnerIdleTimeout = time.Minute
+	srv.cfg.SandboxTimeout = time.Minute
+	srv.sweepOnce(t.Context())
+	if fake.stoppedCount() != 1 {
+		t.Fatalf("expected sweeper to stop sandbox-timed-out runner, got %d stops", fake.stoppedCount())
+	}
+	got, err := store.ReadState("timeout-after-busy-check-error")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusStopping || got.FailureStage != "sandbox_timeout" || got.FailureReason != "timeout" {
+		t.Fatalf("expected sandbox timeout failure, got %#v", got)
+	}
+}
+
+func TestSweeperHandlesSandboxTimeoutBeforeIdleBusyLookup(t *testing.T) {
+	lookupStarted := make(chan struct{})
+	releaseLookup := make(chan struct{})
+	var closeLookupStarted sync.Once
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method != http.MethodGet || r.URL.Path != "/orgs/o/actions/runners" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		closeLookupStarted.Do(func() { close(lookupStarted) })
+		select {
+		case <-releaseLookup:
+		case <-r.Context().Done():
+			return
+		}
+		w.Write([]byte(`{"runners":[]}`))
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	if _, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:          "sandbox-timeout-before-idle",
+		Source:      "test",
+		Labels:      []string{"self-hosted", "e2b"},
+		ProfileName: "default",
+	}, nil); err != nil {
+		t.Fatal(err)
+	} else {
+		st.Status = state.StatusRunning
+		st.SandboxID = "sb-sandbox-timeout-before-idle"
+		st.ProcessPID = 42
+		st.RunningAt = time.Now().Add(-10 * time.Minute).UTC()
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(time.Millisecond)
+	if _, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "idle-before-timeout",
+		Source:             "test",
+		RepositoryFullName: "o/r",
+		Labels:             []string{"self-hosted", "e2b"},
+		ProfileName:        "default",
+		RunnerGroup:        "default",
+		RunnerName:         "e2b-idle-before-timeout",
+	}, nil); err != nil {
+		t.Fatal(err)
+	} else {
+		st.Status = state.StatusRunning
+		st.SandboxID = "sb-idle-before-timeout"
+		st.ProcessPID = 42
+		st.RunningAt = time.Now().Add(-2 * time.Minute).UTC()
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fake := &fakeSandbox{}
+	srv := newTestServerWithLimit(t, store, ghServer.URL, fake, 10)
+	srv.cfg.RunnerIdleTimeout = time.Minute
+	srv.cfg.SandboxTimeout = 5 * time.Minute
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		srv.sweepOnce(ctx)
+	}()
+	select {
+	case <-lookupStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for idle github runner lookup")
+	}
+	if fake.stoppedCount() != 1 {
+		t.Fatalf("expected sandbox timeout to be handled before idle github lookup, got %d stops", fake.stoppedCount())
+	}
+	close(releaseLookup)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for sweeper")
+	}
+}
+
+func TestSweeperStillStopsSandboxTimedOutRunnerWhenGitHubRunnerIsBusy(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/orgs/o/actions/runners":
+			w.Write([]byte(`{"runners":[{"id":99,"name":"e2b-busy-timeout","status":"online","busy":true}]}`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/orgs/o/actions/runners/99":
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			w.Write([]byte(`{"message":"Bad request - Runner e2b-busy-timeout is currently running a job and cannot be deleted.","status":"422"}`))
+		default:
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	if _, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "busy-timeout",
+		Source:             "test",
+		RepositoryFullName: "o/r",
+		Labels:             []string{"self-hosted", "e2b"},
+		ProfileName:        "default",
+		RunnerGroup:        "default",
+		RunnerName:         "e2b-busy-timeout",
+	}, nil); err != nil {
+		t.Fatal(err)
+	} else {
+		st.Status = state.StatusRunning
+		st.SandboxID = "sb-busy-timeout"
+		st.ProcessPID = 42
+		st.RunningAt = time.Now().Add(-10 * time.Minute).UTC()
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake := &fakeSandbox{}
+	srv := newTestServerWithLimit(t, store, ghServer.URL, fake, 10)
+	srv.cfg.RunnerIdleTimeout = time.Minute
+	srv.cfg.SandboxTimeout = time.Minute
+	srv.sweepOnce(t.Context())
+	if fake.stoppedCount() != 1 {
+		t.Fatalf("expected sweeper to stop sandbox-timed-out busy runner, got %d stops", fake.stoppedCount())
+	}
+	got, err := store.ReadState("busy-timeout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusStopping || got.FailureStage != "sandbox_timeout" || got.FailureReason != "timeout" {
+		t.Fatalf("expected sandbox timeout cleanup retry, got %#v", got)
+	}
+}
+
 func TestSweeperKeepsRunnerAfterJobStarted(t *testing.T) {
 	store := state.New(t.TempDir())
 	if _, st, err := store.CreateRequest(state.RunnerRequest{

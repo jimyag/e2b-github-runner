@@ -272,7 +272,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
                 </CardContent>
               </Card>
             </TabsContent>
-            <TabsContent value="terminal" className="mt-4">
+            <TabsContent value="terminal" forceMount className="mt-4 data-[state=inactive]:hidden">
               <Card className="gap-0 py-0">
                 <CardHeader className="border-b px-5 py-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">

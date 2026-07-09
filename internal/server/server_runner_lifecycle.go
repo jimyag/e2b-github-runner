@@ -456,16 +456,35 @@ func (s *Server) failStart(id string, st state.RunnerState, stage string, err er
 
 func (s *Server) runnerExited(id string, result sandboxrunner.ExitResult, err error) {
 	unlock := s.lockRunner(id)
-	defer unlock()
 
 	st, readErr := s.store.ReadState(id)
 	if readErr != nil {
+		unlock()
 		s.logger.Error("read state after runner exit", "id", id, "error", readErr)
 		return
 	}
 	if st.Status != state.StatusCreating && st.Status != state.StatusRunning {
+		unlock()
 		return
 	}
+	if shouldCheckGitHubBusyAfterRunnerExit(result, err) {
+		unlock()
+		if s.keepRunnerRunningWhenGitHubBusy(id, st, result, err) {
+			return
+		}
+		unlock = s.lockRunner(id)
+		st, readErr = s.store.ReadState(id)
+		if readErr != nil {
+			unlock()
+			s.logger.Error("read state after runner exit busy check", "id", id, "error", readErr)
+			return
+		}
+		if st.Status != state.StatusCreating && st.Status != state.StatusRunning {
+			unlock()
+			return
+		}
+	}
+	defer unlock()
 	if err != nil {
 		st.Status = state.StatusFailed
 		st.Error = err.Error()
@@ -524,6 +543,62 @@ func (s *Server) runnerExited(id string, result sandboxrunner.ExitResult, err er
 	}
 	s.writeStateOrLog(id, st, "write exited state")
 	s.refreshMetrics()
+}
+
+func shouldCheckGitHubBusyAfterRunnerExit(result sandboxrunner.ExitResult, err error) bool {
+	if err == nil && result.ExitCode == 0 {
+		return false
+	}
+	return true
+}
+
+func (s *Server) keepRunnerRunningWhenGitHubBusy(id string, st state.RunnerState, result sandboxrunner.ExitResult, err error) bool {
+	busy, busyErr := s.githubRunnerBusy(context.Background(), st)
+	if busyErr != nil {
+		s.logger.Warn("could not verify github runner busy state after runner exit", "id", id, "runner_name", st.RunnerName, "error", busyErr)
+		s.store.AppendLog(id, "control.log", []byte("could not verify github runner busy state after runner exit: "+busyErr.Error()+"\n"))
+		return false
+	}
+	if !busy {
+		return false
+	}
+	unlock := s.lockRunner(id)
+	defer unlock()
+	latest, readErr := s.store.ReadState(id)
+	if readErr != nil {
+		s.logger.Error("read state after busy runner exit check", "id", id, "error", readErr)
+		return false
+	}
+	if latest.Status != state.StatusCreating && latest.Status != state.StatusRunning {
+		return true
+	}
+	if latest.RunnerName != st.RunnerName || latest.SandboxID != st.SandboxID {
+		s.logger.Info("busy runner exit ignored because runner identity changed", "id", id, "runner_name", st.RunnerName, "sandbox_id", st.SandboxID)
+		return true
+	}
+	message := "runner process stream ended while GitHub still reports the runner is busy"
+	if err != nil {
+		message += ": " + err.Error()
+	} else {
+		message += ": " + runnerExitMessage(result)
+	}
+	latest.Status = state.StatusRunning
+	latest.LastErrorCode = "github_runner_busy"
+	latest.LastErrorMessage = message
+	latest.LastErrorRetryable = true
+	latest.Error = message
+	if latest.AssignedJobName == "" {
+		latest.AssignedJobName = runnerJobStartedMarker
+	}
+	if writeErr := s.store.WriteState(latest); writeErr != nil {
+		s.logger.Error("write running state after busy runner exit", "id", id, "error", writeErr)
+		s.store.AppendLog(id, "control.log", []byte("write running state after busy runner exit failed: "+writeErr.Error()+"\n"))
+		return false
+	}
+	s.logger.Warn("runner process stream ended while github runner is busy; keeping sandbox running", "id", id, "runner_name", latest.RunnerName, "sandbox_id", latest.SandboxID, "error", latest.Error)
+	s.store.AppendLog(id, "control.log", []byte(message+"; keeping sandbox running\n"))
+	s.refreshMetrics()
+	return true
 }
 
 func (s *Server) cleanupSandboxAfterExit(id string, st state.RunnerState) error {

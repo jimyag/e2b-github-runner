@@ -1167,7 +1167,7 @@ function RunnerJobLogPanel({
             )}
           />
         </TabsContent>
-        <TabsContent value="web-console" className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden pt-2">
+        <TabsContent value="web-console" forceMount className="m-0 flex min-h-0 flex-1 flex-col overflow-hidden pt-2 data-[state=inactive]:hidden">
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-y border-emerald-500/15 bg-[#111318] text-slate-100 shadow-[inset_3px_0_0_theme(colors.emerald.500/0.35)]">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-900/95 px-4 py-3">
               <div className="min-w-0">
