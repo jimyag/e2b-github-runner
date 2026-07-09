@@ -236,7 +236,7 @@ func (s *Server) handleUserPreferences(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	response, err := s.accountPreferencesResponse(scope, account.ID)
+	response, err := s.accountPreferencesResponse(scope)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -324,12 +324,16 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.recordAudit("github:"+session.Subject, "sandbox.configure", scope.Type, strconv.FormatInt(scope.ID, 10), map[string]any{
+	auditPayload := map[string]any{
 		"mode":           mode,
 		"api_url":        value.APIURL,
 		"api_key_update": apiKey != "",
-	})
-	response, err := s.accountPreferencesResponse(scope, account.ID)
+	}
+	if mode == sandboxPreferenceModeInherit {
+		auditPayload["source_account_id"] = value.SourceAccountID
+	}
+	s.recordAudit("github:"+session.Subject, "sandbox.configure", scope.Type, strconv.FormatInt(scope.ID, 10), auditPayload)
+	response, err := s.accountPreferencesResponse(scope)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -352,7 +356,7 @@ func (s *Server) handleUserDeleteSandboxAPIKey(w http.ResponseWriter, r *http.Re
 		return
 	}
 	s.recordAudit("github:"+session.Subject, "sandbox_api_key.delete", scope.Type, strconv.FormatInt(scope.ID, 10), nil)
-	response, err := s.accountPreferencesResponse(scope, account.ID)
+	response, err := s.accountPreferencesResponse(scope)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -360,7 +364,7 @@ func (s *Server) handleUserDeleteSandboxAPIKey(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (s *Server) accountPreferencesResponse(scope accountPreferenceScope, accountID int64) (accountPreferencesResponse, error) {
+func (s *Server) accountPreferencesResponse(scope accountPreferenceScope) (accountPreferencesResponse, error) {
 	var response accountPreferencesResponse
 	preference, err := s.store.GetAccountPreference(scope.Type, scope.ID, accountPreferenceNamespaceSandbox, accountPreferenceKeySandboxService)
 	if err != nil {
