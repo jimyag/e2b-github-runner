@@ -240,6 +240,7 @@ type RunnerCatalogStore interface {
 
 type IdentityStore interface {
 	GetAccountByOAuthIdentity(provider, subject string) (Account, OAuthIdentity, error)
+	GetOAuthIdentityForAccount(accountID int64, provider string) (OAuthIdentity, error)
 	EnsureAccountForOAuthIdentity(identity OAuthIdentity, role string) (Account, OAuthIdentity, error)
 	UpsertAccountForOAuthIdentity(identity OAuthIdentity, role string) (Account, OAuthIdentity, error)
 	LinkOAuthIdentityToAccount(accountID int64, identity OAuthIdentity) (Account, OAuthIdentity, error)

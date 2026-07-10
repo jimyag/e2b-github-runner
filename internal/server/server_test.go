@@ -1184,6 +1184,152 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	}
 }
 
+func TestUserSandboxInheritanceRequiresExplicitSourceReplacement(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	if _, _, err := store.UpsertAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "alice-id", OAuthLogin: "alice"}, "user"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.UpsertAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "bob-id", OAuthLogin: "bob"}, "user"); err != nil {
+		t.Fatal(err)
+	}
+
+	type sandboxPreferences struct {
+		Sandbox struct {
+			Mode                   string `json:"mode"`
+			APIURL                 string `json:"api_url"`
+			Inherited              bool   `json:"inherited"`
+			SourceAccountID        int64  `json:"source_account_id"`
+			SourceAccountLogin     string `json:"source_account_login"`
+			SourceIsCurrentAccount bool   `json:"source_is_current_account"`
+			APIKey                 struct {
+				Configured bool `json:"configured"`
+			} `json:"api_key"`
+		} `json:"sandbox"`
+	}
+
+	saveAccountDefault := func(subject, login, apiURL, apiKey string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "/user/preferences/sandbox", strings.NewReader(fmt.Sprintf(`{"api_url":%q,"api_key":%q}`, apiURL, apiKey)))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(testSessionCookie(subject, login, "user"))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("save %s account defaults: status=%d body=%s", login, rec.Code, rec.Body.String())
+		}
+	}
+
+	saveAccountDefault("alice-id", "alice", "https://alice-sandbox.example.test", "alice-key")
+	saveAccountDefault("bob-id", "bob", "https://bob-sandbox.example.test", "bob-key")
+	alice, _, err := store.GetAccountByOAuthIdentity("github", "alice-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, _, err := store.GetAccountByOAuthIdentity("github", "bob-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliceInstallation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{AccountID: alice.ID, InstallationID: 987, AccountLogin: "example-org"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobInstallation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{AccountID: bob.ID, InstallationID: 987, AccountLogin: "example-org"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", aliceInstallation.ID), strings.NewReader(`{"mode":"inherit"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("alice-id", "alice", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("alice enables inheritance: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/user/preferences?installation_id=%d", bobInstallation.ID), nil)
+	req.AddCookie(testSessionCookie("bob-id", "bob", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bob reads inherited preferences: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var preferences sandboxPreferences
+	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
+		t.Fatal(err)
+	}
+	if preferences.Sandbox.SourceAccountID != alice.ID || preferences.Sandbox.SourceAccountLogin != "alice" || preferences.Sandbox.SourceIsCurrentAccount || preferences.Sandbox.APIURL != "https://alice-sandbox.example.test" {
+		t.Fatalf("expected bob to see alice as the inherited source: %#v", preferences)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", bobInstallation.ID), strings.NewReader(`{"mode":"inherit"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("bob-id", "bob", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bob preserves inherited source: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
+		t.Fatal(err)
+	}
+	if preferences.Sandbox.SourceAccountID != alice.ID || preferences.Sandbox.SourceIsCurrentAccount {
+		t.Fatalf("expected ordinary inherit save to preserve alice as source: %#v", preferences)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", bobInstallation.ID), strings.NewReader(`{"mode":"inherit","replace_inherited_source":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("bob-id", "bob", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bob replaces inherited source: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
+		t.Fatal(err)
+	}
+	if preferences.Sandbox.SourceAccountID != bob.ID || preferences.Sandbox.SourceAccountLogin != "bob" || !preferences.Sandbox.SourceIsCurrentAccount || preferences.Sandbox.APIURL != "https://bob-sandbox.example.test" {
+		t.Fatalf("expected explicit replacement to use bob as source: %#v", preferences)
+	}
+}
+
+func TestUserSandboxInheritanceRejectsUnconfiguredSourceAccount(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	if _, _, err := store.UpsertAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "alice-id", OAuthLogin: "alice"}, "user"); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/preferences", nil)
+	req.AddCookie(testSessionCookie("alice-id", "alice", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create alice account: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	alice, _, err := store.GetAccountByOAuthIdentity("github", "alice-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{AccountID: alice.ID, InstallationID: 987, AccountLogin: "example-org"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", installation.ID), strings.NewReader(`{"mode":"inherit"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("alice-id", "alice", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "configure your account Sandbox service first") {
+		t.Fatalf("expected unconfigured inherited source to be rejected: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := store.GetAccountPreference(state.AccountScopeTypeGitHubInstall, installation.InstallationID, "sandbox", "service"); err != state.ErrNotFound {
+		t.Fatalf("expected rejected inheritance not to save an org preference, got %v", err)
+	}
+}
+
 func TestSandboxServiceUsesGitHubInstallationPreferences(t *testing.T) {
 	store := state.New(t.TempDir())
 	cfg := config.Config{

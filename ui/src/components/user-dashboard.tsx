@@ -146,7 +146,7 @@ export function UserDashboard({
   authorizedRepositories: Record<number, string[]>
   loadingRepositoriesFor: number | null
   onLoadAuthorizedRepositories: (id: number) => void
-  onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit") => Promise<void>
+  onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   onNavigate: (page: UserPage) => void
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
@@ -388,7 +388,7 @@ function AccountsPage({
   loadingRepositoriesFor: number | null
   route: AccountSettingsRoute
   onLoadAuthorizedRepositories: (id: number) => void
-  onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit") => Promise<void>
+  onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   currentLogin?: string
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
@@ -555,7 +555,7 @@ function AccountsPage({
                   <SandboxAPIKeyCard
                     preferences={userPreferences}
                     allowInheritance={Boolean(preferenceInstallationID)}
-                    onSave={(apiURL, apiKey, mode) => onSaveSandboxConfig(apiURL, apiKey, preferenceInstallationID, mode)}
+                    onSave={(apiURL, apiKey, mode, replaceInheritedSource) => onSaveSandboxConfig(apiURL, apiKey, preferenceInstallationID, mode, replaceInheritedSource)}
                     onDelete={() => onDeleteSandboxAPIKey(preferenceInstallationID)}
                   />
                 </TabsContent>
@@ -594,7 +594,7 @@ function SandboxAPIKeyCard({
 }: {
   preferences: UserPreferences | null
   allowInheritance?: boolean
-  onSave: (apiURL: string, apiKey: string, mode?: "custom" | "inherit") => Promise<void>
+  onSave: (apiURL: string, apiKey: string, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDelete: () => Promise<void>
 }) {
   const [apiURL, setAPIURL] = useState("")
@@ -604,9 +604,13 @@ function SandboxAPIKeyCard({
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false)
+  const [replaceSourceConfirmOpen, setReplaceSourceConfirmOpen] = useState(false)
   const [error, setError] = useState("")
   const configured = preferences?.sandbox?.api_key?.configured ?? false
   const customConfigured = configured && !preferences?.sandbox?.inherited
+  const inherited = credentialMode === "inherit" && Boolean(preferences?.sandbox?.inherited)
+  const sourceIsCurrentAccount = Boolean(preferences?.sandbox?.source_is_current_account)
+  const sourceAccountLogin = preferences?.sandbox?.source_account_login?.trim()
   const updatedAt = preferences?.sandbox?.api_key?.updated_at
   const selectedRegion = findSandboxRegionByAPIURL(apiURL)
   const customAPIURL = regionSelection === customSandboxRegionID ? apiURL.trim() : ""
@@ -674,6 +678,20 @@ function SandboxAPIKeyCard({
     }
   }
 
+  const replaceInheritedSource = async () => {
+    setSaving(true)
+    setError("")
+    try {
+      await onSave("", "", "inherit", true)
+      setAPIKey("")
+      setReplaceSourceConfirmOpen(false)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Failed to use your account credentials.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <Card className="gap-0 rounded-lg py-0">
       <form className="p-3" onSubmit={submit}>
@@ -710,7 +728,15 @@ function SandboxAPIKeyCard({
               Use account default credentials
             </Label>
             <span className="text-sm text-muted-foreground">
-              {credentialMode === "inherit" ? "This account uses the signed-in account Sandbox service settings." : "This account uses its own Sandbox service settings."}
+              {credentialMode !== "inherit"
+                ? "This organization uses its own Sandbox service settings."
+                : !preferences?.sandbox?.inherited
+                  ? "Your account default credentials will be used after saving."
+                : sourceIsCurrentAccount
+                  ? "Using Sandbox credentials provided by your account."
+                  : sourceAccountLogin
+                    ? `Using Sandbox credentials provided by @${sourceAccountLogin}.`
+                    : "Using Sandbox credentials provided by another connected owner."}
             </span>
           </div>
         ) : null}
@@ -776,10 +802,26 @@ function SandboxAPIKeyCard({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="submit" disabled={saving || deleting || (credentialMode === "custom" && (!apiURL.trim() || (!customConfigured && !apiKey.trim())))}>
-              <ShieldCheck className="h-4 w-4" />
-              {saving ? "Saving" : configured ? "Save changes" : "Save settings"}
-            </Button>
+            {!inherited ? (
+              <Button type="submit" disabled={saving || deleting || (credentialMode === "custom" && (!apiURL.trim() || (!customConfigured && !apiKey.trim())))}>
+                <ShieldCheck className="h-4 w-4" />
+                {saving ? "Saving" : configured ? "Save changes" : "Save settings"}
+              </Button>
+            ) : null}
+            {inherited && !sourceIsCurrentAccount ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setError("")
+                  setReplaceSourceConfirmOpen(true)
+                }}
+                disabled={saving || deleting}
+              >
+                <KeyRound className="h-4 w-4" />
+                Use my account credentials
+              </Button>
+            ) : null}
             {customConfigured && credentialMode === "custom" ? (
               <Button type="button" variant="outline" onClick={() => setRemoveConfirmOpen(true)} disabled={deleting || saving}>
                 <X className="h-4 w-4" />
@@ -812,6 +854,29 @@ function SandboxAPIKeyCard({
             <Button type="button" variant="destructive" onClick={remove} disabled={deleting}>
               <X className="h-4 w-4" />
               {deleting ? "Removing" : "Remove API Key"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={replaceSourceConfirmOpen} onOpenChange={(open) => !saving && setReplaceSourceConfirmOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Use your account credentials?</DialogTitle>
+            <DialogDescription>
+              {sourceAccountLogin ? `This replaces the Sandbox credentials provided by @${sourceAccountLogin}. ` : "This replaces the current Sandbox credentials. "}
+              The change applies to all Runner jobs in this organization, and your account must have a complete Sandbox service configuration.
+            </DialogDescription>
+          </DialogHeader>
+          {error ? <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline" disabled={saving}>
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button type="button" onClick={replaceInheritedSource} disabled={saving}>
+              <KeyRound className="h-4 w-4" />
+              {saving ? "Switching" : "Use my credentials"}
             </Button>
           </DialogFooter>
         </DialogContent>

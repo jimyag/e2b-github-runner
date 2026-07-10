@@ -288,6 +288,28 @@ func TestUpsertAccountForOAuthIdentityMaintainsRoleByOAuthIdentity(t *testing.T)
 	}
 }
 
+func TestGetOAuthIdentityForAccountByProvider(t *testing.T) {
+	store := New(t.TempDir())
+	account, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "octocat"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.LinkOAuthIdentityToAccount(account.ID, OAuthIdentity{OAuthProvider: "gitlab", OAuthSubject: "abcde", OAuthLogin: "octocat-gitlab"}); err != nil {
+		t.Fatal(err)
+	}
+
+	identity, err := store.GetOAuthIdentityForAccount(account.ID, " GITHUB ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.AccountID != account.ID || identity.OAuthProvider != "github" || identity.OAuthLogin != "octocat" {
+		t.Fatalf("unexpected github identity: %#v", identity)
+	}
+	if _, err := store.GetOAuthIdentityForAccount(account.ID, "missing"); err != ErrNotFound {
+		t.Fatalf("expected missing provider identity to return ErrNotFound, got %v", err)
+	}
+}
+
 func TestEnsureAccountForOAuthIdentityCreatesDefaultWithoutOverwritingExistingRole(t *testing.T) {
 	store := New(t.TempDir())
 	createdAccount, createdIdentity, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "octocat"}, "user")

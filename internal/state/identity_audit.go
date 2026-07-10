@@ -30,6 +30,25 @@ func (s *DBStore) GetAccountByOAuthIdentity(provider, subject string) (Account, 
 	return s.accountFromIdentity(db, identity)
 }
 
+func (s *DBStore) GetOAuthIdentityForAccount(accountID int64, provider string) (OAuthIdentity, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return OAuthIdentity{}, err
+	}
+	provider = normalizeOAuthProvider(provider)
+	if accountID <= 0 || provider == "" {
+		return OAuthIdentity{}, ErrNotFound
+	}
+	var identity oauthIdentityRecord
+	if err := db.First(&identity, "account_id = ? AND oauth_provider = ?", accountID, provider).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return OAuthIdentity{}, ErrNotFound
+		}
+		return OAuthIdentity{}, err
+	}
+	return recordToOAuthIdentity(identity), nil
+}
+
 func (s *DBStore) UpsertAccountForOAuthIdentity(identity OAuthIdentity, role string) (Account, OAuthIdentity, error) {
 	return s.saveOAuthIdentity(identity, role, true, 0)
 }
