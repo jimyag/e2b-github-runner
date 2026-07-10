@@ -1202,6 +1202,7 @@ func TestUserSandboxInheritanceRequiresExplicitSourceReplacement(t *testing.T) {
 			SourceAccountID        int64  `json:"source_account_id"`
 			SourceAccountLogin     string `json:"source_account_login"`
 			SourceIsCurrentAccount bool   `json:"source_is_current_account"`
+			SourceAvailable        bool   `json:"source_available"`
 			APIKey                 struct {
 				Configured bool `json:"configured"`
 			} `json:"api_key"`
@@ -1259,7 +1260,7 @@ func TestUserSandboxInheritanceRequiresExplicitSourceReplacement(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.SourceAccountID != alice.ID || preferences.Sandbox.SourceAccountLogin != "alice" || preferences.Sandbox.SourceIsCurrentAccount || preferences.Sandbox.APIURL != "https://alice-sandbox.example.test" {
+	if preferences.Sandbox.SourceAccountID != alice.ID || preferences.Sandbox.SourceAccountLogin != "alice" || preferences.Sandbox.SourceIsCurrentAccount || !preferences.Sandbox.SourceAvailable || preferences.Sandbox.APIURL != "https://alice-sandbox.example.test" {
 		t.Fatalf("expected bob to see alice as the inherited source: %#v", preferences)
 	}
 
@@ -1277,6 +1278,22 @@ func TestUserSandboxInheritanceRequiresExplicitSourceReplacement(t *testing.T) {
 	if preferences.Sandbox.SourceAccountID != alice.ID || preferences.Sandbox.SourceIsCurrentAccount {
 		t.Fatalf("expected ordinary inherit save to preserve alice as source: %#v", preferences)
 	}
+	if err := store.DeleteGitHubInstallation(alice.ID, aliceInstallation.ID); err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/user/preferences?installation_id=%d", bobInstallation.ID), nil)
+	req.AddCookie(testSessionCookie("bob-id", "bob", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("bob reads unavailable inherited preferences: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
+		t.Fatal(err)
+	}
+	if !preferences.Sandbox.Inherited || preferences.Sandbox.SourceAvailable || preferences.Sandbox.SourceAccountID != alice.ID || preferences.Sandbox.SourceAccountLogin != "alice" || preferences.Sandbox.APIURL != "" || preferences.Sandbox.APIKey.Configured {
+		t.Fatalf("expected unlinked inherited source to be unavailable: %#v", preferences)
+	}
 
 	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", bobInstallation.ID), strings.NewReader(`{"mode":"inherit","replace_inherited_source":true}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -1289,7 +1306,7 @@ func TestUserSandboxInheritanceRequiresExplicitSourceReplacement(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.SourceAccountID != bob.ID || preferences.Sandbox.SourceAccountLogin != "bob" || !preferences.Sandbox.SourceIsCurrentAccount || preferences.Sandbox.APIURL != "https://bob-sandbox.example.test" {
+	if preferences.Sandbox.SourceAccountID != bob.ID || preferences.Sandbox.SourceAccountLogin != "bob" || !preferences.Sandbox.SourceIsCurrentAccount || !preferences.Sandbox.SourceAvailable || preferences.Sandbox.APIURL != "https://bob-sandbox.example.test" {
 		t.Fatalf("expected explicit replacement to use bob as source: %#v", preferences)
 	}
 }

@@ -611,6 +611,7 @@ function SandboxAPIKeyCard({
   const inherited = credentialMode === "inherit" && Boolean(preferences?.sandbox?.inherited)
   const sourceIsCurrentAccount = Boolean(preferences?.sandbox?.source_is_current_account)
   const sourceAccountLogin = preferences?.sandbox?.source_account_login?.trim()
+  const sourceAvailable = Boolean(preferences?.sandbox?.source_available)
   const updatedAt = preferences?.sandbox?.api_key?.updated_at
   const selectedRegion = findSandboxRegionByAPIURL(apiURL)
   const customAPIURL = regionSelection === customSandboxRegionID ? apiURL.trim() : ""
@@ -732,6 +733,10 @@ function SandboxAPIKeyCard({
                 ? "This organization uses its own Sandbox service settings."
                 : !preferences?.sandbox?.inherited
                   ? "Your account default credentials will be used after saving."
+                : !sourceAvailable
+                  ? sourceAccountLogin
+                    ? `Credentials provided by @${sourceAccountLogin} are unavailable because that account is no longer connected to this organization.`
+                    : "The inherited credentials are unavailable because the source account is no longer connected to this organization."
                 : sourceIsCurrentAccount
                   ? "Using Sandbox credentials provided by your account."
                   : sourceAccountLogin

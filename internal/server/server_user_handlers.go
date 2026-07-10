@@ -32,6 +32,7 @@ type accountSandboxPreference struct {
 	SourceAccountID        int64                          `json:"source_account_id,omitempty"`
 	SourceAccountLogin     string                         `json:"source_account_login,omitempty"`
 	SourceIsCurrentAccount bool                           `json:"source_is_current_account,omitempty"`
+	SourceAvailable        bool                           `json:"source_available"`
 }
 
 type accountSandboxAPIKeyPreference struct {
@@ -407,6 +408,14 @@ func (s *Server) accountPreferencesResponse(scope accountPreferenceScope, viewer
 				return accountPreferencesResponse{}, err
 			}
 			response.Sandbox.SourceAccountLogin = identity.OAuthLogin
+			available, err := s.githubInstallationLinkedToAccount(value.SourceAccountID, scope.ID)
+			if err != nil {
+				return accountPreferencesResponse{}, err
+			}
+			response.Sandbox.SourceAvailable = available
+			if !available {
+				return response, nil
+			}
 			return s.fillSandboxResponseFromScope(response, accountPreferenceScope{Type: state.AccountScopeTypeAccount, ID: value.SourceAccountID})
 		}
 		response.Sandbox.APIURL = value.APIURL
