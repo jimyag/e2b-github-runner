@@ -392,6 +392,7 @@ func (s *Server) accountPreferencesResponse(scope accountPreferenceScope, viewer
 			return accountPreferencesResponse{}, err
 		}
 		response.Sandbox.Mode = sandboxPreferenceModeCustom
+		return response, nil
 	} else {
 		var value accountSandboxServicePreferenceValue
 		if err := json.Unmarshal([]byte(preference.ValueJSON), &value); err != nil {
