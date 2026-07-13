@@ -81,6 +81,7 @@ export function SandboxTemplatesSection({
     const generation = ++loadGeneration.current
     setLoading(true)
     setError("")
+    setItems([])
     try {
       const data = await loadSandboxTemplates(request, region, installationID)
       if (generation === loadGeneration.current) {
@@ -180,6 +181,7 @@ export function SandboxesSection({
     const generation = ++templateLoadGeneration.current
     setTemplatesLoading(true)
     setTemplatesError("")
+    setTemplates([])
     try {
       const data = await loadSandboxTemplates(request, region, installationID)
       if (generation === templateLoadGeneration.current) {
@@ -200,6 +202,7 @@ export function SandboxesSection({
     const generation = ++instanceLoadGeneration.current
     setInstancesLoading(true)
     setInstancesError("")
+    setItems([])
     try {
       const templateID = template === "all" ? "" : template
       const data = await loadSandboxInstances(request, region, installationID, templateID)

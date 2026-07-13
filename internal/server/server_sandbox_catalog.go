@@ -41,7 +41,8 @@ func (s *Server) sandboxCatalogForUser(w http.ResponseWriter, r *http.Request) (
 	snapshot.APIURL = endpoint
 	svc, err := s.sandboxServiceForConfig(snapshot)
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "sandbox service is not configured")
+		s.logger.Warn("initialize sandbox service for catalog", "error", err)
+		writeError(w, http.StatusServiceUnavailable, "initialize sandbox service")
 		return nil, false
 	}
 	catalog, ok := svc.(sandboxrunner.Catalog)
