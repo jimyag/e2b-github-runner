@@ -245,6 +245,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /user/preferences", s.handleUserPreferences)
 	s.mux.HandleFunc("PUT /user/preferences/sandbox", s.handleUserSaveSandboxConfig)
 	s.mux.HandleFunc("DELETE /user/preferences/sandbox-api-key", s.handleUserDeleteSandboxAPIKey)
+	s.mux.HandleFunc("GET /user/sandbox/templates", s.handleListSandboxTemplates)
+	s.mux.HandleFunc("GET /user/sandbox/instances", s.handleListSandboxes)
 	s.mux.HandleFunc("POST /webhooks/github", s.handleGitHubWebhook)
 	s.mux.HandleFunc("POST /runner_requests", s.handleCreateRunner)
 	s.mux.HandleFunc("GET /runner_requests", s.handleListRunners)

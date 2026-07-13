@@ -45,6 +45,35 @@ type ExitResult struct {
 	Error    string
 }
 
+type CatalogTemplate struct {
+	TemplateID  string    `json:"template_id"`
+	Aliases     []string  `json:"aliases"`
+	BuildStatus string    `json:"build_status"`
+	CPUCount    int32     `json:"cpu_count"`
+	MemoryMB    int32     `json:"memory_mb"`
+	DiskSizeMB  int32     `json:"disk_size_mb"`
+	Public      bool      `json:"public"`
+	SpawnCount  int64     `json:"spawn_count"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type CatalogSandbox struct {
+	SandboxID  string    `json:"sandbox_id"`
+	TemplateID string    `json:"template_id"`
+	Alias      string    `json:"alias,omitempty"`
+	State      string    `json:"state"`
+	CPUCount   int32     `json:"cpu_count"`
+	MemoryMB   int32     `json:"memory_mb"`
+	DiskSizeMB int32     `json:"disk_size_mb"`
+	StartedAt  time.Time `json:"started_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+
+type Catalog interface {
+	ListTemplates(ctx context.Context) ([]CatalogTemplate, error)
+	ListRunnerSandboxes(ctx context.Context) ([]CatalogSandbox, error)
+}
+
 type TerminalSession interface {
 	PID() uint32
 	SendInput(ctx context.Context, data []byte) error
@@ -103,6 +132,35 @@ func (s *E2BService) ValidateTemplate(ctx context.Context, templateID string) er
 		}
 	}
 	return ErrTemplateNotReady
+}
+
+func (s *E2BService) ListTemplates(ctx context.Context) ([]CatalogTemplate, error) {
+	items, err := s.client.ListTemplates(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]CatalogTemplate, 0, len(items))
+	for _, item := range items {
+		result = append(result, CatalogTemplate{TemplateID: item.TemplateID, Aliases: item.Aliases, BuildStatus: string(item.BuildStatus), CPUCount: item.CPUCount, MemoryMB: item.MemoryMB, DiskSizeMB: item.DiskSizeMB, Public: item.Public, SpawnCount: item.SpawnCount, UpdatedAt: item.UpdatedAt})
+	}
+	return result, nil
+}
+
+func (s *E2BService) ListRunnerSandboxes(ctx context.Context) ([]CatalogSandbox, error) {
+	metadata := "app=e2b-github-runner"
+	items, err := s.client.List(ctx, &qnsandbox.ListParams{Metadata: &metadata})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]CatalogSandbox, 0, len(items))
+	for _, item := range items {
+		alias := ""
+		if item.Alias != nil {
+			alias = *item.Alias
+		}
+		result = append(result, CatalogSandbox{SandboxID: item.SandboxID, TemplateID: item.TemplateID, Alias: alias, State: string(item.State), CPUCount: item.CPUCount, MemoryMB: item.MemoryMB, DiskSizeMB: item.DiskSizeMB, StartedAt: item.StartedAt, ExpiresAt: item.EndAt})
+	}
+	return result, nil
 }
 
 func templateBuildUsable(status qnsandbox.TemplateBuildStatus) bool {

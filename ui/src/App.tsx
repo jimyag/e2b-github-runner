@@ -43,7 +43,7 @@ import {
 } from "@/admin-types"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
 
-type AccountSettingsTab = "repositories" | "preferences"
+type AccountSettingsTab = "repositories" | "preferences" | "sandbox-templates" | "sandbox-instances"
 type AccountSettingsRoute = {
   accountLogin?: string
   tab: AccountSettingsTab
@@ -424,6 +424,13 @@ function App() {
     window.history.replaceState(null, "", nextPath)
     setLocationPath("/account/repositories")
     setLocationSearch(window.location.search)
+  }, [locationPath])
+
+  useEffect(() => {
+    if (locationPath !== "/account/sandbox" && !/^\/organizations\/[^/]+\/sandbox$/.test(locationPath)) return
+    const nextPath = locationPath.replace(/\/sandbox$/, "/sandbox-templates")
+    window.history.replaceState(null, "", nextPath)
+    setLocationPath(nextPath)
   }, [locationPath])
 
   useEffect(() => {
@@ -899,7 +906,10 @@ function isAccountSettingsPath(path: string): boolean {
     path === "/accounts" ||
     path === "/account/repositories" ||
     path === "/account/preferences" ||
-    /^\/organizations\/[^/]+\/(repositories|preferences)$/.test(path)
+    path === "/account/sandbox" ||
+    path === "/account/sandbox-templates" ||
+    path === "/account/sandbox-instances" ||
+    /^\/organizations\/[^/]+\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path)
   )
 }
 
@@ -907,15 +917,17 @@ function parseAccountSettingsRoute(path: string, currentLogin?: string): Account
   if (path === "/settings" || path === "/accounts") return defaultAccountSettingsRoute(currentLogin)
   if (path === "/account/repositories") return { accountLogin: currentLogin, tab: "repositories" }
   if (path === "/account/preferences") return { accountLogin: currentLogin, tab: "preferences" }
+  if (path === "/account/sandbox" || path === "/account/sandbox-templates") return { accountLogin: currentLogin, tab: "sandbox-templates" }
+  if (path === "/account/sandbox-instances") return { accountLogin: currentLogin, tab: "sandbox-instances" }
 
-  const organizationMatch = path.match(/^\/organizations\/([^/]+)\/(repositories|preferences)$/)
+  const organizationMatch = path.match(/^\/organizations\/([^/]+)\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances)$/)
   if (!organizationMatch) return null
   const accountLogin = safeDecodePathSegment(organizationMatch[1])
   if (!accountLogin) return null
 
   return {
     accountLogin,
-    tab: organizationMatch[2] as AccountSettingsTab,
+    tab: (organizationMatch[2] === "sandbox" ? "sandbox-templates" : organizationMatch[2]) as AccountSettingsTab,
   }
 }
 
@@ -1082,7 +1094,7 @@ function accountSettingsPath(
   currentLogin: string | undefined,
   tab: AccountSettingsTab
 ): string {
-  const segment = tab === "preferences" ? "preferences" : "repositories"
+  const segment = tab === "preferences" ? "preferences" : tab === "sandbox-templates" ? "sandbox-templates" : tab === "sandbox-instances" ? "sandbox-instances" : "repositories"
   const login = accountLogin?.trim()
   if (!login || login === currentLogin) return `/account/${segment}`
   return `/organizations/${encodeURIComponent(login)}/${segment}`

@@ -50,6 +50,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { SandboxesSection, SandboxTemplatesSection } from "@/components/sandbox-catalog-sections"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useSandboxTerminal } from "@/hooks/use-sandbox-terminal"
@@ -73,7 +74,7 @@ type BuildGroup = {
 }
 
 type UserPage = "home" | "repositories" | "settings"
-type AccountSettingsTab = "repositories" | "preferences"
+type AccountSettingsTab = "repositories" | "preferences" | "sandbox-templates" | "sandbox-instances"
 type AccountSettingsRoute = {
   accountLogin?: string
   tab: AccountSettingsTab
@@ -87,14 +88,14 @@ const jobLogTabsListClassName = "h-auto w-full justify-start gap-6 rounded-none 
 const jobLogTabsTriggerClassName = "h-10 flex-none rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0 py-2 text-sm font-medium shadow-none hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
 const sandboxRegions = [
   {
-    id: "cn-yangzhou-1",
-    label: "China (Yangzhou 1)",
-    apiURL: "https://cn-yangzhou-1-sandbox.qiniuapi.com",
-  },
-  {
     id: "us-south-1",
     label: "United States (Dallas 1)",
     apiURL: "https://us-south-1-sandbox.qiniuapi.com",
+  },
+  {
+    id: "cn-yangzhou-1",
+    label: "China (Yangzhou 1)",
+    apiURL: "https://cn-yangzhou-1-sandbox.qiniuapi.com",
   },
 ]
 const customSandboxRegionID = "__custom__"
@@ -252,6 +253,7 @@ export function UserDashboard({
           onDeleteSandboxAPIKey={onDeleteSandboxAPIKey}
           currentLogin={authSession.login}
           onNavigateAccountSettings={onNavigateAccountSettings}
+          request={request}
         />
       ) : (
         <PullRequestsPage
@@ -380,6 +382,7 @@ function AccountsPage({
   onDeleteSandboxAPIKey,
   currentLogin,
   onNavigateAccountSettings,
+  request,
 }: {
   githubApp: GitHubAppConfig | null
   userPreferences: UserPreferences | null
@@ -392,6 +395,7 @@ function AccountsPage({
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   currentLogin?: string
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
+  request: (url: string, options?: RequestInit) => Promise<unknown>
 }) {
   const [filter, setFilter] = useState("")
   const selected = installations.find((installation) => installation.account_login === route.accountLogin)
@@ -500,6 +504,18 @@ function AccountsPage({
                   >
                     Preferences
                   </TabsTrigger>
+                  <TabsTrigger
+                    value="sandbox-templates"
+                    className="ml-8 h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+                  >
+                    Sandbox Templates
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="sandbox-instances"
+                    className="ml-8 h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+                  >
+                    Sandbox Instances
+                  </TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="repositories">
@@ -559,6 +575,12 @@ function AccountsPage({
                     onDelete={() => onDeleteSandboxAPIKey(preferenceInstallationID)}
                   />
                 </TabsContent>
+                <TabsContent value="sandbox-templates">
+                  <SandboxTemplatesSection request={request} installationID={preferenceInstallationID} />
+                </TabsContent>
+                <TabsContent value="sandbox-instances">
+                  <SandboxesSection request={request} installationID={preferenceInstallationID} />
+                </TabsContent>
               </Tabs>
             </div>
           ) : (
@@ -573,6 +595,22 @@ function AccountsPage({
                   onSave={(apiURL, apiKey, mode) => onSaveSandboxConfig(apiURL, apiKey, undefined, mode)}
                   onDelete={onDeleteSandboxAPIKey}
                 />
+              </div>
+            ) : route.tab === "sandbox-templates" ? (
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-semibold">Sandbox templates</h2>
+                  <div className="mt-1 text-sm text-muted-foreground">Templates available to the signed-in account.</div>
+                </div>
+                <SandboxTemplatesSection request={request} />
+              </div>
+            ) : route.tab === "sandbox-instances" ? (
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-2xl font-semibold">Sandbox instances</h2>
+                  <div className="mt-1 text-sm text-muted-foreground">Runner-created instances for the signed-in account.</div>
+                </div>
+                <SandboxesSection request={request} />
               </div>
             ) : (
               <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">

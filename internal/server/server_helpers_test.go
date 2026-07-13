@@ -25,6 +25,22 @@ func TestWorkflowConclusionPrefersConclusionOverStatus(t *testing.T) {
 	}
 }
 
+func TestSandboxRegionEndpoint(t *testing.T) {
+	tests := map[string]string{
+		"cn-yangzhou-1": "https://cn-yangzhou-1-sandbox.qiniuapi.com",
+		"us-south-1":    "https://us-south-1-sandbox.qiniuapi.com",
+	}
+	for region, want := range tests {
+		got, ok := sandboxRegionEndpoint(region)
+		if !ok || got != want {
+			t.Fatalf("sandboxRegionEndpoint(%q) = %q, %v; want %q, true", region, got, ok, want)
+		}
+	}
+	if _, ok := sandboxRegionEndpoint("unknown"); ok {
+		t.Fatal("unknown sandbox region should be rejected")
+	}
+}
+
 func TestWorkflowConclusionFallsBackToStatusWhenConclusionEmpty(t *testing.T) {
 	job := github.WorkflowJob{Conclusion: "", Status: "in_progress"}
 	if got := workflowConclusion(job); got != "in_progress" {

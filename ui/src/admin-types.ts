@@ -164,6 +164,30 @@ export type Metric = {
   description: string
 }
 
+export type SandboxTemplate = {
+  template_id: string
+  aliases: string[]
+  build_status: string
+  cpu_count: number
+  memory_mb: number
+  disk_size_mb: number
+  public: boolean
+  spawn_count: number
+  updated_at: string
+}
+
+export type SandboxInstance = {
+  sandbox_id: string
+  template_id: string
+  alias?: string
+  state: string
+  cpu_count: number
+  memory_mb: number
+  disk_size_mb: number
+  started_at: string
+  expires_at: string
+}
+
 export const activeStatuses = new Set<RunnerStatus>(["queued", "creating", "running", "stopping"])
 export const logNames = ["control.log", "stdout.log", "stderr.log"] as const
 export const adminSections = [
