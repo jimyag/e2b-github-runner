@@ -6,6 +6,7 @@ import {
   formatOptionalTime,
   loadSandboxInstances,
   loadSandboxTemplates,
+  sandboxInstancesViewState,
   type SandboxCatalogRequest,
 } from "@/components/sandbox-catalog-utils"
 import { Button } from "@/components/ui/button"
@@ -230,8 +231,12 @@ export function SandboxesSection({
     }
   }, [loadInstances])
 
-  const loading = templatesLoading || instancesLoading
-  const error = templatesError || instancesError
+  const { loading, error, filterDisabled } = sandboxInstancesViewState({
+    templatesLoading,
+    instancesLoading,
+    templatesError,
+    instancesError,
+  })
 
   return (
     <Card className="overflow-hidden">
@@ -249,7 +254,7 @@ export function SandboxesSection({
           void loadInstances()
         }}
       >
-        <Select value={template} onValueChange={setTemplate}>
+        <Select value={template} onValueChange={setTemplate} disabled={filterDisabled}>
           <SelectTrigger className="min-w-[200px] max-w-[280px]">
             <SelectValue placeholder="Filter by template" />
           </SelectTrigger>

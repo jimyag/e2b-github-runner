@@ -78,14 +78,19 @@ func (s *Server) handleListSandboxes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	templateID := strings.TrimSpace(r.URL.Query().Get("template_id"))
-	if templateID != "" {
-		filtered := items[:0]
-		for _, item := range items {
-			if item.TemplateID == templateID {
-				filtered = append(filtered, item)
-			}
-		}
-		items = filtered
-	}
+	items = filterCatalogSandboxes(items, templateID)
 	writeJSON(w, http.StatusOK, items)
+}
+
+func filterCatalogSandboxes(items []sandboxrunner.CatalogSandbox, templateID string) []sandboxrunner.CatalogSandbox {
+	if templateID == "" {
+		return items
+	}
+	filtered := make([]sandboxrunner.CatalogSandbox, 0, len(items))
+	for _, item := range items {
+		if item.TemplateID == templateID {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
 }

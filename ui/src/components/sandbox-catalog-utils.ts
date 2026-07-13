@@ -28,6 +28,24 @@ export async function loadSandboxInstances(
   return Array.isArray(data) ? (data as SandboxInstance[]) : []
 }
 
+export function sandboxInstancesViewState({
+  templatesLoading,
+  instancesLoading,
+  templatesError,
+  instancesError,
+}: {
+  templatesLoading: boolean
+  instancesLoading: boolean
+  templatesError: string
+  instancesError: string
+}) {
+  return {
+    loading: templatesLoading || instancesLoading,
+    error: instancesError,
+    filterDisabled: templatesLoading || Boolean(templatesError),
+  }
+}
+
 export function formatOptionalTime(value: string) {
   if (!value || value.startsWith("0001-01-01")) return "—"
   const date = new Date(value)

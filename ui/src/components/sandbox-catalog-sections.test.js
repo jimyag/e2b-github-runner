@@ -31,3 +31,20 @@ describe("sandbox catalog loaders", () => {
     ])
   })
 })
+
+describe("sandbox instances view state", () => {
+  test("keeps the instances table available when only the template filter fails", () => {
+    expect(
+      catalogUtils.sandboxInstancesViewState({
+        templatesLoading: false,
+        instancesLoading: false,
+        templatesError: "template catalog unavailable",
+        instancesError: "",
+      }),
+    ).toEqual({
+      loading: false,
+      error: "",
+      filterDisabled: true,
+    })
+  })
+})
