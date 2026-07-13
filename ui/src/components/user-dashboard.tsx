@@ -1003,22 +1003,24 @@ function PullRequestsPage({
                             <JobField
                               label="Job Name"
                               value={selectedJob.github_job_url ? (
-                                <a className={cn("inline-flex min-w-0 items-center gap-1 hover:underline", jobStatusTextClass(selectedJob.status))} href={selectedJob.github_job_url} target="_blank" rel="noreferrer">
+                                <a className={cn("inline-flex max-w-full min-w-0 items-center gap-1 hover:underline", jobStatusTextClass(selectedJob.status))} href={selectedJob.github_job_url} target="_blank" rel="noreferrer">
                                   <span className="truncate">{runnerJobTitle(selectedJob)}</span>
                                   <ExternalLink className="h-3.5 w-3.5 shrink-0" />
                                 </a>
                               ) : (
-                                <span className={jobStatusTextClass(selectedJob.status)}>{runnerJobTitle(selectedJob)}</span>
+                                <span className={cn("block truncate", jobStatusTextClass(selectedJob.status))}>{runnerJobTitle(selectedJob)}</span>
                               )}
                             />
                             <JobField
                               label="Workflow"
                               value={workflowRunURL(selectedJob) ? (
-                                <a className="inline-flex min-w-0 items-center gap-1 text-primary hover:underline" href={workflowRunURL(selectedJob)} target="_blank" rel="noreferrer">
+                                <a className="inline-flex max-w-full min-w-0 items-center gap-1 text-primary hover:underline" href={workflowRunURL(selectedJob)} target="_blank" rel="noreferrer">
                                   <span className="truncate">{selectedJob.workflow_name || "Workflow"}</span>
                                   <ExternalLink className="h-3.5 w-3.5 shrink-0" />
                                 </a>
-                              ) : selectedJob.workflow_name || "Workflow"}
+                              ) : (
+                                <span className="block truncate">{selectedJob.workflow_name || "Workflow"}</span>
+                              )}
                             />
                             <JobField label="Duration" value={formatRunnerDuration(selectedJob) || "-"} />
                           </>

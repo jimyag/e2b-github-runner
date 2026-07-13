@@ -273,9 +273,9 @@ export function RunnerRequestsSection({
                       {runner.repository_full_name || "-"}
                     </TableCell>
                     <TableCell>{runner.runner_spec_name || "-"}</TableCell>
-                    <TableCell>
-                      <div className="font-medium">{runner.runner_name || runner.id}</div>
-                      <div className="text-xs text-muted-foreground">{runner.id}</div>
+                    <TableCell className="max-w-[260px]">
+                      <div className="truncate font-medium">{runner.runner_name || runner.id}</div>
+                      <div className="truncate text-xs text-muted-foreground">{runner.id}</div>
                     </TableCell>
                     <TableCell className="max-w-[180px] truncate">
                       {runner.sandbox_id || "-"}

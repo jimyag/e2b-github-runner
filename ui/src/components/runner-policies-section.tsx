@@ -114,8 +114,8 @@ export function RunnerPoliciesSection({
             <TableBody>
               {runnerPolicies.map((policy) => (
                 <TableRow key={policy.id} className="cursor-pointer" onClick={() => onEditRunnerPolicy(policy)}>
-                  <TableCell>{policy.repository_full_name}</TableCell>
-                  <TableCell>
+                  <TableCell className="max-w-[260px] truncate">{policy.repository_full_name}</TableCell>
+                  <TableCell className="max-w-[260px] truncate">
                     {policy.runner_group_name
                       ? `group:${policy.runner_group_name}`
                       : `spec:${policy.runner_spec_name || "-"}`}

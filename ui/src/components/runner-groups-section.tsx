@@ -102,7 +102,7 @@ export function RunnerGroupsSection({
             <TableBody>
               {runnerGroups.map((group) => (
                 <TableRow key={group.name} className="cursor-pointer" onClick={() => onEditRunnerGroup(group)}>
-                  <TableCell>{group.name}</TableCell>
+                  <TableCell className="max-w-[220px] truncate">{group.name}</TableCell>
                   <TableCell className="max-w-[420px] truncate">{group.spec_names.join(", ") || "-"}</TableCell>
                   <TableCell>{group.enabled ? "yes" : "no"}</TableCell>
                   <TableCell>{formatTime(group.updated_at)}</TableCell>

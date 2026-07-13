@@ -119,11 +119,11 @@ export function RunnerSpecsSection({
             <TableBody>
               {runnerSpecs.map((runnerSpec) => (
                 <TableRow key={runnerSpec.name} className="cursor-pointer" onClick={() => onEditRunnerSpec(runnerSpec)}>
-                  <TableCell>{runnerSpec.name}</TableCell>
+                  <TableCell className="max-w-[220px] truncate">{runnerSpec.name}</TableCell>
                   <TableCell className="max-w-[260px] truncate">{runnerSpec.labels.join(", ")}</TableCell>
-                  <TableCell>{runnerSpec.template_id}</TableCell>
-                  <TableCell>{runnerSpec.runner_group || "-"}</TableCell>
-                  <TableCell>{groupNamesForSpec(runnerSpec.name).join(", ") || "-"}</TableCell>
+                  <TableCell className="max-w-[220px] truncate">{runnerSpec.template_id}</TableCell>
+                  <TableCell className="max-w-[220px] truncate">{runnerSpec.runner_group || "-"}</TableCell>
+                  <TableCell className="max-w-[260px] truncate">{groupNamesForSpec(runnerSpec.name).join(", ") || "-"}</TableCell>
                   <TableCell>{runnerSpec.default_available ? "yes" : "no"}</TableCell>
                   <TableCell>{runnerSpec.max_concurrency}</TableCell>
                   <TableCell>
