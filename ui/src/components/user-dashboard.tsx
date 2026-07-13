@@ -576,10 +576,18 @@ function AccountsPage({
                   />
                 </TabsContent>
                 <TabsContent value="sandbox-templates">
-                  <SandboxTemplatesSection request={request} installationID={preferenceInstallationID} />
+                  <SandboxTemplatesSection
+                    key={`templates-${preferenceInstallationID ?? "account"}`}
+                    request={request}
+                    installationID={preferenceInstallationID}
+                  />
                 </TabsContent>
                 <TabsContent value="sandbox-instances">
-                  <SandboxesSection request={request} installationID={preferenceInstallationID} />
+                  <SandboxesSection
+                    key={`instances-${preferenceInstallationID ?? "account"}`}
+                    request={request}
+                    installationID={preferenceInstallationID}
+                  />
                 </TabsContent>
               </Tabs>
             </div>

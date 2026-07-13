@@ -2,7 +2,12 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { RefreshCw } from "lucide-react"
 
 import type { SandboxInstance, SandboxTemplate } from "@/admin-types"
-import { formatOptionalTime } from "@/components/sandbox-catalog-utils"
+import {
+  formatOptionalTime,
+  loadSandboxInstances,
+  loadSandboxTemplates,
+  type SandboxCatalogRequest,
+} from "@/components/sandbox-catalog-utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -12,15 +17,6 @@ const regions = [
   { id: "us-south-1", label: "United States · Dallas 1" },
   { id: "cn-yangzhou-1", label: "China · Yangzhou 1" },
 ]
-
-type Request = (url: string, options?: RequestInit) => Promise<unknown>
-
-function sandboxCatalogURL(path: string, region: string, installationID?: number, extra = "") {
-  const params = new URLSearchParams({ region })
-  if (installationID) params.set("installation_id", String(installationID))
-  if (extra) params.set("template_id", extra)
-  return `/user/sandbox/${path}?${params.toString()}`
-}
 
 function Header({
   title,
@@ -67,7 +63,13 @@ function Header({
   )
 }
 
-export function SandboxTemplatesSection({ request, installationID }: { request: Request; installationID?: number }) {
+export function SandboxTemplatesSection({
+  request,
+  installationID,
+}: {
+  request: SandboxCatalogRequest
+  installationID?: number
+}) {
   const [region, setRegion] = useState(regions[0].id)
   const [items, setItems] = useState<SandboxTemplate[]>([])
   const [loading, setLoading] = useState(false)
@@ -79,9 +81,9 @@ export function SandboxTemplatesSection({ request, installationID }: { request: 
     setLoading(true)
     setError("")
     try {
-      const data = await request(sandboxCatalogURL("templates", region, installationID))
+      const data = await loadSandboxTemplates(request, region, installationID)
       if (generation === loadGeneration.current) {
-        setItems(Array.isArray(data) ? (data as SandboxTemplate[]) : [])
+        setItems(data)
       }
     } catch (cause) {
       if (generation === loadGeneration.current) {
@@ -155,49 +157,81 @@ export function SandboxTemplatesSection({ request, installationID }: { request: 
   )
 }
 
-export function SandboxesSection({ request, installationID }: { request: Request; installationID?: number }) {
+export function SandboxesSection({
+  request,
+  installationID,
+}: {
+  request: SandboxCatalogRequest
+  installationID?: number
+}) {
   const [region, setRegion] = useState(regions[0].id)
   const [template, setTemplate] = useState("all")
   const [templates, setTemplates] = useState<SandboxTemplate[]>([])
   const [items, setItems] = useState<SandboxInstance[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const loadGeneration = useRef(0)
+  const [templatesLoading, setTemplatesLoading] = useState(false)
+  const [instancesLoading, setInstancesLoading] = useState(false)
+  const [templatesError, setTemplatesError] = useState("")
+  const [instancesError, setInstancesError] = useState("")
+  const templateLoadGeneration = useRef(0)
+  const instanceLoadGeneration = useRef(0)
 
-  const load = useCallback(async () => {
-    const generation = ++loadGeneration.current
-    setLoading(true)
-    setError("")
+  const loadTemplates = useCallback(async () => {
+    const generation = ++templateLoadGeneration.current
+    setTemplatesLoading(true)
+    setTemplatesError("")
     try {
-      const templateID = template === "all" ? "" : template
-      const [templateData, sandboxData] = await Promise.all([
-        request(sandboxCatalogURL("templates", region, installationID)),
-        request(sandboxCatalogURL("instances", region, installationID, templateID)),
-      ])
-      if (generation !== loadGeneration.current) return
-      setTemplates(Array.isArray(templateData) ? (templateData as SandboxTemplate[]) : [])
-      setItems(Array.isArray(sandboxData) ? (sandboxData as SandboxInstance[]) : [])
+      const data = await loadSandboxTemplates(request, region, installationID)
+      if (generation === templateLoadGeneration.current) {
+        setTemplates(data)
+      }
     } catch (cause) {
-      if (generation === loadGeneration.current) {
-        setError(cause instanceof Error ? cause.message : "Failed to load sandboxes")
+      if (generation === templateLoadGeneration.current) {
+        setTemplatesError(cause instanceof Error ? cause.message : "Failed to load sandbox templates")
       }
     } finally {
-      if (generation === loadGeneration.current) {
-        setLoading(false)
+      if (generation === templateLoadGeneration.current) {
+        setTemplatesLoading(false)
+      }
+    }
+  }, [installationID, region, request])
+
+  const loadInstances = useCallback(async () => {
+    const generation = ++instanceLoadGeneration.current
+    setInstancesLoading(true)
+    setInstancesError("")
+    try {
+      const templateID = template === "all" ? "" : template
+      const data = await loadSandboxInstances(request, region, installationID, templateID)
+      if (generation === instanceLoadGeneration.current) {
+        setItems(data)
+      }
+    } catch (cause) {
+      if (generation === instanceLoadGeneration.current) {
+        setInstancesError(cause instanceof Error ? cause.message : "Failed to load sandboxes")
+      }
+    } finally {
+      if (generation === instanceLoadGeneration.current) {
+        setInstancesLoading(false)
       }
     }
   }, [installationID, region, request, template])
 
   useEffect(() => {
-    setTemplate("all")
-  }, [installationID])
+    void loadTemplates()
+    return () => {
+      templateLoadGeneration.current += 1
+    }
+  }, [loadTemplates])
 
   useEffect(() => {
-    void load()
+    void loadInstances()
     return () => {
-      loadGeneration.current += 1
+      instanceLoadGeneration.current += 1
     }
-  }, [load])
+  }, [loadInstances])
+
+  const loading = templatesLoading || instancesLoading
+  const error = templatesError || instancesError
 
   return (
     <Card className="overflow-hidden">
@@ -210,7 +244,10 @@ export function SandboxesSection({ request, installationID }: { request: Request
           setRegion(value)
           setTemplate("all")
         }}
-        onRefresh={() => void load()}
+        onRefresh={() => {
+          void loadTemplates()
+          void loadInstances()
+        }}
       >
         <Select value={template} onValueChange={setTemplate}>
           <SelectTrigger className="min-w-[200px] max-w-[280px]">
