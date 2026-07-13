@@ -2,6 +2,19 @@ import type { SandboxInstance, SandboxTemplate } from "@/admin-types"
 
 export type SandboxCatalogRequest = (url: string, options?: RequestInit) => Promise<unknown>
 
+export const sandboxRegions = [
+  {
+    id: "us-south-1",
+    label: "United States · Dallas 1",
+    apiURL: "https://us-south-1-sandbox.qiniuapi.com",
+  },
+  {
+    id: "cn-yangzhou-1",
+    label: "China · Yangzhou 1",
+    apiURL: "https://cn-yangzhou-1-sandbox.qiniuapi.com",
+  },
+]
+
 function sandboxCatalogURL(path: string, region: string, installationID?: number, templateID = "") {
   const params = new URLSearchParams({ region })
   if (installationID) params.set("installation_id", String(installationID))

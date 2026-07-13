@@ -6,6 +6,7 @@ import {
   formatOptionalTime,
   loadSandboxInstances,
   loadSandboxTemplates,
+  sandboxRegions,
   sandboxInstancesViewState,
   type SandboxCatalogRequest,
 } from "@/components/sandbox-catalog-utils"
@@ -13,11 +14,6 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-
-const regions = [
-  { id: "us-south-1", label: "United States · Dallas 1" },
-  { id: "cn-yangzhou-1", label: "China · Yangzhou 1" },
-]
 
 function Header({
   title,
@@ -48,7 +44,7 @@ function Header({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {regions.map((item) => (
+            {sandboxRegions.map((item) => (
               <SelectItem key={item.id} value={item.id}>
                 {item.label}
               </SelectItem>
@@ -71,7 +67,7 @@ export function SandboxTemplatesSection({
   request: SandboxCatalogRequest
   installationID?: number
 }) {
-  const [region, setRegion] = useState(regions[0].id)
+  const [region, setRegion] = useState(sandboxRegions[0].id)
   const [items, setItems] = useState<SandboxTemplate[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
@@ -166,7 +162,7 @@ export function SandboxesSection({
   request: SandboxCatalogRequest
   installationID?: number
 }) {
-  const [region, setRegion] = useState(regions[0].id)
+  const [region, setRegion] = useState(sandboxRegions[0].id)
   const [template, setTemplate] = useState("all")
   const [templates, setTemplates] = useState<SandboxTemplate[]>([])
   const [items, setItems] = useState<SandboxInstance[]>([])

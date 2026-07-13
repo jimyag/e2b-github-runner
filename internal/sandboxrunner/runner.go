@@ -141,7 +141,17 @@ func (s *E2BService) ListTemplates(ctx context.Context) ([]CatalogTemplate, erro
 	}
 	result := make([]CatalogTemplate, 0, len(items))
 	for _, item := range items {
-		result = append(result, CatalogTemplate{TemplateID: item.TemplateID, Aliases: item.Aliases, BuildStatus: string(item.BuildStatus), CPUCount: item.CPUCount, MemoryMB: item.MemoryMB, DiskSizeMB: item.DiskSizeMB, Public: item.Public, SpawnCount: item.SpawnCount, UpdatedAt: item.UpdatedAt})
+		result = append(result, CatalogTemplate{
+			TemplateID:  item.TemplateID,
+			Aliases:     item.Aliases,
+			BuildStatus: string(item.BuildStatus),
+			CPUCount:    item.CPUCount,
+			MemoryMB:    item.MemoryMB,
+			DiskSizeMB:  item.DiskSizeMB,
+			Public:      item.Public,
+			SpawnCount:  item.SpawnCount,
+			UpdatedAt:   item.UpdatedAt,
+		})
 	}
 	return result, nil
 }
@@ -158,7 +168,17 @@ func (s *E2BService) ListRunnerSandboxes(ctx context.Context) ([]CatalogSandbox,
 		if item.Alias != nil {
 			alias = *item.Alias
 		}
-		result = append(result, CatalogSandbox{SandboxID: item.SandboxID, TemplateID: item.TemplateID, Alias: alias, State: string(item.State), CPUCount: item.CPUCount, MemoryMB: item.MemoryMB, DiskSizeMB: item.DiskSizeMB, StartedAt: item.StartedAt, ExpiresAt: item.EndAt})
+		result = append(result, CatalogSandbox{
+			SandboxID:  item.SandboxID,
+			TemplateID: item.TemplateID,
+			Alias:      alias,
+			State:      string(item.State),
+			CPUCount:   item.CPUCount,
+			MemoryMB:   item.MemoryMB,
+			DiskSizeMB: item.DiskSizeMB,
+			StartedAt:  item.StartedAt,
+			ExpiresAt:  item.EndAt,
+		})
 	}
 	return result, nil
 }

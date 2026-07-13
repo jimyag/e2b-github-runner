@@ -4,6 +4,23 @@ import * as catalogUtils from "./sandbox-catalog-utils"
 
 const { formatOptionalTime } = catalogUtils
 
+describe("sandbox regions", () => {
+  test("shares overseas-first region metadata", () => {
+    expect(catalogUtils.sandboxRegions).toEqual([
+      {
+        id: "us-south-1",
+        label: "United States · Dallas 1",
+        apiURL: "https://us-south-1-sandbox.qiniuapi.com",
+      },
+      {
+        id: "cn-yangzhou-1",
+        label: "China · Yangzhou 1",
+        apiURL: "https://cn-yangzhou-1-sandbox.qiniuapi.com",
+      },
+    ])
+  })
+})
+
 describe("formatOptionalTime", () => {
   test("renders invalid timestamps as unavailable", () => {
     expect(formatOptionalTime("not-a-date")).toBe("—")

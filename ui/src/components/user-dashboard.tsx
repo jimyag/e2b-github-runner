@@ -51,6 +51,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { SandboxesSection, SandboxTemplatesSection } from "@/components/sandbox-catalog-sections"
+import { sandboxRegions } from "@/components/sandbox-catalog-utils"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useSandboxTerminal } from "@/hooks/use-sandbox-terminal"
@@ -86,18 +87,6 @@ type GitHubLogState =
 
 const jobLogTabsListClassName = "h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0 text-muted-foreground"
 const jobLogTabsTriggerClassName = "h-10 flex-none rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0 py-2 text-sm font-medium shadow-none hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
-const sandboxRegions = [
-  {
-    id: "us-south-1",
-    label: "United States (Dallas 1)",
-    apiURL: "https://us-south-1-sandbox.qiniuapi.com",
-  },
-  {
-    id: "cn-yangzhou-1",
-    label: "China (Yangzhou 1)",
-    apiURL: "https://cn-yangzhou-1-sandbox.qiniuapi.com",
-  },
-]
 const customSandboxRegionID = "__custom__"
 
 function normalizeSandboxAPIURL(value: string) {
