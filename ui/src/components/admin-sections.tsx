@@ -199,8 +199,8 @@ export function AuditSection({ auditEvents }: { auditEvents: AuditEvent[] }) {
                   <TableCell>
                     {event.resource_type} · {event.resource_id}
                   </TableCell>
-                  <TableCell className="max-w-[420px] truncate text-xs text-muted-foreground">
-                    {event.payload_json || "-"}
+                  <TableCell className="text-xs text-muted-foreground">
+                    <div className="max-w-[420px] truncate">{event.payload_json || "-"}</div>
                   </TableCell>
                 </TableRow>
               ))

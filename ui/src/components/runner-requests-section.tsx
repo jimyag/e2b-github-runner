@@ -269,16 +269,16 @@ export function RunnerRequestsSection({
                     <TableCell>
                       <StatusBadge status={runner.status} />
                     </TableCell>
-                    <TableCell className="max-w-[220px] truncate">
-                      {runner.repository_full_name || "-"}
+                    <TableCell>
+                      <div className="max-w-[220px] truncate">{runner.repository_full_name || "-"}</div>
                     </TableCell>
                     <TableCell>{runner.runner_spec_name || "-"}</TableCell>
                     <TableCell className="max-w-[260px]">
                       <div className="truncate font-medium">{runner.runner_name || runner.id}</div>
                       <div className="truncate text-xs text-muted-foreground">{runner.id}</div>
                     </TableCell>
-                    <TableCell className="max-w-[180px] truncate">
-                      {runner.sandbox_id || "-"}
+                    <TableCell>
+                      <div className="max-w-[180px] truncate">{runner.sandbox_id || "-"}</div>
                     </TableCell>
                     <TableCell>
                       {runner.github_job_url ? (
