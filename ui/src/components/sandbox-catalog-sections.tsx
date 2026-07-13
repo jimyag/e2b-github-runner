@@ -294,7 +294,9 @@ export function SandboxesSection({
                     <div className="max-w-[300px] truncate text-xs text-muted-foreground">{item.sandbox_id}</div>
                   </TableCell>
                   <TableCell>{item.state}</TableCell>
-                  <TableCell className="max-w-[260px] truncate">{item.template_id}</TableCell>
+                  <TableCell>
+                    <div className="max-w-[260px] truncate">{item.template_id}</div>
+                  </TableCell>
                   <TableCell>
                     {item.cpu_count} CPU · {item.memory_mb} MB
                   </TableCell>
