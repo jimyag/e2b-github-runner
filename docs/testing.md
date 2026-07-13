@@ -170,6 +170,13 @@ Ordinary-user personal Preferences page:
 http://127.0.0.1:25500/account/preferences
 ```
 
+Ordinary-user personal Sandbox catalogs:
+
+```text
+http://127.0.0.1:25500/account/sandbox-templates
+http://127.0.0.1:25500/account/sandbox-instances
+```
+
 Admin UI:
 
 ```text
@@ -212,13 +219,13 @@ The page redirects to GitHub OAuth login. The first login creates a local accoun
 go run ./cmd/runnerd --config ./runnerd.yaml --bootstrap-admin github:<your-github-user-id>
 ```
 
-`<your-github-user-id>` is the stable numeric `id` returned by GitHub `/user`, not the mutable login. Role belongs to the local account. OAuth identity stores provider, stable subject, and login display metadata, so other provider identities can later be linked to the same account. After ordinary users sign in, they can install the configured GitHub App from `/account/repositories` and configure Sandbox service from `/account/preferences` or `/organizations/{login}/preferences`. When GitHub returns an `installation_id`, runnerd records the GitHub App installation linked to that account. Jobs visible to an ordinary user are filtered by the installation id in the workflow job payload. runnerd does not copy the full repository authorization list for that installation into local state. The account repositories page loads the installation's current authorized repositories on demand through the GitHub App API. After an admin signs in, the browser stores a signed HttpOnly session cookie and automatically sends it to management APIs such as `/runner_requests`. For `curl` examples, export a cookie jar from the browser or OAuth debug flow:
+`<your-github-user-id>` is the stable numeric `id` returned by GitHub `/user`, not the mutable login. Role belongs to the local account. OAuth identity stores provider, stable subject, and login display metadata, so other provider identities can later be linked to the same account. After ordinary users sign in, they can install the configured GitHub App from `/account/repositories`, configure Sandbox service from `/account/preferences` or `/organizations/{login}/preferences`, and inspect scoped resources from the Sandbox Templates and Sandbox Instances tabs. When GitHub returns an `installation_id`, runnerd records the GitHub App installation linked to that account. Jobs visible to an ordinary user are filtered by the installation id in the workflow job payload. runnerd does not copy the full repository authorization list for that installation into local state. The account repositories page loads the installation's current authorized repositories on demand through the GitHub App API. The catalog endpoints require an ordinary-user session, use the account or selected installation's encrypted credentials, map supported region ids to server-owned endpoints, and never expose the credentials. After an admin signs in, the browser stores a signed HttpOnly session cookie and automatically sends it to management APIs such as `/runner_requests`. For `curl` examples, export a cookie jar from the browser or OAuth debug flow:
 
 ```bash
 export COOKIE_JAR=./runnerd.cookies
 ```
 
-UI source lives in `ui/` and uses the same React, Vite, Tailwind CSS, shadcn-style components, and theme CSS as `kubevirt-console`. `task build` runs `task ui-build`, writes frontend output to `internal/server/ui/`, and then compiles `runnerd`. In development mode, `internal/server/ui_assets_development.go` proxies UI assets to Vite. In production builds, `internal/server/ui_assets_production.go` embeds `internal/server/ui/*`. The ordinary-user UI includes GitHub App accounts and on-demand authorized repositories at `/account/repositories`, Sandbox service settings at `/account/preferences` and `/organizations/{login}/preferences`, local activity repositories at `/repositories`, the Repo/PR job list at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, and job details at `/jobs/{id}`. The admin surface includes runners, runner specs, runner groups, runner policies, retry, audit, label match test, and diagnostics pages.
+UI source lives in `ui/` and uses the same React, Vite, Tailwind CSS, shadcn-style components, and theme CSS as `kubevirt-console`. `task build` runs `task ui-build`, writes frontend output to `internal/server/ui/`, and then compiles `runnerd`. In development mode, `internal/server/ui_assets_development.go` proxies UI assets to Vite. In production builds, `internal/server/ui_assets_production.go` embeds `internal/server/ui/*`. The ordinary-user UI includes GitHub App accounts and on-demand authorized repositories at `/account/repositories`, Sandbox service settings at `/account/preferences` and `/organizations/{login}/preferences`, region-filtered templates at `/account/sandbox-templates`, region- and template-filtered runner instances at `/account/sandbox-instances`, the equivalent organization routes, local activity repositories at `/repositories`, the Repo/PR job list at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, and job details at `/jobs/{id}`. The catalog uses `GET /user/sandbox/templates?region=<id>` and `GET /user/sandbox/instances?region=<id>&template_id=<id>`; the instance endpoint lists only runner-created sandboxes. The admin surface includes runners, runner specs, runner groups, runner policies, retry, audit, label match test, and diagnostics pages, but not provider resource catalogs.
 
 Create a default runner spec first:
 

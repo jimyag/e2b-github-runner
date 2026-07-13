@@ -17,7 +17,7 @@ Implemented pieces:
 - DB claim/lease processing with retry metadata (`retry_count`, `next_retry_at`, `lease_owner`, `lease_expires_at`).
 - GitHub App auth with optional dynamic installation resolution, plus token and basic auth compatibility modes.
 - GitHub App OAuth login for the admin console, with local roles and signed HttpOnly sessions.
-- Ordinary-user UI for PR/job views, local activity repositories, GitHub App installations, authorized repositories, and account or organization scoped Sandbox service Preferences.
+- Ordinary-user UI for PR/job views, local activity repositories, GitHub App installations, authorized repositories, account or organization scoped Sandbox service Preferences, and scoped Sandbox template and runner-instance catalogs.
 - Admin API and UI for runner requests, specs, groups, policies, retry/stop actions, match tests, audit history, and diagnostics.
 - Production UI assets built from `ui/` into `internal/server/ui/`; development assets are proxied to Vite.
 - Diagnostics through `github.com/jimmicro/pprof`, `/diagnostics/pprof`, `/diagnostics/vars`, and expvar metrics.
@@ -28,6 +28,7 @@ Known boundaries:
 - Runner specs, runner groups, and repository policies are managed through the admin API/UI, not through `runnerd.yaml`.
 - Token and basic auth still exist as compatibility modes. Product policy has not decided whether to keep them for production.
 - Multi-instance behavior should not be advertised until two runnerd processes have been verified against the same database.
+- Sandbox provider catalogs are ordinary-user resources, not admin configuration. `GET /user/sandbox/templates` and `GET /user/sandbox/instances` resolve the selected account or GitHub installation credentials, accept only supported region ids, and keep secrets server-side.
 
 ## Architecture Overview
 

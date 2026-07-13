@@ -19,7 +19,7 @@ runnerd 是单个 Go 服务：接收 GitHub `workflow_job` webhooks，根据 rep
 - DB claim/lease processing，带 retry metadata（`retry_count`、`next_retry_at`、`lease_owner`、`lease_expires_at`）。
 - GitHub App auth 支持可选 dynamic installation resolution，同时保留 token 和 basic auth compatibility modes。
 - GitHub App OAuth login 用于 admin console，本地 roles 和 signed HttpOnly sessions。
-- Ordinary-user UI 支持 PR/job views、local activity repositories、GitHub App installations、authorized repositories，以及 account 或 organization scoped Sandbox service Preferences。
+- Ordinary-user UI 支持 PR/job views、local activity repositories、GitHub App installations、authorized repositories、account 或 organization scoped Sandbox service Preferences，以及 scoped Sandbox template 和 runner-instance catalogs。
 - Admin API 和 UI 支持 runner requests、specs、groups、policies、retry/stop actions、match tests、audit history 和 diagnostics。
 - Production UI assets 从 `ui/` 构建到 `internal/server/ui/`；development assets 代理到 Vite。
 - 通过 `github.com/jimmicro/pprof`、`/diagnostics/pprof`、`/diagnostics/vars` 和 expvar metrics 提供 diagnostics。
@@ -30,6 +30,7 @@ runnerd 是单个 Go 服务：接收 GitHub `workflow_job` webhooks，根据 rep
 - Runner specs、runner groups 和 repository policies 通过 admin API/UI 管理，不是 `runnerd.yaml` 字段。
 - Token 和 basic auth 仍作为 compatibility modes 存在。产品策略尚未决定是否为生产长期保留。
 - 在用两个 runnerd 进程连接同一个 database 验证前，不应宣传 multi-instance support。
+- Sandbox provider catalogs 是普通用户资源，不是 admin 配置。`GET /user/sandbox/templates` 和 `GET /user/sandbox/instances` 会解析选中 account 或 GitHub installation 的凭据，只接受支持的 region id，并把 secrets 保留在服务端。
 
 ## 架构总览
 

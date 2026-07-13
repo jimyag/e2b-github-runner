@@ -11,7 +11,8 @@
 
 - The current browser entry for the ordinary-user UI is `/`.
 - Ordinary-user job group routes use a source-context path with the jobs view as the terminal resource, such as `/github/pulls/{owner}/{repo}/{number}/jobs`; individual runner job details remain `/jobs/{id}`.
-- Ordinary-user account settings live under `/account/repositories`, `/account/preferences`, and `/organizations/{login}/...`.
+- Ordinary-user account settings live under `/account/repositories`, `/account/preferences`, `/account/sandbox-templates`, `/account/sandbox-instances`, and `/organizations/{login}/...`.
+- `/user/sandbox/templates` and `/user/sandbox/instances` resolve encrypted Sandbox credentials from the selected account or GitHub installation scope. They are ordinary-user catalog APIs, not admin configuration APIs.
 - The current browser entry for the admin console is `/admin/`.
 - UI source lives in `ui/`.
 - Production UI assets are generated into `internal/server/ui/` by `task ui-build` and embedded by `internal/server/ui_assets_production.go`.

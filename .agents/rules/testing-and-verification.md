@@ -43,7 +43,7 @@ Old-schema upgrade coverage is required when adding required columns, changing u
 - Edit source under `ui/`, not generated files under `internal/server/ui/`.
 - For UI source changes, run `task ui-lint` or `task build` depending on scope.
 - Use `task build` when verifying production embedded UI behavior.
-- Use the real ordinary-user entries `/`, `/repositories`, `/account/repositories`, and `/account/preferences` when changing user UI.
+- Use the real ordinary-user entries `/`, `/repositories`, `/account/repositories`, `/account/preferences`, `/account/sandbox-templates`, and `/account/sandbox-instances` when changing user UI. Also exercise the corresponding `/organizations/{login}/...` route when scope resolution changes.
 - Use the real admin entry `/admin/`; do not assume the `ui/` tree is all admin-only.
 
 ## Development Startup

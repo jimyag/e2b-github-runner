@@ -34,6 +34,8 @@ GitHub 鉴权方式必须三选一：`github.app`、`github.token` 或 `github.b
 
 Sandbox service API URL 和 API key 在普通用户的 account 或 organization Preferences 页面配置。API key 会使用 `auth.encryption_key` 加密；runnerd 不再从 `runnerd.yaml` 读取 Sandbox service 凭据。
 
+登录用户可以在同一 account 或 organization scope 下查看 Sandbox 资源。Sandbox Templates 按支持的区域列出模板，Sandbox Instances 按区域和可选模板筛选 runner 创建的实例。页面位于 `/account/sandbox-templates`、`/account/sandbox-instances` 及对应的 `/organizations/{login}/...` 路由；凭据只在服务端使用，目录 API 不会返回凭据。
+
 `/webhooks/github` 使用 GitHub HMAC signature verification。`/runner_requests` 下的手动管理 API 需要有效的 GitHub OAuth admin session cookie。
 
 Runner state 持久化到 DB-backed store，不再使用按请求拆分的 JSON 目录。Control/stdout/stderr logs 会作为 runner events 保存，并继续通过 admin API 和 UI 查看。
@@ -61,7 +63,7 @@ cp runnerd.yaml.example runnerd.local.yaml
 task dev
 ```
 
-`task dev` 会从 `5173` 开始选择第一个可用 localhost 端口启动 Vite UI dev server；当 `.smee-url` 存在时启动 smee webhook forwarder；并用 `development` build tag 运行 `runnerd`。Go server 仍监听 `runnerd.local.yaml` 中的地址，通常是 `:25500`，并把嵌入式 UI 资源代理到 Vite。开发时可打开 `http://127.0.0.1:25500/` 查看普通用户 PR/job 视图，打开 `http://127.0.0.1:25500/repositories` 查看普通用户 activity repositories，打开 `http://127.0.0.1:25500/account/repositories` 查看 GitHub App accounts 和 authorized repositories，打开 `http://127.0.0.1:25500/account/preferences` 配置个人 Sandbox service，或打开 `http://127.0.0.1:25500/admin/` 查看 admin console。
+`task dev` 会从 `5173` 开始选择第一个可用 localhost 端口启动 Vite UI dev server；当 `.smee-url` 存在时启动 smee webhook forwarder；并用 `development` build tag 运行 `runnerd`。Go server 仍监听 `runnerd.local.yaml` 中的地址，通常是 `:25500`，并把嵌入式 UI 资源代理到 Vite。开发时可打开 `http://127.0.0.1:25500/` 查看普通用户 PR/job 视图，打开 `http://127.0.0.1:25500/repositories` 查看普通用户 activity repositories，打开 `http://127.0.0.1:25500/account/repositories` 查看 GitHub App accounts 和 authorized repositories，打开 `http://127.0.0.1:25500/account/preferences` 配置个人 Sandbox service，打开 `http://127.0.0.1:25500/account/sandbox-templates` 或 `/account/sandbox-instances` 查看个人 Sandbox 目录，或打开 `http://127.0.0.1:25500/admin/` 查看 admin console。
 
 可设置 `RUNNERD_CONFIG` 使用其他配置文件，或设置 `RUNNERD_VITE_PORT` 要求固定 Vite 端口。
 
@@ -84,7 +86,7 @@ docker run --rm -p 25500:25500 \
   ghcr.io/qiniu/ci-runner
 ```
 
-普通用户 console 地址是 `http://127.0.0.1:25500/`，admin console 地址是 `http://127.0.0.1:25500/admin/`。UI 从 `ui/` 构建，使用 React、Vite、Tailwind CSS、shadcn-style components，以及与 `kubevirt-console` 相同的 theme tokens。Console 提供 GitHub sign-in，并使用 signed HttpOnly cookie 调用 API。普通用户可以在 `/` 看到两列 repository/PR job 视图，在 `/repositories` 看到本地 activity repositories，在 `/account/repositories` 看到 GitHub App accounts 和按需加载的 authorized repositories，在 `/account/preferences` 或 `/organizations/{login}/preferences` 配置 Sandbox service。Admin 用户看到管理 console。
+普通用户 console 地址是 `http://127.0.0.1:25500/`，admin console 地址是 `http://127.0.0.1:25500/admin/`。UI 从 `ui/` 构建，使用 React、Vite、Tailwind CSS、shadcn-style components，以及与 `kubevirt-console` 相同的 theme tokens。Console 提供 GitHub sign-in，并使用 signed HttpOnly cookie 调用 API。普通用户可以在 `/` 看到两列 repository/PR job 视图，在 `/repositories` 看到本地 activity repositories，在 `/account/repositories` 看到 GitHub App accounts 和按需加载的 authorized repositories，在 `/account/preferences` 或 `/organizations/{login}/preferences` 配置 Sandbox service，并在 `/account/sandbox-templates`、`/account/sandbox-instances` 及对应的 organization 路由查看 scoped resource catalogs。Admin 用户看到管理 console；provider resource catalogs 不属于 admin 配置。
 
 Admin console 管理 runner requests、runner specs、runner groups、runner policies、retry actions、audit history、runner-spec match tests 和 diagnostics。Runner specs、groups 和 repository policies 通过 admin API/UI 创建，不是 `runnerd.yaml` 字段。runnerd 默认创建 repository runner；当匹配到的 runner spec 配置了 GitHub runner group 时，它会为 job repository owner 创建 organization runner，并把该 group 作为 `--runnergroup` 传入。
 

@@ -168,6 +168,13 @@ http://127.0.0.1:25500/account/repositories
 http://127.0.0.1:25500/account/preferences
 ```
 
+普通用户个人 Sandbox 目录：
+
+```text
+http://127.0.0.1:25500/account/sandbox-templates
+http://127.0.0.1:25500/account/sandbox-instances
+```
+
 管理员界面：
 
 ```text
@@ -210,13 +217,13 @@ http://127.0.0.1:25500/
 go run ./cmd/runnerd --config ./runnerd.yaml --bootstrap-admin github:<your-github-user-id>
 ```
 
-`<your-github-user-id>` 是 GitHub `/user` 返回的稳定 numeric `id`，不是可修改的 login。role 属于本地 account，OAuth identity 只保存 provider、stable subject 和 login 展示信息，因此后续可以把其他 provider identity 绑定到同一个 account。普通用户登录后可以在 `/account/repositories` 安装配置文件中定义的 GitHub App，并在 `/account/preferences` 或 `/organizations/{login}/preferences` 配置 Sandbox service。GitHub 带 `installation_id` 回调后，runnerd 会记录该 account 绑定的 GitHub App installation。普通用户能看到的 job 按 workflow job payload 里的 installation id 过滤，runnerd 不会把该 installation 授权的全部仓库列表复制到本地状态中；account repositories 页面点击安装账户时，会按需通过 GitHub App API 获取该账户当前授权的 repositories。管理员登录后，浏览器会保存 signed HttpOnly session cookie，并自动带上该 cookie 访问 `/runner_requests` 等管理接口。需要用 `curl` 调管理 API 时，可以从浏览器或 OAuth 调试流程导出 cookie 到 `COOKIE_JAR`，后续示例统一使用：
+`<your-github-user-id>` 是 GitHub `/user` 返回的稳定 numeric `id`，不是可修改的 login。role 属于本地 account，OAuth identity 只保存 provider、stable subject 和 login 展示信息，因此后续可以把其他 provider identity 绑定到同一个 account。普通用户登录后可以在 `/account/repositories` 安装配置文件中定义的 GitHub App，在 `/account/preferences` 或 `/organizations/{login}/preferences` 配置 Sandbox service，并通过 Sandbox Templates 和 Sandbox Instances tabs 查看 scoped resources。GitHub 带 `installation_id` 回调后，runnerd 会记录该 account 绑定的 GitHub App installation。普通用户能看到的 job 按 workflow job payload 里的 installation id 过滤，runnerd 不会把该 installation 授权的全部仓库列表复制到本地状态中；account repositories 页面点击安装账户时，会按需通过 GitHub App API 获取该账户当前授权的 repositories。目录接口要求普通用户 session，使用 account 或选中 installation 的加密凭据，把支持的 region id 映射到服务端维护的 endpoint，且不会暴露凭据。管理员登录后，浏览器会保存 signed HttpOnly session cookie，并自动带上该 cookie 访问 `/runner_requests` 等管理接口。需要用 `curl` 调管理 API 时，可以从浏览器或 OAuth 调试流程导出 cookie 到 `COOKIE_JAR`，后续示例统一使用：
 
 ```bash
 export COOKIE_JAR=./runnerd.cookies
 ```
 
-页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。开发模式下 `internal/server/ui_assets_development.go` 会把 UI 资源代理到 Vite；生产构建下 `internal/server/ui_assets_production.go` 会嵌入 `internal/server/ui/*`。普通用户界面包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/repositories` 的本地 activity repositories，以及 `/` 的 Repo/PR 列表和 PR job 明细；管理面包含 runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面。
+页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。开发模式下 `internal/server/ui_assets_development.go` 会把 UI 资源代理到 Vite；生产构建下 `internal/server/ui_assets_production.go` 会嵌入 `internal/server/ui/*`。普通用户界面包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/account/sandbox-templates` 的区域过滤模板、`/account/sandbox-instances` 的区域和模板过滤 runner instances、对应的 organization 路由、`/repositories` 的本地 activity repositories，以及 `/` 的 Repo/PR 列表和 PR job 明细。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes。管理面包含 runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
 
 先创建一个默认 runner spec：
 
