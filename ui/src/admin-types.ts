@@ -158,6 +158,10 @@ export type AuthorizedRepositories = {
   repositories: string[]
 }
 
+export type SyncedGitHubInstallations = {
+  installations: GitHubInstallation[]
+}
+
 export type Metric = {
   label: string
   value: number

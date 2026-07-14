@@ -36,6 +36,7 @@ func (s *Server) handleGitHubOAuthLogin(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	stateToken := newID()
+	returnTo := sanitizeOAuthReturnTo(r.URL.Query().Get("return_to"))
 	http.SetCookie(w, &http.Cookie{
 		Name:     oauthStateCookieName,
 		Value:    stateToken,
@@ -45,6 +46,19 @@ func (s *Server) handleGitHubOAuthLogin(w http.ResponseWriter, r *http.Request) 
 		Secure:   requestIsSecure(r),
 		MaxAge:   int((10 * time.Minute).Seconds()),
 	})
+	if returnTo != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name:     oauthReturnToCookieName,
+			Value:    returnTo,
+			Path:     "/auth/github",
+			HttpOnly: true,
+			SameSite: http.SameSiteLaxMode,
+			Secure:   requestIsSecure(r),
+			MaxAge:   int((10 * time.Minute).Seconds()),
+		})
+	} else {
+		clearCookie(w, oauthReturnToCookieName, "/auth/github", requestIsSecure(r))
+	}
 	values := url.Values{
 		"client_id":    {s.cfg.GitHubOAuthClientID},
 		"state":        {stateToken},
@@ -100,6 +114,22 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "save github oauth account")
 		return
 	}
+	encryptedToken, err := encryptSecret(token, s.cfg.AuthEncryptionKey)
+	if err != nil {
+		s.logger.Warn("github oauth token encrypt failed", "login", user.Login, "error", err)
+		writeError(w, http.StatusInternalServerError, "save github oauth token")
+		return
+	}
+	if _, err := s.store.UpsertAccountSecret(state.AccountSecret{
+		ScopeType:      state.AccountScopeTypeAccount,
+		ScopeID:        account.ID,
+		KeyType:        state.AccountSecretTypeGitHubOAuthToken,
+		EncryptedValue: encryptedToken,
+	}); err != nil {
+		s.logger.Warn("github oauth token save failed", "login", user.Login, "error", err)
+		writeError(w, http.StatusInternalServerError, "save github oauth token")
+		return
+	}
 	session := adminSession{
 		Provider:  "github",
 		Subject:   user.Subject(),
@@ -123,7 +153,14 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		Secure:   requestIsSecure(r),
 		MaxAge:   int(s.cfg.AuthSessionTTL.Seconds()),
 	})
-	http.Redirect(w, r, "/", http.StatusFound)
+	returnTo := "/"
+	if cookie, err := r.Cookie(oauthReturnToCookieName); err == nil {
+		clearCookie(w, oauthReturnToCookieName, "/auth/github", requestIsSecure(r))
+		if sanitized := sanitizeOAuthReturnTo(cookie.Value); sanitized != "" {
+			returnTo = sanitized
+		}
+	}
+	http.Redirect(w, r, returnTo, http.StatusFound)
 }
 
 func (s *Server) isGitHubAppSetupCallback(r *http.Request) bool {
@@ -133,7 +170,19 @@ func (s *Server) isGitHubAppSetupCallback(r *http.Request) bool {
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	clearCookie(w, adminSessionCookieName, "/", requestIsSecure(r))
 	clearCookie(w, oauthStateCookieName, "/auth/github", requestIsSecure(r))
+	clearCookie(w, oauthReturnToCookieName, "/auth/github", requestIsSecure(r))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func sanitizeOAuthReturnTo(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") {
+		return ""
+	}
+	if parsed, err := url.Parse(value); err != nil || parsed.IsAbs() || parsed.Host != "" {
+		return ""
+	}
+	return value
 }
 
 type githubOAuthTokenResponse struct {

@@ -170,6 +170,61 @@ func (c *Client) ListInstallationRepositories(ctx context.Context, installationI
 	return repositories, nil
 }
 
+func (c *Client) ListUserInstallations(ctx context.Context, token string) ([]Installation, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, fmt.Errorf("github oauth token is required")
+	}
+	nextURL := fmt.Sprintf("%s/user/installations?per_page=100", c.baseURL)
+	var installations []Installation
+	for nextURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		setGitHubHeaders(req)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read github user installations response: %w", readErr)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, fmt.Errorf("github user installations: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+		var out struct {
+			Installations []struct {
+				ID      int64 `json:"id"`
+				Account struct {
+					Login     string `json:"login"`
+					Name      string `json:"name"`
+					AvatarURL string `json:"avatar_url"`
+				} `json:"account"`
+			} `json:"installations"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, err
+		}
+		for _, item := range out.Installations {
+			if item.ID <= 0 {
+				continue
+			}
+			installations = append(installations, Installation{
+				ID:            item.ID,
+				AccountLogin:  item.Account.Login,
+				AccountName:   item.Account.Name,
+				AccountAvatar: item.Account.AvatarURL,
+			})
+		}
+		nextURL = nextLink(resp.Header.Get("Link"))
+	}
+	return installations, nil
+}
+
 func NewClient(baseURL string, httpClient *http.Client) *Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient

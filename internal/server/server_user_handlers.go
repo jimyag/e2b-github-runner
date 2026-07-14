@@ -178,6 +178,57 @@ func (s *Server) handleUserDeleteGitHubInstallation(w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+func (s *Server) handleUserSyncGitHubInstallations(w http.ResponseWriter, r *http.Request) {
+	session, account, ok := s.requireUserSession(w, r)
+	if !ok {
+		return
+	}
+	if s.gh == nil {
+		writeError(w, http.StatusInternalServerError, "github client is not configured")
+		return
+	}
+	secret, err := s.store.GetAccountSecret(state.AccountScopeTypeAccount, account.ID, state.AccountSecretTypeGitHubOAuthToken)
+	if err != nil {
+		if errors.Is(err, state.ErrNotFound) {
+			writeError(w, http.StatusBadRequest, "sign in with GitHub again before syncing installations")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	token, err := decryptSecret(secret.EncryptedValue, s.cfg.AuthEncryptionKey)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "decrypt github oauth token")
+		return
+	}
+	remoteInstallations, err := s.gh.ListUserInstallations(r.Context(), token)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	synced := make([]state.GitHubInstallation, 0, len(remoteInstallations))
+	for _, remote := range remoteInstallations {
+		installation, err := s.store.UpsertGitHubInstallation(state.GitHubInstallation{
+			AccountID:      account.ID,
+			InstallationID: remote.ID,
+			AccountLogin:   remote.AccountLogin,
+			AccountName:    remote.AccountName,
+			AccountAvatar:  remote.AccountAvatar,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		synced = append(synced, installation)
+	}
+	s.recordAudit("github:"+session.Subject, "github_app.sync", "account", strconv.FormatInt(account.ID, 10), map[string]any{
+		"count": len(synced),
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"installations": synced,
+	})
+}
+
 func (s *Server) handleUserListGitHubInstallationRepositories(w http.ResponseWriter, r *http.Request) {
 	_, account, ok := s.requireUserSession(w, r)
 	if !ok {

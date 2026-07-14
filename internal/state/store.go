@@ -170,9 +170,10 @@ type GitHubInstallation struct {
 }
 
 const (
-	AccountSecretTypeSandboxAPIKey = "sandbox_api_key"
-	AccountScopeTypeAccount        = "account"
-	AccountScopeTypeGitHubInstall  = "github_installation"
+	AccountSecretTypeSandboxAPIKey    = "sandbox_api_key"
+	AccountSecretTypeGitHubOAuthToken = "github_oauth_token"
+	AccountScopeTypeAccount           = "account"
+	AccountScopeTypeGitHubInstall     = "github_installation"
 )
 
 // AccountSecret stores an encrypted named secret for one account.

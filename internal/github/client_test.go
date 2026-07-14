@@ -457,6 +457,29 @@ func TestDownloadWorkflowJobLogsFollowsRedirectWithoutGitHubAuth(t *testing.T) {
 	}
 }
 
+func TestListUserInstallationsUsesOAuthToken(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if r.Header.Get("Authorization") != "Bearer user-token" {
+			t.Fatalf("expected bearer user token, got %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"installations":[{"id":987,"account":{"login":"octo-org","name":"Octo Org","avatar_url":"https://avatars.example/o.png"}}]}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, ts.Client())
+	installations, err := client.ListUserInstallations(t.Context(), "user-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installations) != 1 || installations[0].ID != 987 || installations[0].AccountLogin != "octo-org" {
+		t.Fatalf("unexpected installations: %#v", installations)
+	}
+}
+
 func TestDownloadWorkflowJobLogsRedirectUsesConfiguredTransport(t *testing.T) {
 	client := NewTokenClient("https://api.github.test", "github-token", &http.Client{
 		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

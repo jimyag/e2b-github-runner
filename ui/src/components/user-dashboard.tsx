@@ -115,6 +115,7 @@ export function UserDashboard({
   authorizedRepositories,
   loadingRepositoriesFor,
   onLoadAuthorizedRepositories,
+  onSyncGitHubInstallations,
   onSaveSandboxConfig,
   onDeleteSandboxAPIKey,
   onNavigate,
@@ -136,6 +137,7 @@ export function UserDashboard({
   authorizedRepositories: Record<number, string[]>
   loadingRepositoriesFor: number | null
   onLoadAuthorizedRepositories: (id: number) => void
+  onSyncGitHubInstallations: () => void
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   onNavigate: (page: UserPage) => void
@@ -228,6 +230,8 @@ export function UserDashboard({
       {page === "repositories" ? (
         <ActivityRepositoriesPage
           installations={installations}
+          canSyncGitHubInstallations={Boolean(githubApp)}
+          onSyncGitHubInstallations={onSyncGitHubInstallations}
         />
       ) : page === "settings" ? (
         <AccountsPage
@@ -238,6 +242,7 @@ export function UserDashboard({
           loadingRepositoriesFor={loadingRepositoriesFor}
           route={accountSettingsRoute}
           onLoadAuthorizedRepositories={onLoadAuthorizedRepositories}
+          onSyncGitHubInstallations={onSyncGitHubInstallations}
           onSaveSandboxConfig={onSaveSandboxConfig}
           onDeleteSandboxAPIKey={onDeleteSandboxAPIKey}
           currentLogin={authSession.login}
@@ -252,7 +257,8 @@ export function UserDashboard({
           selectedJobGroup={selectedJobGroup}
           selectedJobID={selectedJobID}
           onSelectKey={onSelectKey}
-          onNavigate={onNavigate}
+          canSyncGitHubInstallations={Boolean(githubApp)}
+          onSyncGitHubInstallations={onSyncGitHubInstallations}
           onOpenJob={onOpenJob}
           request={request}
         />
@@ -263,8 +269,12 @@ export function UserDashboard({
 
 function ActivityRepositoriesPage({
   installations,
+  canSyncGitHubInstallations,
+  onSyncGitHubInstallations,
 }: {
   installations: NonNullable<GitHubAppConfig["installations"]>
+  canSyncGitHubInstallations: boolean
+  onSyncGitHubInstallations: () => void
 }) {
   const [selectedID, setSelectedID] = useState<number | null>(null)
   const selected = installations.find((installation) => installation.id === selectedID) || installations[0]
@@ -303,7 +313,7 @@ function ActivityRepositoriesPage({
                 ))
               ) : (
                 <div className="p-4 text-sm text-muted-foreground">
-                  Connect a GitHub App account, then trigger a workflow job to show active repositories here.
+                  Sync existing GitHub App accounts, then trigger a workflow job to show active repositories here.
                 </div>
               )}
             </div>
@@ -349,8 +359,23 @@ function ActivityRepositoriesPage({
               </Card>
             </div>
           ) : (
-            <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
-              Connect a GitHub App account, then trigger a workflow job to show active repositories here.
+            <div className="rounded-lg border bg-muted/30 p-6">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold">Sync existing GitHub App accounts</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {canSyncGitHubInstallations
+                      ? "Use this if the GitHub App is already installed but this runnerd instance has no local account record yet."
+                      : "Set up GitHub App auth before syncing local account records."}
+                  </p>
+                </div>
+                {canSyncGitHubInstallations ? (
+                  <Button type="button" onClick={onSyncGitHubInstallations}>
+                    <Github className="h-4 w-4" />
+                    Sync accounts
+                  </Button>
+                ) : null}
+              </div>
             </div>
           )}
         </section>
@@ -367,6 +392,7 @@ function AccountsPage({
   loadingRepositoriesFor,
   route,
   onLoadAuthorizedRepositories,
+  onSyncGitHubInstallations,
   onSaveSandboxConfig,
   onDeleteSandboxAPIKey,
   currentLogin,
@@ -380,6 +406,7 @@ function AccountsPage({
   loadingRepositoriesFor: number | null
   route: AccountSettingsRoute
   onLoadAuthorizedRepositories: (id: number) => void
+  onSyncGitHubInstallations: () => void
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   currentLogin?: string
@@ -417,12 +444,18 @@ function AccountsPage({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {githubApp?.install_url ? (
-              <Button type="button" asChild>
-                <a href={githubApp.install_url}>
+              <>
+                <Button type="button" variant="outline" onClick={onSyncGitHubInstallations}>
                   <Github className="h-4 w-4" />
-                  Install GitHub App
-                </a>
-              </Button>
+                  Sync existing installations
+                </Button>
+                <Button type="button" asChild>
+                  <a href={githubApp.install_url}>
+                    <Github className="h-4 w-4" />
+                    Install GitHub App
+                  </a>
+                </Button>
+              </>
             ) : (
               <Badge variant="outline">Set github.app.slug to enable the install link</Badge>
             )}
@@ -457,7 +490,7 @@ function AccountsPage({
                 ))
               ) : (
                 <div className="p-4 text-sm text-muted-foreground">
-                  Install the GitHub App to connect a user or organization.
+                  Install the GitHub App or sync existing installations to link a user or organization.
                 </div>
               )}
             </div>
@@ -610,8 +643,23 @@ function AccountsPage({
                 <SandboxesSection request={request} />
               </div>
             ) : (
-              <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
-                Install the GitHub App to connect a user or organization.
+              <div className="rounded-lg border bg-muted/30 p-6">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <h2 className="text-base font-semibold">No local GitHub App accounts</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {githubApp
+                        ? "Sync existing GitHub App installations to create the local account links for this runnerd instance."
+                        : "Set up GitHub App auth before syncing local account records."}
+                    </p>
+                  </div>
+                  {githubApp ? (
+                    <Button type="button" onClick={onSyncGitHubInstallations}>
+                      <Github className="h-4 w-4" />
+                      Sync existing installations
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             )
           )}
@@ -932,7 +980,8 @@ function PullRequestsPage({
   selectedJobGroup,
   selectedJobID,
   onSelectKey,
-  onNavigate,
+  canSyncGitHubInstallations,
+  onSyncGitHubInstallations,
   onOpenJob,
   request,
 }: {
@@ -942,7 +991,8 @@ function PullRequestsPage({
   selectedJobGroup: RunnerJobGroup | null
   selectedJobID: string
   onSelectKey: (key: string) => void
-  onNavigate: (page: UserPage) => void
+  canSyncGitHubInstallations: boolean
+  onSyncGitHubInstallations: () => void
   onOpenJob: (id: string) => void
   request: (url: string, options?: RequestInit) => Promise<unknown>
 }) {
@@ -997,13 +1047,7 @@ function PullRequestsPage({
                   {hasInstallations ? (
                     "No jobs yet. Trigger a workflow in an installed repository, then refresh."
                   ) : (
-                    <button
-                      type="button"
-                      className="text-left text-primary hover:underline"
-                      onClick={() => onNavigate("settings")}
-                    >
-                      Connect a GitHub App account to start tracking jobs.
-                    </button>
+                    "Sync existing GitHub App accounts to start tracking jobs."
                   )}
                 </div>
               )}
@@ -1074,19 +1118,34 @@ function PullRequestsPage({
               </div>
             </div>
           ) : (
-            <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
+            <div className="p-4 lg:p-6">
               {groups.length ? (
-                "This job group was not found. It may have aged out of the local runner history or belongs to an account that is not connected."
+                <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
+                  This job group was not found. It may have aged out of the local runner history or belongs to an account that is not connected.
+                </div>
               ) : hasInstallations ? (
-                "No runner jobs are available yet. Trigger a workflow in an installed repository to see jobs here."
+                <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
+                  No runner jobs are available yet. Trigger a workflow in an installed repository to see jobs here.
+                </div>
               ) : (
-                <button
-                  type="button"
-                  className="text-left text-primary hover:underline"
-                  onClick={() => onNavigate("settings")}
-                >
-                  Connect a GitHub App account to start tracking jobs.
-                </button>
+                <div className="rounded-lg border bg-muted/30 p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <h2 className="text-base font-semibold">Sync existing GitHub App accounts</h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {canSyncGitHubInstallations
+                          ? "Use this if the GitHub App is already installed but this runnerd instance has no local account record yet."
+                          : "Set up GitHub App auth before syncing local account records."}
+                      </p>
+                    </div>
+                    {canSyncGitHubInstallations ? (
+                      <Button type="button" onClick={onSyncGitHubInstallations}>
+                        <Github className="h-4 w-4" />
+                        Sync accounts
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
               )}
             </div>
           )}
