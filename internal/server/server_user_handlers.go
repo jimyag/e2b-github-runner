@@ -190,7 +190,7 @@ func (s *Server) handleUserSyncGitHubInstallations(w http.ResponseWriter, r *htt
 	secret, err := s.store.GetAccountSecret(state.AccountScopeTypeAccount, account.ID, state.AccountSecretTypeGitHubOAuthToken)
 	if err != nil {
 		if errors.Is(err, state.ErrNotFound) {
-			writeError(w, http.StatusBadRequest, "sign in with GitHub again before syncing installations")
+			writeErrorCode(w, http.StatusBadRequest, "REAUTH_REQUIRED", "sign in with GitHub again before syncing installations")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -206,8 +206,15 @@ func (s *Server) handleUserSyncGitHubInstallations(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	existingInstallations, err := s.store.ListGitHubInstallations(account.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	remoteIDs := make(map[int64]struct{}, len(remoteInstallations))
 	synced := make([]state.GitHubInstallation, 0, len(remoteInstallations))
 	for _, remote := range remoteInstallations {
+		remoteIDs[remote.ID] = struct{}{}
 		installation, err := s.store.UpsertGitHubInstallation(state.GitHubInstallation{
 			AccountID:      account.ID,
 			InstallationID: remote.ID,
@@ -221,8 +228,20 @@ func (s *Server) handleUserSyncGitHubInstallations(w http.ResponseWriter, r *htt
 		}
 		synced = append(synced, installation)
 	}
+	removed := 0
+	for _, existing := range existingInstallations {
+		if _, ok := remoteIDs[existing.InstallationID]; ok {
+			continue
+		}
+		if err := s.store.DeleteGitHubInstallation(account.ID, existing.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		removed++
+	}
 	s.recordAudit("github:"+session.Subject, "github_app.sync", "account", strconv.FormatInt(account.ID, 10), map[string]any{
-		"count": len(synced),
+		"count":   len(synced),
+		"removed": removed,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{
 		"installations": synced,

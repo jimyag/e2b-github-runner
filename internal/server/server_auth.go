@@ -176,7 +176,7 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 
 func sanitizeOAuthReturnTo(value string) string {
 	value = strings.TrimSpace(value)
-	if value == "" || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") {
+	if value == "" || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || strings.Contains(value, "\\") {
 		return ""
 	}
 	if parsed, err := url.Parse(value); err != nil || parsed.IsAbs() || parsed.Host != "" {

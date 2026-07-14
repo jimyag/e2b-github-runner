@@ -557,6 +557,17 @@ func TestUserSyncGitHubInstallationsFromOAuthToken(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	stale, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 654,
+		AccountLogin:   "stale-org",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.ID <= 0 {
+		t.Fatalf("expected stale installation id, got %#v", stale)
+	}
 
 	req := httptest.NewRequest(http.MethodPost, "/user/github-app/installations/sync", nil)
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
@@ -571,6 +582,25 @@ func TestUserSyncGitHubInstallationsFromOAuthToken(t *testing.T) {
 	}
 	if len(installations) != 1 || installations[0].InstallationID != 987 || installations[0].AccountLogin != "octo-org" {
 		t.Fatalf("unexpected synced installations: %#v", installations)
+	}
+}
+
+func TestUserSyncGitHubInstallationsRequiresOAuthTokenCode(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "https://github.example", &fakeSandbox{})
+	if _, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id"); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/user/github-app/installations/sync", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected sync status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"REAUTH_REQUIRED"`) {
+		t.Fatalf("expected reauth code response, got %s", rec.Body.String())
 	}
 }
 
@@ -1085,6 +1115,17 @@ func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"role":"admin"`) {
 		t.Fatalf("expected session role response, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSanitizeOAuthReturnToRejectsBackslashRedirects(t *testing.T) {
+	for _, value := range []string{`/\example.com`, `/\\example.com`, `/account\repositories`} {
+		if got := sanitizeOAuthReturnTo(value); got != "" {
+			t.Fatalf("expected %q to be rejected, got %q", value, got)
+		}
+	}
+	if got := sanitizeOAuthReturnTo("/account/repositories"); got != "/account/repositories" {
+		t.Fatalf("expected account path to be preserved, got %q", got)
 	}
 }
 

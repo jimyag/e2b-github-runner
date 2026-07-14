@@ -49,6 +49,7 @@ type AccountSettingsRoute = {
   accountLogin?: string
   tab: AccountSettingsTab
 }
+type RequestError = Error & { code?: string }
 
 function App() {
   const [authSession, setAuthSession] = useState<AuthSession>({ authenticated: false, oauth_enabled: false })
@@ -202,13 +203,17 @@ function App() {
       if (!response.ok) {
         const text = await response.text()
         let message = text
+        let code = ""
         try {
-          const parsed = JSON.parse(text) as { error?: string }
+          const parsed = JSON.parse(text) as { code?: string; error?: string }
+          code = parsed.code || ""
           message = parsed.error || text
         } catch {
           // Keep the raw response body for non-JSON errors.
         }
-        throw new Error(message || `${response.status} ${response.statusText}`)
+        const error = new Error(message || `${response.status} ${response.statusText}`) as RequestError
+        error.code = code
+        throw error
       }
       const contentType = response.headers.get("content-type") || ""
       if (contentType.includes("application/json")) return response.json()
@@ -356,8 +361,9 @@ function App() {
       toast.success(count === 1 ? "Synced 1 GitHub App account" : `Synced ${count} GitHub App accounts`)
       await loadUserAll()
     } catch (error) {
+      const requestError = error as RequestError
       const message = error instanceof Error ? error.message : "Failed to sync GitHub App accounts"
-      if (message === "sign in with GitHub again before syncing installations") {
+      if (requestError.code === "REAUTH_REQUIRED" || message === "sign in with GitHub again before syncing installations") {
         toast.message("Refreshing GitHub sign-in...")
         refreshGitHubOAuthLogin()
         return

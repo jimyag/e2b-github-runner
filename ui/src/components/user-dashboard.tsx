@@ -11,6 +11,7 @@ import {
   Monitor,
   Moon,
   Play,
+  Pencil,
   RefreshCw,
   Settings,
   ShieldCheck,
@@ -157,6 +158,7 @@ export function UserDashboard({
     () => orderInstallationsByCurrentAccount(githubApp?.installations ?? [], authSession.login),
     [authSession.login, githubApp?.installations]
   )
+  const canSyncGitHubInstallations = Boolean(githubApp?.install_url || githubApp?.app_slug)
   const hasInstallations = installations.length > 0
   const navItemClass = (active: boolean) =>
     cn(
@@ -231,7 +233,7 @@ export function UserDashboard({
       {page === "repositories" ? (
         <ActivityRepositoriesPage
           installations={installations}
-          canSyncGitHubInstallations={Boolean(githubApp)}
+          canSyncGitHubInstallations={canSyncGitHubInstallations}
           syncingGitHubInstallations={syncingGitHubInstallations}
           onSyncGitHubInstallations={onSyncGitHubInstallations}
         />
@@ -260,7 +262,7 @@ export function UserDashboard({
           selectedJobGroup={selectedJobGroup}
           selectedJobID={selectedJobID}
           onSelectKey={onSelectKey}
-          canSyncGitHubInstallations={Boolean(githubApp)}
+          canSyncGitHubInstallations={canSyncGitHubInstallations}
           syncingGitHubInstallations={syncingGitHubInstallations}
           onSyncGitHubInstallations={onSyncGitHubInstallations}
           onOpenJob={onOpenJob}
@@ -697,7 +699,7 @@ function AccountsPage({
                         : "Set up GitHub App auth before syncing local account records."}
                     </p>
                   </div>
-                  {githubApp ? (
+                  {githubApp?.install_url || githubApp?.app_slug ? (
                     <SyncGitHubInstallationsButton
                       isSyncing={syncingGitHubInstallations}
                       label="Sync existing installations"
@@ -729,6 +731,7 @@ function SandboxAPIKeyCard({
   const [apiURL, setAPIURL] = useState("")
   const [apiKey, setAPIKey] = useState("")
   const [credentialMode, setCredentialMode] = useState<"custom" | "inherit">("custom")
+  const [customAPIURLOpen, setCustomAPIURLOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false)
@@ -742,14 +745,15 @@ function SandboxAPIKeyCard({
   const sourceAvailable = Boolean(preferences?.sandbox?.source_available)
   const updatedAt = preferences?.sandbox?.api_key?.updated_at
   const savedAPIURL = preferences?.sandbox?.api_url ?? ""
-  const canUseSavedAPIURL = !(allowInheritance && preferences?.sandbox?.inherited && credentialMode === "custom")
+  const canUseSavedAPIURL = !customAPIURLOpen && !(allowInheritance && preferences?.sandbox?.inherited && credentialMode === "custom")
   const effectiveAPIURL = apiURL || (canUseSavedAPIURL ? savedAPIURL : "")
   const selectedRegion = findSandboxRegionByAPIURL(effectiveAPIURL)
-  const showsCustomAPIURL = Boolean(effectiveAPIURL.trim()) && !selectedRegion
+  const showsCustomAPIURL = customAPIURLOpen || (Boolean(effectiveAPIURL.trim()) && !selectedRegion)
 
   useEffect(() => {
     const resolvedAPIURL = resolveSandboxRegionAPIURL(savedAPIURL)
     setAPIURL(resolvedAPIURL)
+    setCustomAPIURLOpen(Boolean(savedAPIURL.trim()) && !findSandboxRegionByAPIURL(resolvedAPIURL))
   }, [savedAPIURL])
 
   useEffect(() => {
@@ -883,6 +887,7 @@ function SandboxAPIKeyCard({
                 onValueChange={(regionID) => {
                   const region = sandboxRegions.find((region) => region.id === regionID)
                   setAPIURL(region?.apiURL ?? "")
+                  setCustomAPIURLOpen(false)
                 }}
                 disabled={saving || deleting || credentialMode === "inherit"}
               >
@@ -902,6 +907,20 @@ function SandboxAPIKeyCard({
                   ))}
                 </SelectContent>
               </Select>
+              {!showsCustomAPIURL && credentialMode === "custom" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setAPIURL("")
+                    setCustomAPIURLOpen(true)
+                  }}
+                  disabled={saving || deleting}
+                >
+                  <Pencil className="h-4 w-4" />
+                  Custom endpoint
+                </Button>
+              ) : null}
               {showsCustomAPIURL && credentialMode === "custom" ? (
                 <Input
                   value={apiURL}
