@@ -26,6 +26,7 @@ type accountPreferencesResponse struct {
 
 type accountSandboxPreference struct {
 	Mode                   string                         `json:"mode"`
+	ResolvedSource         string                         `json:"resolved_source"`
 	APIURL                 string                         `json:"api_url"`
 	APIKey                 accountSandboxAPIKeyPreference `json:"api_key"`
 	Inherited              bool                           `json:"inherited"`
@@ -216,11 +217,13 @@ func (s *Server) handleUserSyncGitHubInstallations(w http.ResponseWriter, r *htt
 	for _, remote := range remoteInstallations {
 		remoteIDs[remote.ID] = struct{}{}
 		installation, err := s.store.UpsertGitHubInstallation(state.GitHubInstallation{
-			AccountID:      account.ID,
-			InstallationID: remote.ID,
-			AccountLogin:   remote.AccountLogin,
-			AccountName:    remote.AccountName,
-			AccountAvatar:  remote.AccountAvatar,
+			AccountID:       account.ID,
+			InstallationID:  remote.ID,
+			GitHubAccountID: remote.AccountID,
+			AccountType:     remote.AccountType,
+			AccountLogin:    remote.AccountLogin,
+			AccountName:     remote.AccountName,
+			AccountAvatar:   remote.AccountAvatar,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -462,7 +465,7 @@ func (s *Server) accountPreferencesResponse(scope accountPreferenceScope, viewer
 			return accountPreferencesResponse{}, err
 		}
 		response.Sandbox.Mode = sandboxPreferenceModeCustom
-		return response, nil
+		return s.fillSandboxResolvedSource(response, scope)
 	} else {
 		var value accountSandboxServicePreferenceValue
 		if err := json.Unmarshal([]byte(preference.ValueJSON), &value); err != nil {
@@ -485,13 +488,41 @@ func (s *Server) accountPreferencesResponse(scope accountPreferenceScope, viewer
 			}
 			response.Sandbox.SourceAvailable = available
 			if !available {
-				return response, nil
+				return s.fillSandboxResolvedSource(response, scope)
 			}
-			return s.fillSandboxResponseFromScope(response, accountPreferenceScope{Type: state.AccountScopeTypeAccount, ID: value.SourceAccountID})
+			response, err = s.fillSandboxResponseFromScope(response, accountPreferenceScope{Type: state.AccountScopeTypeAccount, ID: value.SourceAccountID})
+			if err != nil {
+				return accountPreferencesResponse{}, err
+			}
+			return s.fillSandboxResolvedSource(response, scope)
 		}
 		response.Sandbox.APIURL = value.APIURL
 	}
-	return s.fillSandboxResponseFromScope(response, scope)
+	response, err = s.fillSandboxResponseFromScope(response, scope)
+	if err != nil {
+		return accountPreferencesResponse{}, err
+	}
+	return s.fillSandboxResolvedSource(response, scope)
+}
+
+func (s *Server) fillSandboxResolvedSource(response accountPreferencesResponse, scope accountPreferenceScope) (accountPreferencesResponse, error) {
+	_, snapshot, err := s.sandboxServiceForScopeWithDefault(scope)
+	if err != nil {
+		if errors.Is(err, errSandboxServiceNotConfigured) {
+			response.Sandbox.ResolvedSource = "none"
+			return response, nil
+		}
+		return accountPreferencesResponse{}, err
+	}
+	switch snapshot.Source {
+	case sandboxConfigSourceInheritedAccount:
+		response.Sandbox.ResolvedSource = "inherited"
+	case sandboxConfigSourceAdminDefault:
+		response.Sandbox.ResolvedSource = sandboxConfigSourceAdminDefault
+	default:
+		response.Sandbox.ResolvedSource = "custom"
+	}
+	return response, nil
 }
 
 func (s *Server) inheritedSandboxSourceAccountID(scope accountPreferenceScope, currentAccountID int64, replace bool) (int64, error) {
@@ -655,11 +686,13 @@ func (s *Server) syncGitHubInstallation(ctx context.Context, accountID, installa
 		return state.GitHubInstallation{}, err
 	}
 	return s.store.UpsertGitHubInstallation(state.GitHubInstallation{
-		AccountID:      accountID,
-		InstallationID: installation.ID,
-		AccountLogin:   installation.AccountLogin,
-		AccountName:    installation.AccountName,
-		AccountAvatar:  installation.AccountAvatar,
+		AccountID:       accountID,
+		InstallationID:  installation.ID,
+		GitHubAccountID: installation.AccountID,
+		AccountType:     installation.AccountType,
+		AccountLogin:    installation.AccountLogin,
+		AccountName:     installation.AccountName,
+		AccountAvatar:   installation.AccountAvatar,
 	})
 }
 

@@ -9,6 +9,7 @@ export type RunnerState = {
   runner_group?: string
   runner_name: string
   sandbox_id?: string
+  sandbox_config_source?: string
   process_pid?: number
   workflow_job_id?: number
   workflow_run_id?: number
@@ -140,6 +141,7 @@ export type GitHubAppConfig = {
 export type UserPreferences = {
   sandbox: {
     mode: "custom" | "inherit"
+    resolved_source: "custom" | "inherited" | "admin_default" | "none"
     api_url: string
     inherited?: boolean
     source_account_id?: number
@@ -151,6 +153,33 @@ export type UserPreferences = {
       updated_at?: string
     }
   }
+}
+
+export type SandboxServiceDefault = {
+  enabled: boolean
+  configured: boolean
+  audience_mode: "all" | "selected"
+  audiences: SandboxServiceDefaultAudience[]
+  available_accounts: SandboxAudienceAccount[]
+  api_url: string
+  api_key: {
+    configured: boolean
+    updated_at?: string
+  }
+}
+
+export type SandboxAudienceAccount = {
+  github_account_id: number
+  account_type: "user" | "organization"
+  account_login: string
+  account_name?: string
+  account_avatar?: string
+}
+
+export type SandboxServiceDefaultAudience = SandboxAudienceAccount & {
+  id: number
+  created_at?: string
+  updated_at?: string
 }
 
 export type AuthorizedRepositories = {
@@ -200,6 +229,7 @@ export const adminSections = [
   "runner_specs",
   "runner_groups",
   "runner_policies",
+  "sandbox_service",
   "match",
   "audit",
   "diagnostics",

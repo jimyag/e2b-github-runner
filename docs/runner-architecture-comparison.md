@@ -12,13 +12,14 @@ Implemented pieces:
 - SQLite, Postgres, and MySQL state backends through `database.backend` and `database.dsn`.
 - DB-backed runner requests, runner events/logs, runner specs, runner groups, repository policies, OAuth accounts, and audit events.
 - Account and GitHub installation scoped Preferences for Sandbox service settings, with API keys stored as encrypted account secrets.
+- An admin-managed, disabled-by-default Sandbox service fallback stored independently from account preferences.
 - Schema creation is driven by GORM tags in the state record structs, with startup `AutoMigrate` and narrow compatibility backfills for older schema columns.
 - Fixed runner states: `queued`, `creating`, `running`, `stopping`, `completed`, and `failed`.
 - DB claim/lease processing with retry metadata (`retry_count`, `next_retry_at`, `lease_owner`, `lease_expires_at`).
 - GitHub App auth with optional dynamic installation resolution, plus token and basic auth compatibility modes.
 - GitHub App OAuth login for the admin console, with local roles and signed HttpOnly sessions.
 - Ordinary-user UI for PR/job views, local activity repositories, GitHub App installations, authorized repositories, account or organization scoped Sandbox service Preferences, and scoped Sandbox template and runner-instance catalogs.
-- Admin API and UI for runner requests, specs, groups, policies, retry/stop actions, match tests, audit history, and diagnostics.
+- Admin API and UI for runner requests, specs, groups, policies, the global Sandbox service fallback, retry/stop actions, match tests, audit history, and diagnostics.
 - Production UI assets built from `ui/` into `internal/server/ui/`; development assets are proxied to Vite.
 - Diagnostics through `github.com/jimmicro/pprof`, `/diagnostics/pprof`, `/diagnostics/vars`, and expvar metrics.
 
@@ -28,7 +29,7 @@ Known boundaries:
 - Runner specs, runner groups, and repository policies are managed through the admin API/UI, not through `runnerd.yaml`.
 - Token and basic auth still exist as compatibility modes. Product policy has not decided whether to keep them for production.
 - Multi-instance behavior should not be advertised until two runnerd processes have been verified against the same database.
-- Sandbox provider catalogs are ordinary-user resources, not admin configuration. `GET /user/sandbox/templates` and `GET /user/sandbox/instances` resolve the selected account or GitHub installation credentials, accept only supported region ids, and keep secrets server-side.
+- Sandbox provider catalogs are ordinary-user resources, not admin configuration. `GET /user/sandbox/templates` and `GET /user/sandbox/instances` resolve scoped credentials and then the enabled admin fallback, accept only supported region ids, and keep secrets server-side.
 
 ## Architecture Overview
 
@@ -196,13 +197,14 @@ stateDiagram-v2
 
 ### Configuration And Secret Boundaries
 
-`runnerd.yaml` configures service behavior, GitHub auth, OAuth login, database, and worker policy. Sandbox service credentials are not file config: ordinary users configure them per account or GitHub App installation through Preferences, and API keys are stored encrypted.
+`runnerd.yaml` configures service behavior, GitHub auth, OAuth login, database, and worker policy. Sandbox service credentials are not file config: ordinary users configure scoped credentials through Preferences, while admins may enable an independent platform fallback at `/admin/sandbox_service`. API keys are stored encrypted. The fallback audience is all repository owners or selected GitHub users/organizations matched by stable owner identity. Resolution order is request snapshot, installation custom/inherited config, eligible personal account config, enabled and audience-eligible admin default, then not configured.
 
 ```mermaid
 flowchart LR
   File["runnerd.yaml<br/>server, database, GitHub, OAuth, worker"]
   OAuth["GitHub OAuth callback<br/>/auth/github/callback"]
   UserPrefs["User Preferences UI<br/>account or organization scope"]
+  AdminDefault["Admin Sandbox default<br/>platform fallback"]
   SecretBox["secretbox encryption<br/>auth.encryption_key"]
   Store[("State DB")]
   Runnerd["runnerd"]
@@ -211,6 +213,7 @@ flowchart LR
   File --> Runnerd
   OAuth -->|"signed HttpOnly session"| Runnerd
   UserPrefs -->|"Sandbox API URL + API key"| Runnerd
+  AdminDefault -->|"fallback API URL + API key"| Runnerd
   Runnerd --> SecretBox
   SecretBox -->|"encrypted API key"| Store
   Runnerd -->|"decrypt at runner start"| QiniuSandbox

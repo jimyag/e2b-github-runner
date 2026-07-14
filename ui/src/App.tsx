@@ -9,6 +9,7 @@ import { RunnerGroupsSection } from "@/components/runner-groups-section"
 import { RunnerPoliciesSection } from "@/components/runner-policies-section"
 import { RunnerRequestsSection } from "@/components/runner-requests-section"
 import { RunnerSpecsSection } from "@/components/runner-specs-section"
+import { SandboxServiceDefaultSection } from "@/components/sandbox-service-default-section"
 import { SiteHeader } from "@/components/site-header"
 import { UserDashboard } from "@/components/user-dashboard"
 import {
@@ -859,6 +860,10 @@ function App() {
               onEditRunnerPolicy={loadPolicyIntoForm}
               onDeleteRunnerPolicy={(id) => void deletePolicy(id)}
             />
+          ) : null}
+
+          {section === "sandbox_service" ? (
+            <SandboxServiceDefaultSection request={request} />
           ) : null}
 
           {section === "match" ? (

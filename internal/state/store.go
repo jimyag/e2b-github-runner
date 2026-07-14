@@ -21,9 +21,10 @@ const (
 )
 
 var (
-	ErrConflict        = errors.New("state conflict")
-	ErrNotFound        = errors.New("state record not found")
-	ErrRetryNotAllowed = errors.New("retry not allowed for current state")
+	ErrConflict                            = errors.New("state conflict")
+	ErrNotFound                            = errors.New("state record not found")
+	ErrRetryNotAllowed                     = errors.New("retry not allowed for current state")
+	ErrSandboxServiceDefaultAPIKeyRequired = errors.New("sandbox service default api key is required")
 )
 
 type RunnerRequest struct {
@@ -39,6 +40,7 @@ type RunnerRequest struct {
 	RunnerName             string    `json:"runner_name"`
 	SandboxAPIURL          string    `json:"-"`
 	SandboxAPIKeyEncrypted string    `json:"-"`
+	SandboxConfigSource    string    `json:"sandbox_config_source,omitempty"`
 	CreatedAt              time.Time `json:"created_at"`
 }
 
@@ -54,6 +56,7 @@ type RunnerState struct {
 	SandboxID              string    `json:"sandbox_id,omitempty"`
 	SandboxAPIURL          string    `json:"-"`
 	SandboxAPIKeyEncrypted string    `json:"-"`
+	SandboxConfigSource    string    `json:"sandbox_config_source,omitempty"`
 	ProcessPID             uint32    `json:"process_pid,omitempty"`
 	WorkflowJobID          int64     `json:"workflow_job_id,omitempty"`
 	WorkflowRunID          int64     `json:"workflow_run_id,omitempty"`
@@ -158,15 +161,25 @@ type OAuthIdentity struct {
 // Repositories contains repositories observed by runnerd for that installation,
 // not the full GitHub App authorization scope.
 type GitHubInstallation struct {
-	ID             int64     `json:"id"`
-	AccountID      int64     `json:"account_id"`
-	InstallationID int64     `json:"installation_id"`
-	AccountLogin   string    `json:"account_login,omitempty"`
-	AccountName    string    `json:"account_name,omitempty"`
-	AccountAvatar  string    `json:"account_avatar,omitempty"`
-	Repositories   []string  `json:"repositories"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID              int64     `json:"id"`
+	AccountID       int64     `json:"account_id"`
+	InstallationID  int64     `json:"installation_id"`
+	GitHubAccountID int64     `json:"github_account_id,omitempty"`
+	AccountType     string    `json:"account_type,omitempty"`
+	AccountLogin    string    `json:"account_login,omitempty"`
+	AccountName     string    `json:"account_name,omitempty"`
+	AccountAvatar   string    `json:"account_avatar,omitempty"`
+	Repositories    []string  `json:"repositories"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type GitHubInstallationAccount struct {
+	GitHubAccountID int64  `json:"github_account_id"`
+	AccountType     string `json:"account_type"`
+	AccountLogin    string `json:"account_login"`
+	AccountName     string `json:"account_name,omitempty"`
+	AccountAvatar   string `json:"account_avatar,omitempty"`
 }
 
 const (
@@ -197,6 +210,33 @@ type AccountPreference struct {
 	ValueJSON string    `json:"-"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type SandboxServiceDefault struct {
+	ID              int64      `json:"id"`
+	Enabled         bool       `json:"enabled"`
+	AudienceMode    string     `json:"audience_mode"`
+	APIURL          string     `json:"api_url"`
+	APIKeyEncrypted string     `json:"-"`
+	APIKeyUpdatedAt *time.Time `json:"api_key_updated_at,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+const (
+	SandboxServiceDefaultAudienceModeAll      = "all"
+	SandboxServiceDefaultAudienceModeSelected = "selected"
+)
+
+type SandboxServiceDefaultAudience struct {
+	ID              int64     `json:"id"`
+	GitHubAccountID int64     `json:"github_account_id"`
+	AccountType     string    `json:"account_type"`
+	AccountLogin    string    `json:"account_login"`
+	AccountName     string    `json:"account_name,omitempty"`
+	AccountAvatar   string    `json:"account_avatar,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type RunnerRequestStore interface {
@@ -249,6 +289,11 @@ type IdentityStore interface {
 
 type GitHubInstallationStore interface {
 	ListGitHubInstallations(accountID int64) ([]GitHubInstallation, error)
+	ListGitHubInstallationAccounts() ([]GitHubInstallationAccount, error)
+	GitHubInstallationAccountForInstallation(installationID int64) (GitHubInstallationAccount, error)
+	GitHubInstallationAccountForLogin(accountLogin string) (GitHubInstallationAccount, error)
+	GetGitHubInstallationOwner(installationID int64) (GitHubInstallationAccount, error)
+	UpsertGitHubInstallationOwner(installationID int64, owner GitHubInstallationAccount) (GitHubInstallationAccount, error)
 	GitHubInstallationScopeForAccountLogin(accountLogin string) (int64, bool, error)
 	AccountScopeForPersonalGitHubInstallation(installationID int64) (int64, bool, error)
 	UpsertGitHubInstallation(installation GitHubInstallation) (GitHubInstallation, error)
@@ -268,6 +313,17 @@ type AccountPreferenceStore interface {
 	UpsertAccountPreferenceAndDeleteSecret(preference AccountPreference, secret AccountSecret) (AccountPreference, error)
 }
 
+type SandboxServiceDefaultStore interface {
+	GetSandboxServiceDefault() (SandboxServiceDefault, error)
+	UpsertSandboxServiceDefault(defaultConfig SandboxServiceDefault) (SandboxServiceDefault, error)
+	UpdateSandboxServiceDefaultPreservingAPIKey(defaultConfig SandboxServiceDefault) (SandboxServiceDefault, error)
+	DeleteSandboxServiceDefaultAPIKey() error
+	ListSandboxServiceDefaultAudiences() ([]SandboxServiceDefaultAudience, error)
+	UpsertSandboxServiceDefaultAudience(audience SandboxServiceDefaultAudience) (SandboxServiceDefaultAudience, error)
+	DeleteSandboxServiceDefaultAudience(id int64) error
+	SandboxServiceDefaultAudienceContains(githubAccountID int64, accountType string) (bool, error)
+}
+
 type AuditStore interface {
 	AppendAuditEvent(event AuditEvent) (AuditEvent, error)
 	ListAuditEvents(limit int) ([]AuditEvent, error)
@@ -280,6 +336,7 @@ type Store interface {
 	GitHubInstallationStore
 	AccountSecretStore
 	AccountPreferenceStore
+	SandboxServiceDefaultStore
 	AuditStore
 }
 

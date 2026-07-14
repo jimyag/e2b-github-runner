@@ -103,6 +103,205 @@ func TestMySQLDSNWithParseTime(t *testing.T) {
 	}
 }
 
+func TestSandboxServiceDefaultLifecycle(t *testing.T) {
+	store := New(t.TempDir())
+
+	if _, err := store.GetSandboxServiceDefault(); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetSandboxServiceDefault() error = %v, want ErrNotFound", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	saved, err := store.UpsertSandboxServiceDefault(SandboxServiceDefault{
+		Enabled:         true,
+		APIURL:          "https://sandbox.example.test",
+		APIKeyEncrypted: "encrypted-key",
+		APIKeyUpdatedAt: &now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.ID != 1 || !saved.Enabled || saved.APIKeyEncrypted != "encrypted-key" {
+		t.Fatalf("unexpected saved default: %#v", saved)
+	}
+
+	saved, err = store.UpsertSandboxServiceDefault(SandboxServiceDefault{
+		Enabled: false,
+		APIURL:  "https://sandbox.example.test/v2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Enabled || saved.APIURL != "https://sandbox.example.test/v2" || saved.APIKeyEncrypted != "encrypted-key" {
+		t.Fatalf("expected update to preserve encrypted key: %#v", saved)
+	}
+	if saved.APIKeyUpdatedAt == nil || !saved.APIKeyUpdatedAt.Equal(now) {
+		t.Fatalf("expected update to preserve key timestamp: %#v", saved.APIKeyUpdatedAt)
+	}
+
+	if err := store.DeleteSandboxServiceDefaultAPIKey(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteSandboxServiceDefaultAPIKey(); err != nil {
+		t.Fatalf("expected key deletion to be idempotent: %v", err)
+	}
+	saved, err = store.GetSandboxServiceDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.APIKeyEncrypted != "" || saved.APIKeyUpdatedAt != nil || saved.APIURL == "" {
+		t.Fatalf("expected only API key metadata to be cleared: %#v", saved)
+	}
+}
+
+func TestSandboxServiceDefaultAudienceLifecycle(t *testing.T) {
+	store := New(t.TempDir())
+	saved, err := store.UpsertSandboxServiceDefault(SandboxServiceDefault{
+		Enabled: true,
+		APIURL:  "https://sandbox.example.test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.AudienceMode != SandboxServiceDefaultAudienceModeAll {
+		t.Fatalf("default audience mode = %q", saved.AudienceMode)
+	}
+	saved, err = store.UpsertSandboxServiceDefault(SandboxServiceDefault{
+		Enabled:      false,
+		APIURL:       saved.APIURL,
+		AudienceMode: SandboxServiceDefaultAudienceModeSelected,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.AudienceMode != SandboxServiceDefaultAudienceModeSelected {
+		t.Fatalf("saved audience mode = %q", saved.AudienceMode)
+	}
+
+	audience, err := store.UpsertSandboxServiceDefaultAudience(SandboxServiceDefaultAudience{
+		GitHubAccountID: 9001,
+		AccountType:     "Organization",
+		AccountLogin:    "Octo-Org",
+		AccountName:     "Octo Org",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.UpsertSandboxServiceDefaultAudience(SandboxServiceDefaultAudience{
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "renamed-org",
+		AccountName:     "Renamed Org",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != audience.ID || updated.AccountLogin != "renamed-org" {
+		t.Fatalf("expected duplicate identity to update display metadata: first=%#v updated=%#v", audience, updated)
+	}
+	audiences, err := store.ListSandboxServiceDefaultAudiences()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(audiences) != 1 || audiences[0].GitHubAccountID != 9001 || audiences[0].AccountType != "organization" {
+		t.Fatalf("unexpected audiences: %#v", audiences)
+	}
+	allowed, err := store.SandboxServiceDefaultAudienceContains(9001, "Organization")
+	if err != nil || !allowed {
+		t.Fatalf("expected audience membership, allowed=%v err=%v", allowed, err)
+	}
+	if allowed, err := store.SandboxServiceDefaultAudienceContains(9002, "organization"); err != nil || allowed {
+		t.Fatalf("unexpected audience membership, allowed=%v err=%v", allowed, err)
+	}
+	if err := store.DeleteSandboxServiceDefaultAudience(audience.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteSandboxServiceDefaultAudience(audience.ID); err != nil {
+		t.Fatalf("expected audience deletion to be idempotent: %v", err)
+	}
+}
+
+func TestGitHubInstallationOwnerCacheLifecycle(t *testing.T) {
+	store := New(t.TempDir())
+	if _, err := store.GetGitHubInstallationOwner(987); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetGitHubInstallationOwner() error = %v, want ErrNotFound", err)
+	}
+	owner, err := store.UpsertGitHubInstallationOwner(987, GitHubInstallationAccount{
+		GitHubAccountID: 9001,
+		AccountType:     "Organization",
+		AccountLogin:    "octo-org",
+		AccountName:     "Octo Org",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner.GitHubAccountID != 9001 || owner.AccountType != "organization" || owner.AccountLogin != "octo-org" {
+		t.Fatalf("unexpected cached owner: %#v", owner)
+	}
+	updated, err := store.UpsertGitHubInstallationOwner(987, GitHubInstallationAccount{
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "renamed-org",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.AccountLogin != "renamed-org" {
+		t.Fatalf("expected display metadata update, got %#v", updated)
+	}
+	loaded, err := store.GetGitHubInstallationOwner(987)
+	if err != nil || loaded.AccountLogin != "renamed-org" {
+		t.Fatalf("unexpected loaded owner: %#v err=%v", loaded, err)
+	}
+}
+
+func TestRunnerRequestSandboxConfigSourceRoundTripAndRetryReset(t *testing.T) {
+	store := New(t.TempDir())
+	_, st, err := store.CreateRequest(RunnerRequest{
+		ID:                     "sandbox-source",
+		Source:                 "test",
+		Labels:                 []string{"self-hosted"},
+		RunnerName:             "e2b-sandbox-source",
+		SandboxAPIURL:          "https://sandbox.example.test",
+		SandboxAPIKeyEncrypted: "encrypted-key",
+		SandboxConfigSource:    "admin_default",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.SandboxConfigSource != "admin_default" {
+		t.Fatalf("created state source = %q", st.SandboxConfigSource)
+	}
+
+	req, err := store.ReadRequest("sandbox-source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.SandboxConfigSource != "admin_default" {
+		t.Fatalf("request source = %q", req.SandboxConfigSource)
+	}
+
+	st.Status = StatusFailed
+	st.SandboxConfigSource = "account"
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.ReadState("sandbox-source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.SandboxConfigSource != "account" {
+		t.Fatalf("updated state source = %q", st.SandboxConfigSource)
+	}
+
+	retried, err := store.RetryRequest("sandbox-source", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.SandboxConfigSource != "" || retried.SandboxAPIURL != "" || retried.SandboxAPIKeyEncrypted != "" {
+		t.Fatalf("expected retry to clear sandbox config snapshot: %#v", retried)
+	}
+}
+
 func TestCreateRequestIsIdempotent(t *testing.T) {
 	store := New(t.TempDir())
 	req := RunnerRequest{ID: "123", Source: "test", Labels: []string{"self-hosted"}, RunnerName: "e2b-123"}
@@ -1101,6 +1300,54 @@ func TestGitHubInstallationsAllowSharedOrgInstallationAcrossAccounts(t *testing.
 	}
 	if len(firstInstallations) != 0 || len(secondInstallations) != 1 {
 		t.Fatalf("expected deleting one user's link to preserve collaborator link, first=%#v second=%#v", firstInstallations, secondInstallations)
+	}
+}
+
+func TestGitHubInstallationAccountIdentityRoundTripAndLookup(t *testing.T) {
+	store := New(t.TempDir())
+	first, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "200", OAuthLogin: "bob"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, accountID := range []int64{first.ID, second.ID} {
+		if _, err := store.UpsertGitHubInstallation(GitHubInstallation{
+			AccountID:       accountID,
+			InstallationID:  987,
+			GitHubAccountID: 9001,
+			AccountType:     "Organization",
+			AccountLogin:    "Octo-Org",
+			AccountName:     "Octo Org",
+			AccountAvatar:   "https://avatars.example/o.png",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	installations, err := store.ListGitHubInstallations(first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(installations) != 1 || installations[0].GitHubAccountID != 9001 || installations[0].AccountType != "organization" {
+		t.Fatalf("unexpected installation identity: %#v", installations)
+	}
+	accounts, err := store.ListGitHubInstallationAccounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 || accounts[0].GitHubAccountID != 9001 || accounts[0].AccountLogin != "Octo-Org" {
+		t.Fatalf("unexpected installation accounts: %#v", accounts)
+	}
+	byInstallation, err := store.GitHubInstallationAccountForInstallation(987)
+	if err != nil || byInstallation.GitHubAccountID != 9001 {
+		t.Fatalf("lookup by installation: account=%#v err=%v", byInstallation, err)
+	}
+	byLogin, err := store.GitHubInstallationAccountForLogin("octo-org")
+	if err != nil || byLogin.GitHubAccountID != 9001 {
+		t.Fatalf("lookup by login: account=%#v err=%v", byLogin, err)
 	}
 }
 

@@ -69,6 +69,7 @@ func (s *DBStore) CreateRequest(req RunnerRequest, payload []byte) (bool, Runner
 		RunnerName:              req.RunnerName,
 		SandboxAPIURL:           strings.TrimSpace(req.SandboxAPIURL),
 		SandboxAPIKeyEncrypted:  strings.TrimSpace(req.SandboxAPIKeyEncrypted),
+		SandboxConfigSource:     strings.TrimSpace(req.SandboxConfigSource),
 		Status:                  StatusQueued,
 		GitHubPayloadJSON:       string(payload),
 		QueuedAt:                req.CreatedAt,
@@ -137,6 +138,7 @@ func (s *DBStore) WriteState(st RunnerState) error {
 		"sandbox_id":                st.SandboxID,
 		"sandbox_api_url":           strings.TrimSpace(st.SandboxAPIURL),
 		"sandbox_api_key_encrypted": strings.TrimSpace(st.SandboxAPIKeyEncrypted),
+		"sandbox_config_source":     strings.TrimSpace(st.SandboxConfigSource),
 		"process_pid":               st.ProcessPID,
 		"assigned_job_id":           st.AssignedJobID,
 		"assigned_job_name":         st.AssignedJobName,
@@ -490,6 +492,7 @@ func (s *DBStore) RetryRequest(id string, now time.Time) (RunnerState, error) {
 		record.FailedAt = nil
 		record.SandboxAPIURL = ""
 		record.SandboxAPIKeyEncrypted = ""
+		record.SandboxConfigSource = ""
 		record.UpdatedAt = now.UTC()
 		record.Version++
 		if err := tx.Model(&runnerRequestRecord{}).
@@ -516,6 +519,7 @@ func (s *DBStore) RetryRequest(id string, now time.Time) (RunnerState, error) {
 				"failed_at":                 nil,
 				"sandbox_api_url":           record.SandboxAPIURL,
 				"sandbox_api_key_encrypted": record.SandboxAPIKeyEncrypted,
+				"sandbox_config_source":     record.SandboxConfigSource,
 				"updated_at":                record.UpdatedAt,
 				"version":                   record.Version,
 			}).Error; err != nil {

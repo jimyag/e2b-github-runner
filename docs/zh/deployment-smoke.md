@@ -11,7 +11,7 @@
 - 目标 repository 或 organization 已安装 GitHub.com App。
 - GitHub App OAuth callback URL 指向 runnerd origin 下的 `/auth/github/callback`。
 - Repository webhook 将 `workflow_job` events 发送到 `POST /webhooks/github`。
-- 目标 account 或 organization Preferences 页面已配置 Sandbox service API URL 和 API key。
+- 目标 account/organization Preferences 已配置 Sandbox service API URL 和 API key，或 `/admin/sandbox_service` 已启用 admin fallback。
 - 至少一个 Qiniu sandbox template 包含 `/opt/actions-runner/config.sh` 和 `/opt/actions-runner/run.sh`。
 - 已通过 `runnerd --bootstrap-admin github:<github-user-id>` 引导 admin account。
 
@@ -52,6 +52,17 @@ curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/vars | jq
 - Recent failure summaries 为空，或每一项都已理解。
 
 ## 3. Runner Catalog
+
+创建 runner specs 前先验证 Sandbox credential precedence：
+
+- 没有 scoped credentials 的 account 仅在 admin default 已启用且完整时可以列出 templates。
+- `all` 模式下，个人 repository owner 与 organization owner 都能使用完整 default。
+- `selected` 模式下，stable-ID audience list 中的 owner 可以使用 default；未选择的 owner 和空 audience 都不能使用。
+- 添加一个从未登录或同步的 GitHub login，确认 admin response 显示 GitHub 返回的 canonical login、stable ID 和 account type。
+- 启用 GitHub App auth 后，确认 selected owner 的第一个 workflow 能解析并缓存原本未知的 installation owner；后续请求不应再次查询 owner。
+- 保存 account 或 organization scoped credentials 后，effective source 不再是 `admin_default`。
+- 移除 audience entry 会阻止新的 fallback resolution，但不会改变已 snapshot 的 runner request。
+- 禁用 admin default 后，原本未配置的 account 会得到 `sandbox service not configured`。
 
 创建或确认 runner spec：
 

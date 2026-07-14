@@ -164,8 +164,11 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 		&accountRecord{},
 		&oauthIdentityRecord{},
 		&githubInstallationRecord{},
+		&githubInstallationOwnerRecord{},
 		&accountSecretRecord{},
 		&accountPreferenceRecord{},
+		&sandboxServiceDefaultRecord{},
+		&sandboxServiceDefaultAudienceRecord{},
 	); err != nil {
 		return err
 	}

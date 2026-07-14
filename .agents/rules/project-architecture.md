@@ -12,8 +12,9 @@
 - The current browser entry for the ordinary-user UI is `/`.
 - Ordinary-user job group routes use a source-context path with the jobs view as the terminal resource, such as `/github/pulls/{owner}/{repo}/{number}/jobs`; individual runner job details remain `/jobs/{id}`.
 - Ordinary-user account settings live under `/account/repositories`, `/account/preferences`, `/account/sandbox-templates`, `/account/sandbox-instances`, and `/organizations/{login}/...`.
-- `/user/sandbox/templates` and `/user/sandbox/instances` resolve encrypted Sandbox credentials from the selected account or GitHub installation scope. They are ordinary-user catalog APIs, not admin configuration APIs.
+- `/user/sandbox/templates` and `/user/sandbox/instances` resolve encrypted Sandbox credentials from the selected account or GitHub installation scope, then the enabled admin default when the scope is incomplete. They are ordinary-user catalog APIs, not admin configuration APIs.
 - The current browser entry for the admin console is `/admin/`.
+- `/admin/sandbox_service` and `/admin/api/sandbox-service-default` manage the platform fallback. Keep this singleton independent from account preferences and disabled by default.
 - UI source lives in `ui/`.
 - Production UI assets are generated into `internal/server/ui/` by `task ui-build` and embedded by `internal/server/ui_assets_production.go`.
 - Development UI assets are proxied to Vite by `internal/server/ui_assets_development.go`.
@@ -25,6 +26,9 @@
 - Token and basic auth still exist as compatibility modes; their long-term product status is undecided.
 - GitHub Enterprise Server is not supported. Config validation rejects `github.api_base_url` values other than `https://api.github.com`.
 - Runner specs, runner groups, and repository policies are admin API/UI data, not `runnerd.yaml` fields.
+- Sandbox credential precedence is request snapshot, installation custom/inherited config, eligible personal account config, enabled and audience-eligible admin default, then not configured. Corrupt scoped config must fail instead of falling through.
+- Admin default audience mode is `all` or `selected`. Selected entries match the repository owner's stable GitHub numeric account ID and account type, never the workflow actor or organization membership; an empty selected audience matches nobody.
+- Admin audience additions resolve a typed GitHub login to canonical stable ID/type through GitHub before persistence; login remains display metadata. Installation sync and runtime GitHub App lookup both populate the separate installation-owner cache used for selected-audience matching.
 - `github.allowed_repositories` limits admitted repositories before runner spec/policy matching.
 
 ## State And Migrations

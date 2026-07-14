@@ -743,6 +743,7 @@ function SandboxAPIKeyCard({
   const sourceIsCurrentAccount = Boolean(preferences?.sandbox?.source_is_current_account)
   const sourceAccountLogin = preferences?.sandbox?.source_account_login?.trim()
   const sourceAvailable = Boolean(preferences?.sandbox?.source_available)
+  const usingAdminDefault = preferences?.sandbox?.resolved_source === "admin_default"
   const updatedAt = preferences?.sandbox?.api_key?.updated_at
   const savedAPIURL = preferences?.sandbox?.api_url ?? ""
   const canUseSavedAPIURL = !customAPIURLOpen && !(allowInheritance && preferences?.sandbox?.inherited && credentialMode === "custom")
@@ -979,6 +980,12 @@ function SandboxAPIKeyCard({
             {configured && updatedAt ? `Last updated ${formatTime(updatedAt)}` : "No Sandbox API Key is saved."}
           </div>
 
+          {usingAdminDefault ? (
+            <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+              Using the platform Sandbox service default.
+            </div>
+          ) : null}
+
           {error ? <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
         </CardContent>
       </form>
@@ -987,7 +994,7 @@ function SandboxAPIKeyCard({
           <DialogHeader>
             <DialogTitle>Remove Sandbox API Key?</DialogTitle>
             <DialogDescription>
-              This removes the saved Sandbox API Key for this account. Runner jobs cannot start new Sandbox instances until a key is saved again.
+              This removes the saved Sandbox API Key for this account. Runner jobs may use an eligible, complete platform default; otherwise they cannot start new Sandbox instances until a key is saved again.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

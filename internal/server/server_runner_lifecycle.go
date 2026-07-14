@@ -209,7 +209,7 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		s.failStart(id, st, "profile_lookup", fmt.Errorf("load profile %q: %w", req.ProfileName, err))
 		return
 	}
-	sandboxService, sandboxConfig, err := s.sandboxServiceAndConfigForRunnerRequest(req)
+	sandboxService, sandboxConfig, err := s.sandboxServiceAndConfigForRunnerRequestContext(ctx, req)
 	if err != nil {
 		s.failStart(id, st, "sandbox_config", err)
 		return
@@ -222,6 +222,7 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		}
 		current.SandboxAPIURL = sandboxConfig.APIURL
 		current.SandboxAPIKeyEncrypted = sandboxConfig.EncryptedAPIKey
+		current.SandboxConfigSource = sandboxConfig.Source
 		if err := s.store.WriteState(current); err != nil {
 			s.failStart(id, current, "sandbox_config", fmt.Errorf("write sandbox config snapshot: %w", err))
 			return

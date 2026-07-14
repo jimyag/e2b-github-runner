@@ -1,4 +1,4 @@
-import { Activity, ClipboardList, Github, ListTree, Route, ScrollText, Server, Settings2, Stethoscope, Terminal } from "lucide-react"
+import { Activity, ClipboardList, CloudCog, Github, ListTree, Route, ScrollText, Server, Settings2, Stethoscope, Terminal } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -36,6 +36,7 @@ export function AppSidebar({
     { id: "runner_specs", label: "Runner Specs", icon: Settings2 },
     { id: "runner_groups", label: "Runner Groups", icon: Server },
     { id: "runner_policies", label: "Runner Policies", icon: Route },
+    { id: "sandbox_service", label: "Sandbox Service", icon: CloudCog },
     { id: "match", label: "Match Test", icon: ClipboardList },
     { id: "audit", label: "Audit", icon: ScrollText },
     { id: "diagnostics", label: "Diagnostics", icon: Stethoscope },

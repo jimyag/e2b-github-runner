@@ -48,6 +48,22 @@ type fakeSandbox struct {
 	terminal       *fakeTerminalSession
 }
 
+type blockingSandboxDefaultStore struct {
+	state.Store
+	getStarted  chan struct{}
+	continueGet chan struct{}
+	blockOnce   sync.Once
+}
+
+func (s *blockingSandboxDefaultStore) GetSandboxServiceDefault() (state.SandboxServiceDefault, error) {
+	defaultConfig, err := s.Store.GetSandboxServiceDefault()
+	s.blockOnce.Do(func() {
+		close(s.getStarted)
+		<-s.continueGet
+	})
+	return defaultConfig, err
+}
+
 func (f *fakeSandbox) ValidateTemplate(ctx context.Context, templateID string) error {
 	return nil
 }
@@ -1471,6 +1487,717 @@ func TestUserSandboxInheritanceRejectsUnconfiguredSourceAccount(t *testing.T) {
 	}
 }
 
+func TestAdminSandboxServiceDefaultRequiresAdmin(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/sandbox-service-default", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET sandbox default without auth: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminSandboxServiceDefaultLifecycle(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+
+	req := adminRequest(http.MethodGet, "/admin/api/sandbox-service-default", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"enabled":false`) || !strings.Contains(rec.Body.String(), `"configured":false`) {
+		t.Fatalf("GET empty sandbox default: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = adminRequest(http.MethodPut, "/admin/api/sandbox-service-default", strings.NewReader(`{"enabled":true,"api_url":"https://sandbox.example.test"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "api_key is required") {
+		t.Fatalf("enable incomplete sandbox default: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = adminRequest(http.MethodPut, "/admin/api/sandbox-service-default", strings.NewReader(`{"enabled":true,"api_url":"ftp://sandbox.example.test","api_key":"secret-value"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "api_url must use http or https") {
+		t.Fatalf("save invalid sandbox default URL: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = adminRequest(http.MethodPut, "/admin/api/sandbox-service-default", strings.NewReader(`{"enabled":true,"api_url":"https://sandbox.example.test","api_key":"secret-value"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"configured":true`) || strings.Contains(rec.Body.String(), "secret-value") {
+		t.Fatalf("save sandbox default: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	saved, err := store.GetSandboxServiceDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.APIKeyEncrypted == "" || saved.APIKeyEncrypted == "secret-value" {
+		t.Fatalf("expected encrypted API key at rest, got %q", saved.APIKeyEncrypted)
+	}
+	decrypted, err := decryptSecret(saved.APIKeyEncrypted, srv.cfg.AuthEncryptionKey)
+	if err != nil || decrypted != "secret-value" {
+		t.Fatalf("decrypt saved API key: value=%q err=%v", decrypted, err)
+	}
+
+	req = adminRequest(http.MethodPut, "/admin/api/sandbox-service-default", strings.NewReader(`{"enabled":false,"api_url":"https://sandbox.example.test/v2"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"enabled":false`) || !strings.Contains(rec.Body.String(), `"configured":true`) {
+		t.Fatalf("disable sandbox default: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	saved, err = store.GetSandboxServiceDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decrypted, err = decryptSecret(saved.APIKeyEncrypted, srv.cfg.AuthEncryptionKey)
+	if err != nil || decrypted != "secret-value" {
+		t.Fatalf("expected omitted API key to preserve saved key: value=%q err=%v", decrypted, err)
+	}
+
+	req = adminRequest(http.MethodDelete, "/admin/api/sandbox-service-default/api-key", nil)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"configured":false`) {
+		t.Fatalf("delete sandbox default key: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	req = adminRequest(http.MethodDelete, "/admin/api/sandbox-service-default/api-key", nil)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete sandbox default key twice: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	events, err := store.ListAuditEvents(20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var configured, deleted bool
+	for _, event := range events {
+		if strings.Contains(event.PayloadJSON, "secret-value") || strings.Contains(event.PayloadJSON, saved.APIKeyEncrypted) {
+			t.Fatalf("audit event leaked API key: %#v", event)
+		}
+		configured = configured || event.Action == "sandbox_default.configure"
+		deleted = deleted || event.Action == "sandbox_default.api_key.delete"
+	}
+	if !configured || !deleted {
+		t.Fatalf("expected configure and delete audit events, got %#v", events)
+	}
+}
+
+func TestAdminSandboxServiceDefaultRejectsStaleSaveAfterAPIKeyDeletion(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		APIURL:          "https://sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	blockingStore := &blockingSandboxDefaultStore{
+		Store:       store,
+		getStarted:  make(chan struct{}),
+		continueGet: make(chan struct{}),
+	}
+	srv.store = blockingStore
+	response := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := adminRequest(http.MethodPut, "/admin/api/sandbox-service-default", strings.NewReader(`{"enabled":true,"api_url":"https://sandbox.example.test/v2"}`))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		response <- rec
+	}()
+
+	<-blockingStore.getStarted
+	if err := store.DeleteSandboxServiceDefaultAPIKey(); err != nil {
+		t.Fatal(err)
+	}
+	close(blockingStore.continueGet)
+	rec := <-response
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "api_key is required") {
+		t.Fatalf("stale save after key deletion: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	saved, err := store.GetSandboxServiceDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.APIKeyEncrypted != "" {
+		t.Fatalf("stale save restored deleted API key: %#v", saved)
+	}
+}
+
+func TestAdminSandboxServiceDefaultAudienceLifecycle(t *testing.T) {
+	store := state.New(t.TempDir())
+	account, _, err := store.EnsureAccountForOAuthIdentity(state.OAuthIdentity{
+		OAuthProvider: "github",
+		OAuthSubject:  "100",
+		OAuthLogin:    "admin",
+	}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:       account.ID,
+		InstallationID:  987,
+		GitHubAccountID: 9002,
+		AccountType:     "organization",
+		AccountLogin:    "synced-org",
+		AccountName:     "Synced Org",
+		AccountAvatar:   "https://avatars.example/s.png",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	githubAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/users/OCTO-ORG", "/users/octo-org":
+			w.Write([]byte(`{"id":9001,"login":"octo-org","type":"Organization","name":"Octo Org","avatar_url":"https://avatars.example/o.png"}`))
+		case "/users/missing":
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer githubAPI.Close()
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	srv.gh = github.NewClient(githubAPI.URL, githubAPI.Client())
+
+	type response struct {
+		AudienceMode      string                                `json:"audience_mode"`
+		Audiences         []state.SandboxServiceDefaultAudience `json:"audiences"`
+		AvailableAccounts []state.GitHubInstallationAccount     `json:"available_accounts"`
+	}
+	decode := func(rec *httptest.ResponseRecorder) response {
+		t.Helper()
+		var body response
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode audience response: %v body=%s", err, rec.Body.String())
+		}
+		return body
+	}
+
+	req := adminRequest(http.MethodGet, "/admin/api/sandbox-service-default", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	body := decode(rec)
+	if rec.Code != http.StatusOK || body.AudienceMode != "all" || len(body.AvailableAccounts) != 1 || body.AvailableAccounts[0].GitHubAccountID != 9002 {
+		t.Fatalf("GET audience defaults: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = adminRequest(http.MethodPut, "/admin/api/sandbox-service-default", strings.NewReader(`{"enabled":false,"audience_mode":"unknown"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "audience_mode") {
+		t.Fatalf("save invalid audience mode: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = adminRequest(http.MethodPut, "/admin/api/sandbox-service-default", strings.NewReader(`{"enabled":false,"audience_mode":"selected"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	body = decode(rec)
+	if rec.Code != http.StatusOK || body.AudienceMode != "selected" || len(body.Audiences) != 0 {
+		t.Fatalf("save selected audience mode: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/admin/api/sandbox-service-default/audiences", strings.NewReader(`{"account_login":"octo-org"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("add audience without auth: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = adminRequest(http.MethodPost, "/admin/api/sandbox-service-default/audiences", strings.NewReader(`{"account_login":"missing"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "GitHub account was not found") {
+		t.Fatalf("add unknown audience: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = adminRequest(http.MethodPost, "/admin/api/sandbox-service-default/audiences", strings.NewReader(`{"account_login":" @OCTO-ORG "}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	body = decode(rec)
+	if rec.Code != http.StatusOK || len(body.Audiences) != 1 || body.Audiences[0].GitHubAccountID != 9001 || body.Audiences[0].AccountType != "organization" {
+		t.Fatalf("add manually resolved audience: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	audienceID := body.Audiences[0].ID
+
+	req = adminRequest(http.MethodPost, "/admin/api/sandbox-service-default/audiences", strings.NewReader(`{"account_login":"octo-org"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	body = decode(rec)
+	if rec.Code != http.StatusOK || len(body.Audiences) != 1 || body.Audiences[0].ID != audienceID {
+		t.Fatalf("add duplicate audience: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = adminRequest(http.MethodDelete, fmt.Sprintf("/admin/api/sandbox-service-default/audiences/%d", audienceID), nil)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	body = decode(rec)
+	if rec.Code != http.StatusOK || len(body.Audiences) != 0 {
+		t.Fatalf("delete audience: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	events, err := store.ListAuditEvents(20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var added, deleted bool
+	for _, event := range events {
+		added = added || event.Action == "sandbox_default.audience.add"
+		deleted = deleted || event.Action == "sandbox_default.audience.delete"
+	}
+	if !added || !deleted {
+		t.Fatalf("expected audience audit events, got %#v", events)
+	}
+}
+
+func TestSandboxServiceUsesAdminDefault(t *testing.T) {
+	store := state.New(t.TempDir())
+	cfg := config.Config{
+		AuthEncryptionKey:    "encryption-key",
+		MaxConcurrentRunners: 10,
+	}
+	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc, snapshot, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987})
+	if err != nil || svc == nil {
+		t.Fatalf("expected admin Sandbox default, service=%T err=%v", svc, err)
+	}
+	if snapshot.APIURL != "https://admin-sandbox.example.test" || snapshot.EncryptedAPIKey != encrypted || snapshot.Source != sandboxConfigSourceAdminDefault {
+		t.Fatalf("unexpected admin default snapshot: %#v", snapshot)
+	}
+}
+
+func TestSandboxServiceAllAdminDefaultDoesNotRequireInstallationScope(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := New(config.Config{AuthEncryptionKey: "encryption-key", MaxConcurrentRunners: 10}, store, github.NewClient("", http.DefaultClient), nil, nil)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		AudienceMode:    state.SandboxServiceDefaultAudienceModeAll,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc, snapshot, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{
+		ID:                 "manual-request",
+		RepositoryFullName: "unsynced/example",
+	})
+	if err != nil || svc == nil || snapshot.Source != sandboxConfigSourceAdminDefault {
+		t.Fatalf("expected all-account admin default without installation scope, service=%T snapshot=%#v err=%v", svc, snapshot, err)
+	}
+}
+
+func TestSandboxServiceAdminDefaultAudienceAllowsSelectedInstallationOwner(t *testing.T) {
+	store := state.New(t.TempDir())
+	account, _, err := store.EnsureAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:       account.ID,
+		InstallationID:  987,
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "octo-org",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{AuthEncryptionKey: "encryption-key", MaxConcurrentRunners: 10}
+	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		AudienceMode:    state.SandboxServiceDefaultAudienceModeSelected,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	audience, err := store.UpsertSandboxServiceDefaultAudience(state.SandboxServiceDefaultAudience{
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "octo-org",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, snapshot, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987})
+	if err != nil || snapshot.Source != sandboxConfigSourceAdminDefault {
+		t.Fatalf("expected selected owner to use admin default, snapshot=%#v err=%v", snapshot, err)
+	}
+	if err := store.DeleteSandboxServiceDefaultAudience(audience.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{ID: "req-2", GitHubInstallationID: 987}); !errors.Is(err, errSandboxServiceNotConfigured) {
+		t.Fatalf("expected removed owner to lose admin default, got %v", err)
+	}
+	if svc, restored, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{
+		ID:                     "req-1",
+		GitHubInstallationID:   987,
+		SandboxAPIURL:          snapshot.APIURL,
+		SandboxAPIKeyEncrypted: snapshot.EncryptedAPIKey,
+		SandboxConfigSource:    snapshot.Source,
+	}); err != nil || svc == nil || restored.Source != sandboxConfigSourceAdminDefault {
+		t.Fatalf("expected saved snapshot after audience removal, service=%T snapshot=%#v err=%v", svc, restored, err)
+	}
+}
+
+func TestSandboxServiceAdminDefaultAudienceResolvesAndCachesUnsynchronizedInstallationOwner(t *testing.T) {
+	store := state.New(t.TempDir())
+	var installationLookups int
+	githubAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/app/installations/987" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		installationLookups++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":987,"account":{"id":9001,"login":"octo-org","type":"Organization","name":"Octo Org","avatar_url":"https://avatars.example/o.png"}}`))
+	}))
+	defer githubAPI.Close()
+	gh, err := github.NewAppClient(githubAPI.URL, github.AppAuth{
+		AppID:          123,
+		PrivateKeyFile: testServerPrivateKeyFile(t),
+	}, githubAPI.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := New(config.Config{AuthEncryptionKey: "encryption-key", MaxConcurrentRunners: 10}, store, gh, nil, nil)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		AudienceMode:    state.SandboxServiceDefaultAudienceModeSelected,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefaultAudience(state.SandboxServiceDefaultAudience{
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "octo-org",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, requestID := range []string{"req-1", "req-2"} {
+		_, snapshot, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{ID: requestID, GitHubInstallationID: 987})
+		if err != nil || snapshot.Source != sandboxConfigSourceAdminDefault {
+			t.Fatalf("expected unsynchronized owner to use admin default, request=%s snapshot=%#v err=%v", requestID, snapshot, err)
+		}
+	}
+	if installationLookups != 1 {
+		t.Fatalf("expected one GitHub installation lookup followed by a cache hit, got %d", installationLookups)
+	}
+	cached, err := store.GetGitHubInstallationOwner(987)
+	if err != nil || cached.GitHubAccountID != 9001 || cached.AccountType != "organization" {
+		t.Fatalf("unexpected cached installation owner: %#v err=%v", cached, err)
+	}
+}
+
+func TestSandboxServiceAdminDefaultAudienceRejectsUnselectedOwner(t *testing.T) {
+	store := state.New(t.TempDir())
+	account, _, err := store.EnsureAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:       account.ID,
+		InstallationID:  987,
+		GitHubAccountID: 9002,
+		AccountType:     "organization",
+		AccountLogin:    "other-org",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := New(config.Config{AuthEncryptionKey: "encryption-key", MaxConcurrentRunners: 10}, store, github.NewClient("", http.DefaultClient), nil, nil)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		AudienceMode:    state.SandboxServiceDefaultAudienceModeSelected,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefaultAudience(state.SandboxServiceDefaultAudience{
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "octo-org",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); !errors.Is(err, errSandboxServiceNotConfigured) {
+		t.Fatalf("expected unselected owner to remain unconfigured, got %v", err)
+	}
+}
+
+func TestSandboxServiceAdminDefaultAudienceAllowsSelectedPersonalAccount(t *testing.T) {
+	store := state.New(t.TempDir())
+	account, _, err := store.EnsureAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := New(config.Config{AuthEncryptionKey: "encryption-key", MaxConcurrentRunners: 10}, store, github.NewClient("", http.DefaultClient), nil, nil)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		AudienceMode:    state.SandboxServiceDefaultAudienceModeSelected,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefaultAudience(state.SandboxServiceDefaultAudience{
+		GitHubAccountID: 100,
+		AccountType:     "user",
+		AccountLogin:    "alice",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, snapshot, err := srv.sandboxServiceForScopeWithDefault(accountPreferenceScope{Type: state.AccountScopeTypeAccount, ID: account.ID})
+	if err != nil || snapshot.Source != sandboxConfigSourceAdminDefault {
+		t.Fatalf("expected selected personal account to use admin default, snapshot=%#v err=%v", snapshot, err)
+	}
+}
+
+func TestSandboxServiceForScopeUsesAdminDefault(t *testing.T) {
+	store := state.New(t.TempDir())
+	cfg := config.Config{
+		AuthEncryptionKey:    "encryption-key",
+		MaxConcurrentRunners: 10,
+	}
+	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	svc, snapshot, err := srv.sandboxServiceForScopeWithDefault(accountPreferenceScope{
+		Type: state.AccountScopeTypeGitHubInstall,
+		ID:   987,
+	})
+	if err != nil || svc == nil || snapshot.Source != sandboxConfigSourceAdminDefault {
+		t.Fatalf("expected scoped resolver to use admin default, service=%T snapshot=%#v err=%v", svc, snapshot, err)
+	}
+}
+
+func TestUserPreferencesReportsAdminDefaultWithoutLeakingMetadata(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/preferences", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"resolved_source":"admin_default"`) {
+		t.Fatalf("GET preferences with admin default: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "admin-sandbox.example.test") || strings.Contains(rec.Body.String(), "admin-sandbox-key") || strings.Contains(rec.Body.String(), encrypted) {
+		t.Fatalf("preferences leaked admin default metadata: %s", rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/user/preferences/sandbox", strings.NewReader(`{"api_url":"https://user-sandbox.example.test","api_key":"user-key"}`))
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"resolved_source":"custom"`) {
+		t.Fatalf("PUT user Sandbox preferences: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUserPreferencesReportsSelectedAdminDefaultOnlyForEligibleAccount(t *testing.T) {
+	store := state.New(t.TempDir())
+	if _, _, err := store.EnsureAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user"); err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		AudienceMode:    state.SandboxServiceDefaultAudienceModeSelected,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	audience, err := store.UpsertSandboxServiceDefaultAudience(state.SandboxServiceDefaultAudience{
+		GitHubAccountID: 100,
+		AccountType:     "user",
+		AccountLogin:    "alice",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/preferences", nil)
+	req.AddCookie(testSessionCookie("100", "alice", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"resolved_source":"admin_default"`) || strings.Contains(rec.Body.String(), `"audiences"`) {
+		t.Fatalf("eligible preferences response: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if err := store.DeleteSandboxServiceDefaultAudience(audience.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/user/preferences", nil)
+	req.AddCookie(testSessionCookie("100", "alice", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"resolved_source":"none"`) {
+		t.Fatalf("ineligible preferences response: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSandboxServiceDoesNotUseDisabledAdminDefault(t *testing.T) {
+	store := state.New(t.TempDir())
+	cfg := config.Config{
+		AuthEncryptionKey:    "encryption-key",
+		MaxConcurrentRunners: 10,
+	}
+	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         false,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); !errors.Is(err, errSandboxServiceNotConfigured) {
+		t.Fatalf("expected disabled admin default to remain unavailable, got %v", err)
+	}
+}
+
+func TestSandboxServiceDoesNotUseAdminDefaultForCorruptScope(t *testing.T) {
+	store := state.New(t.TempDir())
+	cfg := config.Config{
+		AuthEncryptionKey:    "encryption-key",
+		MaxConcurrentRunners: 10,
+	}
+	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		AudienceMode:    state.SandboxServiceDefaultAudienceModeSelected,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountPreference(state.AccountPreference{
+		ScopeType: state.AccountScopeTypeGitHubInstall,
+		ScopeID:   987,
+		Namespace: accountPreferenceNamespaceSandbox,
+		Key:       accountPreferenceKeySandboxService,
+		ValueJSON: "{",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); err == nil || errors.Is(err, errSandboxServiceNotConfigured) {
+		t.Fatalf("expected corrupt scoped config error without fallback, got %v", err)
+	}
+}
+
+func TestSandboxServicePreservesSnapshotSource(t *testing.T) {
+	store := state.New(t.TempDir())
+	cfg := config.Config{
+		AuthEncryptionKey:    "encryption-key",
+		MaxConcurrentRunners: 10,
+	}
+	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
+	encrypted, err := encryptSecret("snapshot-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc, snapshot, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{
+		ID:                     "req-1",
+		SandboxAPIURL:          "https://snapshot.example.test",
+		SandboxAPIKeyEncrypted: encrypted,
+		SandboxConfigSource:    sandboxConfigSourceAdminDefault,
+	})
+	if err != nil || svc == nil {
+		t.Fatalf("expected request snapshot, service=%T err=%v", svc, err)
+	}
+	if snapshot.Source != sandboxConfigSourceAdminDefault {
+		t.Fatalf("snapshot source = %q", snapshot.Source)
+	}
+}
+
 func TestSandboxServiceUsesGitHubInstallationPreferences(t *testing.T) {
 	store := state.New(t.TempDir())
 	cfg := config.Config{
@@ -1481,6 +2208,18 @@ func TestSandboxServiceUsesGitHubInstallationPreferences(t *testing.T) {
 
 	if _, err := srv.sandboxServiceForRunnerRequest(context.Background(), state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); err == nil {
 		t.Fatal("expected missing sandbox service config error")
+	}
+	adminEncrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled:         true,
+		AudienceMode:    state.SandboxServiceDefaultAudienceModeSelected,
+		APIURL:          "https://admin-sandbox.example.test",
+		APIKeyEncrypted: adminEncrypted,
+	}); err != nil {
+		t.Fatal(err)
 	}
 
 	valueJSON, err := json.Marshal(accountSandboxServicePreferenceValue{APIURL: "https://sandbox.example.test"})
@@ -1513,7 +2252,7 @@ func TestSandboxServiceUsesGitHubInstallationPreferences(t *testing.T) {
 		t.Fatalf("expected sandbox service from installation preferences, service=%T err=%v", svc, err)
 	}
 	svc, snapshot, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987})
-	if err != nil || svc == nil || snapshot.APIURL == "" || snapshot.EncryptedAPIKey == "" {
+	if err != nil || svc == nil || snapshot.APIURL == "" || snapshot.EncryptedAPIKey == "" || snapshot.Source != sandboxConfigSourceInstallation {
 		t.Fatalf("expected sandbox service snapshot, service=%T snapshot=%#v err=%v", svc, snapshot, err)
 	}
 	if err := store.DeleteAccountSecret(state.AccountScopeTypeGitHubInstall, 987, state.AccountSecretTypeSandboxAPIKey); err != nil {
@@ -1572,8 +2311,8 @@ func TestSandboxServiceFallsBackToPersonalAccountPreferences(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if svc, err := srv.sandboxServiceForRunnerRequest(context.Background(), state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); err != nil || svc == nil {
-		t.Fatalf("expected sandbox service from personal account preferences, service=%T err=%v", svc, err)
+	if svc, snapshot, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); err != nil || svc == nil || snapshot.Source != sandboxConfigSourceAccount {
+		t.Fatalf("expected sandbox service from personal account preferences, service=%T snapshot=%#v err=%v", svc, snapshot, err)
 	}
 }
 
@@ -1637,8 +2376,8 @@ func TestSandboxServiceUsesInheritedAccountPreferencesForOrgInstallation(t *test
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if svc, err := srv.sandboxServiceForRunnerRequest(context.Background(), state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); err != nil || svc == nil {
-		t.Fatalf("expected sandbox service from inherited account preferences, service=%T err=%v", svc, err)
+	if svc, snapshot, err := srv.sandboxServiceAndConfigForRunnerRequest(state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); err != nil || svc == nil || snapshot.Source != sandboxConfigSourceInheritedAccount {
+		t.Fatalf("expected sandbox service from inherited account preferences, service=%T snapshot=%#v err=%v", svc, snapshot, err)
 	}
 	if err := store.DeleteGitHubInstallation(account.ID, installation.ID); err != nil {
 		t.Fatal(err)

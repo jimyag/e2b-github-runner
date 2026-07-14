@@ -31,6 +31,7 @@ type runnerRequestRecord struct {
 	SandboxID               string     `gorm:"column:sandbox_id"`
 	SandboxAPIURL           string     `gorm:"column:sandbox_api_url"`
 	SandboxAPIKeyEncrypted  string     `gorm:"column:sandbox_api_key_encrypted;type:text"`
+	SandboxConfigSource     string     `gorm:"column:sandbox_config_source"`
 	ProcessPID              uint32     `gorm:"column:process_pid"`
 	AssignedJobID           int64      `gorm:"column:assigned_job_id"`
 	AssignedJobName         string     `gorm:"column:assigned_job_name"`
@@ -156,18 +157,33 @@ type oauthIdentityRecord struct {
 func (oauthIdentityRecord) TableName() string { return "oauth_identities" }
 
 type githubInstallationRecord struct {
-	ID             int64         `gorm:"column:id;primaryKey;autoIncrement"`
-	AccountID      int64         `gorm:"column:account_id;not null;uniqueIndex:idx_github_installations_account_installation;index:idx_github_installations_account"`
-	Account        accountRecord `gorm:"foreignKey:AccountID"`
-	InstallationID int64         `gorm:"column:installation_id;not null;uniqueIndex:idx_github_installations_account_installation"`
-	AccountLogin   string        `gorm:"column:account_login;not null"`
-	AccountName    string        `gorm:"column:account_name"`
-	AccountAvatar  string        `gorm:"column:account_avatar"`
-	CreatedAt      time.Time     `gorm:"column:created_at;not null"`
-	UpdatedAt      time.Time     `gorm:"column:updated_at;not null"`
+	ID              int64         `gorm:"column:id;primaryKey;autoIncrement"`
+	AccountID       int64         `gorm:"column:account_id;not null;uniqueIndex:idx_github_installations_account_installation;index:idx_github_installations_account"`
+	Account         accountRecord `gorm:"foreignKey:AccountID"`
+	InstallationID  int64         `gorm:"column:installation_id;not null;uniqueIndex:idx_github_installations_account_installation"`
+	GitHubAccountID int64         `gorm:"column:github_account_id;index:idx_github_installations_github_account"`
+	AccountType     string        `gorm:"column:account_type"`
+	AccountLogin    string        `gorm:"column:account_login;not null"`
+	AccountName     string        `gorm:"column:account_name"`
+	AccountAvatar   string        `gorm:"column:account_avatar"`
+	CreatedAt       time.Time     `gorm:"column:created_at;not null"`
+	UpdatedAt       time.Time     `gorm:"column:updated_at;not null"`
 }
 
 func (githubInstallationRecord) TableName() string { return "github_installations" }
+
+type githubInstallationOwnerRecord struct {
+	InstallationID  int64     `gorm:"column:installation_id;primaryKey;autoIncrement:false"`
+	GitHubAccountID int64     `gorm:"column:github_account_id;not null;index:idx_github_installation_owners_account"`
+	AccountType     string    `gorm:"column:account_type;not null;index:idx_github_installation_owners_account"`
+	AccountLogin    string    `gorm:"column:account_login;not null"`
+	AccountName     string    `gorm:"column:account_name"`
+	AccountAvatar   string    `gorm:"column:account_avatar"`
+	CreatedAt       time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (githubInstallationOwnerRecord) TableName() string { return "github_installation_owners" }
 
 type accountSecretRecord struct {
 	ID             int64     `gorm:"column:id;primaryKey;autoIncrement"`
@@ -193,3 +209,31 @@ type accountPreferenceRecord struct {
 }
 
 func (accountPreferenceRecord) TableName() string { return "account_preferences" }
+
+type sandboxServiceDefaultRecord struct {
+	ID              int64      `gorm:"column:id;primaryKey"`
+	Enabled         bool       `gorm:"column:enabled;not null"`
+	AudienceMode    string     `gorm:"column:audience_mode"`
+	APIURL          string     `gorm:"column:api_url"`
+	APIKeyEncrypted string     `gorm:"column:api_key_encrypted;type:text"`
+	APIKeyUpdatedAt *time.Time `gorm:"column:api_key_updated_at"`
+	CreatedAt       time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;not null"`
+}
+
+func (sandboxServiceDefaultRecord) TableName() string { return "sandbox_service_defaults" }
+
+type sandboxServiceDefaultAudienceRecord struct {
+	ID              int64     `gorm:"column:id;primaryKey;autoIncrement"`
+	GitHubAccountID int64     `gorm:"column:github_account_id;not null;uniqueIndex:idx_sandbox_default_audience_identity,priority:2"`
+	AccountType     string    `gorm:"column:account_type;not null;uniqueIndex:idx_sandbox_default_audience_identity,priority:1"`
+	AccountLogin    string    `gorm:"column:account_login;not null"`
+	AccountName     string    `gorm:"column:account_name"`
+	AccountAvatar   string    `gorm:"column:account_avatar"`
+	CreatedAt       time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt       time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (sandboxServiceDefaultAudienceRecord) TableName() string {
+	return "sandbox_service_default_audiences"
+}

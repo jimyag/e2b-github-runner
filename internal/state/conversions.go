@@ -35,6 +35,7 @@ func recordToRequest(record runnerRequestRecord) (RunnerRequest, error) {
 		RunnerName:             record.RunnerName,
 		SandboxAPIURL:          record.SandboxAPIURL,
 		SandboxAPIKeyEncrypted: record.SandboxAPIKeyEncrypted,
+		SandboxConfigSource:    record.SandboxConfigSource,
 		CreatedAt:              record.QueuedAt,
 	}, nil
 }
@@ -54,6 +55,7 @@ func recordToState(record runnerRequestRecord) RunnerState {
 		SandboxID:              record.SandboxID,
 		SandboxAPIURL:          record.SandboxAPIURL,
 		SandboxAPIKeyEncrypted: record.SandboxAPIKeyEncrypted,
+		SandboxConfigSource:    record.SandboxConfigSource,
 		ProcessPID:             record.ProcessPID,
 		WorkflowJobID:          pointerToInt64(record.WorkflowJobID),
 		WorkflowRunID:          githubLinks.workflowRunID,

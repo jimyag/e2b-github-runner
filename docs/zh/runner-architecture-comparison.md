@@ -14,13 +14,14 @@ runnerd 是单个 Go 服务：接收 GitHub `workflow_job` webhooks，根据 rep
 - 通过 `database.backend` 和 `database.dsn` 支持 SQLite、Postgres 和 MySQL state backends。
 - DB-backed runner requests、runner events/logs、runner specs、runner groups、repository policies、OAuth accounts 和 audit events。
 - Account 和 GitHub installation scoped Preferences 用于 Sandbox service settings，API keys 作为 encrypted account secrets 保存。
+- 独立于 account preferences 的 admin-managed Sandbox service fallback，默认关闭。
 - Schema creation 由 state record structs 中的 GORM tags 驱动，启动时执行 `AutoMigrate` 和针对旧 schema columns 的窄范围 compatibility backfills。
 - 固定 runner states：`queued`、`creating`、`running`、`stopping`、`completed` 和 `failed`。
 - DB claim/lease processing，带 retry metadata（`retry_count`、`next_retry_at`、`lease_owner`、`lease_expires_at`）。
 - GitHub App auth 支持可选 dynamic installation resolution，同时保留 token 和 basic auth compatibility modes。
 - GitHub App OAuth login 用于 admin console，本地 roles 和 signed HttpOnly sessions。
 - Ordinary-user UI 支持 PR/job views、local activity repositories、GitHub App installations、authorized repositories、account 或 organization scoped Sandbox service Preferences，以及 scoped Sandbox template 和 runner-instance catalogs。
-- Admin API 和 UI 支持 runner requests、specs、groups、policies、retry/stop actions、match tests、audit history 和 diagnostics。
+- Admin API 和 UI 支持 runner requests、specs、groups、policies、全局 Sandbox service fallback、retry/stop actions、match tests、audit history 和 diagnostics。
 - Production UI assets 从 `ui/` 构建到 `internal/server/ui/`；development assets 代理到 Vite。
 - 通过 `github.com/jimmicro/pprof`、`/diagnostics/pprof`、`/diagnostics/vars` 和 expvar metrics 提供 diagnostics。
 
@@ -30,7 +31,7 @@ runnerd 是单个 Go 服务：接收 GitHub `workflow_job` webhooks，根据 rep
 - Runner specs、runner groups 和 repository policies 通过 admin API/UI 管理，不是 `runnerd.yaml` 字段。
 - Token 和 basic auth 仍作为 compatibility modes 存在。产品策略尚未决定是否为生产长期保留。
 - 在用两个 runnerd 进程连接同一个 database 验证前，不应宣传 multi-instance support。
-- Sandbox provider catalogs 是普通用户资源，不是 admin 配置。`GET /user/sandbox/templates` 和 `GET /user/sandbox/instances` 会解析选中 account 或 GitHub installation 的凭据，只接受支持的 region id，并把 secrets 保留在服务端。
+- Sandbox provider catalogs 是普通用户资源，不是 admin 配置。`GET /user/sandbox/templates` 和 `GET /user/sandbox/instances` 会先解析 scoped credentials，再尝试已启用的 admin fallback，只接受支持的 region id，并把 secrets 保留在服务端。
 
 ## 架构总览
 
@@ -198,13 +199,14 @@ stateDiagram-v2
 
 ### 配置和密钥边界
 
-`runnerd.yaml` 配置 service behavior、GitHub auth、OAuth login、database 和 worker policy。Sandbox service credentials 不是 file config：普通用户通过 Preferences 按 account 或 GitHub App installation 配置，API keys 加密后存储。
+`runnerd.yaml` 配置 service behavior、GitHub auth、OAuth login、database 和 worker policy。Sandbox service credentials 不是 file config：普通用户通过 Preferences 配置 scoped credentials，管理员可在 `/admin/sandbox_service` 启用独立的平台回退。API keys 加密后存储。fallback audience 可以是全部 repository owners，或按 stable owner identity 匹配的 selected GitHub users/organizations。解析顺序为 request snapshot、installation custom/inherited 配置、符合条件的个人账户配置、已启用且 audience eligible 的 admin default，最后是未配置错误。
 
 ```mermaid
 flowchart LR
   File["runnerd.yaml<br/>server, database, GitHub, OAuth, worker"]
   OAuth["GitHub OAuth callback<br/>/auth/github/callback"]
   UserPrefs["User Preferences UI<br/>account or organization scope"]
+  AdminDefault["Admin Sandbox default<br/>platform fallback"]
   SecretBox["secretbox encryption<br/>auth.encryption_key"]
   Store[("State DB")]
   Runnerd["runnerd"]
@@ -213,6 +215,7 @@ flowchart LR
   File --> Runnerd
   OAuth -->|"signed HttpOnly session"| Runnerd
   UserPrefs -->|"Sandbox API URL + API key"| Runnerd
+  AdminDefault -->|"fallback API URL + API key"| Runnerd
   Runnerd --> SecretBox
   SecretBox -->|"encrypted API key"| Store
   Runnerd -->|"decrypt at runner start"| QiniuSandbox

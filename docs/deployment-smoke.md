@@ -9,7 +9,7 @@ Use this checklist before treating a runnerd deployment as ready for real GitHub
 - A GitHub.com App installed on the target repository or organization.
 - A GitHub App OAuth callback URL pointing at `/auth/github/callback` on the runnerd origin.
 - A repository webhook delivering `workflow_job` events to `POST /webhooks/github`.
-- Sandbox service API URL and API key configured in the target account or organization Preferences page.
+- Sandbox service API URL and API key configured in the target account/organization Preferences page, or an enabled admin fallback at `/admin/sandbox_service`.
 - At least one Qiniu sandbox template that contains `/opt/actions-runner/config.sh` and `/opt/actions-runner/run.sh`.
 - An admin account bootstrapped with `runnerd --bootstrap-admin github:<github-user-id>`.
 
@@ -50,6 +50,17 @@ Check:
 - Recent failure summaries are empty or understood.
 
 ## 3. Runner Catalog
+
+Before creating runner specs, verify Sandbox credential precedence:
+
+- An account with no scoped credentials can list templates only while the admin default is enabled and complete.
+- In `all` mode, both a personal repository owner and an organization owner can use the complete default.
+- In `selected` mode, an owner on the stable-ID audience list can use the default, while an unselected owner and an empty audience cannot.
+- Add a GitHub login that has never signed in or synchronized, and verify the admin response shows GitHub's canonical login, stable ID, and account type.
+- With GitHub App auth enabled, verify the first selected-owner workflow resolves and caches an otherwise unknown installation owner; a later request should not require another owner lookup.
+- Saving scoped account or organization credentials changes the effective source away from `admin_default`.
+- Removing an audience entry blocks new fallback resolution without changing an already-snapshotted runner request.
+- Disabling the admin default makes an otherwise unconfigured account fail with `sandbox service not configured`.
 
 Create or confirm a runner spec:
 

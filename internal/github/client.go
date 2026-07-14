@@ -8,9 +8,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -61,11 +63,26 @@ type Runner struct {
 
 type Installation struct {
 	ID            int64    `json:"id"`
+	AccountID     int64    `json:"account_id,omitempty"`
+	AccountType   string   `json:"account_type,omitempty"`
 	AccountLogin  string   `json:"account_login,omitempty"`
 	AccountName   string   `json:"account_name,omitempty"`
 	AccountAvatar string   `json:"account_avatar,omitempty"`
 	Repositories  []string `json:"repositories"`
 }
+
+type Account struct {
+	ID        int64  `json:"id"`
+	Type      string `json:"type"`
+	Login     string `json:"login"`
+	Name      string `json:"name,omitempty"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+}
+
+var (
+	ErrAccountNotFound        = errors.New("github account not found")
+	ErrUnsupportedAccountType = errors.New("unsupported github account type")
+)
 
 type runnerTarget struct {
 	repositoryFullName string
@@ -102,6 +119,8 @@ func (c *Client) GetInstallation(ctx context.Context, installationID int64) (Ins
 	var out struct {
 		ID      int64 `json:"id"`
 		Account struct {
+			ID        int64  `json:"id"`
+			Type      string `json:"type"`
 			Login     string `json:"login"`
 			Name      string `json:"name"`
 			AvatarURL string `json:"avatar_url"`
@@ -115,10 +134,55 @@ func (c *Client) GetInstallation(ctx context.Context, installationID int64) (Ins
 	}
 	return Installation{
 		ID:            out.ID,
+		AccountID:     out.Account.ID,
+		AccountType:   normalizeGitHubAccountType(out.Account.Type),
 		AccountLogin:  out.Account.Login,
 		AccountName:   out.Account.Name,
 		AccountAvatar: out.Account.AvatarURL,
 	}, nil
+}
+
+func (c *Client) GetAccount(ctx context.Context, login string) (Account, error) {
+	login = strings.TrimSpace(login)
+	if login == "" {
+		return Account{}, fmt.Errorf("github account login is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/users/%s", c.baseURL, url.PathEscape(login)), nil)
+	if err != nil {
+		return Account{}, err
+	}
+	setGitHubHeaders(req)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return Account{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return Account{}, fmt.Errorf("read github account response: %w", err)
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return Account{}, fmt.Errorf("%w: %s", ErrAccountNotFound, login)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return Account{}, fmt.Errorf("github account: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var account Account
+	if err := json.Unmarshal(body, &account); err != nil {
+		return Account{}, err
+	}
+	rawAccountType := account.Type
+	account.Type = normalizeGitHubAccountType(rawAccountType)
+	account.Login = strings.TrimSpace(account.Login)
+	account.Name = strings.TrimSpace(account.Name)
+	account.AvatarURL = strings.TrimSpace(account.AvatarURL)
+	if account.Type == "" {
+		return Account{}, fmt.Errorf("%w: %s", ErrUnsupportedAccountType, rawAccountType)
+	}
+	if account.ID <= 0 || account.Login == "" {
+		return Account{}, fmt.Errorf("github account response has no supported stable identity")
+	}
+	return account, nil
 }
 
 func (c *Client) ListInstallationRepositories(ctx context.Context, installationID int64) ([]string, error) {
@@ -200,6 +264,8 @@ func (c *Client) ListUserInstallations(ctx context.Context, token string) ([]Ins
 			Installations []struct {
 				ID      int64 `json:"id"`
 				Account struct {
+					ID        int64  `json:"id"`
+					Type      string `json:"type"`
 					Login     string `json:"login"`
 					Name      string `json:"name"`
 					AvatarURL string `json:"avatar_url"`
@@ -215,6 +281,8 @@ func (c *Client) ListUserInstallations(ctx context.Context, token string) ([]Ins
 			}
 			installations = append(installations, Installation{
 				ID:            item.ID,
+				AccountID:     item.Account.ID,
+				AccountType:   normalizeGitHubAccountType(item.Account.Type),
 				AccountLogin:  item.Account.Login,
 				AccountName:   item.Account.Name,
 				AccountAvatar: item.Account.AvatarURL,
@@ -223,6 +291,17 @@ func (c *Client) ListUserInstallations(ctx context.Context, token string) ([]Ins
 		nextURL = nextLink(resp.Header.Get("Link"))
 	}
 	return installations, nil
+}
+
+func normalizeGitHubAccountType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "user":
+		return "user"
+	case "organization", "org":
+		return "organization"
+	default:
+		return ""
+	}
 }
 
 func NewClient(baseURL string, httpClient *http.Client) *Client {

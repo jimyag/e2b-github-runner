@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -145,6 +146,65 @@ func TestNewAppClientUsesConfiguredBaseURLForInstallationTransport(t *testing.T)
 	}
 	if client.appAuth.staticInstallationID != 456 {
 		t.Fatalf("unexpected static installation id: %d", client.appAuth.staticInstallationID)
+	}
+}
+
+func TestGetInstallationReturnsStableAccountIdentity(t *testing.T) {
+	privateKey := testPrivateKeyFile(t)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/app/installations/456" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if r.Header.Get("Authorization") == "" {
+			t.Fatal("expected app JWT authorization")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":456,"account":{"id":9001,"login":"octo-org","type":"Organization","name":"Octo Org","avatar_url":"https://avatars.example/o.png"}}`))
+	}))
+	defer ts.Close()
+
+	client, err := NewAppClient(ts.URL, AppAuth{AppID: 123, PrivateKeyFile: privateKey}, ts.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation, err := client.GetInstallation(t.Context(), 456)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if installation.AccountID != 9001 || installation.AccountType != "organization" || installation.AccountLogin != "octo-org" {
+		t.Fatalf("unexpected installation owner: %#v", installation)
+	}
+}
+
+func TestGetAccountReturnsCanonicalStableIdentity(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/users/OCTO-ORG" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":9001,"login":"octo-org","type":"Organization","name":"Octo Org","avatar_url":"https://avatars.example/o.png"}`))
+	}))
+	defer ts.Close()
+
+	account, err := NewClient(ts.URL, ts.Client()).GetAccount(t.Context(), "OCTO-ORG")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.ID != 9001 || account.Type != "organization" || account.Login != "octo-org" || account.Name != "Octo Org" {
+		t.Fatalf("unexpected account: %#v", account)
+	}
+}
+
+func TestGetAccountRejectsUnsupportedAccountType(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":9001,"login":"release-bot","type":"Bot"}`))
+	}))
+	defer ts.Close()
+
+	_, err := NewClient(ts.URL, ts.Client()).GetAccount(t.Context(), "release-bot")
+	if !errors.Is(err, ErrUnsupportedAccountType) {
+		t.Fatalf("GetAccount() error = %v, want ErrUnsupportedAccountType", err)
 	}
 }
 
@@ -466,7 +526,7 @@ func TestListUserInstallationsUsesOAuthToken(t *testing.T) {
 			t.Fatalf("expected bearer user token, got %q", r.Header.Get("Authorization"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"installations":[{"id":987,"account":{"login":"octo-org","name":"Octo Org","avatar_url":"https://avatars.example/o.png"}}]}`))
+		w.Write([]byte(`{"installations":[{"id":987,"account":{"id":9001,"login":"octo-org","type":"Organization","name":"Octo Org","avatar_url":"https://avatars.example/o.png"}}]}`))
 	}))
 	defer ts.Close()
 
@@ -475,7 +535,7 @@ func TestListUserInstallationsUsesOAuthToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(installations) != 1 || installations[0].ID != 987 || installations[0].AccountLogin != "octo-org" {
+	if len(installations) != 1 || installations[0].ID != 987 || installations[0].AccountID != 9001 || installations[0].AccountType != "organization" || installations[0].AccountLogin != "octo-org" {
 		t.Fatalf("unexpected installations: %#v", installations)
 	}
 }

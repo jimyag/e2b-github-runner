@@ -57,7 +57,7 @@ worker:
   retry_max_attempts: 5
 ```
 
-Sandbox service API URL and API Key are not configured in `runnerd.yaml`. After signing in to the ordinary-user UI, configure them on the account or organization Preferences page. The API Key is encrypted with `auth.encryption_key`.
+Sandbox service API URL and API Key are not configured in `runnerd.yaml`. After signing in, configure scoped credentials on the account or organization Preferences page, or configure the disabled-by-default platform fallback at `/admin/sandbox_service`. The fallback audience is either `all` or `selected`; selected entries match the repository owner's stable GitHub account ID and type. The API Key is encrypted with `auth.encryption_key`. Resolution order is a saved runner-request snapshot, installation custom/inherited settings, an eligible personal account, the enabled and audience-eligible admin default, then a not-configured error.
 
 Runner spec, runner group, and repository policy are not `runnerd.yaml` fields. Create them from the admin page or admin API after the service starts. Use meaningful spec names such as `ubuntu-24-04`; set `template_id` to the matching Qiniu sandbox template ID. Template access is checked when runnerd starts a sandbox with the account or organization Sandbox service config.
 
@@ -225,7 +225,23 @@ go run ./cmd/runnerd --config ./runnerd.yaml --bootstrap-admin github:<your-gith
 export COOKIE_JAR=./runnerd.cookies
 ```
 
-UI source lives in `ui/` and uses the same React, Vite, Tailwind CSS, shadcn-style components, and theme CSS as `kubevirt-console`. `task build` runs `task ui-build`, writes frontend output to `internal/server/ui/`, and then compiles `runnerd`. In development mode, `internal/server/ui_assets_development.go` proxies UI assets to Vite. In production builds, `internal/server/ui_assets_production.go` embeds `internal/server/ui/*`. The ordinary-user UI includes GitHub App accounts and on-demand authorized repositories at `/account/repositories`, Sandbox service settings at `/account/preferences` and `/organizations/{login}/preferences`, region-filtered templates at `/account/sandbox-templates`, region- and template-filtered runner instances at `/account/sandbox-instances`, the equivalent organization routes, local activity repositories at `/repositories`, the Repo/PR job list at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, and job details at `/jobs/{id}`. The catalog uses `GET /user/sandbox/templates?region=<id>` and `GET /user/sandbox/instances?region=<id>&template_id=<id>`; the instance endpoint lists only runner-created sandboxes. The admin surface includes runners, runner specs, runner groups, runner policies, retry, audit, label match test, and diagnostics pages, but not provider resource catalogs.
+Admins manage the platform fallback through explicit role-gated APIs. Omitting `api_key` preserves the saved encrypted key; omitting `audience_mode` preserves the current mode; the response never returns the key. `selected` with no audience entries matches nobody. Audience additions accept `login` or `@login`; runnerd queries GitHub for the canonical login, stable numeric ID, and user/organization type before saving. Existing synchronized or cached owners are optional suggestions, not a prerequisite. When the first workflow for a selected owner has no local installation row, GitHub App auth resolves the installation owner and runnerd caches that stable identity.
+
+```bash
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/admin/api/sandbox-service-default | jq
+curl -fsS -X PUT -b "$COOKIE_JAR" -H 'content-type: application/json' \
+  http://127.0.0.1:25500/admin/api/sandbox-service-default \
+  -d '{"enabled":true,"audience_mode":"selected","api_url":"https://us-south-1-sandbox.qiniuapi.com","api_key":"<sandbox-api-key>"}' | jq
+curl -fsS -X POST -b "$COOKIE_JAR" -H 'content-type: application/json' \
+  http://127.0.0.1:25500/admin/api/sandbox-service-default/audiences \
+  -d '{"account_login":"octo-org"}' | jq
+curl -fsS -X DELETE -b "$COOKIE_JAR" \
+  http://127.0.0.1:25500/admin/api/sandbox-service-default/audiences/<audience-id> | jq
+curl -fsS -X DELETE -b "$COOKIE_JAR" \
+  http://127.0.0.1:25500/admin/api/sandbox-service-default/api-key | jq
+```
+
+UI source lives in `ui/` and uses the same React, Vite, Tailwind CSS, shadcn-style components, and theme CSS as `kubevirt-console`. `task build` runs `task ui-build`, writes frontend output to `internal/server/ui/`, and then compiles `runnerd`. In development mode, `internal/server/ui_assets_development.go` proxies UI assets to Vite. In production builds, `internal/server/ui_assets_production.go` embeds `internal/server/ui/*`. The ordinary-user UI includes GitHub App accounts and on-demand authorized repositories at `/account/repositories`, Sandbox service settings at `/account/preferences` and `/organizations/{login}/preferences`, region-filtered templates at `/account/sandbox-templates`, region- and template-filtered runner instances at `/account/sandbox-instances`, the equivalent organization routes, local activity repositories at `/repositories`, the Repo/PR job list at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, and job details at `/jobs/{id}`. The catalog uses `GET /user/sandbox/templates?region=<id>` and `GET /user/sandbox/instances?region=<id>&template_id=<id>`; the instance endpoint lists only runner-created sandboxes and uses the effective scoped/default credential resolver. The admin surface includes the platform fallback at `/admin/sandbox_service`, runners, runner specs, runner groups, runner policies, retry, audit, label match test, and diagnostics pages, but not provider resource catalogs.
 
 Create a default runner spec first:
 
@@ -406,7 +422,7 @@ Common issues:
 - `invalid signature`: GitHub webhook secret and `github.webhook_secret` do not match.
 - `runner concurrency limit reached`: active request count reached `worker.max_concurrent_runners`.
 - GitHub job stays queued: workflow `runs-on` labels must include `self-hosted` and `e2b`, and must match runner spec labels.
-- sandbox creation fails: confirm account or organization Preferences have Sandbox service config matching the template and local environment.
+- sandbox creation fails: confirm the account/organization Preferences or enabled admin default has a complete Sandbox service config matching the template and local environment; the Runner detail shows which source was selected.
 - registration token fails: confirm the GitHub App installation has the required administration/self-hosted runner permission for the target repository.
 
 ## 9. How To Read GitHub Actions Logs

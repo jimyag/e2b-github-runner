@@ -44,7 +44,9 @@ Old-schema upgrade coverage is required when adding required columns, changing u
 - For UI source changes, run `task ui-lint` or `task build` depending on scope.
 - Use `task build` when verifying production embedded UI behavior.
 - Use the real ordinary-user entries `/`, `/repositories`, `/account/repositories`, `/account/preferences`, `/account/sandbox-templates`, and `/account/sandbox-instances` when changing user UI. Also exercise the corresponding `/organizations/{login}/...` route when scope resolution changes.
-- Use the real admin entry `/admin/`; do not assume the `ui/` tree is all admin-only.
+- Use the real admin entries `/admin/` and `/admin/sandbox_service`; do not assume the `ui/` tree is all admin-only.
+- For Sandbox fallback changes, verify scoped override, enabled-default fallback, disabled/incomplete default rejection, catalog access, and config-source display without exposing endpoint/key or audience metadata to ordinary users.
+- For audience changes, verify `all`, selected match/miss, selected-empty, user/org stable identity, login rename tolerance, manual preconfiguration before sign-in/sync, GitHub 404 rejection, installation-owner lookup/cache behavior, audit events, and saved snapshot behavior.
 
 ## Development Startup
 

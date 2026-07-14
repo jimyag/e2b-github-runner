@@ -55,7 +55,7 @@ worker:
   retry_max_attempts: 5
 ```
 
-Sandbox service API URL 和 API Key 不在 `runnerd.yaml` 中配置；登录普通用户界面后，在账户或组织的 Preferences 页面配置。API Key 会使用 `auth.encryption_key` 加密保存。
+Sandbox service API URL 和 API Key 不在 `runnerd.yaml` 中配置。登录后可在账户或组织的 Preferences 页面配置 scoped credentials，也可由管理员在 `/admin/sandbox_service` 配置默认关闭的平台回退。fallback audience 为 `all` 或 `selected`；selected entries 按仓库 owner 的稳定 GitHub account ID 和 type 匹配。API Key 使用 `auth.encryption_key` 加密保存。解析顺序为 runner request 已保存快照、installation custom/inherited 配置、符合条件的个人账户配置、已启用且 audience eligible 的 admin default，最后才是未配置错误。
 
 Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置；服务启动后通过后台页面或 admin API 创建。spec 名称建议使用有意义的名字，例如 `ubuntu-24-04`，`template_id` 填对应的 Qiniu sandbox template ID。template 是否可访问会在 runnerd 使用对应账户或组织的 Sandbox service 配置启动 sandbox 时确认。
 
@@ -223,7 +223,23 @@ go run ./cmd/runnerd --config ./runnerd.yaml --bootstrap-admin github:<your-gith
 export COOKIE_JAR=./runnerd.cookies
 ```
 
-页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。开发模式下 `internal/server/ui_assets_development.go` 会把 UI 资源代理到 Vite；生产构建下 `internal/server/ui_assets_production.go` 会嵌入 `internal/server/ui/*`。普通用户界面包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/account/sandbox-templates` 的区域过滤模板、`/account/sandbox-instances` 的区域和模板过滤 runner instances、对应的 organization 路由、`/repositories` 的本地 activity repositories，以及 `/` 的 Repo/PR 列表和 PR job 明细。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes。管理面包含 runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
+管理员通过显式的 role-gated API 管理平台回退。省略 `api_key` 会保留已有密文，省略 `audience_mode` 会保留当前模式，响应永远不会返回 API Key。`selected` 模式没有 audience entries 时不会匹配任何 account。添加 audience 时可提交 `login` 或 `@login`；runnerd 会先向 GitHub 查询 canonical login、stable numeric ID 和 user/organization type，再保存稳定身份。已同步或已缓存的 owner 只作为可选建议，不是添加前提。selected owner 的第一个 workflow 如果没有本地 installation row，runnerd 会通过 GitHub App auth 查询 installation owner 并缓存该稳定身份。
+
+```bash
+curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/admin/api/sandbox-service-default | jq
+curl -fsS -X PUT -b "$COOKIE_JAR" -H 'content-type: application/json' \
+  http://127.0.0.1:25500/admin/api/sandbox-service-default \
+  -d '{"enabled":true,"audience_mode":"selected","api_url":"https://us-south-1-sandbox.qiniuapi.com","api_key":"<sandbox-api-key>"}' | jq
+curl -fsS -X POST -b "$COOKIE_JAR" -H 'content-type: application/json' \
+  http://127.0.0.1:25500/admin/api/sandbox-service-default/audiences \
+  -d '{"account_login":"octo-org"}' | jq
+curl -fsS -X DELETE -b "$COOKIE_JAR" \
+  http://127.0.0.1:25500/admin/api/sandbox-service-default/audiences/<audience-id> | jq
+curl -fsS -X DELETE -b "$COOKIE_JAR" \
+  http://127.0.0.1:25500/admin/api/sandbox-service-default/api-key | jq
+```
+
+页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。开发模式下 `internal/server/ui_assets_development.go` 会把 UI 资源代理到 Vite；生产构建下 `internal/server/ui_assets_production.go` 会嵌入 `internal/server/ui/*`。普通用户界面包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/account/sandbox-templates` 的区域过滤模板、`/account/sandbox-instances` 的区域和模板过滤 runner instances、对应的 organization 路由、`/repositories` 的本地 activity repositories，以及 `/` 的 Repo/PR 列表和 PR job 明细。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes，并使用统一的 scoped/default credential resolver。管理面包含 `/admin/sandbox_service` 的平台回退、runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
 
 先创建一个默认 runner spec：
 
@@ -404,7 +420,7 @@ curl -fsS -b "$COOKIE_JAR" \
 - `invalid signature`：GitHub webhook secret 和 `github.webhook_secret` 不一致。
 - `runner concurrency limit reached`：活跃 request 数量达到 `worker.max_concurrent_runners`。
 - GitHub job 一直 queued：workflow 的 `runs-on` labels 必须包含 `self-hosted` 和 `e2b`，并与 runner spec 的 labels 保持一致。
-- sandbox 创建失败：确认账户或组织 Preferences 里的 Sandbox service 配置和 template 配置是否匹配本地环境。
+- sandbox 创建失败：确认账户/组织 Preferences 或已启用的 admin default 具有与 template 和本地环境匹配的完整 Sandbox service 配置；Runner detail 会显示实际选择的来源。
 - registration token 失败：确认 GitHub App installation 对目标仓库有对应的 administration/self-hosted runner 权限。
 
 ## 9. GitHub Actions 日志怎么看

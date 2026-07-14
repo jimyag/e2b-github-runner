@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -61,6 +62,150 @@ func (s *DBStore) AccountScopeForPersonalGitHubInstallation(installationID int64
 	return rows[0].AccountID, true, nil
 }
 
+func (s *DBStore) ListGitHubInstallationAccounts() ([]GitHubInstallationAccount, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, err
+	}
+	var records []githubInstallationRecord
+	if err := db.
+		Where("github_account_id > 0 AND account_type != ''").
+		Order("updated_at DESC, id DESC").
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	var ownerRecords []githubInstallationOwnerRecord
+	if err := db.Order("updated_at DESC, installation_id DESC").Find(&ownerRecords).Error; err != nil {
+		return nil, err
+	}
+	accounts := make([]GitHubInstallationAccount, 0, len(records)+len(ownerRecords))
+	seen := map[string]bool{}
+	for _, record := range ownerRecords {
+		account := ownerRecordToGitHubInstallationAccount(record)
+		key := fmt.Sprintf("%s:%d", account.AccountType, account.GitHubAccountID)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		accounts = append(accounts, account)
+	}
+	for _, record := range records {
+		account := recordToGitHubInstallationAccount(record)
+		key := fmt.Sprintf("%s:%d", account.AccountType, account.GitHubAccountID)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		accounts = append(accounts, account)
+	}
+	slices.SortFunc(accounts, func(a, b GitHubInstallationAccount) int {
+		return strings.Compare(strings.ToLower(a.AccountLogin), strings.ToLower(b.AccountLogin))
+	})
+	return accounts, nil
+}
+
+func (s *DBStore) GetGitHubInstallationOwner(installationID int64) (GitHubInstallationAccount, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return GitHubInstallationAccount{}, err
+	}
+	if installationID <= 0 {
+		return GitHubInstallationAccount{}, ErrNotFound
+	}
+	var record githubInstallationOwnerRecord
+	if err := db.First(&record, "installation_id = ?", installationID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return GitHubInstallationAccount{}, ErrNotFound
+		}
+		return GitHubInstallationAccount{}, err
+	}
+	return ownerRecordToGitHubInstallationAccount(record), nil
+}
+
+func (s *DBStore) UpsertGitHubInstallationOwner(installationID int64, owner GitHubInstallationAccount) (GitHubInstallationAccount, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return GitHubInstallationAccount{}, err
+	}
+	record, err := upsertGitHubInstallationOwner(db, installationID, owner)
+	if err != nil {
+		return GitHubInstallationAccount{}, err
+	}
+	return ownerRecordToGitHubInstallationAccount(record), nil
+}
+
+func upsertGitHubInstallationOwner(db *gorm.DB, installationID int64, owner GitHubInstallationAccount) (githubInstallationOwnerRecord, error) {
+	accountType := normalizeGitHubAccountType(owner.AccountType)
+	accountLogin := strings.TrimSpace(owner.AccountLogin)
+	if installationID <= 0 {
+		return githubInstallationOwnerRecord{}, fmt.Errorf("installation_id is required")
+	}
+	if owner.GitHubAccountID <= 0 || accountType == "" || accountLogin == "" {
+		return githubInstallationOwnerRecord{}, fmt.Errorf("stable github installation owner identity is required")
+	}
+	now := time.Now().UTC()
+	record := githubInstallationOwnerRecord{
+		InstallationID:  installationID,
+		GitHubAccountID: owner.GitHubAccountID,
+		AccountType:     accountType,
+		AccountLogin:    accountLogin,
+		AccountName:     strings.TrimSpace(owner.AccountName),
+		AccountAvatar:   strings.TrimSpace(owner.AccountAvatar),
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if err := db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "installation_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"github_account_id", "account_type", "account_login", "account_name", "account_avatar", "updated_at"}),
+	}).Create(&record).Error; err != nil {
+		return githubInstallationOwnerRecord{}, err
+	}
+	if err := db.First(&record, "installation_id = ?", installationID).Error; err != nil {
+		return githubInstallationOwnerRecord{}, err
+	}
+	return record, nil
+}
+
+func (s *DBStore) GitHubInstallationAccountForInstallation(installationID int64) (GitHubInstallationAccount, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return GitHubInstallationAccount{}, err
+	}
+	var record githubInstallationRecord
+	if err := db.
+		Where("installation_id = ? AND github_account_id > 0 AND account_type != ''", installationID).
+		Order("updated_at DESC, id DESC").
+		First(&record).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return GitHubInstallationAccount{}, ErrNotFound
+		}
+		return GitHubInstallationAccount{}, err
+	}
+	return recordToGitHubInstallationAccount(record), nil
+}
+
+func (s *DBStore) GitHubInstallationAccountForLogin(accountLogin string) (GitHubInstallationAccount, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return GitHubInstallationAccount{}, err
+	}
+	accountLogin = strings.TrimSpace(accountLogin)
+	if accountLogin == "" {
+		return GitHubInstallationAccount{}, ErrNotFound
+	}
+	var record githubInstallationRecord
+	if err := db.
+		Where("LOWER(account_login) = LOWER(?) AND github_account_id > 0 AND account_type != ''", accountLogin).
+		Order("updated_at DESC, id DESC").
+		First(&record).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return GitHubInstallationAccount{}, ErrNotFound
+		}
+		return GitHubInstallationAccount{}, err
+	}
+	return recordToGitHubInstallationAccount(record), nil
+}
+
 func (s *DBStore) GitHubInstallationScopeForAccountLogin(accountLogin string) (int64, bool, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {
@@ -96,19 +241,26 @@ func (s *DBStore) UpsertGitHubInstallation(installation GitHubInstallation) (Git
 	}
 	now := time.Now().UTC()
 	record := githubInstallationRecord{
-		AccountID:      installation.AccountID,
-		InstallationID: installation.InstallationID,
-		AccountLogin:   strings.TrimSpace(installation.AccountLogin),
-		AccountName:    strings.TrimSpace(installation.AccountName),
-		AccountAvatar:  strings.TrimSpace(installation.AccountAvatar),
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		AccountID:       installation.AccountID,
+		InstallationID:  installation.InstallationID,
+		GitHubAccountID: installation.GitHubAccountID,
+		AccountType:     normalizeGitHubAccountType(installation.AccountType),
+		AccountLogin:    strings.TrimSpace(installation.AccountLogin),
+		AccountName:     strings.TrimSpace(installation.AccountName),
+		AccountAvatar:   strings.TrimSpace(installation.AccountAvatar),
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	if err := db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "account_id"}, {Name: "installation_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"account_login", "account_name", "account_avatar", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"github_account_id", "account_type", "account_login", "account_name", "account_avatar", "updated_at"}),
 	}).Create(&record).Error; err != nil {
 		return GitHubInstallation{}, err
+	}
+	if installation.GitHubAccountID > 0 && normalizeGitHubAccountType(installation.AccountType) != "" && strings.TrimSpace(installation.AccountLogin) != "" {
+		if _, err := upsertGitHubInstallationOwner(db, installation.InstallationID, recordToGitHubInstallationAccount(record)); err != nil {
+			return GitHubInstallation{}, err
+		}
 	}
 	if err := db.First(&record, "account_id = ? AND installation_id = ?", installation.AccountID, installation.InstallationID).Error; err != nil {
 		return GitHubInstallation{}, err
@@ -168,15 +320,48 @@ func repositoriesForGitHubInstallations(db *gorm.DB, records []githubInstallatio
 
 func recordToGitHubInstallation(record githubInstallationRecord, repositories []string) GitHubInstallation {
 	return GitHubInstallation{
-		ID:             record.ID,
-		AccountID:      record.AccountID,
-		InstallationID: record.InstallationID,
-		AccountLogin:   record.AccountLogin,
-		AccountName:    record.AccountName,
-		AccountAvatar:  record.AccountAvatar,
-		Repositories:   normalizeRepositories(repositories),
-		CreatedAt:      record.CreatedAt,
-		UpdatedAt:      record.UpdatedAt,
+		ID:              record.ID,
+		AccountID:       record.AccountID,
+		InstallationID:  record.InstallationID,
+		GitHubAccountID: record.GitHubAccountID,
+		AccountType:     normalizeGitHubAccountType(record.AccountType),
+		AccountLogin:    record.AccountLogin,
+		AccountName:     record.AccountName,
+		AccountAvatar:   record.AccountAvatar,
+		Repositories:    normalizeRepositories(repositories),
+		CreatedAt:       record.CreatedAt,
+		UpdatedAt:       record.UpdatedAt,
+	}
+}
+
+func recordToGitHubInstallationAccount(record githubInstallationRecord) GitHubInstallationAccount {
+	return GitHubInstallationAccount{
+		GitHubAccountID: record.GitHubAccountID,
+		AccountType:     normalizeGitHubAccountType(record.AccountType),
+		AccountLogin:    record.AccountLogin,
+		AccountName:     record.AccountName,
+		AccountAvatar:   record.AccountAvatar,
+	}
+}
+
+func ownerRecordToGitHubInstallationAccount(record githubInstallationOwnerRecord) GitHubInstallationAccount {
+	return GitHubInstallationAccount{
+		GitHubAccountID: record.GitHubAccountID,
+		AccountType:     normalizeGitHubAccountType(record.AccountType),
+		AccountLogin:    record.AccountLogin,
+		AccountName:     record.AccountName,
+		AccountAvatar:   record.AccountAvatar,
+	}
+}
+
+func normalizeGitHubAccountType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "user":
+		return "user"
+	case "organization", "org":
+		return "organization"
+	default:
+		return ""
 	}
 }
 

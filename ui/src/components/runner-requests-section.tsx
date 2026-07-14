@@ -4,6 +4,7 @@ import { Copy, ExternalLink, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { formatTime } from "@/admin-format"
 import { activeStatuses, logNames, type RunnerState, type RunnerStatus } from "@/admin-types"
 import { Detail, StatusBadge } from "@/components/admin-shared"
+import { sandboxConfigSourceLabel } from "@/components/sandbox-service-default-utils"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -366,6 +367,7 @@ export function RunnerRequestsSection({
               <Detail label="Repository" value={selected.repository_full_name || "-"} />
               <Detail label="Runner spec" value={selected.runner_spec_name || "-"} />
               <Detail label="Sandbox" value={selected.sandbox_id || "-"} />
+              <Detail label="Sandbox config" value={sandboxConfigSourceLabel(selected.sandbox_config_source)} />
               <Detail label="PID" value={selected.process_pid || "-"} />
               <Detail
                 label="Job"

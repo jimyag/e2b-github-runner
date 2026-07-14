@@ -33,7 +33,7 @@ func (s *Server) sandboxCatalogForUser(w http.ResponseWriter, r *http.Request) (
 		writeError(w, http.StatusBadRequest, "unsupported sandbox region")
 		return nil, false
 	}
-	_, snapshot, err := s.sandboxServiceForScope(scope)
+	_, snapshot, err := s.sandboxServiceForScopeWithDefaultContext(r.Context(), scope)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, "sandbox service is not configured")
 		return nil, false
