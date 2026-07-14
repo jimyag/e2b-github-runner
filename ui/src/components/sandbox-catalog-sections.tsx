@@ -33,9 +33,9 @@ function Header({
   children?: ReactNode
 }) {
   return (
-    <CardHeader className="flex flex-col gap-4 border-b 2xl:flex-row 2xl:items-center 2xl:justify-between">
+    <CardHeader className="flex flex-col gap-3 pb-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
       <div>
-        <CardTitle>{title}</CardTitle>
+        <CardTitle className="text-base">{title}</CardTitle>
         <CardDescription className="mt-1">{description}</CardDescription>
       </div>
       <div className="flex w-full flex-wrap justify-end gap-2 2xl:w-auto">
@@ -102,7 +102,7 @@ export function SandboxTemplatesSection({
   }, [load])
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="rounded-lg">
       <Header
         title="Sandbox templates"
         description="Runnable images available to runner specs in the selected region."
@@ -111,44 +111,46 @@ export function SandboxTemplatesSection({
         onRegion={setRegion}
         onRefresh={() => void load()}
       />
-      <CardContent className="p-0">
+      <CardContent>
         {error ? (
-          <p className="p-6 text-sm text-destructive">{error}</p>
+          <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Template</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Resources</TableHead>
-                <TableHead>Visibility</TableHead>
-                <TableHead className="text-right">Spawns</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((item) => (
-                <TableRow key={item.template_id}>
-                  <TableCell>
-                    <div className="font-medium">{item.aliases?.[0] || item.template_id}</div>
-                    <div className="max-w-[360px] truncate text-xs text-muted-foreground">{item.template_id}</div>
-                  </TableCell>
-                  <TableCell>{item.build_status || "unknown"}</TableCell>
-                  <TableCell>
-                    {item.cpu_count} CPU · {item.memory_mb} MB · {item.disk_size_mb} MB disk
-                  </TableCell>
-                  <TableCell>{item.public ? "Public" : "Private"}</TableCell>
-                  <TableCell className="text-right tabular-nums">{item.spawn_count}</TableCell>
-                </TableRow>
-              ))}
-              {!loading && items.length === 0 ? (
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
-                    No templates in this region.
-                  </TableCell>
+                  <TableHead>Template</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Resources</TableHead>
+                  <TableHead>Visibility</TableHead>
+                  <TableHead className="text-right">Spawns</TableHead>
                 </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {items.map((item) => (
+                  <TableRow key={item.template_id}>
+                    <TableCell>
+                      <div className="font-medium">{item.aliases?.[0] || item.template_id}</div>
+                      <div className="max-w-[360px] truncate text-xs text-muted-foreground">{item.template_id}</div>
+                    </TableCell>
+                    <TableCell>{item.build_status || "unknown"}</TableCell>
+                    <TableCell>
+                      {item.cpu_count} CPU · {item.memory_mb} MB · {item.disk_size_mb} MB disk
+                    </TableCell>
+                    <TableCell>{item.public ? "Public" : "Private"}</TableCell>
+                    <TableCell className="text-right tabular-nums">{item.spawn_count}</TableCell>
+                  </TableRow>
+                ))}
+                {!loading && items.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                      No templates in this region.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </CardContent>
     </Card>
@@ -238,7 +240,7 @@ export function SandboxesSection({
   })
 
   return (
-    <Card className="overflow-hidden">
+    <Card className="rounded-lg">
       <Header
         title="Sandbox instances"
         description="Live and recent sandbox capacity in the selected region."
@@ -267,48 +269,50 @@ export function SandboxesSection({
           </SelectContent>
         </Select>
       </Header>
-      <CardContent className="p-0">
+      <CardContent>
         {error ? (
-          <p className="p-6 text-sm text-destructive">{error}</p>
+          <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Sandbox</TableHead>
-                <TableHead>State</TableHead>
-                <TableHead>Template</TableHead>
-                <TableHead>Resources</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead>Expires</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {items.map((item) => (
-                <TableRow key={item.sandbox_id}>
-                  <TableCell>
-                    <div className="font-medium">{item.alias || item.sandbox_id}</div>
-                    <div className="max-w-[300px] truncate text-xs text-muted-foreground">{item.sandbox_id}</div>
-                  </TableCell>
-                  <TableCell>{item.state}</TableCell>
-                  <TableCell>
-                    <div className="max-w-[260px] truncate">{item.template_id}</div>
-                  </TableCell>
-                  <TableCell>
-                    {item.cpu_count} CPU · {item.memory_mb} MB
-                  </TableCell>
-                  <TableCell>{formatOptionalTime(item.started_at)}</TableCell>
-                  <TableCell>{formatOptionalTime(item.expires_at)}</TableCell>
-                </TableRow>
-              ))}
-              {!loading && items.length === 0 ? (
+          <div className="overflow-x-auto rounded-md border">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                    No sandboxes match these filters.
-                  </TableCell>
+                  <TableHead>Sandbox</TableHead>
+                  <TableHead>State</TableHead>
+                  <TableHead>Template</TableHead>
+                  <TableHead>Resources</TableHead>
+                  <TableHead>Started</TableHead>
+                  <TableHead>Expires</TableHead>
                 </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {items.map((item) => (
+                  <TableRow key={item.sandbox_id}>
+                    <TableCell>
+                      <div className="font-medium">{item.alias || item.sandbox_id}</div>
+                      <div className="max-w-[300px] truncate text-xs text-muted-foreground">{item.sandbox_id}</div>
+                    </TableCell>
+                    <TableCell>{item.state}</TableCell>
+                    <TableCell>
+                      <div className="max-w-[260px] truncate">{item.template_id}</div>
+                    </TableCell>
+                    <TableCell>
+                      {item.cpu_count} CPU · {item.memory_mb} MB
+                    </TableCell>
+                    <TableCell>{formatOptionalTime(item.started_at)}</TableCell>
+                    <TableCell>{formatOptionalTime(item.expires_at)}</TableCell>
+                  </TableRow>
+                ))}
+                {!loading && items.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                      No sandboxes match these filters.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </CardContent>
     </Card>

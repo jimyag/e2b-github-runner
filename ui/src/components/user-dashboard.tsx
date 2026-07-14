@@ -87,7 +87,6 @@ type GitHubLogState =
 
 const jobLogTabsListClassName = "h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0 text-muted-foreground"
 const jobLogTabsTriggerClassName = "h-10 flex-none rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0 py-2 text-sm font-medium shadow-none hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
-const customSandboxRegionID = "__custom__"
 
 function normalizeSandboxAPIURL(value: string) {
   return value.trim().replace(/\/+$/, "")
@@ -114,6 +113,7 @@ export function UserDashboard({
   accountSettingsRoute,
   authorizedRepositories,
   loadingRepositoriesFor,
+  syncingGitHubInstallations,
   onLoadAuthorizedRepositories,
   onSyncGitHubInstallations,
   onSaveSandboxConfig,
@@ -136,6 +136,7 @@ export function UserDashboard({
   accountSettingsRoute: AccountSettingsRoute
   authorizedRepositories: Record<number, string[]>
   loadingRepositoriesFor: number | null
+  syncingGitHubInstallations: boolean
   onLoadAuthorizedRepositories: (id: number) => void
   onSyncGitHubInstallations: () => void
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
@@ -231,6 +232,7 @@ export function UserDashboard({
         <ActivityRepositoriesPage
           installations={installations}
           canSyncGitHubInstallations={Boolean(githubApp)}
+          syncingGitHubInstallations={syncingGitHubInstallations}
           onSyncGitHubInstallations={onSyncGitHubInstallations}
         />
       ) : page === "settings" ? (
@@ -241,6 +243,7 @@ export function UserDashboard({
           authorizedRepositories={authorizedRepositories}
           loadingRepositoriesFor={loadingRepositoriesFor}
           route={accountSettingsRoute}
+          syncingGitHubInstallations={syncingGitHubInstallations}
           onLoadAuthorizedRepositories={onLoadAuthorizedRepositories}
           onSyncGitHubInstallations={onSyncGitHubInstallations}
           onSaveSandboxConfig={onSaveSandboxConfig}
@@ -258,6 +261,7 @@ export function UserDashboard({
           selectedJobID={selectedJobID}
           onSelectKey={onSelectKey}
           canSyncGitHubInstallations={Boolean(githubApp)}
+          syncingGitHubInstallations={syncingGitHubInstallations}
           onSyncGitHubInstallations={onSyncGitHubInstallations}
           onOpenJob={onOpenJob}
           request={request}
@@ -270,10 +274,12 @@ export function UserDashboard({
 function ActivityRepositoriesPage({
   installations,
   canSyncGitHubInstallations,
+  syncingGitHubInstallations,
   onSyncGitHubInstallations,
 }: {
   installations: NonNullable<GitHubAppConfig["installations"]>
   canSyncGitHubInstallations: boolean
+  syncingGitHubInstallations: boolean
   onSyncGitHubInstallations: () => void
 }) {
   const [selectedID, setSelectedID] = useState<number | null>(null)
@@ -370,10 +376,12 @@ function ActivityRepositoriesPage({
                   </p>
                 </div>
                 {canSyncGitHubInstallations ? (
-                  <Button type="button" onClick={onSyncGitHubInstallations}>
-                    <Github className="h-4 w-4" />
-                    Sync accounts
-                  </Button>
+                  <SyncGitHubInstallationsButton
+                    isSyncing={syncingGitHubInstallations}
+                    label="Sync accounts"
+                    loadingLabel="Syncing..."
+                    onSync={onSyncGitHubInstallations}
+                  />
                 ) : null}
               </div>
             </div>
@@ -384,6 +392,37 @@ function ActivityRepositoriesPage({
   )
 }
 
+function SyncGitHubInstallationsButton({
+  isSyncing,
+  label,
+  loadingLabel,
+  onSync,
+  variant,
+}: {
+  isSyncing: boolean
+  label: string
+  loadingLabel: string
+  onSync: () => void
+  variant?: "default" | "outline"
+}) {
+  return (
+    <Button
+      type="button"
+      variant={variant}
+      disabled={isSyncing}
+      className={cn(label.length > 16 ? "min-w-[13.5rem]" : "min-w-[8.5rem]")}
+      onClick={onSync}
+    >
+      {isSyncing ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <Github className="h-4 w-4" />
+      )}
+      {isSyncing ? loadingLabel : label}
+    </Button>
+  )
+}
+
 function AccountsPage({
   githubApp,
   userPreferences,
@@ -391,6 +430,7 @@ function AccountsPage({
   authorizedRepositories,
   loadingRepositoriesFor,
   route,
+  syncingGitHubInstallations,
   onLoadAuthorizedRepositories,
   onSyncGitHubInstallations,
   onSaveSandboxConfig,
@@ -405,6 +445,7 @@ function AccountsPage({
   authorizedRepositories: Record<number, string[]>
   loadingRepositoriesFor: number | null
   route: AccountSettingsRoute
+  syncingGitHubInstallations: boolean
   onLoadAuthorizedRepositories: (id: number) => void
   onSyncGitHubInstallations: () => void
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
@@ -445,10 +486,13 @@ function AccountsPage({
           <div className="flex flex-wrap items-center gap-2">
             {githubApp?.install_url ? (
               <>
-                <Button type="button" variant="outline" onClick={onSyncGitHubInstallations}>
-                  <Github className="h-4 w-4" />
-                  Sync existing installations
-                </Button>
+                <SyncGitHubInstallationsButton
+                  isSyncing={syncingGitHubInstallations}
+                  label="Sync existing installations"
+                  loadingLabel="Syncing installations..."
+                  onSync={onSyncGitHubInstallations}
+                  variant="outline"
+                />
                 <Button type="button" asChild>
                   <a href={githubApp.install_url}>
                     <Github className="h-4 w-4" />
@@ -654,10 +698,12 @@ function AccountsPage({
                     </p>
                   </div>
                   {githubApp ? (
-                    <Button type="button" onClick={onSyncGitHubInstallations}>
-                      <Github className="h-4 w-4" />
-                      Sync existing installations
-                    </Button>
+                    <SyncGitHubInstallationsButton
+                      isSyncing={syncingGitHubInstallations}
+                      label="Sync existing installations"
+                      loadingLabel="Syncing installations..."
+                      onSync={onSyncGitHubInstallations}
+                    />
                   ) : null}
                 </div>
               </div>
@@ -683,7 +729,6 @@ function SandboxAPIKeyCard({
   const [apiURL, setAPIURL] = useState("")
   const [apiKey, setAPIKey] = useState("")
   const [credentialMode, setCredentialMode] = useState<"custom" | "inherit">("custom")
-  const [regionSelection, setRegionSelection] = useState("")
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false)
@@ -696,16 +741,16 @@ function SandboxAPIKeyCard({
   const sourceAccountLogin = preferences?.sandbox?.source_account_login?.trim()
   const sourceAvailable = Boolean(preferences?.sandbox?.source_available)
   const updatedAt = preferences?.sandbox?.api_key?.updated_at
-  const selectedRegion = findSandboxRegionByAPIURL(apiURL)
-  const customAPIURL = regionSelection === customSandboxRegionID ? apiURL.trim() : ""
+  const savedAPIURL = preferences?.sandbox?.api_url ?? ""
+  const canUseSavedAPIURL = !(allowInheritance && preferences?.sandbox?.inherited && credentialMode === "custom")
+  const effectiveAPIURL = apiURL || (canUseSavedAPIURL ? savedAPIURL : "")
+  const selectedRegion = findSandboxRegionByAPIURL(effectiveAPIURL)
+  const showsCustomAPIURL = Boolean(effectiveAPIURL.trim()) && !selectedRegion
 
   useEffect(() => {
-    const savedAPIURL = preferences?.sandbox?.api_url ?? ""
     const resolvedAPIURL = resolveSandboxRegionAPIURL(savedAPIURL)
-    const savedRegion = findSandboxRegionByAPIURL(resolvedAPIURL)
     setAPIURL(resolvedAPIURL)
-    setRegionSelection(savedRegion?.id ?? (savedAPIURL.trim() ? customSandboxRegionID : ""))
-  }, [preferences?.sandbox?.api_url])
+  }, [savedAPIURL])
 
   useEffect(() => {
     setCredentialMode(allowInheritance && preferences?.sandbox?.mode === "inherit" ? "inherit" : "custom")
@@ -713,7 +758,7 @@ function SandboxAPIKeyCard({
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    const nextAPIURL = apiURL.trim()
+    const nextAPIURL = effectiveAPIURL.trim()
     const nextAPIKey = apiKey.trim()
     if (credentialMode === "inherit") {
       setSaving(true)
@@ -777,153 +822,146 @@ function SandboxAPIKeyCard({
   }
 
   return (
-    <Card className="gap-0 rounded-lg py-0">
-      <form className="p-3" onSubmit={submit}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-base font-semibold leading-none">
-              <KeyRound className="h-4 w-4 shrink-0" />
-              <span>Sandbox service</span>
+    <Card className="rounded-lg">
+      <form onSubmit={submit}>
+        <CardHeader className="gap-3 pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <KeyRound className="h-4 w-4 shrink-0" />
+                <span>Sandbox service</span>
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Configure the account Sandbox service endpoint and encrypted API Key.
+              </CardDescription>
             </div>
-            <div className="mt-1 text-sm text-muted-foreground">
-              Configure the account Sandbox service endpoint and encrypted API Key.
-            </div>
+            <Badge variant={configured ? "success" : "outline"}>{configured ? "Configured" : "Not configured"}</Badge>
           </div>
-          <Badge variant={configured ? "secondary" : "outline"}>{configured ? "Configured" : "Not configured"}</Badge>
-        </div>
-
-        {allowInheritance ? (
-          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-md border bg-muted/20 px-3 py-2">
-            <Switch
-              id="sandbox-use-account-default"
-              checked={credentialMode === "inherit"}
-              onCheckedChange={(checked) => {
-                setCredentialMode(checked ? "inherit" : "custom")
-                if (!checked && preferences?.sandbox?.inherited) {
-                  setAPIURL("")
-                  setAPIKey("")
-                  setRegionSelection("")
-                }
-                setError("")
-              }}
-              disabled={saving || deleting}
-            />
-            <Label htmlFor="sandbox-use-account-default" className="cursor-pointer text-sm font-medium">
-              Use account default credentials
-            </Label>
-            <span className="text-sm text-muted-foreground">
-              {credentialMode !== "inherit"
-                ? "This organization uses its own Sandbox service settings."
-                : !preferences?.sandbox?.inherited
-                  ? "Your account default credentials will be used after saving."
-                : !sourceAvailable
-                  ? sourceAccountLogin
-                    ? `Credentials provided by @${sourceAccountLogin} are unavailable because that account is no longer connected to this organization.`
-                    : "The inherited credentials are unavailable because the source account is no longer connected to this organization."
-                : sourceIsCurrentAccount
-                  ? "Using Sandbox credentials provided by your account."
-                  : sourceAccountLogin
-                    ? `Using Sandbox credentials provided by @${sourceAccountLogin}.`
-                    : "Using Sandbox credentials provided by another connected owner."}
-            </span>
-          </div>
-        ) : null}
-
-        <div className="mt-2.5 grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] lg:items-end">
-          <div className="grid min-w-0 gap-1.5">
-            <Label htmlFor="sandbox-api-region">Region</Label>
-            <Select
-              value={regionSelection}
-              onValueChange={(regionID) => {
-                if (regionID === customSandboxRegionID) {
-                  setRegionSelection(customSandboxRegionID)
-                  if (selectedRegion) {
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {allowInheritance ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/20 px-3 py-3">
+              <Switch
+                id="sandbox-use-account-default"
+                checked={credentialMode === "inherit"}
+                onCheckedChange={(checked) => {
+                  setCredentialMode(checked ? "inherit" : "custom")
+                  if (!checked && preferences?.sandbox?.inherited) {
                     setAPIURL("")
+                    setAPIKey("")
                   }
-                  return
-                }
-                const region = sandboxRegions.find((region) => region.id === regionID)
-                setRegionSelection(region?.id ?? "")
-                setAPIURL(region?.apiURL ?? "")
-              }}
-              disabled={saving || deleting || credentialMode === "inherit"}
-            >
-              <SelectTrigger id="sandbox-api-region" className="w-full">
-                <SelectValue placeholder="Select Sandbox region" />
-              </SelectTrigger>
-              <SelectContent>
-                {sandboxRegions.map((region) => (
-                  <SelectItem key={region.id} value={region.id}>
-                    <span>{region.label}</span>
-                    <span className="text-muted-foreground">{region.id}</span>
-                  </SelectItem>
-                ))}
-                <SelectItem value={customSandboxRegionID}>
-                  <span>Custom endpoint</span>
-                  {customAPIURL ? <span className="text-muted-foreground">{customAPIURL}</span> : null}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            {regionSelection === customSandboxRegionID && credentialMode === "custom" ? (
-              <Input
-                className="mt-1.5"
-                value={apiURL}
-                onChange={(event) => setAPIURL(event.target.value)}
-                placeholder="https://sandbox.example.test"
-                disabled={saving || deleting}
-                autoComplete="off"
-              />
-            ) : null}
-          </div>
-
-          <div className="grid min-w-0 gap-1.5">
-            <Label htmlFor="sandbox-api-key">API Key</Label>
-            <Input
-              id="sandbox-api-key"
-              type="password"
-              value={apiKey}
-              onChange={(event) => setAPIKey(event.target.value)}
-              autoComplete="off"
-              disabled={saving || deleting || credentialMode === "inherit"}
-              placeholder={customConfigured ? "••••••••••••••••" : "Enter Sandbox API Key"}
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            {!inherited ? (
-              <Button type="submit" disabled={saving || deleting || (credentialMode === "custom" && (!apiURL.trim() || (!customConfigured && !apiKey.trim())))}>
-                <ShieldCheck className="h-4 w-4" />
-                {saving ? "Saving" : configured ? "Save changes" : "Save settings"}
-              </Button>
-            ) : null}
-            {inherited && !sourceIsCurrentAccount ? (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
                   setError("")
-                  setReplaceSourceConfirmOpen(true)
                 }}
                 disabled={saving || deleting}
+              />
+              <Label htmlFor="sandbox-use-account-default" className="cursor-pointer text-sm font-medium">
+                Use account default credentials
+              </Label>
+              <span className="text-sm text-muted-foreground">
+                {credentialMode !== "inherit"
+                  ? "This organization uses its own Sandbox service settings."
+                  : !preferences?.sandbox?.inherited
+                    ? "Your account default credentials will be used after saving."
+                  : !sourceAvailable
+                    ? sourceAccountLogin
+                      ? `Credentials provided by @${sourceAccountLogin} are unavailable because that account is no longer connected to this organization.`
+                      : "The inherited credentials are unavailable because the source account is no longer connected to this organization."
+                  : sourceIsCurrentAccount
+                    ? "Using Sandbox credentials provided by your account."
+                    : sourceAccountLogin
+                      ? `Using Sandbox credentials provided by @${sourceAccountLogin}.`
+                      : "Using Sandbox credentials provided by another connected owner."}
+              </span>
+            </div>
+          ) : null}
+
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
+            <div className="grid min-w-0 gap-2">
+              <Label htmlFor="sandbox-api-region">Region</Label>
+              <Select
+                value={selectedRegion?.id ?? ""}
+                onValueChange={(regionID) => {
+                  const region = sandboxRegions.find((region) => region.id === regionID)
+                  setAPIURL(region?.apiURL ?? "")
+                }}
+                disabled={saving || deleting || credentialMode === "inherit"}
               >
-                <KeyRound className="h-4 w-4" />
-                Use my account credentials
-              </Button>
-            ) : null}
-            {customConfigured && credentialMode === "custom" ? (
-              <Button type="button" variant="outline" onClick={() => setRemoveConfirmOpen(true)} disabled={deleting || saving}>
-                <X className="h-4 w-4" />
-                {deleting ? "Removing" : "Remove"}
-              </Button>
-            ) : null}
+                <SelectTrigger id="sandbox-api-region" className="w-full">
+                  {selectedRegion ? (
+                    <span className="truncate">{selectedRegion.label}</span>
+                  ) : (
+                    <SelectValue placeholder="Select Sandbox region" />
+                  )}
+                </SelectTrigger>
+                <SelectContent>
+                  {sandboxRegions.map((region) => (
+                    <SelectItem key={region.id} value={region.id} textValue={region.label}>
+                      <span>{region.label}</span>
+                      <span className="text-muted-foreground">{region.id}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {showsCustomAPIURL && credentialMode === "custom" ? (
+                <Input
+                  value={apiURL}
+                  onChange={(event) => setAPIURL(event.target.value)}
+                  placeholder="https://sandbox.example.test"
+                  disabled={saving || deleting}
+                  autoComplete="off"
+                />
+              ) : null}
+            </div>
+
+            <div className="grid min-w-0 gap-2">
+              <Label htmlFor="sandbox-api-key">API Key</Label>
+              <Input
+                id="sandbox-api-key"
+                type="password"
+                value={apiKey}
+                onChange={(event) => setAPIKey(event.target.value)}
+                autoComplete="off"
+                disabled={saving || deleting || credentialMode === "inherit"}
+                placeholder={customConfigured ? "Enter a new API Key to replace the saved one" : "Enter Sandbox API Key"}
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {!inherited ? (
+                <Button type="submit" disabled={saving || deleting || (credentialMode === "custom" && (!effectiveAPIURL.trim() || (!customConfigured && !apiKey.trim())))}>
+                  <ShieldCheck className="h-4 w-4" />
+                  {saving ? "Saving" : configured ? "Save changes" : "Save settings"}
+                </Button>
+              ) : null}
+              {inherited && !sourceIsCurrentAccount ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setError("")
+                    setReplaceSourceConfirmOpen(true)
+                  }}
+                  disabled={saving || deleting}
+                >
+                  <KeyRound className="h-4 w-4" />
+                  Use my account credentials
+                </Button>
+              ) : null}
+              {customConfigured && credentialMode === "custom" ? (
+                <Button type="button" variant="outline" onClick={() => setRemoveConfirmOpen(true)} disabled={deleting || saving}>
+                  <X className="h-4 w-4" />
+                  {deleting ? "Removing" : "Remove"}
+                </Button>
+              ) : null}
+            </div>
           </div>
-        </div>
 
-        <div className="mt-1.5 text-sm text-muted-foreground">
-          {configured && updatedAt ? `Last updated ${formatTime(updatedAt)}` : "No Sandbox API Key is saved."}
-        </div>
+          <div className="text-sm text-muted-foreground">
+            {configured && updatedAt ? `Last updated ${formatTime(updatedAt)}` : "No Sandbox API Key is saved."}
+          </div>
 
-        {error ? <div className="mt-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+          {error ? <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+        </CardContent>
       </form>
       <Dialog open={removeConfirmOpen} onOpenChange={(open) => !deleting && setRemoveConfirmOpen(open)}>
         <DialogContent>
@@ -981,6 +1019,7 @@ function PullRequestsPage({
   selectedJobID,
   onSelectKey,
   canSyncGitHubInstallations,
+  syncingGitHubInstallations,
   onSyncGitHubInstallations,
   onOpenJob,
   request,
@@ -992,6 +1031,7 @@ function PullRequestsPage({
   selectedJobID: string
   onSelectKey: (key: string) => void
   canSyncGitHubInstallations: boolean
+  syncingGitHubInstallations: boolean
   onSyncGitHubInstallations: () => void
   onOpenJob: (id: string) => void
   request: (url: string, options?: RequestInit) => Promise<unknown>
@@ -1139,10 +1179,12 @@ function PullRequestsPage({
                       </p>
                     </div>
                     {canSyncGitHubInstallations ? (
-                      <Button type="button" onClick={onSyncGitHubInstallations}>
-                        <Github className="h-4 w-4" />
-                        Sync accounts
-                      </Button>
+                      <SyncGitHubInstallationsButton
+                        isSyncing={syncingGitHubInstallations}
+                        label="Sync accounts"
+                        loadingLabel="Syncing..."
+                        onSync={onSyncGitHubInstallations}
+                      />
                     ) : null}
                   </div>
                 </div>

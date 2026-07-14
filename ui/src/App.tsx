@@ -83,6 +83,7 @@ function App() {
   const [userPreferences, setUserPreferences] = useState<UserPreferences | null>(null)
   const [authorizedRepositories, setAuthorizedRepositories] = useState<Record<number, string[]>>({})
   const [loadingRepositoriesFor, setLoadingRepositoriesFor] = useState<number | null>(null)
+  const [syncingGitHubInstallations, setSyncingGitHubInstallations] = useState(false)
   const [userSelectedKey, setUserSelectedKey] = useState(() => userJobsGroupKeyFromLocation(window.location.pathname, window.location.search))
 
   const setSection = useCallback((next: string) => {
@@ -346,7 +347,9 @@ function App() {
   }, [request])
 
   const syncGitHubInstallations = useCallback(async () => {
+    if (syncingGitHubInstallations) return
     setLoading(true)
+    setSyncingGitHubInstallations(true)
     try {
       const data = (await request("/user/github-app/installations/sync", { method: "POST" })) as SyncedGitHubInstallations
       const count = data.installations?.length ?? 0
@@ -361,9 +364,10 @@ function App() {
       }
       toast.error(message)
     } finally {
+      setSyncingGitHubInstallations(false)
       setLoading(false)
     }
-  }, [loadUserAll, refreshGitHubOAuthLogin, request])
+  }, [loadUserAll, refreshGitHubOAuthLogin, request, syncingGitHubInstallations])
 
   const saveSandboxConfig = useCallback(async (
     apiURL: string,
@@ -703,6 +707,7 @@ function App() {
           accountSettingsRoute={accountSettingsRoute || defaultAccountSettingsRoute(authSession.login)}
           authorizedRepositories={authorizedRepositories}
           loadingRepositoriesFor={loadingRepositoriesFor}
+          syncingGitHubInstallations={syncingGitHubInstallations}
           onLoadAuthorizedRepositories={(id) => void loadAuthorizedRepositories(id)}
           onSyncGitHubInstallations={() => void syncGitHubInstallations()}
           onSaveSandboxConfig={saveSandboxConfig}
