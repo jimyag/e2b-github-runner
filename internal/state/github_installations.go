@@ -99,7 +99,15 @@ func (s *DBStore) ListGitHubInstallationAccounts() ([]GitHubInstallationAccount,
 		accounts = append(accounts, account)
 	}
 	slices.SortFunc(accounts, func(a, b GitHubInstallationAccount) int {
-		return strings.Compare(strings.ToLower(a.AccountLogin), strings.ToLower(b.AccountLogin))
+		aLogin := strings.ToLower(a.AccountLogin)
+		bLogin := strings.ToLower(b.AccountLogin)
+		if aLogin < bLogin {
+			return -1
+		}
+		if aLogin > bLogin {
+			return 1
+		}
+		return 0
 	})
 	return accounts, nil
 }

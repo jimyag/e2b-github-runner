@@ -124,7 +124,7 @@ func (s *DBStore) ListSandboxServiceDefaultAudiences() ([]SandboxServiceDefaultA
 		return nil, err
 	}
 	var records []sandboxServiceDefaultAudienceRecord
-	if err := db.Order("account_login ASC, id ASC").Find(&records).Error; err != nil {
+	if err := db.Order("LOWER(account_login) ASC, id ASC").Find(&records).Error; err != nil {
 		return nil, err
 	}
 	audiences := make([]SandboxServiceDefaultAudience, 0, len(records))

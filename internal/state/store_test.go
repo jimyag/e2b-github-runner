@@ -220,6 +220,34 @@ func TestSandboxServiceDefaultAudienceLifecycle(t *testing.T) {
 	}
 }
 
+func TestSandboxServiceDefaultAudiencesSortCaseInsensitively(t *testing.T) {
+	store := New(t.TempDir())
+	for githubAccountID, accountLogin := range map[int64]string{
+		1: "beta",
+		2: "Alpha",
+		3: "charlie",
+	} {
+		if _, err := store.UpsertSandboxServiceDefaultAudience(SandboxServiceDefaultAudience{
+			GitHubAccountID: githubAccountID,
+			AccountType:     "organization",
+			AccountLogin:    accountLogin,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	audiences, err := store.ListSandboxServiceDefaultAudiences()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(audiences))
+	for _, audience := range audiences {
+		got = append(got, audience.AccountLogin)
+	}
+	if want := []string{"Alpha", "beta", "charlie"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("audience order = %#v, want %#v", got, want)
+	}
+}
+
 func TestGitHubInstallationOwnerCacheLifecycle(t *testing.T) {
 	store := New(t.TempDir())
 	if _, err := store.GetGitHubInstallationOwner(987); !errors.Is(err, ErrNotFound) {
