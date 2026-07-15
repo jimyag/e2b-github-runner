@@ -1930,6 +1930,13 @@ func TestSandboxServiceAdminDefaultAudienceResolvesAndCachesUnsynchronizedInstal
 	}
 }
 
+func TestGitHubInstallationOwnerRejectsInvalidInstallationID(t *testing.T) {
+	server := &Server{}
+	if _, err := server.githubInstallationOwner(t.Context(), 0); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("githubInstallationOwner() error = %v, want ErrNotFound", err)
+	}
+}
+
 func TestSandboxServiceAdminDefaultAudienceRejectsUnselectedOwner(t *testing.T) {
 	store := state.New(t.TempDir())
 	account, _, err := store.EnsureAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")

@@ -1351,6 +1351,40 @@ func TestGitHubInstallationAccountIdentityRoundTripAndLookup(t *testing.T) {
 	}
 }
 
+func TestUpsertGitHubInstallationRollsBackWhenOwnerCacheFails(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	account, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrator().DropTable(&githubInstallationOwnerRecord{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.UpsertGitHubInstallation(GitHubInstallation{
+		AccountID:       account.ID,
+		InstallationID:  987,
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "octo-org",
+	}); err == nil {
+		t.Fatal("UpsertGitHubInstallation() error = nil, want owner cache failure")
+	}
+	var count int64
+	if err := db.Model(&githubInstallationRecord{}).
+		Where("account_id = ? AND installation_id = ?", account.ID, 987).
+		Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("installation rows = %d, want transaction rollback", count)
+	}
+}
+
 func TestAccountScopeForPersonalGitHubInstallation(t *testing.T) {
 	store := New(t.TempDir())
 	account, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alice"}, "user")

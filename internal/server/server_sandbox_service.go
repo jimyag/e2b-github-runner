@@ -254,6 +254,9 @@ func (s *Server) sandboxDefaultAudienceOwnerForScope(ctx context.Context, scope 
 }
 
 func (s *Server) githubInstallationOwner(ctx context.Context, installationID int64) (state.GitHubInstallationAccount, error) {
+	if installationID <= 0 {
+		return state.GitHubInstallationAccount{}, state.ErrNotFound
+	}
 	owner, err := s.store.GitHubInstallationAccountForInstallation(installationID)
 	if err == nil {
 		return owner, nil

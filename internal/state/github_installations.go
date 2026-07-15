@@ -251,16 +251,21 @@ func (s *DBStore) UpsertGitHubInstallation(installation GitHubInstallation) (Git
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}
-	if err := db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "account_id"}, {Name: "installation_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"github_account_id", "account_type", "account_login", "account_name", "account_avatar", "updated_at"}),
-	}).Create(&record).Error; err != nil {
-		return GitHubInstallation{}, err
-	}
-	if installation.GitHubAccountID > 0 && normalizeGitHubAccountType(installation.AccountType) != "" && strings.TrimSpace(installation.AccountLogin) != "" {
-		if _, err := upsertGitHubInstallationOwner(db, installation.InstallationID, recordToGitHubInstallationAccount(record)); err != nil {
-			return GitHubInstallation{}, err
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "account_id"}, {Name: "installation_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"github_account_id", "account_type", "account_login", "account_name", "account_avatar", "updated_at"}),
+		}).Create(&record).Error; err != nil {
+			return err
 		}
+		if record.GitHubAccountID > 0 && record.AccountType != "" && record.AccountLogin != "" {
+			if _, err := upsertGitHubInstallationOwner(tx, installation.InstallationID, recordToGitHubInstallationAccount(record)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return GitHubInstallation{}, err
 	}
 	if err := db.First(&record, "account_id = ? AND installation_id = ?", installation.AccountID, installation.InstallationID).Error; err != nil {
 		return GitHubInstallation{}, err
