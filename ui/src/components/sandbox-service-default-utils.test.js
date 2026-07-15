@@ -6,6 +6,7 @@ import {
   sandboxAudienceIdentityKey,
   sandboxAudienceSummary,
   sandboxConfigSourceLabel,
+  sandboxServiceDefaultAPIURL,
   sandboxServiceDefaultStatus,
 } from "./sandbox-service-default-utils"
 
@@ -15,6 +16,20 @@ describe("sandboxServiceDefaultStatus", () => {
     expect(sandboxServiceDefaultStatus({ enabled: false, configured: true })).toBe("Disabled")
     expect(sandboxServiceDefaultStatus({ enabled: true, configured: false })).toBe("Incomplete")
     expect(sandboxServiceDefaultStatus({ enabled: false, configured: false })).toBe("Incomplete")
+  })
+})
+
+describe("sandboxServiceDefaultAPIURL", () => {
+  const regions = [{ apiURL: "https://us-south-1-sandbox.qiniuapi.com" }]
+
+  test("canonicalizes catalog regions without dropping saved endpoints", () => {
+    expect(sandboxServiceDefaultAPIURL(" HTTPS://US-SOUTH-1-SANDBOX.QINIUAPI.COM/ ", regions)).toBe(
+      "https://us-south-1-sandbox.qiniuapi.com",
+    )
+    expect(sandboxServiceDefaultAPIURL(" https://sandbox.example.test/ ", regions)).toBe(
+      "https://sandbox.example.test/",
+    )
+    expect(sandboxServiceDefaultAPIURL("   ", regions)).toBe("")
   })
 })
 

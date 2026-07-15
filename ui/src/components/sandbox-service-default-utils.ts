@@ -3,6 +3,21 @@ type SandboxAudienceIdentity = {
   account_type: string
 }
 
+type SandboxRegion = {
+  apiURL: string
+}
+
+function normalizeSandboxAPIURL(value: string) {
+  return value.trim().replace(/\/+$/, "").toLowerCase()
+}
+
+export function sandboxServiceDefaultAPIURL(value: string, regions: readonly SandboxRegion[]) {
+  const trimmed = value.trim()
+  const normalized = normalizeSandboxAPIURL(trimmed)
+  const region = regions.find((item) => normalizeSandboxAPIURL(item.apiURL) === normalized)
+  return region?.apiURL ?? trimmed
+}
+
 export function sandboxServiceDefaultStatus(config: { enabled: boolean; configured: boolean }) {
   if (!config.configured) return "Incomplete" as const
   return config.enabled ? ("Enabled" as const) : ("Disabled" as const)

@@ -9,6 +9,7 @@ import {
   availableSandboxAudienceAccounts,
   normalizeSandboxAudienceLogin,
   sandboxAudienceSummary,
+  sandboxServiceDefaultAPIURL,
   sandboxServiceDefaultStatus,
 } from "@/components/sandbox-service-default-utils"
 import { Badge } from "@/components/ui/badge"
@@ -84,12 +85,11 @@ export function SandboxServiceDefaultSection({ request }: { request: Request }) 
       audiences: next?.audiences ?? [],
       available_accounts: next?.available_accounts ?? [],
     }
-    const region = regionForAPIURL(normalized.api_url || "")
     setConfig(normalized)
     setEnabled(Boolean(normalized.enabled))
     setAudienceMode(normalized.audience_mode === "selected" ? "selected" : "all")
     setCandidateLogin("")
-    setAPIURL(region?.apiURL ?? "")
+    setAPIURL(sandboxServiceDefaultAPIURL(normalized.api_url || "", sandboxRegions))
     setAPIKey("")
   }, [])
 
@@ -374,7 +374,13 @@ export function SandboxServiceDefaultSection({ request }: { request: Request }) 
                 disabled={busy}
               >
                 <SelectTrigger id="sandbox-default-region" className="w-full">
-                  {selectedRegion ? <span className="truncate">{selectedRegion.label}</span> : <SelectValue placeholder="Select Sandbox region" />}
+                  {selectedRegion ? (
+                    <span className="truncate">{selectedRegion.label}</span>
+                  ) : apiURL ? (
+                    <span className="truncate">Saved endpoint</span>
+                  ) : (
+                    <SelectValue placeholder="Select Sandbox region" />
+                  )}
                 </SelectTrigger>
                 <SelectContent>
                   {sandboxRegions.map((region) => (
