@@ -73,7 +73,7 @@ go test ./internal/state -count=1
 
 推荐使用 GitHub App。PAT token 和 basic auth 也支持，主要用于本地验证或已有凭据场景。
 
-GitHub App 需要能调用 runner registration token API。Repository runner 需要目标仓库的 administration 权限；使用 GitHub runner group 时会创建 organization runner，需要组织级 self-hosted runner 管理权限。
+继续前，请先配置[必要的 GitHub App 权限](../../README.zh.md#github-app-权限)。以下步骤只说明本地设置细节。
 
 建议流程：
 
@@ -83,18 +83,15 @@ GitHub App 需要能调用 runner registration token API。Repository runner 需
    - Homepage URL：先填仓库地址或本地项目文档地址
    - Setup URL：填 runnerd 的 `/github-app/setup` 地址，例如 `http://127.0.0.1:25500/github-app/setup`
    - Webhook：如果 runnerd 自己收 webhook，可以先不开 App webhook，这里和 `workflow_job` webhook 不是一回事
-3. Repository permissions：
-   - `Administration` 设为 `Read and write`
-4. Organization permissions（如果要跑 org runner）：
-   - 打开对应 self-hosted runner 管理权限
-5. Where can this GitHub App be installed：
+3. 在 `Permissions` 中应用[必要权限表](../../README.zh.md#github-app-权限)中的设置。
+4. Where can this GitHub App be installed：
    - 本地验证一般选 `Only on this account`
-6. 创建后，在 App 页面生成 private key，下载 `.pem` 文件，保存到本地例如 `./secrets/github-app.pem`
-7. 安装 App 到目标仓库或组织：
+5. 创建后，在 App 页面生成 private key，下载 `.pem` 文件，保存到本地，例如 `./secrets/github-app.pem`
+6. 安装 App 到目标仓库或组织：
    - 点 `Install App`
    - 选择目标 owner
    - 选择要授权的仓库
-8. 记录这些值：
+7. 记录这些值：
    - App ID
    - App slug（App URL 里的短名称，例如 `https://github.com/apps/<slug>`）
    - Installation ID（可选；不配置时 runnerd 会按仓库动态解析）

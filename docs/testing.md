@@ -75,7 +75,7 @@ Do not validate migrations only with a fresh sqlite file. Old-schema upgrade pat
 
 GitHub App is recommended. PAT token and basic auth are also supported, mainly for local verification or existing credential scenarios.
 
-The GitHub App must be able to call the runner registration token API. Repository runners require administration permission on the target repository. When using a GitHub runner group, runnerd creates an organization runner and needs organization-level self-hosted runner management permission.
+Configure the [required GitHub App permissions](../README.md#github-app-permissions) before continuing. The steps below cover local setup details.
 
 Suggested setup:
 
@@ -85,18 +85,15 @@ Suggested setup:
    - Homepage URL: use the repository URL or local project docs URL
    - Setup URL: runnerd's `/github-app/setup`, for example `http://127.0.0.1:25500/github-app/setup`
    - Webhook: if runnerd receives repository webhooks itself, you can leave the App webhook disabled; this is different from the `workflow_job` webhook
-3. Repository permissions:
-   - Set `Administration` to `Read and write`
-4. Organization permissions, if you need organization runners:
-   - Enable the corresponding self-hosted runner management permission
-5. Where can this GitHub App be installed:
+3. Under `Permissions`, apply the settings in the [required permissions table](../README.md#github-app-permissions).
+4. Where can this GitHub App be installed:
    - For local verification, usually choose `Only on this account`
-6. After creating the App, generate a private key on the App page, download the `.pem`, and save it locally, for example `./secrets/github-app.pem`
-7. Install the App on the target repository or organization:
+5. After creating the App, generate a private key on the App page, download the `.pem`, and save it locally, for example `./secrets/github-app.pem`
+6. Install the App on the target repository or organization:
    - Click `Install App`
    - Choose the target owner
    - Choose the repositories to authorize
-8. Record:
+7. Record:
    - App ID
    - App slug, the short name in the App URL such as `https://github.com/apps/<slug>`
    - Installation ID, optional; when omitted, runnerd resolves it dynamically by repository

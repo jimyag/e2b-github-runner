@@ -9,6 +9,7 @@
 - 一个可通过 HTTPS 接收 GitHub webhooks 和 admin login 的 runnerd 部署。
 - `runnerd.yaml` 已配置 `database`、`auth`、`github` 和 `worker` sections。
 - 目标 repository 或 organization 已安装 GitHub.com App。
+- GitHub App 已配置当前部署所用 runner 模式需要的[仓库级和组织级权限](../../README.zh.md#github-app-权限)。
 - GitHub App OAuth callback URL 指向 runnerd origin 下的 `/auth/github/callback`。
 - Repository webhook 将 `workflow_job` events 发送到 `POST /webhooks/github`。
 - 目标 account/organization Preferences 已配置 Sandbox service API URL 和 API key，或 `/admin/sandbox_service` 已启用 admin fallback。

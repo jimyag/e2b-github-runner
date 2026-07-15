@@ -27,6 +27,18 @@ cp runnerd.yaml.example runnerd.yaml
 本地和小型单节点部署建议使用 sqlite。状态存储支持 Postgres 和 MySQL，但不要在两个 runnerd 进程共用同一个数据库验证前，把 shared-database multi-instance 作为已支持能力对外说明。
 当前不支持 GitHub Enterprise Server；请配置 GitHub.com App installation。
 GitHub 鉴权方式必须三选一：`github.app`、`github.token` 或 `github.basic_auth`。使用 GitHub App auth 时，`github.app.installation_id` 是可选的；省略时，runnerd 会按每个 job repository 动态解析 installation，并缓存 installation transports，因此一个 GitHub App 可以服务多个已安装账号。
+
+### GitHub App 权限
+
+使用 GitHub App 鉴权时，只需配置下表中的权限。Runner 管理权限取决于匹配到的 Runner Spec 是否设置了 `runner_group`。
+
+| 分组 | 权限 | 级别 | 必要用途 |
+| --- | --- | --- | --- |
+| Repository | Actions | Read-only | 查询 workflow job 和 run 状态、列出 queued jobs，并读取 job 或 run 日志；通过 GitHub App webhook 接收 `workflow_job` 和 `workflow_run` 事件时，也需要此权限。 |
+| Repository | Administration | Read and write | 匹配到的 Runner Spec **未配置 `runner_group`** 时，用于生成仓库级 runner 注册令牌、查询已注册 runner，并在任务结束后清理 runner。若不配置此权限，仓库级 runner 将注册失败，只能使用配置了 `runner_group` 的组织级 runner，且不再支持个人账户仓库。 |
+| Repository | Metadata | Read-only | 识别仓库及其所属账户，并获取 GitHub App installation 已授权的仓库列表。 |
+| Organization | Self-hosted runners | Read and write | 匹配到的 Runner Spec **配置了 `runner_group`** 时，用于生成组织级 runner 注册令牌、将 runner 注册到指定 group，并在任务结束后查询和清理 runner。 |
+
 如果希望普通用户 UI 显示 Install GitHub App 链接，请设置 `github.app.slug` 为 GitHub App URL slug。
 `github.allowed_repositories` 是可选 allowlist，支持 `owner/repo` 或 `owner/*`。为空表示允许所有能发送有效 webhook 且能匹配 runner labels/policies 的仓库。
 
