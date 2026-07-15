@@ -930,6 +930,50 @@ func TestRepositoryPolicyIndexesArePortable(t *testing.T) {
 	}
 }
 
+func TestMigrateAddsGitHubInstallationLookupIndex(t *testing.T) {
+	databaseURL := t.TempDir() + "/runnerd.db"
+	store := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: false,
+	}).(*DBStore)
+	db, err := store.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE github_installations (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		account_id INTEGER NOT NULL,
+		installation_id INTEGER NOT NULL,
+		github_account_id INTEGER,
+		account_type TEXT,
+		account_login TEXT NOT NULL,
+		account_name TEXT,
+		account_avatar TEXT,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX idx_github_installations_account_installation ON github_installations (account_id, installation_id)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	migrated := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: true,
+	}).(*DBStore)
+	migratedDB, err := migrated.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !migratedDB.Migrator().HasIndex(&githubInstallationRecord{}, "idx_github_installations_installation") {
+		t.Fatal("expected installation_id lookup index after migration")
+	}
+}
+
 func TestUpsertRepositoryPolicyConcurrentCreateIsIdempotent(t *testing.T) {
 	store := New(t.TempDir())
 	const workers = 12

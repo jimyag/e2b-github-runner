@@ -160,7 +160,7 @@ type githubInstallationRecord struct {
 	ID              int64         `gorm:"column:id;primaryKey;autoIncrement"`
 	AccountID       int64         `gorm:"column:account_id;not null;uniqueIndex:idx_github_installations_account_installation;index:idx_github_installations_account"`
 	Account         accountRecord `gorm:"foreignKey:AccountID"`
-	InstallationID  int64         `gorm:"column:installation_id;not null;uniqueIndex:idx_github_installations_account_installation"`
+	InstallationID  int64         `gorm:"column:installation_id;not null;uniqueIndex:idx_github_installations_account_installation;index:idx_github_installations_installation"`
 	GitHubAccountID int64         `gorm:"column:github_account_id;index:idx_github_installations_github_account"`
 	AccountType     string        `gorm:"column:account_type"`
 	AccountLogin    string        `gorm:"column:account_login;not null"`
