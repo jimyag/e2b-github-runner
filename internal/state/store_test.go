@@ -582,7 +582,7 @@ func TestListAccountsSearchesFiltersAndPaginates(t *testing.T) {
 }
 
 func TestGetAccountStatsCountsAccountsRolesAndIdentities(t *testing.T) {
-	store := New(t.TempDir())
+	store := New(t.TempDir()).(*DBStore)
 	if _, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alpha"}, "admin"); err != nil {
 		t.Fatal(err)
 	}
@@ -593,6 +593,20 @@ func TestGetAccountStatsCountsAccountsRolesAndIdentities(t *testing.T) {
 	if _, _, err := store.LinkOAuthIdentityToAccount(user.ID, OAuthIdentity{OAuthProvider: "gitlab", OAuthSubject: "gl-200", OAuthLogin: "bravo"}); err != nil {
 		t.Fatal(err)
 	}
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	queryCount := 0
+	countQuery := func(*gorm.DB) {
+		queryCount++
+	}
+	if err := db.Callback().Query().Before("gorm:query").Register("test:count-account-stats-query", countQuery); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Callback().Row().Before("gorm:row").Register("test:count-account-stats-row", countQuery); err != nil {
+		t.Fatal(err)
+	}
 
 	stats, err := store.GetAccountStats()
 	if err != nil {
@@ -601,6 +615,9 @@ func TestGetAccountStatsCountsAccountsRolesAndIdentities(t *testing.T) {
 	want := AccountStats{TotalAccounts: 2, AdminAccounts: 1, UserAccounts: 1, OAuthIdentities: 3}
 	if stats != want {
 		t.Fatalf("unexpected account stats: got=%#v want=%#v", stats, want)
+	}
+	if queryCount != 2 {
+		t.Fatalf("GetAccountStats executed %d queries, want 2", queryCount)
 	}
 }
 
@@ -653,6 +670,38 @@ func TestUpdateAccountRoleValidatesAndPersists(t *testing.T) {
 	}
 	if _, err := store.GetAccount(0); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected missing account lookup to return ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpdateAccountRoleWithAuditSkipsNoOpChanges(t *testing.T) {
+	store := New(t.TempDir())
+	actor, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "actor", OAuthLogin: "actor"}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "target", OAuthLogin: "target"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated, err := store.UpdateAccountRoleWithAudit(AccountRoleUpdate{
+		ActorAccountID: actor.ID,
+		AccountID:      target.ID,
+		Role:           "user",
+		AuditActor:     "github:actor",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != target {
+		t.Fatalf("expected no-op role update to return the unchanged account: before=%#v after=%#v", target, updated)
+	}
+	events, err := store.ListAuditEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected no audit event for a no-op role update, got %#v", events)
 	}
 }
 

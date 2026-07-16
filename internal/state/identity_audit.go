@@ -148,14 +148,24 @@ func (s *DBStore) GetAccountStats() (AccountStats, error) {
 		return AccountStats{}, err
 	}
 	var stats AccountStats
-	if err := db.Model(&accountRecord{}).Count(&stats.TotalAccounts).Error; err != nil {
+	var roleCounts []struct {
+		Role  string
+		Count int64
+	}
+	if err := db.Model(&accountRecord{}).
+		Select("role, COUNT(*) AS count").
+		Group("role").
+		Scan(&roleCounts).Error; err != nil {
 		return AccountStats{}, err
 	}
-	if err := db.Model(&accountRecord{}).Where("role = ?", "admin").Count(&stats.AdminAccounts).Error; err != nil {
-		return AccountStats{}, err
-	}
-	if err := db.Model(&accountRecord{}).Where("role = ?", "user").Count(&stats.UserAccounts).Error; err != nil {
-		return AccountStats{}, err
+	for _, roleCount := range roleCounts {
+		stats.TotalAccounts += roleCount.Count
+		switch roleCount.Role {
+		case "admin":
+			stats.AdminAccounts = roleCount.Count
+		case "user":
+			stats.UserAccounts = roleCount.Count
+		}
 	}
 	if err := db.Model(&oauthIdentityRecord{}).Count(&stats.OAuthIdentities).Error; err != nil {
 		return AccountStats{}, err
@@ -222,6 +232,10 @@ func updateAccountRoleWithAuditOnce(db *gorm.DB, actorAccountID, accountID int64
 		}
 		if target.ID == actor.ID {
 			return ErrConflict
+		}
+		if target.Role == role {
+			updated = target
+			return nil
 		}
 		if target.Role == "admin" && role == "user" {
 			// This predicate read is part of the serializable invariant: concurrent
