@@ -66,7 +66,6 @@ function App() {
   const [selectedLog, setSelectedLog] = useState<(typeof logNames)[number]>("control.log")
   const [logText, setLogText] = useState("No runner selected")
   const [loading, setLoading] = useState(false)
-  const [connected, setConnected] = useState(false)
   const [createID, setCreateID] = useState("")
   const [createRepository, setCreateRepository] = useState("")
   const [createRunnerSpec, setCreateRunnerSpec] = useState("")
@@ -199,7 +198,6 @@ function App() {
         } catch {
           setAuthSession((current) => ({ ...current, authenticated: false, login: undefined, role: undefined, avatar_url: undefined, expires_at: undefined }))
         }
-        setConnected(false)
         throw new Error("Session expired or access is not allowed")
       }
       if (!response.ok) {
@@ -255,10 +253,7 @@ function App() {
   )
 
   const loadAll = useCallback(async () => {
-    if (!hasAccess) {
-      setConnected(false)
-      return
-    }
+    if (!hasAccess) return
     setLoading(true)
     try {
       const [runnerData, runnerSpecData, runnerGroupData, policyData, auditData] = await Promise.all([
@@ -274,13 +269,11 @@ function App() {
       setRunnerGroups(Array.isArray(runnerGroupData) ? (runnerGroupData as RunnerGroup[]) : [])
       setRunnerPolicies(Array.isArray(policyData) ? (policyData as RunnerPolicy[]) : [])
       setAuditEvents(Array.isArray(auditData) ? (auditData as AuditEvent[]) : [])
-      setConnected(true)
       if (selectedID && !nextRunners.some((runner) => runner.id === selectedID)) {
         setSelectedID("")
         setLogText("No runner selected")
       }
     } catch (error) {
-      setConnected(false)
       toast.error(error instanceof Error ? error.message : "Failed to load control plane data")
     } finally {
       setLoading(false)
@@ -436,10 +429,6 @@ function App() {
     setSection,
     parseLabels,
   })
-
-  useEffect(() => {
-    void fetch("/healthz").catch(() => setConnected(false))
-  }, [])
 
   useEffect(() => {
     void (async () => {
@@ -737,11 +726,7 @@ function App() {
     <SidebarProvider>
       <AppSidebar
         section={section}
-        connected={connected}
-        activeCount={metrics[0]?.value || 0}
-        authLabel={authSession.authenticated ? `@${authSession.login}` : "Locked"}
         onSectionChange={setSection}
-        onSignOut={signOut}
       />
       <SidebarInset className="min-h-0 overflow-hidden">
         <SiteHeader authSession={authSession} onSignOut={signOut} />
