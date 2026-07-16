@@ -540,6 +540,26 @@ func TestListUserInstallationsUsesOAuthToken(t *testing.T) {
 	}
 }
 
+func TestListUserInstallationsReturnsStructuredAPIError(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"message":"Bad credentials"}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, ts.Client())
+	_, err := client.ListUserInstallations(t.Context(), "expired-user-token")
+	if err == nil {
+		t.Fatal("expected GitHub API error")
+	}
+	if status, ok := ErrorStatus(err); !ok || status != http.StatusUnauthorized {
+		t.Fatalf("expected structured unauthorized error, got status=%d ok=%v err=%v", status, ok, err)
+	}
+}
+
 func TestListUserInstallationRepositoriesUsesOAuthToken(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {

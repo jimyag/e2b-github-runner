@@ -206,7 +206,7 @@ func (s *Server) handleUserSyncGitHubInstallations(w http.ResponseWriter, r *htt
 	}
 	remoteInstallations, err := s.gh.ListUserInstallations(r.Context(), token)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		s.writeUserRepositoryAuthorizationError(w, err)
 		return
 	}
 	existingInstallations, err := s.store.ListGitHubInstallations(account.ID)

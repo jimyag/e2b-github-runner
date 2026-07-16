@@ -1000,6 +1000,36 @@ func TestUserSyncGitHubInstallationsRequiresOAuthTokenCode(t *testing.T) {
 	}
 }
 
+func TestUserSyncGitHubInstallationsRejectsInvalidOAuthTokenCode(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"message":"Bad credentials"}`))
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "expired-user-token")
+
+	req := httptest.NewRequest(http.MethodPost, "/user/github-app/installations/sync", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected rejected token to require reauthentication, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"REAUTH_REQUIRED"`) {
+		t.Fatalf("expected reauth code response, got %s", rec.Body.String())
+	}
+}
+
 func TestUserRunnerDetailLogAndTerminal(t *testing.T) {
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {

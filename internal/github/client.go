@@ -361,7 +361,13 @@ func (c *Client) ListUserInstallations(ctx context.Context, token string) ([]Ins
 			return nil, fmt.Errorf("read github user installations response: %w", readErr)
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, fmt.Errorf("github user installations: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+			return nil, &apiError{
+				Operation:          "github user installations",
+				StatusCode:         resp.StatusCode,
+				Body:               strings.TrimSpace(string(body)),
+				RetryAfter:         resp.Header.Get("Retry-After"),
+				RateLimitRemaining: resp.Header.Get("X-RateLimit-Remaining"),
+			}
 		}
 		var out struct {
 			Installations []struct {
