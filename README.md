@@ -37,6 +37,7 @@ When GitHub App auth is used, configure only the permissions below. The required
 | Repository | Actions | Read-only | Queries workflow job and run status, lists queued jobs, and reads job or run logs. This permission is also required when `workflow_job` and `workflow_run` events are delivered through the GitHub App webhook. |
 | Repository | Administration | Read and write | When the matched runner spec does not set `runner_group`, runnerd generates repository runner registration tokens, lists registered runners, and removes them after jobs finish. Without this permission, repository runner registration fails; only organization runners from specs that set `runner_group` can be used, so personal-account repositories are unsupported. |
 | Repository | Metadata | Read-only | Identifies repositories and their owners and lists the repositories authorized for a GitHub App installation. |
+| Repository | Pull requests | Read-only | Loads pull request titles for ordinary-user PR job groups, including private repositories. Without this permission, the groups remain available but show the title as unavailable. |
 | Organization | Self-hosted runners | Read and write | When the matched runner spec sets `runner_group`, runnerd generates organization runner registration tokens, registers runners in that group, and lists and removes them after jobs finish. |
 
 Set `github.app.slug` to the GitHub App URL slug when you want the ordinary-user UI to show an Install GitHub App link.
