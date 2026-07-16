@@ -692,6 +692,38 @@ func TestUserRunnerAuthorizationRequiresGitHubOAuthToken(t *testing.T) {
 	}
 }
 
+func TestUserRunnerAuthorizationRequiresReauthenticationForUnreadableGitHubOAuthToken(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "https://github.example", &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountSecret(state.AccountSecret{
+		ScopeType:      state.AccountScopeTypeAccount,
+		ScopeID:        account.ID,
+		KeyType:        state.AccountSecretTypeGitHubOAuthToken,
+		EncryptedValue: "v1:unreadable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"code":"REAUTH_REQUIRED"`) {
+		t.Fatalf("expected unreadable token to require reauthentication, got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestUserRunnerAuthorizationRejectsInvalidGitHubOAuthToken(t *testing.T) {
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
@@ -994,6 +1026,34 @@ func TestUserSyncGitHubInstallationsRequiresOAuthTokenCode(t *testing.T) {
 	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("unexpected sync status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"REAUTH_REQUIRED"`) {
+		t.Fatalf("expected reauth code response, got %s", rec.Body.String())
+	}
+}
+
+func TestUserSyncGitHubInstallationsRequiresReauthenticationForUnreadableOAuthToken(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "https://github.example", &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountSecret(state.AccountSecret{
+		ScopeType:      state.AccountScopeTypeAccount,
+		ScopeID:        account.ID,
+		KeyType:        state.AccountSecretTypeGitHubOAuthToken,
+		EncryptedValue: "v1:unreadable",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/user/github-app/installations/sync", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected unreadable token to require reauthentication, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), `"code":"REAUTH_REQUIRED"`) {
 		t.Fatalf("expected reauth code response, got %s", rec.Body.String())

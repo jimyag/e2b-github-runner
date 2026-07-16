@@ -190,18 +190,13 @@ func (s *Server) handleUserSyncGitHubInstallations(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, "github client is not configured")
 		return
 	}
-	secret, err := s.store.GetAccountSecret(state.AccountScopeTypeAccount, account.ID, state.AccountSecretTypeGitHubOAuthToken)
+	token, err := s.githubUserAccessToken(account.ID)
 	if err != nil {
-		if errors.Is(err, state.ErrNotFound) {
+		if errors.Is(err, errGitHubUserAccessTokenRequired) {
 			writeErrorCode(w, http.StatusBadRequest, "REAUTH_REQUIRED", "sign in with GitHub again before syncing installations")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	token, err := decryptSecret(secret.EncryptedValue, s.cfg.AuthEncryptionKey)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "decrypt github oauth token")
 		return
 	}
 	remoteInstallations, err := s.gh.ListUserInstallations(r.Context(), token)

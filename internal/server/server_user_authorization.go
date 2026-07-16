@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -26,7 +25,7 @@ func (s *Server) githubUserAccessToken(accountID int64) (string, error) {
 	}
 	token, err := decryptSecret(secret.EncryptedValue, s.cfg.AuthEncryptionKey)
 	if err != nil {
-		return "", fmt.Errorf("decrypt github user access token: %w", err)
+		return "", errGitHubUserAccessTokenRequired
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
