@@ -43,7 +43,9 @@ func (s *Server) userAuthorizedRepositoryAccess(ctx context.Context, accountID i
 		return nil, err
 	}
 	if len(installations) == 0 {
-		return []state.GitHubInstallationRepositoryAccess{}, nil
+		access := []state.GitHubInstallationRepositoryAccess{}
+		s.cacheUserRepositoryAccess(accountID, access)
+		return access, nil
 	}
 	if s.gh == nil {
 		return nil, errors.New("github client is not configured")

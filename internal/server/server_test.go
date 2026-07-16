@@ -891,6 +891,27 @@ func TestUserRunnerAuthorizationSkipsInaccessibleInstallation(t *testing.T) {
 	}
 }
 
+func TestUserRunnerAuthorizationCachesNoInstallations(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "https://github.example", &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	access, err := srv.userAuthorizedRepositoryAccess(context.Background(), account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(access) != 0 {
+		t.Fatalf("expected no repository access, got %#v", access)
+	}
+	cached, ok := srv.cachedUserRepositoryAccess(account.ID)
+	if !ok || len(cached) != 0 {
+		t.Fatalf("expected empty repository access to be cached, cached=%#v ok=%v", cached, ok)
+	}
+}
+
 func TestUserRunnerAuthorizationCachesRepositoryAccess(t *testing.T) {
 	var permissionRequests int
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
