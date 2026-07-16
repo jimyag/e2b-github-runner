@@ -1,4 +1,4 @@
-import { Activity, ClipboardList, CloudCog, Github, ListTree, Route, ScrollText, Server, Settings2, Stethoscope, Terminal } from "lucide-react"
+import { Activity, ClipboardList, CloudCog, Github, ListTree, Route, ScrollText, Server, Settings2, Stethoscope, Terminal, UsersRound } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -32,6 +32,7 @@ export function AppSidebar({
 }: AppSidebarProps) {
   const items = [
     { id: "overview", label: "Overview", icon: Activity },
+    { id: "accounts", label: "Accounts", icon: UsersRound },
     { id: "runner_requests", label: "Runner Requests", icon: ListTree },
     { id: "runner_specs", label: "Runner Specs", icon: Settings2 },
     { id: "runner_groups", label: "Runner Groups", icon: Server },

@@ -220,6 +220,22 @@ go run ./cmd/runnerd --config ./runnerd.yaml --bootstrap-admin github:<your-gith
 export COOKIE_JAR=./runnerd.cookies
 ```
 
+管理员账户页面：
+
+```text
+http://127.0.0.1:25500/admin/accounts
+```
+
+顶部统计卡展示账户总数、管理员、普通用户和已绑定 OAuth identity 数量；这些统计是全局口径，不受搜索、角色筛选或分页影响。账户列表可搜索关联 OAuth identity 的 login、provider 和 stable subject；`role` 可筛选 `admin` 或 `user`，`limit` 和 `offset` 用于分页。角色修改会立即生效，并写入 `account.role.update` 审计事件。当前管理员不能通过此 API 修改自己的角色。
+
+```bash
+curl -fsS -b "$COOKIE_JAR" \
+  'http://127.0.0.1:25500/admin/api/accounts?q=octo&role=admin&limit=20&offset=0' | jq
+curl -fsS -X PATCH -b "$COOKIE_JAR" -H 'content-type: application/json' \
+  http://127.0.0.1:25500/admin/api/accounts/<account-id>/role \
+  -d '{"role":"admin"}' | jq
+```
+
 管理员通过显式的 role-gated API 管理平台回退。省略 `api_key` 会保留已有密文，省略 `audience_mode` 会保留当前模式，响应永远不会返回 API Key。`selected` 模式没有 audience entries 时不会匹配任何 account。添加 audience 时可提交 `login` 或 `@login`；runnerd 会先向 GitHub 查询 canonical login、stable numeric ID 和 user/organization type，再保存稳定身份。已同步或已缓存的 owner 只作为可选建议，不是添加前提。selected owner 的第一个 workflow 如果没有本地 installation row，runnerd 会通过 GitHub App auth 查询 installation owner 并缓存该稳定身份。
 
 ```bash
@@ -236,7 +252,7 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/admin/api/sandbox-service-default/api-key | jq
 ```
 
-页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。开发模式下 `internal/server/ui_assets_development.go` 会把 UI 资源代理到 Vite；生产构建下 `internal/server/ui_assets_production.go` 会嵌入 `internal/server/ui/*`。普通用户界面包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/account/sandbox-templates` 的区域过滤模板、`/account/sandbox-instances` 的区域和模板过滤 runner instances、对应的 organization 路由、`/repositories` 的本地 activity repositories，以及 `/` 的 Repo/PR 列表和 PR job 明细。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes，并使用统一的 scoped/default credential resolver。管理面包含 `/admin/sandbox_service` 的平台回退、runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
+页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。开发模式下 `internal/server/ui_assets_development.go` 会把 UI 资源代理到 Vite；生产构建下 `internal/server/ui_assets_production.go` 会嵌入 `internal/server/ui/*`。普通用户界面包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/account/sandbox-templates` 的区域过滤模板、`/account/sandbox-instances` 的区域和模板过滤 runner instances、对应的 organization 路由、`/repositories` 的本地 activity repositories，以及 `/` 的 Repo/PR 列表和 PR job 明细。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes，并使用统一的 scoped/default credential resolver。管理面包含 `/admin/accounts` 的账户与角色管理、`/admin/sandbox_service` 的平台回退、runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
 
 先创建一个默认 runner spec：
 

@@ -119,6 +119,42 @@ export type AuthSession = {
   expires_at?: string
 }
 
+export type AccountRole = "admin" | "user"
+
+export type AdminOAuthIdentity = {
+  id: number
+  account_id: number
+  oauth_provider: string
+  oauth_subject: string
+  oauth_login: string
+  created_at: string
+  updated_at: string
+}
+
+export type AdminAccount = {
+  id: number
+  role: AccountRole
+  created_at: string
+  updated_at: string
+  oauth_identities: AdminOAuthIdentity[]
+}
+
+export type AdminAccountStats = {
+  total_accounts: number
+  admin_accounts: number
+  user_accounts: number
+  oauth_identities: number
+}
+
+export type AdminAccountsResponse = {
+  accounts: AdminAccount[]
+  current_account_id: number
+  stats: AdminAccountStats
+  total: number
+  limit: number
+  offset: number
+}
+
 export type GitHubInstallation = {
   id: number
   account_id: number
@@ -225,6 +261,7 @@ export const activeStatuses = new Set<RunnerStatus>(["queued", "creating", "runn
 export const logNames = ["control.log", "stdout.log", "stderr.log"] as const
 export const adminSections = [
   "overview",
+  "accounts",
   "runner_requests",
   "runner_specs",
   "runner_groups",

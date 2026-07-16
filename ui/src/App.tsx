@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react
 import { toast } from "sonner"
 
 import { AppSidebar } from "@/components/app-sidebar"
+import { AccountsSection } from "@/components/accounts-section"
 import { AuditSection, DiagnosticsSection, MatchSection, OverviewSection } from "@/components/admin-sections"
 import { LoginPage } from "@/components/login-page"
 import { RunnerJobDetail } from "@/components/runner-job-detail"
@@ -745,19 +746,21 @@ function App() {
       <SidebarInset className="min-h-0 overflow-hidden">
         <SiteHeader />
         <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 lg:gap-6 lg:p-6">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {metrics.map((metric) => (
-              <Card key={metric.label} className="gap-3 py-5">
-                <CardHeader className="px-5">
-                  <CardDescription>{metric.label}</CardDescription>
-                  <CardTitle className="text-3xl">{metric.value}</CardTitle>
-                </CardHeader>
-                <CardContent className="px-5 text-xs text-muted-foreground">
-                  {metric.description}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          {section !== "accounts" ? (
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              {metrics.map((metric) => (
+                <Card key={metric.label} className="gap-3 py-5">
+                  <CardHeader className="px-5">
+                    <CardDescription>{metric.label}</CardDescription>
+                    <CardTitle className="text-3xl">{metric.value}</CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-5 text-xs text-muted-foreground">
+                    {metric.description}
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : null}
 
           {section === "overview" ? (
             <OverviewSection
@@ -768,6 +771,8 @@ function App() {
               onEditPolicy={loadPolicyIntoForm}
             />
           ) : null}
+
+          {section === "accounts" ? <AccountsSection request={request} /> : null}
 
           {section === "runner_requests" ? (
             <RunnerRequestsSection

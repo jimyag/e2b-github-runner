@@ -36,7 +36,7 @@ Old-schema upgrade coverage is required when adding required columns, changing u
 
 - For focused backend changes, start with the relevant package test.
 - For broad server/API behavior, run `go test ./...`.
-- For pre-merge confidence, run `task test`; it rebuilds UI assets and runs Go tests with race and coverage.
+- For pre-merge confidence, run `task test`; it rebuilds UI assets, runs Bun UI tests, and runs Go tests with race and coverage.
 
 ## UI
 

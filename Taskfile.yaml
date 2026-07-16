@@ -84,10 +84,11 @@ tasks:
       - task: ui-lint
 
   test:
-    desc: Run tests with the race detector and coverage
+    desc: Run UI tests and Go tests with the race detector and coverage
     deps:
       - ui-build
     cmds:
+      - cd ui && bun run test
       - GORACE=atexit_sleep_ms=0 go test -v -trimpath -failfast -race -cover -coverprofile=coverage.txt {{.GO_PACKAGES}}
 
   build:

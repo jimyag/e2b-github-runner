@@ -118,7 +118,7 @@ jobs:
           go-version: stable
           cache-dependency-path: go.sum
       - uses: oven-sh/setup-bun@v2
-      - run: cd ui && bun install --frozen-lockfile && bun run build
+      - run: cd ui && bun install --frozen-lockfile && bun run build && bun run test
       - run: GORACE=atexit_sleep_ms=0 go test -v -trimpath -failfast -race -cover -coverprofile=coverage.txt ./cmd/... ./internal/...
 
   build:

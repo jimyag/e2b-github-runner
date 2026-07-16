@@ -1,6 +1,8 @@
 package state
 
 import (
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +11,25 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+// GetAccount returns a local account by its stable database ID.
+func (s *DBStore) GetAccount(accountID int64) (Account, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return Account{}, err
+	}
+	if accountID <= 0 {
+		return Account{}, ErrNotFound
+	}
+	var record accountRecord
+	if err := db.First(&record, "id = ?", accountID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Account{}, ErrNotFound
+		}
+		return Account{}, err
+	}
+	return Account(record), nil
+}
 
 func (s *DBStore) GetAccountByOAuthIdentity(provider, subject string) (Account, OAuthIdentity, error) {
 	db, err := s.dbOrEnsure()
@@ -47,6 +68,211 @@ func (s *DBStore) GetOAuthIdentityForAccount(accountID int64, provider string) (
 		return OAuthIdentity{}, err
 	}
 	return recordToOAuthIdentity(identity), nil
+}
+
+// ListAccounts returns one page of accounts with their linked OAuth identities.
+func (s *DBStore) ListAccounts(options AccountListOptions) ([]AccountListItem, int64, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, 0, err
+	}
+	if options.Limit <= 0 {
+		options.Limit = 50
+	}
+	if options.Offset < 0 {
+		return nil, 0, fmt.Errorf("offset must be a non-negative integer")
+	}
+
+	query := db.Model(&accountRecord{})
+	if role := strings.TrimSpace(options.Role); role != "" {
+		normalizedRole := normalizePlatformRole(role)
+		if normalizedRole == "" {
+			return nil, 0, fmt.Errorf("role must be admin or user")
+		}
+		query = query.Where("accounts.role = ?", normalizedRole)
+	}
+	if search := strings.ToLower(strings.TrimSpace(options.Query)); search != "" {
+		like := "%" + search + "%"
+		query = query.Where(`EXISTS (
+			SELECT 1 FROM oauth_identities
+			WHERE oauth_identities.account_id = accounts.id
+			AND (
+				LOWER(oauth_identities.oauth_provider) LIKE ? OR
+				LOWER(oauth_identities.oauth_subject) LIKE ? OR
+				LOWER(oauth_identities.oauth_login) LIKE ?
+			)
+		)`, like, like, like)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var records []accountRecord
+	if err := query.Order("accounts.updated_at DESC").Order("accounts.id DESC").Limit(options.Limit).Offset(options.Offset).Find(&records).Error; err != nil {
+		return nil, 0, err
+	}
+
+	items := make([]AccountListItem, len(records))
+	if len(records) == 0 {
+		return items, total, nil
+	}
+	accountIDs := make([]int64, len(records))
+	itemByAccountID := make(map[int64]*AccountListItem, len(records))
+	for index, record := range records {
+		items[index] = AccountListItem{
+			Account:         Account(record),
+			OAuthIdentities: []OAuthIdentity{},
+		}
+		accountIDs[index] = record.ID
+		itemByAccountID[record.ID] = &items[index]
+	}
+
+	var identities []oauthIdentityRecord
+	if err := db.Where("account_id IN ?", accountIDs).Order("oauth_provider ASC").Order("id ASC").Find(&identities).Error; err != nil {
+		return nil, 0, err
+	}
+	for _, identity := range identities {
+		itemByAccountID[identity.AccountID].OAuthIdentities = append(
+			itemByAccountID[identity.AccountID].OAuthIdentities,
+			recordToOAuthIdentity(identity),
+		)
+	}
+	return items, total, nil
+}
+
+// GetAccountStats returns unfiltered account, role, and OAuth identity totals.
+func (s *DBStore) GetAccountStats() (AccountStats, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return AccountStats{}, err
+	}
+	var stats AccountStats
+	if err := db.Model(&accountRecord{}).Count(&stats.TotalAccounts).Error; err != nil {
+		return AccountStats{}, err
+	}
+	if err := db.Model(&accountRecord{}).Where("role = ?", "admin").Count(&stats.AdminAccounts).Error; err != nil {
+		return AccountStats{}, err
+	}
+	if err := db.Model(&accountRecord{}).Where("role = ?", "user").Count(&stats.UserAccounts).Error; err != nil {
+		return AccountStats{}, err
+	}
+	if err := db.Model(&oauthIdentityRecord{}).Count(&stats.OAuthIdentities).Error; err != nil {
+		return AccountStats{}, err
+	}
+	return stats, nil
+}
+
+// UpdateAccountRoleWithAudit atomically updates an account role and records the administrator action.
+func (s *DBStore) UpdateAccountRoleWithAudit(update AccountRoleUpdate) (Account, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return Account{}, err
+	}
+	if update.ActorAccountID <= 0 || update.AccountID <= 0 {
+		return Account{}, ErrNotFound
+	}
+	if update.ActorAccountID == update.AccountID {
+		return Account{}, ErrConflict
+	}
+	role := normalizePlatformRole(update.Role)
+	if role == "" {
+		return Account{}, fmt.Errorf("role must be admin or user")
+	}
+	auditActor := strings.TrimSpace(update.AuditActor)
+	if auditActor == "" {
+		return Account{}, fmt.Errorf("audit actor is required")
+	}
+
+	var updated Account
+	var lastErr error
+	for attempt := 0; attempt < 20; attempt++ {
+		updated, lastErr = updateAccountRoleWithAuditOnce(db, update.ActorAccountID, update.AccountID, role, auditActor)
+		if lastErr == nil {
+			return updated, nil
+		}
+		if !isTransientStoreError(lastErr) {
+			return Account{}, lastErr
+		}
+		time.Sleep(time.Duration(attempt+1) * 25 * time.Millisecond)
+	}
+	return Account{}, lastErr
+}
+
+func updateAccountRoleWithAuditOnce(db *gorm.DB, actorAccountID, accountID int64, role, auditActor string) (Account, error) {
+	var updated accountRecord
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var actor accountRecord
+		if err := tx.First(&actor, "id = ?", actorAccountID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if actor.Role != "admin" {
+			return ErrConflict
+		}
+
+		var target accountRecord
+		if err := tx.First(&target, "id = ?", accountID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if target.ID == actor.ID {
+			return ErrConflict
+		}
+		if target.Role == "admin" && role == "user" {
+			// This predicate read is part of the serializable invariant: concurrent
+			// administrators must not both demote each other and leave no admin.
+			var adminCount int64
+			if err := tx.Model(&accountRecord{}).Where("role = ?", "admin").Count(&adminCount).Error; err != nil {
+				return err
+			}
+			if adminCount <= 1 {
+				return ErrConflict
+			}
+		}
+
+		now := time.Now().UTC()
+		result := tx.Model(&accountRecord{}).
+			Where("id = ? AND role = ?", target.ID, target.Role).
+			Updates(map[string]any{"role": role, "updated_at": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrConflict
+		}
+
+		payload, err := json.Marshal(map[string]string{
+			"old_role": target.Role,
+			"new_role": role,
+		})
+		if err != nil {
+			return err
+		}
+		if _, err := appendAuditEvent(tx, AuditEvent{
+			Actor:        auditActor,
+			Action:       "account.role.update",
+			ResourceType: "account",
+			ResourceID:   fmt.Sprint(target.ID),
+			PayloadJSON:  string(payload),
+			CreatedAt:    now,
+		}); err != nil {
+			return err
+		}
+
+		target.Role = role
+		target.UpdatedAt = now
+		updated = target
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return Account{}, err
+	}
+	return Account(updated), nil
 }
 
 func (s *DBStore) UpsertAccountForOAuthIdentity(identity OAuthIdentity, role string) (Account, OAuthIdentity, error) {
@@ -233,6 +459,10 @@ func (s *DBStore) AppendAuditEvent(event AuditEvent) (AuditEvent, error) {
 	if err != nil {
 		return AuditEvent{}, err
 	}
+	return appendAuditEvent(db, event)
+}
+
+func appendAuditEvent(db *gorm.DB, event AuditEvent) (AuditEvent, error) {
 	record := auditEventRecord{
 		Actor:        strings.TrimSpace(event.Actor),
 		Action:       strings.TrimSpace(event.Action),

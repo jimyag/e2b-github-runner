@@ -214,6 +214,8 @@ func (s *Server) Recover(ctx context.Context) error {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /", s.handleRoot)
 	s.mux.HandleFunc("GET /admin", s.handleAdminRedirect)
+	s.mux.HandleFunc("GET /admin/api/accounts", s.handleAdminListAccounts)
+	s.mux.HandleFunc("PATCH /admin/api/accounts/{id}/role", s.handleAdminUpdateAccountRole)
 	s.mux.HandleFunc("GET /admin/api/sandbox-service-default", s.handleAdminGetSandboxServiceDefault)
 	s.mux.HandleFunc("PUT /admin/api/sandbox-service-default", s.handleAdminSaveSandboxServiceDefault)
 	s.mux.HandleFunc("DELETE /admin/api/sandbox-service-default/api-key", s.handleAdminDeleteSandboxServiceDefaultAPIKey)

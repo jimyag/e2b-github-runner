@@ -515,6 +515,235 @@ func TestUpsertAccountForOAuthIdentityMaintainsRoleByOAuthIdentity(t *testing.T)
 	}
 }
 
+func TestListAccountsSearchesFiltersAndPaginates(t *testing.T) {
+	store := New(t.TempDir())
+	admin, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alpha"}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "200", OAuthLogin: "bravo"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.LinkOAuthIdentityToAccount(user.ID, OAuthIdentity{OAuthProvider: "gitlab", OAuthSubject: "gl-200", OAuthLogin: "Bravo-Lab"}); err != nil {
+		t.Fatal(err)
+	}
+	third, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "300", OAuthLogin: "charlie"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstPage, total, err := store.ListAccounts(AccountListOptions{Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 || len(firstPage) != 2 {
+		t.Fatalf("unexpected first page: total=%d accounts=%#v", total, firstPage)
+	}
+	secondPage, secondTotal, err := store.ListAccounts(AccountListOptions{Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondTotal != 3 || len(secondPage) != 1 || secondPage[0].ID == firstPage[0].ID || secondPage[0].ID == firstPage[1].ID {
+		t.Fatalf("unexpected second page: total=%d accounts=%#v first=%#v", secondTotal, secondPage, firstPage)
+	}
+
+	users, userTotal, err := store.ListAccounts(AccountListOptions{Role: " USER ", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if userTotal != 2 || len(users) != 2 {
+		t.Fatalf("unexpected user filter: total=%d accounts=%#v", userTotal, users)
+	}
+	for _, item := range users {
+		if item.Role != "user" || item.ID == admin.ID {
+			t.Fatalf("role filter returned the wrong account: %#v", item)
+		}
+	}
+
+	searched, searchTotal, err := store.ListAccounts(AccountListOptions{Query: " BRAVO-LAB ", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if searchTotal != 1 || len(searched) != 1 || searched[0].ID != user.ID || len(searched[0].OAuthIdentities) != 2 {
+		t.Fatalf("unexpected login search result: total=%d accounts=%#v", searchTotal, searched)
+	}
+	if searched[0].OAuthIdentities[0].OAuthProvider != "github" || searched[0].OAuthIdentities[1].OAuthProvider != "gitlab" {
+		t.Fatalf("expected stable provider ordering, got %#v", searched[0].OAuthIdentities)
+	}
+
+	bySubject, subjectTotal, err := store.ListAccounts(AccountListOptions{Query: "300", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subjectTotal != 1 || len(bySubject) != 1 || bySubject[0].ID != third.ID {
+		t.Fatalf("unexpected subject search result: total=%d accounts=%#v", subjectTotal, bySubject)
+	}
+}
+
+func TestGetAccountStatsCountsAccountsRolesAndIdentities(t *testing.T) {
+	store := New(t.TempDir())
+	if _, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alpha"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	user, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "200", OAuthLogin: "bravo"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.LinkOAuthIdentityToAccount(user.ID, OAuthIdentity{OAuthProvider: "gitlab", OAuthSubject: "gl-200", OAuthLogin: "bravo"}); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err := store.GetAccountStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := AccountStats{TotalAccounts: 2, AdminAccounts: 1, UserAccounts: 1, OAuthIdentities: 3}
+	if stats != want {
+		t.Fatalf("unexpected account stats: got=%#v want=%#v", stats, want)
+	}
+}
+
+func TestListAccountsRejectsInvalidRole(t *testing.T) {
+	store := New(t.TempDir())
+	if _, _, err := store.ListAccounts(AccountListOptions{Role: "owner", Limit: 10}); err == nil {
+		t.Fatal("expected invalid role filter to fail")
+	}
+}
+
+func TestUpdateAccountRoleValidatesAndPersists(t *testing.T) {
+	store := New(t.TempDir())
+	actor, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "admin", OAuthLogin: "admin"}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	account, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "octocat"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fetched, err := store.GetAccount(account.ID)
+	if err != nil || fetched.ID != account.ID || fetched.Role != "user" {
+		t.Fatalf("unexpected fetched account: account=%#v err=%v", fetched, err)
+	}
+
+	updated, err := store.UpdateAccountRoleWithAudit(AccountRoleUpdate{
+		ActorAccountID: actor.ID,
+		AccountID:      account.ID,
+		Role:           " ADMIN ",
+		AuditActor:     "github:admin",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != account.ID || updated.Role != "admin" || !updated.UpdatedAt.After(account.UpdatedAt) {
+		t.Fatalf("unexpected updated account: before=%#v after=%#v", account, updated)
+	}
+	persisted, _, err := store.GetAccountByOAuthIdentity("github", "12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Role != "admin" {
+		t.Fatalf("expected persisted admin role, got %#v", persisted)
+	}
+	if _, err := store.UpdateAccountRoleWithAudit(AccountRoleUpdate{ActorAccountID: actor.ID, AccountID: account.ID, Role: "owner", AuditActor: "github:admin"}); err == nil {
+		t.Fatal("expected invalid role update to fail")
+	}
+	if _, err := store.UpdateAccountRoleWithAudit(AccountRoleUpdate{ActorAccountID: actor.ID, AccountID: 0, Role: "user", AuditActor: "github:admin"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected missing account to return ErrNotFound, got %v", err)
+	}
+	if _, err := store.GetAccount(0); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected missing account lookup to return ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpdateAccountRoleWithAuditRollsBackWhenAuditInsertFails(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	actor, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "actor", OAuthLogin: "actor"}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "target", OAuthLogin: "target"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TRIGGER fail_account_role_audit
+		BEFORE INSERT ON audit_events
+		WHEN NEW.action = 'account.role.update'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced audit failure');
+		END`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.UpdateAccountRoleWithAudit(AccountRoleUpdate{
+		ActorAccountID: actor.ID,
+		AccountID:      target.ID,
+		Role:           "admin",
+		AuditActor:     "github:actor",
+	})
+	if err == nil || !strings.Contains(err.Error(), "forced audit failure") {
+		t.Fatalf("expected forced audit failure, got %v", err)
+	}
+	persisted, err := store.GetAccount(target.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Role != "user" {
+		t.Fatalf("expected failed audit insert to roll back role update, got %#v", persisted)
+	}
+}
+
+func TestConcurrentAccountRoleUpdatesKeepAnAdministrator(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	first, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "first", OAuthLogin: "first"}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "second", OAuthLogin: "second"}, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	errorsByUpdate := make(chan error, 2)
+	updates := []AccountRoleUpdate{
+		{ActorAccountID: first.ID, AccountID: second.ID, Role: "user", AuditActor: "github:first"},
+		{ActorAccountID: second.ID, AccountID: first.ID, Role: "user", AuditActor: "github:second"},
+	}
+	for _, update := range updates {
+		update := update
+		go func() {
+			<-start
+			_, updateErr := store.UpdateAccountRoleWithAudit(update)
+			errorsByUpdate <- updateErr
+		}()
+	}
+	close(start)
+	firstErr := <-errorsByUpdate
+	secondErr := <-errorsByUpdate
+	if (firstErr == nil) == (secondErr == nil) {
+		t.Fatalf("expected exactly one role update to succeed, got errors %v and %v", firstErr, secondErr)
+	}
+	failedErr := firstErr
+	if failedErr == nil {
+		failedErr = secondErr
+	}
+	if !errors.Is(failedErr, ErrConflict) {
+		t.Fatalf("expected losing role update to return ErrConflict, got %v", failedErr)
+	}
+	stats, err := store.GetAccountStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.AdminAccounts != 1 {
+		t.Fatalf("expected one administrator to remain, got %#v", stats)
+	}
+}
+
 func TestGetOAuthIdentityForAccountByProvider(t *testing.T) {
 	store := New(t.TempDir())
 	account, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "octocat"}, "user")

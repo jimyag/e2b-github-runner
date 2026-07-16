@@ -146,6 +146,36 @@ type Account struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// AccountListOptions controls account search, role filtering, and pagination.
+type AccountListOptions struct {
+	Query  string
+	Role   string
+	Limit  int
+	Offset int
+}
+
+// AccountListItem combines a local account with all linked OAuth identities.
+type AccountListItem struct {
+	Account
+	OAuthIdentities []OAuthIdentity `json:"oauth_identities"`
+}
+
+// AccountStats summarizes local accounts, roles, and linked OAuth identities.
+type AccountStats struct {
+	TotalAccounts   int64 `json:"total_accounts"`
+	AdminAccounts   int64 `json:"admin_accounts"`
+	UserAccounts    int64 `json:"user_accounts"`
+	OAuthIdentities int64 `json:"oauth_identities"`
+}
+
+// AccountRoleUpdate describes an audited administrator-initiated role change.
+type AccountRoleUpdate struct {
+	ActorAccountID int64
+	AccountID      int64
+	Role           string
+	AuditActor     string
+}
+
 // OAuthIdentity represents an external OAuth identity linked to an account.
 type OAuthIdentity struct {
 	ID            int64     `json:"id"`
@@ -280,8 +310,12 @@ type RunnerCatalogStore interface {
 }
 
 type IdentityStore interface {
+	GetAccount(accountID int64) (Account, error)
 	GetAccountByOAuthIdentity(provider, subject string) (Account, OAuthIdentity, error)
 	GetOAuthIdentityForAccount(accountID int64, provider string) (OAuthIdentity, error)
+	ListAccounts(options AccountListOptions) ([]AccountListItem, int64, error)
+	GetAccountStats() (AccountStats, error)
+	UpdateAccountRoleWithAudit(update AccountRoleUpdate) (Account, error)
 	EnsureAccountForOAuthIdentity(identity OAuthIdentity, role string) (Account, OAuthIdentity, error)
 	UpsertAccountForOAuthIdentity(identity OAuthIdentity, role string) (Account, OAuthIdentity, error)
 	LinkOAuthIdentityToAccount(accountID int64, identity OAuthIdentity) (Account, OAuthIdentity, error)

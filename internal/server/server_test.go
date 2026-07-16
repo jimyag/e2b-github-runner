@@ -1499,6 +1499,168 @@ func TestAdminSandboxServiceDefaultRequiresAdmin(t *testing.T) {
 	}
 }
 
+func TestAdminAccountsRequiresAdmin(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/api/accounts", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("GET accounts without auth: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	hubot, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req = httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/admin/api/accounts/%d/role", hubot.ID), strings.NewReader(`{"role":"admin"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("PATCH account role without auth: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminAccountsSearchFilterAndPagination(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	alice, _, err := store.UpsertAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "alice-id", OAuthLogin: "alice"}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.LinkOAuthIdentityToAccount(alice.ID, state.OAuthIdentity{OAuthProvider: "gitlab", OAuthSubject: "alice-gl", OAuthLogin: "alice-lab"}); err != nil {
+		t.Fatal(err)
+	}
+	current, _, err := store.GetAccountByOAuthIdentity("github", "12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type accountsResponse struct {
+		Accounts         []state.AccountListItem `json:"accounts"`
+		CurrentAccountID int64                   `json:"current_account_id"`
+		Stats            state.AccountStats      `json:"stats"`
+		Total            int64                   `json:"total"`
+		Limit            int                     `json:"limit"`
+		Offset           int                     `json:"offset"`
+	}
+	req := adminRequest(http.MethodGet, "/admin/api/accounts?q=ALICE-LAB&role=user&limit=1&offset=0", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET filtered accounts: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var body accountsResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Total != 1 || body.Limit != 1 || body.Offset != 0 || body.CurrentAccountID != current.ID || len(body.Accounts) != 1 || body.Accounts[0].ID != alice.ID || len(body.Accounts[0].OAuthIdentities) != 2 {
+		t.Fatalf("unexpected filtered accounts response: %#v", body)
+	}
+	wantStats := state.AccountStats{TotalAccounts: 3, AdminAccounts: 1, UserAccounts: 2, OAuthIdentities: 4}
+	if body.Stats != wantStats {
+		t.Fatalf("unexpected unfiltered account stats: got=%#v want=%#v", body.Stats, wantStats)
+	}
+	if rec.Header().Get("X-Total-Count") != "1" || rec.Header().Get("X-Limit") != "1" || rec.Header().Get("X-Offset") != "0" {
+		t.Fatalf("unexpected pagination headers: %#v", rec.Header())
+	}
+
+	req = adminRequest(http.MethodGet, "/admin/api/accounts?limit=1&offset=1", nil)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET account page: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body = accountsResponse{}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Total != 3 || len(body.Accounts) != 1 || rec.Header().Get("Link") == "" {
+		t.Fatalf("unexpected account page response: body=%#v headers=%#v", body, rec.Header())
+	}
+
+	req = adminRequest(http.MethodGet, "/admin/api/accounts?role=owner", nil)
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "role must be admin or user") {
+		t.Fatalf("GET invalid role filter: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminAccountRoleUpdateIsAudited(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	hubot, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := adminRequest(http.MethodPatch, fmt.Sprintf("/admin/api/accounts/%d/role", hubot.ID), strings.NewReader(`{"role":"admin"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH account role: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var updated state.Account
+	if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != hubot.ID || updated.Role != "admin" {
+		t.Fatalf("unexpected updated account: %#v", updated)
+	}
+	persisted, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil || persisted.Role != "admin" {
+		t.Fatalf("unexpected persisted account: account=%#v err=%v", persisted, err)
+	}
+	events, err := store.ListAuditEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Actor != "github:12345" || events[0].Action != "account.role.update" || events[0].ResourceType != "account" || events[0].ResourceID != fmt.Sprint(hubot.ID) || !strings.Contains(events[0].PayloadJSON, `"old_role":"user"`) || !strings.Contains(events[0].PayloadJSON, `"new_role":"admin"`) {
+		t.Fatalf("unexpected role update audit event: %#v", events)
+	}
+
+	req = adminRequest(http.MethodPatch, fmt.Sprintf("/admin/api/accounts/%d/role", hubot.ID), strings.NewReader(`{"role":"owner"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "role must be admin or user") {
+		t.Fatalf("PATCH invalid account role: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = adminRequest(http.MethodPatch, "/admin/api/accounts/999999/role", strings.NewReader(`{"role":"user"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("PATCH missing account role: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAdminAccountRoleUpdateRejectsCurrentAccount(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	current, _, err := store.GetAccountByOAuthIdentity("github", "12345")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := adminRequest(http.MethodPatch, fmt.Sprintf("/admin/api/accounts/%d/role", current.ID), strings.NewReader(`{"role":"user"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "cannot change your own role") {
+		t.Fatalf("PATCH current account role: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	persisted, _, err := store.GetAccountByOAuthIdentity("github", "12345")
+	if err != nil || persisted.Role != "admin" {
+		t.Fatalf("expected current account to stay admin: account=%#v err=%v", persisted, err)
+	}
+}
+
 func TestAdminSandboxServiceDefaultLifecycle(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "", &fakeSandbox{})
