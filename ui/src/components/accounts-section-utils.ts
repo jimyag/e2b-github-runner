@@ -5,6 +5,8 @@ export type AccountAvatarIdentity = {
   oauth_login: string
 }
 
+type AccountAvatarIdentities = AccountAvatarIdentity[] | null | undefined
+
 export type AccountListQuery = {
   query: string
   role: AccountRoleFilter
@@ -19,8 +21,8 @@ export type AccountPageMeta = {
   canNext: boolean
 }
 
-export function accountAvatarURL(identities: AccountAvatarIdentity[]) {
-  const githubIdentity = identities.find(
+export function accountAvatarURL(identities: AccountAvatarIdentities) {
+  const githubIdentity = identities?.find(
     (identity) => identity.oauth_provider.trim().toLowerCase() === "github",
   )
   const login = githubIdentity?.oauth_login.trim()
@@ -29,7 +31,7 @@ export function accountAvatarURL(identities: AccountAvatarIdentity[]) {
 }
 
 export function accountAvatarImageURL(
-  identities: AccountAvatarIdentity[],
+  identities: AccountAvatarIdentities,
   failedAvatarURL: string,
 ) {
   const avatarURL = accountAvatarURL(identities)

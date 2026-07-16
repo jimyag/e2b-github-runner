@@ -78,7 +78,7 @@ export function AccountAvatar({
   identities,
   displayLogin,
 }: {
-  identities: AccountAvatarIdentity[]
+  identities: AccountAvatarIdentity[] | null | undefined
   displayLogin: string
 }) {
   const [failedAvatarURL, setFailedAvatarURL] = useState("")
@@ -214,7 +214,7 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
   const page = useMemo(() => accountPageMeta(total, limit, offset), [limit, offset, total])
   const resultStart = total === 0 ? 0 : offset + 1
   const resultEnd = Math.min(offset + accounts.length, total)
-  const pendingLogin = pendingRoleChange?.account.oauth_identities[0]?.oauth_login || `account #${pendingRoleChange?.account.id || ""}`
+  const pendingLogin = pendingRoleChange?.account.oauth_identities?.[0]?.oauth_login || `account #${pendingRoleChange?.account.id || ""}`
 
   const applySearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -393,7 +393,8 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                 </TableRow>
               ) : (
                 accounts.map((account) => {
-                  const primaryIdentity = account.oauth_identities[0]
+                  const identities = account.oauth_identities ?? []
+                  const primaryIdentity = identities[0]
                   const displayLogin = primaryIdentity?.oauth_login || `account-${account.id}`
                   const isCurrent = account.id === currentAccountID
                   const isSaving = savingAccountID === account.id
@@ -401,7 +402,7 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                     <TableRow key={account.id}>
                       <TableCell className="pl-5">
                         <div className="flex items-center gap-3">
-                          <AccountAvatar identities={account.oauth_identities} displayLogin={displayLogin} />
+                          <AccountAvatar identities={identities} displayLogin={displayLogin} />
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="max-w-48 truncate font-medium">@{displayLogin}</span>
@@ -413,7 +414,7 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                       </TableCell>
                       <TableCell>
                         <div className="flex max-w-xl flex-wrap gap-1.5">
-                          {account.oauth_identities.map((identity) => (
+                          {identities.map((identity) => (
                             <span
                               key={identity.id}
                               className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs shadow-xs"

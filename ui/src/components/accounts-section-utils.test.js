@@ -17,6 +17,10 @@ describe("accountAvatarURL", () => {
     expect(accountAvatarURL([{ oauth_provider: "gitlab", oauth_login: "miclle-lab" }])).toBe("")
   })
 
+  test("keeps the initial fallback when identities are missing", () => {
+    expect(accountAvatarURL(undefined)).toBe("")
+  })
+
   test("only suppresses the avatar URL that failed", () => {
     const accountAvatarImageURL = AccountsSectionUtils.accountAvatarImageURL
     expect(typeof accountAvatarImageURL).toBe("function")

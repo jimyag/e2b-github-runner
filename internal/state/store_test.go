@@ -590,6 +590,9 @@ func TestListAccountsRejectsUnexpectedIdentityAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove("test:append-unexpected-account-identity")
+	})
 	if err := db.Callback().Query().After("gorm:query").Register("test:append-unexpected-account-identity", func(query *gorm.DB) {
 		if identities, ok := query.Statement.Dest.(*[]oauthIdentityRecord); ok {
 			*identities = append(*identities, oauthIdentityRecord{
@@ -629,6 +632,10 @@ func TestGetAccountStatsCountsAccountsRolesAndIdentities(t *testing.T) {
 	countQuery := func(*gorm.DB) {
 		queryCount++
 	}
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove("test:count-account-stats-query")
+		_ = db.Callback().Row().Remove("test:count-account-stats-row")
+	})
 	if err := db.Callback().Query().Before("gorm:query").Register("test:count-account-stats-query", countQuery); err != nil {
 		t.Fatal(err)
 	}
