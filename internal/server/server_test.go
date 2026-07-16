@@ -791,67 +791,71 @@ func TestUserRunnerAuthorizationDoesNotReauthenticateOnGitHubRateLimit(t *testin
 }
 
 func TestUserRunnerAuthorizationSkipsInaccessibleInstallation(t *testing.T) {
-	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/user/installations/987/repositories":
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte(`{"message":"Not Found"}`))
-		case "/user/installations/654/repositories":
-			w.Header().Set("Content-Type", "application/json")
-			w.Write([]byte(`{"repositories":[{"full_name":"other/visible"}]}`))
-		default:
-			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
-		}
-	}))
-	defer ghServer.Close()
+	for _, inaccessibleStatus := range []int{http.StatusNotFound, http.StatusForbidden} {
+		t.Run(http.StatusText(inaccessibleStatus), func(t *testing.T) {
+			ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/user/installations/987/repositories":
+					w.WriteHeader(inaccessibleStatus)
+					w.Write([]byte(`{"message":"installation is not accessible"}`))
+				case "/user/installations/654/repositories":
+					w.Header().Set("Content-Type", "application/json")
+					w.Write([]byte(`{"repositories":[{"full_name":"other/visible"}]}`))
+				default:
+					t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+				}
+			}))
+			defer ghServer.Close()
 
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
-	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, installation := range []state.GitHubInstallation{
-		{AccountID: account.ID, InstallationID: 987, AccountLogin: "o"},
-		{AccountID: account.ID, InstallationID: 654, AccountLogin: "other"},
-	} {
-		if _, err := store.UpsertGitHubInstallation(installation); err != nil {
-			t.Fatal(err)
-		}
-	}
-	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
-	for _, request := range []state.RunnerRequest{
-		{
-			ID:                   "inaccessible-job",
-			Source:               "test",
-			GitHubInstallationID: 987,
-			RepositoryFullName:   "o/private",
-		},
-		{
-			ID:                   "accessible-job",
-			Source:               "test",
-			GitHubInstallationID: 654,
-			RepositoryFullName:   "other/visible",
-		},
-	} {
-		if _, _, err := store.CreateRequest(request, nil); err != nil {
-			t.Fatal(err)
-		}
-	}
+			store := state.New(t.TempDir())
+			srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+			account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, installation := range []state.GitHubInstallation{
+				{AccountID: account.ID, InstallationID: 987, AccountLogin: "o"},
+				{AccountID: account.ID, InstallationID: 654, AccountLogin: "other"},
+			} {
+				if _, err := store.UpsertGitHubInstallation(installation); err != nil {
+					t.Fatal(err)
+				}
+			}
+			saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+			for _, request := range []state.RunnerRequest{
+				{
+					ID:                   "inaccessible-job",
+					Source:               "test",
+					GitHubInstallationID: 987,
+					RepositoryFullName:   "o/private",
+				},
+				{
+					ID:                   "accessible-job",
+					Source:               "test",
+					GitHubInstallationID: 654,
+					RepositoryFullName:   "other/visible",
+				},
+			} {
+				if _, _, err := store.CreateRequest(request, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
 
-	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests", nil)
-	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected inaccessible installation to be skipped, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	var runners []state.RunnerState
-	if err := json.Unmarshal(rec.Body.Bytes(), &runners); err != nil {
-		t.Fatal(err)
-	}
-	if len(runners) != 1 || runners[0].ID != "accessible-job" {
-		t.Fatalf("expected only job from accessible installation, got %#v", runners)
+			req := httptest.NewRequest(http.MethodGet, "/user/runner_requests", nil)
+			req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected inaccessible installation to be skipped, got %d body=%s", rec.Code, rec.Body.String())
+			}
+			var runners []state.RunnerState
+			if err := json.Unmarshal(rec.Body.Bytes(), &runners); err != nil {
+				t.Fatal(err)
+			}
+			if len(runners) != 1 || runners[0].ID != "accessible-job" {
+				t.Fatalf("expected only job from accessible installation, got %#v", runners)
+			}
+		})
 	}
 }
 

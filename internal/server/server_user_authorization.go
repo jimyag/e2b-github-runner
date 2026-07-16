@@ -57,7 +57,8 @@ func (s *Server) userAuthorizedRepositoryAccess(ctx context.Context, accountID i
 	for _, installation := range installations {
 		items, err := s.gh.ListUserInstallationRepositories(ctx, token, installation.InstallationID)
 		if err != nil {
-			if status, ok := github.ErrorStatus(err); ok && status == http.StatusNotFound {
+			if status, ok := github.ErrorStatus(err); ok &&
+				(status == http.StatusNotFound || (status == http.StatusForbidden && !github.IsRateLimitError(err))) {
 				continue
 			}
 			return nil, err
