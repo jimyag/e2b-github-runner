@@ -611,6 +611,21 @@ func TestListUserInstallationRepositoriesClassifiesRateLimitResponse(t *testing.
 	}
 }
 
+func TestRateLimitHelpersHandleWrappedAPIError(t *testing.T) {
+	err := errors.Join(errors.New("request failed"), &apiError{
+		StatusCode:         http.StatusForbidden,
+		Body:               `{"message":"API rate limit exceeded"}`,
+		RetryAfter:         " 60 ",
+		RateLimitRemaining: "0",
+	})
+	if !IsRateLimitError(err) {
+		t.Fatalf("expected wrapped API error to be classified, got %v", err)
+	}
+	if retryAfter, ok := RateLimitRetryAfter(err); !ok || retryAfter != "60" {
+		t.Fatalf("expected wrapped retry-after metadata, got %q ok=%v", retryAfter, ok)
+	}
+}
+
 func TestListUserInstallationRepositoriesFollowsPagination(t *testing.T) {
 	var ts *httptest.Server
 	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -107,29 +107,22 @@ func (s *Server) cacheUserRepositoryAccess(accountID int64, access []state.GitHu
 		s.userRepositoryAccessCache = map[int64]cachedUserRepositoryAccess{}
 	}
 	now := time.Now()
-	for cachedAccountID, cached := range s.userRepositoryAccessCache {
-		if !now.Before(cached.expiresAt) {
-			delete(s.userRepositoryAccessCache, cachedAccountID)
-		}
-	}
-	if _, exists := s.userRepositoryAccessCache[accountID]; !exists {
-		for len(s.userRepositoryAccessCache) >= maxUserRepositoryAccessCacheItems {
-			var oldestAccountID int64
-			var oldestExpiresAt time.Time
-			for cachedAccountID, cached := range s.userRepositoryAccessCache {
-				if oldestExpiresAt.IsZero() || cached.expiresAt.Before(oldestExpiresAt) {
-					oldestAccountID = cachedAccountID
-					oldestExpiresAt = cached.expiresAt
-				}
-			}
-			delete(s.userRepositoryAccessCache, oldestAccountID)
-		}
+	if _, exists := s.userRepositoryAccessCache[accountID]; !exists &&
+		len(s.userRepositoryAccessCache) >= maxUserRepositoryAccessCacheItems {
+		evictOneUserRepositoryAccess(s.userRepositoryAccessCache)
 	}
 	s.userRepositoryAccessCache[accountID] = cachedUserRepositoryAccess{
 		access:    cloneUserRepositoryAccess(access),
 		expiresAt: now.Add(30 * time.Second),
 	}
 	s.userRepositoryAccessMu.Unlock()
+}
+
+func evictOneUserRepositoryAccess(cache map[int64]cachedUserRepositoryAccess) {
+	for accountID := range cache {
+		delete(cache, accountID)
+		return
+	}
 }
 
 func (s *Server) invalidateUserRepositoryAccess(accountID int64) {

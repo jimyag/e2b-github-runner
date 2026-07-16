@@ -973,6 +973,17 @@ func TestUserRunnerAuthorizationCacheIsBounded(t *testing.T) {
 	}
 }
 
+func TestEvictOneUserRepositoryAccess(t *testing.T) {
+	cache := map[int64]cachedUserRepositoryAccess{
+		1: {},
+		2: {},
+	}
+	evictOneUserRepositoryAccess(cache)
+	if len(cache) != 1 {
+		t.Fatalf("expected exactly one cache entry to be evicted, got %d", len(cache))
+	}
+}
+
 func TestUserSyncGitHubInstallationsFromOAuthToken(t *testing.T) {
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

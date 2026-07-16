@@ -51,10 +51,18 @@ func (e *apiError) Error() string {
 	return fmt.Sprintf("%s: status %d: %s", e.Operation, e.StatusCode, e.Body)
 }
 
-// ErrorStatus returns the HTTP status carried by a GitHub API error.
-func ErrorStatus(err error) (int, bool) {
+func asAPIError(err error) (*apiError, bool) {
 	var apiErr *apiError
 	if !errors.As(err, &apiErr) {
+		return nil, false
+	}
+	return apiErr, true
+}
+
+// ErrorStatus returns the HTTP status carried by a GitHub API error.
+func ErrorStatus(err error) (int, bool) {
+	apiErr, ok := asAPIError(err)
+	if !ok {
 		return 0, false
 	}
 	return apiErr.StatusCode, true
@@ -62,10 +70,14 @@ func ErrorStatus(err error) (int, bool) {
 
 // IsRateLimitError reports whether GitHub rejected the request because of a primary or secondary rate limit.
 func IsRateLimitError(err error) bool {
-	var apiErr *apiError
-	if !errors.As(err, &apiErr) {
+	apiErr, ok := asAPIError(err)
+	if !ok {
 		return false
 	}
+	return isRateLimitAPIError(apiErr)
+}
+
+func isRateLimitAPIError(apiErr *apiError) bool {
 	if apiErr.StatusCode != http.StatusForbidden && apiErr.StatusCode != http.StatusTooManyRequests {
 		return false
 	}
@@ -76,11 +88,8 @@ func IsRateLimitError(err error) bool {
 
 // RateLimitRetryAfter returns GitHub's Retry-After header for a classified rate-limit response.
 func RateLimitRetryAfter(err error) (string, bool) {
-	if !IsRateLimitError(err) {
-		return "", false
-	}
-	var apiErr *apiError
-	if !errors.As(err, &apiErr) {
+	apiErr, ok := asAPIError(err)
+	if !ok || !isRateLimitAPIError(apiErr) {
 		return "", false
 	}
 	retryAfter := strings.TrimSpace(apiErr.RetryAfter)
