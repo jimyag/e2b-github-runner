@@ -61,13 +61,29 @@ Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置
 
 `database.backend` 支持 `sqlite`、`postgres` 和 `mysql`。本地开发优先使用 sqlite；共享数据库的多实例部署需要先用两个 runnerd 进程验证 lease 行为，再作为正式运行方式记录。
 
-状态表结构主要由 `internal/state/records.go` 里的 GORM tag 定义，服务启动时会先针对旧 columns、obsolete OAuth constraints 和不兼容的 legacy scope tables 执行窄范围 compatibility pass，再运行 GORM `AutoMigrate`。缺少 `scope_type`/`scope_id` 的旧 `account_preferences` 和 `account_secrets` 表会被删除并重建，而不是迁移原数据。升级后必须重新配置其中保存的 Sandbox Preferences 和 API keys；已保存的 GitHub OAuth tokens 也会被清除，相关用户需重新使用 GitHub 登录后才能同步 installations。修改 state record、索引或迁移 helper 时，至少先跑：
+状态表结构主要由 `internal/state/records.go` 里的 GORM tag 定义。服务启动时，已有 SQLite `runner_requests` 表只通过创建缺失的 model columns 和 indexes 做 additive migration；它会跳过通用 SQLite `AutoMigrate` 表重建，避免历史上通过 ALTER 添加的字段丢失。未来如需对 `runner_requests` 做 non-additive 变更，必须增加窄范围显式 migration 和数据保全回归 fixture。其他表会先针对旧 columns、obsolete OAuth constraints 和不兼容的 legacy scope tables 执行窄范围 compatibility pass，再运行 GORM `AutoMigrate`。缺少 `scope_type`/`scope_id` 的旧 `account_preferences` 和 `account_secrets` 表会被删除并重建，而不是迁移原数据。升级后必须重新配置其中保存的 Sandbox Preferences 和 API keys；已保存的 GitHub OAuth tokens 也会被清除，相关用户需重新使用 GitHub 登录后才能同步 installations。修改 state record、索引或迁移 helper 时，至少先跑：
 
 ```bash
 go test ./internal/state -count=1
 ```
 
 不要只用全新 sqlite 文件验证迁移；旧 schema 升级路径也需要覆盖，尤其是新增 `NOT NULL` 列、唯一索引或关系约束时。
+
+验证生产 SQLite snapshot 时，应在 disposable copy 启动前后记录数据完整性计数：
+
+```bash
+sqlite3 runnerd-export.db \
+  "SELECT COUNT(*), SUM(CASE WHEN github_installation_id > 0 THEN 1 ELSE 0 END), SUM(CASE WHEN sandbox_api_url <> '' THEN 1 ELSE 0 END), SUM(CASE WHEN sandbox_api_key_encrypted <> '' THEN 1 ELSE 0 END), SUM(CASE WHEN sandbox_config_source <> '' THEN 1 ELSE 0 END) FROM runner_requests;"
+```
+
+迁移需要连续运行两次。两次启动后的总行数和各字段非空计数都必须保持稳定；唯一允许增加的是可从 `github_payload_json.installation.id` 恢复的 `github_installation_id`。
+
+仓库提供了一个 opt-in 的 state-only snapshot test。它会先复制源数据库，不会启动 runner recovery：
+
+```bash
+RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
+  go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
+```
 
 ## 2. 配置 GitHub 鉴权
 

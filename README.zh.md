@@ -52,7 +52,7 @@ Sandbox service API URL 和 API key 通常在普通用户的 account 或 organiz
 `/webhooks/github` 使用 GitHub HMAC signature verification。`/runner_requests` 下的手动管理 API 需要有效的 GitHub OAuth admin session cookie。
 
 Runner state 持久化到 DB-backed store，不再使用按请求拆分的 JSON 目录。Control/stdout/stderr logs 会作为 runner events 保存，并继续通过 admin API 和 UI 查看。
-Schema 创建由 GORM model 驱动，启动时会先对旧状态数据库执行窄范围 legacy compatibility pass，再运行 `AutoMigrate`。修改 state records 时需要保持旧 schema upgrade tests 通过。如果旧数据库的 `account_preferences` 或 `account_secrets` 表早于 `scope_type`/`scope_id`，升级会有意删除并重建这些表。升级后需要重新配置受影响的 Sandbox Preferences 和 API keys，相关用户还需重新使用 GitHub 登录，才能继续同步 installations。
+Schema 创建由 GORM model 驱动。已有 SQLite `runner_requests` 表只执行 additive column/index migration，不再由 GORM 重建整张表，以保留历史 installation 和 Sandbox configuration 字段；这张表未来如需 non-additive 变更，必须增加显式 compatibility migration 和数据保全测试。其他旧状态表会先执行窄范围 legacy compatibility pass，再运行 `AutoMigrate`。修改 state records 时需要保持旧 schema upgrade tests 通过。如果旧数据库的 `account_preferences` 或 `account_secrets` 表早于 `scope_type`/`scope_id`，升级会有意删除并重建这些表。升级后需要重新配置受影响的 Sandbox Preferences 和 API keys，相关用户还需重新使用 GitHub 登录，才能继续同步 installations。
 
 ## 运行
 

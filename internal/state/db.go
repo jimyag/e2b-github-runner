@@ -153,8 +153,10 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 	if err := migrateLegacySchemaColumns(db); err != nil {
 		return err
 	}
-	if err := db.AutoMigrate(
-		&runnerRequestRecord{},
+	existingSQLiteRunnerRequests :=
+		s.opts.Backend == BackendSQLite &&
+			db.Migrator().HasTable(&runnerRequestRecord{})
+	models := []any{
 		&runnerEventRecord{},
 		&runnerProfileRecord{},
 		&runnerGroupRecord{},
@@ -169,13 +171,50 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 		&accountPreferenceRecord{},
 		&sandboxServiceDefaultRecord{},
 		&sandboxServiceDefaultAudienceRecord{},
-	); err != nil {
+	}
+	if existingSQLiteRunnerRequests {
+		if err := migrateSQLiteRunnerRequestSchema(db); err != nil {
+			return err
+		}
+	} else {
+		models = append([]any{&runnerRequestRecord{}}, models...)
+	}
+	if err := db.AutoMigrate(models...); err != nil {
 		return err
 	}
 	if err := backfillRunnerRequestGitHubContext(db); err != nil {
 		return err
 	}
 	return nil
+}
+
+func migrateSQLiteRunnerRequestSchema(db *gorm.DB) error {
+	// SQLite records columns added through ALTER TABLE outside the original
+	// CREATE TABLE body. Recreating that table through the current GORM SQLite
+	// migrator can omit those columns from the copy and then add them back empty.
+	stmt := &gorm.Statement{DB: db}
+	if err := stmt.Parse(&runnerRequestRecord{}); err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, field := range stmt.Schema.Fields {
+			if field.IgnoreMigration || field.DBName == "" || tx.Migrator().HasColumn(&runnerRequestRecord{}, field.DBName) {
+				continue
+			}
+			if err := tx.Migrator().AddColumn(&runnerRequestRecord{}, field.DBName); err != nil {
+				return fmt.Errorf("add runner_requests.%s: %w", field.DBName, err)
+			}
+		}
+		for _, index := range stmt.Schema.ParseIndexes() {
+			if tx.Migrator().HasIndex(&runnerRequestRecord{}, index.Name) {
+				continue
+			}
+			if err := tx.Migrator().CreateIndex(&runnerRequestRecord{}, index.Name); err != nil {
+				return fmt.Errorf("create runner_requests index %s: %w", index.Name, err)
+			}
+		}
+		return nil
+	})
 }
 
 func migrateLegacySchemaColumns(db *gorm.DB) error {
@@ -218,12 +257,17 @@ func backfillRunnerRequestGitHubContext(db *gorm.DB) error {
 	var records []runnerRequestRecord
 	return db.
 		Where("github_payload_json <> ''").
-		Where("github_context_backfilled IS NULL OR github_context_backfilled = ?", false).
+		Where(
+			"(github_context_backfilled IS NULL OR github_context_backfilled = ?) OR "+
+				"((github_installation_id IS NULL OR github_installation_id = 0) AND github_payload_json LIKE ?)",
+			false,
+			`%"installation"%`,
+		).
 		FindInBatches(&records, runnerRequestGitHubContextBackfillBatchSize, func(tx *gorm.DB, _ int) error {
 			return tx.Transaction(func(batchTx *gorm.DB) error {
 				for _, record := range records {
 					updates := runnerRequestGitHubContextBackfill(record)
-					if err := batchTx.Model(&runnerRequestRecord{}).Where("id = ?", record.ID).Updates(updates).Error; err != nil {
+					if err := batchTx.Model(&runnerRequestRecord{}).Where("id = ?", record.ID).UpdateColumns(updates).Error; err != nil {
 						return err
 					}
 				}
@@ -236,6 +280,11 @@ func runnerRequestGitHubContextBackfill(record runnerRequestRecord) map[string]a
 	links := githubLinksFromPayload(record)
 	updates := map[string]any{
 		"github_context_backfilled": true,
+	}
+	if record.GitHubInstallationID == 0 {
+		if installationID := githubInstallationIDFromPayload(record.GitHubPayloadJSON); installationID > 0 {
+			updates["github_installation_id"] = installationID
+		}
 	}
 	if record.WorkflowRunID == 0 && links.workflowRunID != 0 {
 		updates["workflow_run_id"] = links.workflowRunID

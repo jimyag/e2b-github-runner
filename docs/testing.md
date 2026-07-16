@@ -63,13 +63,29 @@ Runner spec, runner group, and repository policy are not `runnerd.yaml` fields. 
 
 `database.backend` supports `sqlite`, `postgres`, and `mysql`. Prefer sqlite for local development. Before documenting shared-database multi-instance deployment as supported, verify lease behavior with two runnerd processes sharing the same database.
 
-The state schema is mainly defined by GORM tags in `internal/state/records.go`. On startup, the service runs a narrow legacy compatibility pass for older columns, obsolete OAuth constraints, and incompatible legacy scope tables, then runs GORM `AutoMigrate`. Legacy `account_preferences` and `account_secrets` tables without `scope_type`/`scope_id` are dropped and recreated rather than data-migrated. Reconfigure their saved Sandbox Preferences and API keys after that upgrade; stored GitHub OAuth tokens are also cleared, so affected users must sign in with GitHub again before syncing installations. When changing state records, indexes, or migration helpers, run at least:
+The state schema is mainly defined by GORM tags in `internal/state/records.go`. On startup, an existing SQLite `runner_requests` table is migrated additively by creating missing model columns and indexes; it is deliberately excluded from generic SQLite `AutoMigrate` table recreation because historical ALTER-added columns must remain intact. A future non-additive `runner_requests` change requires a narrow explicit migration and a preserved-data regression fixture. Other tables run through a narrow legacy compatibility pass for older columns, obsolete OAuth constraints, and incompatible legacy scope tables, then run GORM `AutoMigrate`. Legacy `account_preferences` and `account_secrets` tables without `scope_type`/`scope_id` are dropped and recreated rather than data-migrated. Reconfigure their saved Sandbox Preferences and API keys after that upgrade; stored GitHub OAuth tokens are also cleared, so affected users must sign in with GitHub again before syncing installations. When changing state records, indexes, or migration helpers, run at least:
 
 ```bash
 go test ./internal/state -count=1
 ```
 
 Do not validate migrations only with a fresh sqlite file. Old-schema upgrade paths also need coverage, especially when adding `NOT NULL` columns, unique indexes, or relationship constraints.
+
+For a production SQLite snapshot, record data-integrity counts before and after starting the candidate binary against a disposable copy:
+
+```bash
+sqlite3 runnerd-export.db \
+  "SELECT COUNT(*), SUM(CASE WHEN github_installation_id > 0 THEN 1 ELSE 0 END), SUM(CASE WHEN sandbox_api_url <> '' THEN 1 ELSE 0 END), SUM(CASE WHEN sandbox_api_key_encrypted <> '' THEN 1 ELSE 0 END), SUM(CASE WHEN sandbox_config_source <> '' THEN 1 ELSE 0 END) FROM runner_requests;"
+```
+
+Run the migration twice. The total and all populated-field counts must remain unchanged on both starts, except that missing `github_installation_id` values may increase when `github_payload_json.installation.id` can repair them.
+
+The repository includes an opt-in state-only snapshot test that copies the source database before migration and does not start runner recovery:
+
+```bash
+RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
+  go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
+```
 
 ## 2. Configure GitHub Auth
 

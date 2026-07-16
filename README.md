@@ -52,7 +52,7 @@ Authenticated users can inspect Sandbox resources in the same account or organiz
 `/webhooks/github` uses GitHub HMAC signature verification. The manual management API under `/runner_requests` requires a valid GitHub OAuth admin session cookie.
 
 Runner state is persisted in a DB-backed store instead of per-request JSON directories. Control/stdout/stderr logs are kept as runner events and remain available from the admin API and UI.
-Schema creation is GORM-model driven on startup. Existing state databases run through a narrow legacy compatibility pass before `AutoMigrate`, so keep old-schema upgrade tests green when changing state records. Upgrading a database whose legacy `account_preferences` or `account_secrets` tables predate `scope_type`/`scope_id` intentionally drops and recreates those tables. Reconfigure the affected Sandbox Preferences and API keys, and have affected users sign in with GitHub again before syncing installations.
+Schema creation is GORM-model driven on startup. Existing SQLite `runner_requests` tables use additive column/index migration instead of GORM table recreation so historical installation and Sandbox configuration fields remain intact; non-additive changes to that table require an explicit compatibility migration with preserved-data coverage. Other existing state tables run through a narrow legacy compatibility pass before `AutoMigrate`, so keep old-schema upgrade tests green when changing state records. Upgrading a database whose legacy `account_preferences` or `account_secrets` tables predate `scope_type`/`scope_id` intentionally drops and recreates those tables. Reconfigure the affected Sandbox Preferences and API keys, and have affected users sign in with GitHub again before syncing installations.
 
 ## Run
 

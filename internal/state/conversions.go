@@ -154,6 +154,18 @@ type githubPayloadPullRequest struct {
 	Number int64 `json:"number"`
 }
 
+func githubInstallationIDFromPayload(payloadJSON string) int64 {
+	var payload struct {
+		Installation struct {
+			ID int64 `json:"id"`
+		} `json:"installation"`
+	}
+	if payloadJSON == "" || json.Unmarshal([]byte(payloadJSON), &payload) != nil {
+		return 0
+	}
+	return payload.Installation.ID
+}
+
 func githubLinksFromPayload(record runnerRequestRecord) githubPayloadLinks {
 	var payload struct {
 		WorkflowJob struct {

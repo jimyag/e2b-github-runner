@@ -14,7 +14,7 @@ Use this guide for future Codex or agent work in this repository.
 - Current admin browser routes include `/admin/`, `/admin/accounts`, and `/admin/sandbox_service`; keep admin routes and role-gated APIs explicit when changing shared `ui/` code.
 - `/admin/accounts` lists OAuth/bootstrap-created accounts and linked identities. Its only mutation changes another account's `admin`/`user` role atomically with an audit event; self-role changes and changes that could leave no administrator are rejected.
 - Runtime state can use sqlite, Postgres, or MySQL. Do not document multi-instance support until two runnerd processes have been verified against the same database.
-- State schema is defined mostly by GORM tags in `internal/state/records.go`; startup migration runs a narrow legacy compatibility pass and then `AutoMigrate` in `internal/state/db.go`. GORM foreign-key creation is disabled intentionally, so preserve the foreign-keyless schema convention unless a separately tested migration changes it. Legacy account preference/secret tables without scope columns are intentionally reset; operator docs must warn about Sandbox reconfiguration and GitHub reauthentication before installation sync.
+- State schema is defined mostly by GORM tags in `internal/state/records.go`; startup migration runs a narrow legacy compatibility pass and then `AutoMigrate` in `internal/state/db.go`. Existing SQLite `runner_requests` tables are the exception: migrate them additively by creating missing columns and indexes because generic table recreation can erase ALTER-added historical values. GORM foreign-key creation is disabled intentionally, so preserve the foreign-keyless schema convention unless a separately tested migration changes it. Legacy account preference/secret tables without scope columns are intentionally reset; operator docs must warn about Sandbox reconfiguration and GitHub reauthentication before installation sync.
 - Runner specs, runner groups, and repository policies are admin API/UI data, not `runnerd.yaml` fields.
 - The recommended production GitHub auth path is GitHub App auth for runner operations plus GitHub App OAuth sign-in for ordinary users and administrators. Local account roles authorize management APIs. Token and basic auth still exist as compatibility modes, but their long-term product status is undecided.
 
@@ -40,7 +40,7 @@ Use `task build` when verifying production embedded UI behavior because it rebui
 
 Use `cd ui && bun run test` for focused UI tests. `task test` rebuilds the UI, runs the Bun UI tests, and then runs Go tests with race detection and coverage.
 
-When changing state records, GORM tags, indexes, or migration helpers, run `go test ./internal/state -count=1` first. Old sqlite schema upgrade tests are intentional compatibility coverage; do not remove them just because fresh database creation passes.
+When changing state records, GORM tags, indexes, or migration helpers, run `go test ./internal/state -count=1` first. Old sqlite schema upgrade tests are intentional compatibility coverage; do not remove them just because fresh database creation passes. When a production export is available, run `RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v`.
 
 ## Local Agent Assets
 

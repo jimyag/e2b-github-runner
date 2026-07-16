@@ -3,6 +3,9 @@ package state
 import (
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -2542,4 +2545,283 @@ func TestMigrateBackfillsLegacyRunnerRequestGitHubContext(t *testing.T) {
 	if pendingBackfills != 0 {
 		t.Fatalf("expected no pending github context backfills, got %d", pendingBackfills)
 	}
+}
+
+func TestMigratePreservesAdditiveRunnerRequestColumns(t *testing.T) {
+	dir := t.TempDir()
+	databaseURL := dir + "/runnerd.db"
+	store := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: false,
+	}).(*DBStore)
+	db, err := store.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE runner_requests (
+		id TEXT PRIMARY KEY,
+		source TEXT NOT NULL,
+		workflow_job_id INTEGER,
+		repository_full_name TEXT,
+		requested_labels_json TEXT,
+		labels_json TEXT NOT NULL,
+		profile_name TEXT,
+		runner_group TEXT,
+		runner_name TEXT NOT NULL,
+		status TEXT NOT NULL,
+		failure_stage TEXT,
+		failure_reason TEXT,
+		last_error_code TEXT,
+		last_error_message TEXT,
+		last_error_retryable BOOLEAN NOT NULL DEFAULT FALSE,
+		retry_count INTEGER NOT NULL DEFAULT 0,
+		sandbox_id TEXT,
+		process_pid INTEGER,
+		assigned_job_id INTEGER,
+		assigned_job_name TEXT,
+		error TEXT,
+		github_payload_json TEXT,
+		queued_at DATETIME NOT NULL,
+		last_attempt_at DATETIME,
+		next_retry_at DATETIME,
+		creating_at DATETIME,
+		running_at DATETIME,
+		stopping_at DATETIME,
+		completed_at DATETIME,
+		failed_at DATETIME,
+		lease_owner TEXT,
+		lease_expires_at DATETIME,
+		updated_at DATETIME NOT NULL,
+		version INTEGER NOT NULL DEFAULT 0
+	);`).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		"ALTER TABLE runner_requests ADD COLUMN github_installation_id INTEGER",
+		"ALTER TABLE runner_requests ADD COLUMN workflow_run_id INTEGER",
+		"ALTER TABLE runner_requests ADD COLUMN workflow_name TEXT",
+		"ALTER TABLE runner_requests ADD COLUMN workflow_run_attempt INTEGER",
+		"ALTER TABLE runner_requests ADD COLUMN head_branch TEXT",
+		"ALTER TABLE runner_requests ADD COLUMN head_sha TEXT",
+		"ALTER TABLE runner_requests ADD COLUMN github_job_url TEXT",
+		"ALTER TABLE runner_requests ADD COLUMN pull_request_number INTEGER",
+		"ALTER TABLE runner_requests ADD COLUMN github_context_backfilled NUMERIC NOT NULL DEFAULT FALSE",
+		"ALTER TABLE runner_requests ADD COLUMN sandbox_api_url TEXT",
+		"ALTER TABLE runner_requests ADD COLUMN sandbox_api_key_encrypted TEXT",
+		"ALTER TABLE runner_requests ADD COLUMN sandbox_config_source TEXT",
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	originalUpdatedAt := time.Date(2026, time.July, 15, 15, 49, 3, 0, time.UTC)
+	payload := `{"installation":{"id":135340026},"workflow_job":{"run_id":29401048027,"workflow_name":"CI Check And Test","run_attempt":2,"head_branch":"feature/migration-integrity","head_sha":"abc123"}}`
+	if err := db.Exec(
+		`INSERT INTO runner_requests (
+		id, source, workflow_job_id, repository_full_name, requested_labels_json,
+		labels_json, profile_name, runner_group, runner_name, status,
+		github_payload_json, queued_at, updated_at, version,
+		github_installation_id, workflow_run_id, workflow_name, workflow_run_attempt,
+		head_branch, head_sha, github_job_url, github_context_backfilled,
+		sandbox_api_url, sandbox_api_key_encrypted, sandbox_config_source
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"87401142867", "github_webhook", 87401142867, "qbox/las", `["github-runner-ubuntu-24-04"]`,
+		`["self-hosted","e2b","github-runner-ubuntu-24-04"]`, "github-runner-ubuntu-24-04", "Default",
+		"e2b-87401142867", StatusCompleted, payload, originalUpdatedAt.Add(-time.Minute), originalUpdatedAt, 7,
+		135340026, 29401048027, "CI Check And Test", 2, "feature/migration-integrity", "abc123",
+		"https://github.com/qbox/las/actions/runs/29401048027/job/87401142867", true,
+		"https://sandbox.example.test", "encrypted-api-key", "admin_default",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	migrated := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: true,
+	}).(*DBStore)
+	db, err = migrated.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var record runnerRequestRecord
+	if err := db.First(&record, "id = ?", "87401142867").Error; err != nil {
+		t.Fatal(err)
+	}
+	if record.GitHubInstallationID != 135340026 {
+		t.Fatalf("github installation id changed during migration: %d", record.GitHubInstallationID)
+	}
+	if record.SandboxAPIURL != "https://sandbox.example.test" ||
+		record.SandboxAPIKeyEncrypted != "encrypted-api-key" ||
+		record.SandboxConfigSource != "admin_default" {
+		t.Fatalf("sandbox configuration changed during migration: %#v", record)
+	}
+	if !record.UpdatedAt.Equal(originalUpdatedAt) {
+		t.Fatalf("updated_at changed during migration: got %s want %s", record.UpdatedAt, originalUpdatedAt)
+	}
+}
+
+func TestMigrateRepairsMissingRunnerRequestInstallationID(t *testing.T) {
+	dir := t.TempDir()
+	databaseURL := dir + "/runnerd.db"
+	store := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: true,
+	}).(*DBStore)
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowJobID := int64(87401142867)
+	originalUpdatedAt := time.Date(2026, time.July, 15, 15, 49, 3, 0, time.UTC)
+	record := runnerRequestRecord{
+		ID:                      "87401142867",
+		Source:                  "github_webhook",
+		WorkflowJobID:           &workflowJobID,
+		GitHubInstallationID:    0,
+		WorkflowRunID:           29401048027,
+		WorkflowName:            "CI Check And Test",
+		WorkflowRunAttempt:      2,
+		HeadBranch:              "feature/migration-integrity",
+		HeadSHA:                 "abc123",
+		GitHubContextBackfilled: true,
+		RepositoryFullName:      "qbox/las",
+		RequestedLabelsJSON:     `["github-runner-ubuntu-24-04"]`,
+		LabelsJSON:              `["self-hosted","e2b","github-runner-ubuntu-24-04"]`,
+		ProfileName:             "github-runner-ubuntu-24-04",
+		RunnerGroup:             "Default",
+		RunnerName:              "e2b-87401142867",
+		Status:                  StatusCompleted,
+		GitHubPayloadJSON:       `{"installation":{"id":135340026},"workflow_job":{"run_id":29401048027}}`,
+		QueuedAt:                originalUpdatedAt.Add(-time.Minute),
+		UpdatedAt:               originalUpdatedAt,
+		Version:                 7,
+	}
+	if err := db.Create(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	migrated := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: true,
+	}).(*DBStore)
+	db, err = migrated.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var repaired runnerRequestRecord
+	if err := db.First(&repaired, "id = ?", record.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if repaired.GitHubInstallationID != 135340026 {
+		t.Fatalf("github installation id was not repaired: %d", repaired.GitHubInstallationID)
+	}
+	if !repaired.UpdatedAt.Equal(originalUpdatedAt) {
+		t.Fatalf("updated_at changed during repair: got %s want %s", repaired.UpdatedAt, originalUpdatedAt)
+	}
+}
+
+func TestMigrateSQLiteRunnerRequestSnapshot(t *testing.T) {
+	sourcePath := strings.TrimSpace(os.Getenv("RUNNERD_SQLITE_SNAPSHOT"))
+	if sourcePath == "" {
+		t.Skip("set RUNNERD_SQLITE_SNAPSHOT to verify a disposable copy of a production SQLite database")
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	databaseURL := filepath.Join(t.TempDir(), "runnerd.db")
+	destination, err := os.Create(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(destination, source); err != nil {
+		destination.Close()
+		t.Fatal(err)
+	}
+	if err := destination.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	type counts struct {
+		Total                            int64 `gorm:"column:total"`
+		GitHubInstallationIDs            int64 `gorm:"column:github_installation_ids"`
+		RecoverableGitHubInstallationIDs int64 `gorm:"column:recoverable_github_installation_ids"`
+		SandboxAPIURLs                   int64 `gorm:"column:sandbox_api_urls"`
+		SandboxAPIKeys                   int64 `gorm:"column:sandbox_api_keys"`
+		SandboxConfigSources             int64 `gorm:"column:sandbox_config_sources"`
+	}
+	readCounts := func(db *gorm.DB) counts {
+		t.Helper()
+		var result counts
+		if err := db.Raw(`SELECT
+			COUNT(*) AS total,
+			SUM(CASE WHEN github_installation_id > 0 THEN 1 ELSE 0 END) AS github_installation_ids,
+			SUM(CASE
+				WHEN github_installation_id > 0 THEN 0
+				WHEN json_valid(github_payload_json) THEN
+					CASE WHEN CAST(json_extract(github_payload_json, '$.installation.id') AS INTEGER) > 0 THEN 1 ELSE 0 END
+				ELSE 0
+			END) AS recoverable_github_installation_ids,
+			SUM(CASE WHEN sandbox_api_url <> '' THEN 1 ELSE 0 END) AS sandbox_api_urls,
+			SUM(CASE WHEN sandbox_api_key_encrypted <> '' THEN 1 ELSE 0 END) AS sandbox_api_keys,
+			SUM(CASE WHEN sandbox_config_source <> '' THEN 1 ELSE 0 END) AS sandbox_config_sources
+			FROM runner_requests`).Scan(&result).Error; err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	openStore := func(migrate bool) *gorm.DB {
+		t.Helper()
+		store := NewWithOptions(Options{
+			Backend:        BackendSQLite,
+			DatabaseDSN:    databaseURL,
+			MigrateOnStart: migrate,
+		}).(*DBStore)
+		db, err := store.dbOrEnsure()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return db
+	}
+
+	db := openStore(false)
+	before := readCounts(db)
+	closeTestDB(t, db)
+
+	db = openStore(true)
+	afterFirstStart := readCounts(db)
+	closeTestDB(t, db)
+	if afterFirstStart.Total != before.Total {
+		t.Fatalf("runner request count changed after migration: before=%d after=%d", before.Total, afterFirstStart.Total)
+	}
+	expectedGitHubInstallationIDs := before.GitHubInstallationIDs + before.RecoverableGitHubInstallationIDs
+	if afterFirstStart.GitHubInstallationIDs != expectedGitHubInstallationIDs ||
+		afterFirstStart.RecoverableGitHubInstallationIDs != 0 {
+		t.Fatalf(
+			"github installation ids were not fully repaired: before=%#v after=%#v expected_ids=%d",
+			before,
+			afterFirstStart,
+			expectedGitHubInstallationIDs,
+		)
+	}
+	if afterFirstStart.SandboxAPIURLs != before.SandboxAPIURLs ||
+		afterFirstStart.SandboxAPIKeys != before.SandboxAPIKeys ||
+		afterFirstStart.SandboxConfigSources != before.SandboxConfigSources {
+		t.Fatalf("sandbox snapshot counts changed after migration: before=%#v after=%#v", before, afterFirstStart)
+	}
+
+	db = openStore(true)
+	afterSecondStart := readCounts(db)
+	closeTestDB(t, db)
+	if afterSecondStart != afterFirstStart {
+		t.Fatalf("second migration changed runner request data: first=%#v second=%#v", afterFirstStart, afterSecondStart)
+	}
+	t.Logf("runner request migration counts: before=%#v after=%#v", before, afterSecondStart)
 }

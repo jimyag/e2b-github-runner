@@ -21,7 +21,7 @@ Keep runnerd's database schema model-driven through GORM while preserving known 
 
 ## Rules
 
-- Prefer GORM tags and `AutoMigrate` for normal schema source of truth.
+- Prefer GORM tags and `AutoMigrate` for normal schema source of truth. Existing SQLite `runner_requests` tables are additive-only: create missing model columns and indexes without generic table recreation.
 - Use handwritten SQL only for genuine GORM gaps.
 - Keep every legacy compatibility action narrow and explicit. This includes column additions, obsolete constraint removal, and destructive reset of legacy tables that cannot represent the current scope model. Document required operator reconfiguration and user reauthentication.
 - GORM foreign-key creation is disabled intentionally. Preserve the foreign-keyless schema convention unless a separately tested migration changes it.
@@ -44,14 +44,21 @@ sed -n '1,220p' internal/state/db.go
 rg -n "Migrate|Legacy|default_available|runner_group_name|AutoMigrate" internal/state
 ```
 
-3. For schema edits, update the model tags first. Change `migrateLegacySchemaColumns` only when old databases cannot safely migrate through `AutoMigrate` alone. Cover column additions, constraint removal, or legacy-table reset with an old-schema fixture that proves the required cleanup and asserts preservation or intentional data loss according to the compatibility contract.
+3. For schema edits, update the model tags first. Change `migrateLegacySchemaColumns` only when old databases cannot safely migrate through `AutoMigrate` alone. Keep existing SQLite `runner_requests` changes additive; any non-additive change requires a narrow explicit compatibility migration. Cover column additions, constraint removal, or legacy-table reset with an old-schema fixture that proves the required cleanup and asserts preservation or intentional data loss according to the compatibility contract.
 
-4. Add or update tests before relying on the fix. Include old sqlite upgrade coverage for required columns, unique indexes with existing rows, and relationship changes.
+4. Add or update tests before relying on the fix. Include old sqlite upgrade coverage for required columns, unique indexes with existing rows, and relationship changes. Assert preservation of `github_installation_id`, Sandbox snapshot fields, and `updated_at` for existing runner requests.
 
 5. Run:
 
 ```bash
 go test ./internal/state -count=1
+```
+
+When a production SQLite export is available, also run:
+
+```bash
+RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
+  go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
 6. If callers or server behavior changed, also run:
