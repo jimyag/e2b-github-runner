@@ -334,6 +334,20 @@ func uniqueTrimmed(values []string) []string {
 	return out
 }
 
+func uniqueLowerTrimmed(values []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
 func uniquePositiveInt64s(values []int64) []int64 {
 	seen := map[int64]bool{}
 	out := make([]int64, 0, len(values))

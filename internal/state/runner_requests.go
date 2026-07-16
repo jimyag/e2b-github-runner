@@ -311,6 +311,42 @@ func (s *DBStore) ListStatesForRepositories(repositories []string, limit int) ([
 	return states, nil
 }
 
+func (s *DBStore) ListStatesForGitHubInstallationRepositories(access []GitHubInstallationRepositoryAccess, limit int) ([]RunnerState, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, err
+	}
+	var predicates []string
+	var args []any
+	for _, item := range access {
+		repositories := uniqueLowerTrimmed(item.Repositories)
+		if item.InstallationID <= 0 || len(repositories) == 0 {
+			continue
+		}
+		predicates = append(predicates, "(github_installation_id = ? AND LOWER(repository_full_name) IN ?)")
+		args = append(args, item.InstallationID, repositories)
+	}
+	if len(predicates) == 0 {
+		return []RunnerState{}, nil
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 500
+	}
+	var records []runnerRequestRecord
+	if err := db.
+		Where(strings.Join(predicates, " OR "), args...).
+		Order("queued_at DESC").
+		Limit(limit).
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	states := make([]RunnerState, 0, len(records))
+	for _, record := range records {
+		states = append(states, recordToState(record))
+	}
+	return states, nil
+}
+
 func (s *DBStore) ListStatesForGitHubInstallations(installationIDs []int64, limit int) ([]RunnerState, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {

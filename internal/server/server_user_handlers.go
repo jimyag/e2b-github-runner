@@ -150,6 +150,7 @@ func (s *Server) handleUserSaveGitHubInstallation(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	s.invalidateUserRepositoryAccess(account.ID)
 	clearCookie(w, githubAppSetupStateCookieName, "/", requestIsSecure(r))
 	s.recordAudit("github:"+session.Subject, "github_app.configure", "github_installation", strconv.FormatInt(installation.InstallationID, 10), map[string]any{
 		"account_login": installation.AccountLogin,
@@ -175,6 +176,7 @@ func (s *Server) handleUserDeleteGitHubInstallation(w http.ResponseWriter, r *ht
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	s.invalidateUserRepositoryAccess(account.ID)
 	s.recordAudit("github:"+session.Subject, "github_app.delete", "github_installation", strconv.FormatInt(id, 10), nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -212,6 +214,7 @@ func (s *Server) handleUserSyncGitHubInstallations(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	defer s.invalidateUserRepositoryAccess(account.ID)
 	remoteIDs := make(map[int64]struct{}, len(remoteInstallations))
 	synced := make([]state.GitHubInstallation, 0, len(remoteInstallations))
 	for _, remote := range remoteInstallations {
@@ -274,9 +277,14 @@ func (s *Server) handleUserListGitHubInstallationRepositories(w http.ResponseWri
 		writeError(w, http.StatusInternalServerError, "github client is not configured")
 		return
 	}
-	repositories, err := s.gh.ListInstallationRepositories(r.Context(), installation.InstallationID)
+	token, err := s.githubUserAccessToken(account.ID)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		s.writeUserRepositoryAuthorizationError(w, err)
+		return
+	}
+	repositories, err := s.gh.ListUserInstallationRepositories(r.Context(), token, installation.InstallationID)
+	if err != nil {
+		s.writeUserRepositoryAuthorizationError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -290,12 +298,12 @@ func (s *Server) handleUserListRunners(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	installations, err := s.store.ListGitHubInstallations(account.ID)
+	access, err := s.userAuthorizedRepositoryAccess(r.Context(), account.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeUserRepositoryAuthorizationError(w, err)
 		return
 	}
-	states, err := s.store.ListStatesForGitHubInstallations(installationIDsForUserInstallations(installations), 500)
+	states, err := s.store.ListStatesForGitHubInstallationRepositories(access, 500)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -703,25 +711,4 @@ func (s *Server) validGitHubAppSetupState(r *http.Request, setupState string) bo
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(setupState), []byte(cookie.Value)) == 1
-}
-
-func installationIDsForUserInstallations(installations []state.GitHubInstallation) []int64 {
-	var ids []int64
-	for _, installation := range installations {
-		ids = append(ids, installation.InstallationID)
-	}
-	return uniquePositiveInt64s(ids)
-}
-
-func uniquePositiveInt64s(values []int64) []int64 {
-	seen := map[int64]bool{}
-	out := make([]int64, 0, len(values))
-	for _, value := range values {
-		if value <= 0 || seen[value] {
-			continue
-		}
-		seen[value] = true
-		out = append(out, value)
-	}
-	return out
 }

@@ -45,13 +45,17 @@ import {
   type UserPreferences,
 } from "@/admin-types"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
+import {
+  createGitHubReauthenticationGate,
+  requiresGitHubReauthentication,
+  type RequestError,
+} from "@/user-auth-errors"
 
 type AccountSettingsTab = "repositories" | "preferences" | "sandbox-templates" | "sandbox-instances"
 type AccountSettingsRoute = {
   accountLogin?: string
   tab: AccountSettingsTab
 }
-type RequestError = Error & { code?: string }
 
 function App() {
   const [authSession, setAuthSession] = useState<AuthSession>({ authenticated: false, oauth_enabled: false })
@@ -87,6 +91,7 @@ function App() {
   const [loadingRepositoriesFor, setLoadingRepositoriesFor] = useState<number | null>(null)
   const [syncingGitHubInstallations, setSyncingGitHubInstallations] = useState(false)
   const [userSelectedKey, setUserSelectedKey] = useState(() => userJobsGroupKeyFromLocation(window.location.pathname, window.location.search))
+  const [beginGitHubReauthentication] = useState(createGitHubReauthenticationGate)
 
   const setSection = useCallback((next: string) => {
     const section = adminSections.includes(next as AdminSection) ? (next as AdminSection) : "overview"
@@ -300,11 +305,18 @@ function App() {
       setUserPreferences(preferencesData as UserPreferences)
       if (nextRunners.length === 0) setUserSelectedKey("")
     } catch (error) {
+      if (requiresGitHubReauthentication(error)) {
+        if (beginGitHubReauthentication()) {
+          toast.message("Refreshing GitHub sign-in...")
+          refreshGitHubOAuthLogin()
+        }
+        return
+      }
       toast.error(error instanceof Error ? error.message : "Failed to load workspace data")
     } finally {
       setLoading(false)
     }
-  }, [authSession.authenticated, authSession.login, hasAccess, isAdminRoute, locationPath, request])
+  }, [authSession.authenticated, authSession.login, beginGitHubReauthentication, hasAccess, isAdminRoute, locationPath, refreshGitHubOAuthLogin, request])
 
   const syncGitHubAppSetupFromURL = useCallback(async () => {
     if (!authSession.authenticated || (hasAccess && isAdminRoute) || !isAccountSettingsPath(locationPath)) return
@@ -358,9 +370,11 @@ function App() {
     } catch (error) {
       const requestError = error as RequestError
       const message = error instanceof Error ? error.message : "Failed to sync GitHub App accounts"
-      if (requestError.code === "REAUTH_REQUIRED" || message === "sign in with GitHub again before syncing installations") {
-        toast.message("Refreshing GitHub sign-in...")
-        refreshGitHubOAuthLogin()
+      if (requiresGitHubReauthentication(requestError) || message === "sign in with GitHub again before syncing installations") {
+        if (beginGitHubReauthentication()) {
+          toast.message("Refreshing GitHub sign-in...")
+          refreshGitHubOAuthLogin()
+        }
         return
       }
       toast.error(message)
@@ -368,7 +382,7 @@ function App() {
       setSyncingGitHubInstallations(false)
       setLoading(false)
     }
-  }, [loadUserAll, refreshGitHubOAuthLogin, request, syncingGitHubInstallations])
+  }, [beginGitHubReauthentication, loadUserAll, refreshGitHubOAuthLogin, request, syncingGitHubInstallations])
 
   const saveSandboxConfig = useCallback(async (
     apiURL: string,

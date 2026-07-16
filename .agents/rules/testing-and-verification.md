@@ -44,6 +44,7 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
 - For focused backend changes, start with the relevant package test.
 - For broad server/API behavior, run `go test ./...`.
 - For pre-merge confidence, run `task test`; it rebuilds UI assets, runs Bun UI tests, and runs Go tests with race and coverage.
+- For ordinary-user Jobs authorization, cover shared installations with different repository access, exact installation/repository pair matching, filtering before the database limit, list/detail/group/log/terminal consistency, missing or rejected GitHub user tokens, inaccessible linked installations, and short-lived access-cache behavior.
 
 ## UI
 

@@ -530,13 +530,96 @@ func TestListUserInstallationsUsesOAuthToken(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := NewClient(ts.URL, ts.Client())
+	client := NewTokenClient(ts.URL, "configured-runner-token", ts.Client())
 	installations, err := client.ListUserInstallations(t.Context(), "user-token")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(installations) != 1 || installations[0].ID != 987 || installations[0].AccountID != 9001 || installations[0].AccountType != "organization" || installations[0].AccountLogin != "octo-org" {
 		t.Fatalf("unexpected installations: %#v", installations)
+	}
+}
+
+func TestListUserInstallationRepositoriesUsesOAuthToken(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if r.URL.Query().Get("per_page") != "100" {
+			t.Fatalf("expected per_page=100, got %q", r.URL.RawQuery)
+		}
+		if r.Header.Get("Authorization") != "Bearer user-token" {
+			t.Fatalf("expected bearer user token, got %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"repositories":[{"full_name":"o/visible"},{"full_name":"o/another"}]}`))
+	}))
+	defer ts.Close()
+
+	client := NewTokenClient(ts.URL, "configured-runner-token", ts.Client())
+	repositories, err := client.ListUserInstallationRepositories(t.Context(), "user-token", 987)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repositories) != 2 || repositories[0] != "o/visible" || repositories[1] != "o/another" {
+		t.Fatalf("unexpected repositories: %#v", repositories)
+	}
+}
+
+func TestListUserInstallationRepositoriesClassifiesRateLimitResponse(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Retry-After", "60")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+	}))
+	defer ts.Close()
+
+	client := NewTokenClient(ts.URL, "configured-runner-token", ts.Client())
+	_, err := client.ListUserInstallationRepositories(t.Context(), "user-token", 987)
+	if err == nil {
+		t.Fatal("expected rate limit error")
+	}
+	if !IsRateLimitError(err) {
+		t.Fatalf("expected rate limit classification, got %v", err)
+	}
+	if retryAfter, ok := RateLimitRetryAfter(err); !ok || retryAfter != "60" {
+		t.Fatalf("expected retry-after metadata, got %q ok=%v", retryAfter, ok)
+	}
+}
+
+func TestListUserInstallationRepositoriesFollowsPagination(t *testing.T) {
+	var ts *httptest.Server
+	ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if r.Header.Get("Authorization") != "Bearer user-token" {
+			t.Fatalf("expected bearer user token, got %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("page") {
+		case "":
+			w.Header().Set("Link", `<`+ts.URL+`/user/installations/987/repositories?per_page=100&page=2>; rel="next"`)
+			w.Write([]byte(`{"repositories":[{"full_name":"o/first"}]}`))
+		case "2":
+			w.Write([]byte(`{"repositories":[{"full_name":"o/second"}]}`))
+		default:
+			t.Fatalf("unexpected page: %q", r.URL.RawQuery)
+		}
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, ts.Client())
+	repositories, err := client.ListUserInstallationRepositories(t.Context(), "user-token", 987)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repositories) != 2 || repositories[0] != "o/first" || repositories[1] != "o/second" {
+		t.Fatalf("unexpected repositories: %#v", repositories)
 	}
 }
 

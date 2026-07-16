@@ -130,6 +130,7 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "save github oauth token")
 		return
 	}
+	s.invalidateUserRepositoryAccess(account.ID)
 	session := adminSession{
 		Provider:  "github",
 		Subject:   user.Subject(),

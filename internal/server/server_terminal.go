@@ -261,15 +261,13 @@ func (s *Server) userRunnerState(w http.ResponseWriter, r *http.Request) (state.
 		writeError(w, http.StatusNotFound, "runner not found")
 		return state.RunnerState{}, false
 	}
-	installations, err := s.store.ListGitHubInstallations(account.ID)
+	access, err := s.userAuthorizedRepositoryAccess(r.Context(), account.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeUserRepositoryAuthorizationError(w, err)
 		return state.RunnerState{}, false
 	}
-	for _, installation := range installations {
-		if installation.InstallationID == st.GitHubInstallationID {
-			return st, true
-		}
+	if hasRepositoryAccess(access, st.GitHubInstallationID, st.RepositoryFullName) {
+		return st, true
 	}
 	writeError(w, http.StatusNotFound, "runner not found")
 	return state.RunnerState{}, false
@@ -446,28 +444,8 @@ func (s *Server) cachePullTitle(key, title, errorText string) {
 }
 
 func (s *Server) handleUserListRunnerSiblings(w http.ResponseWriter, r *http.Request) {
-	_, account, ok := s.requireUserSession(w, r)
+	st, states, ok := s.userRunnerStates(w, r)
 	if !ok {
-		return
-	}
-	st, err := s.store.ReadState(r.PathValue("id"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runner not found")
-		return
-	}
-	installations, err := s.store.ListGitHubInstallations(account.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	installationIDs := installationIDsForUserInstallations(installations)
-	if !hasInt64(installationIDs, st.GitHubInstallationID) {
-		writeError(w, http.StatusNotFound, "runner not found")
-		return
-	}
-	states, err := s.store.ListStatesForGitHubInstallations(installationIDs, 500)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	group, siblings := runnerSiblings(st, states)
@@ -491,13 +469,12 @@ func (s *Server) userRunnerStatesForRequest(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return nil, false
 	}
-	installations, err := s.store.ListGitHubInstallations(account.ID)
+	access, err := s.userAuthorizedRepositoryAccess(r.Context(), account.ID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		s.writeUserRepositoryAuthorizationError(w, err)
 		return nil, false
 	}
-	installationIDs := installationIDsForUserInstallations(installations)
-	states, err := s.store.ListStatesForGitHubInstallations(installationIDs, 500)
+	states, err := s.store.ListStatesForGitHubInstallationRepositories(access, 500)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return nil, false

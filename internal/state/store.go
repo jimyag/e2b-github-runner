@@ -212,6 +212,12 @@ type GitHubInstallationAccount struct {
 	AccountAvatar   string `json:"account_avatar,omitempty"`
 }
 
+// GitHubInstallationRepositoryAccess preserves repositories within one installation authorization scope.
+type GitHubInstallationRepositoryAccess struct {
+	InstallationID int64
+	Repositories   []string
+}
+
 const (
 	AccountSecretTypeSandboxAPIKey    = "sandbox_api_key"
 	AccountSecretTypeGitHubOAuthToken = "github_oauth_token"
@@ -282,6 +288,7 @@ type RunnerRequestStore interface {
 	ListStatesPage(limit, offset int) ([]RunnerState, int64, error)
 	ListStatesForRepositories(repositories []string, limit int) ([]RunnerState, error)
 	ListStatesForGitHubInstallations(installationIDs []int64, limit int) ([]RunnerState, error)
+	ListStatesForGitHubInstallationRepositories(access []GitHubInstallationRepositoryAccess, limit int) ([]RunnerState, error)
 	ActiveCount() (int, error)
 	InFlightCount() (int, error)
 	ActiveCountForProfile(name string) (int, error)

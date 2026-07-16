@@ -43,11 +43,19 @@ type Server struct {
 	pullTitleMu    sync.Mutex
 	pullTitleCache map[string]cachedPullTitle
 	pullTitleGroup singleflight.Group
+
+	userRepositoryAccessMu    sync.Mutex
+	userRepositoryAccessCache map[int64]cachedUserRepositoryAccess
 }
 
 type cachedPullTitle struct {
 	title     string
 	errorText string
+	expiresAt time.Time
+}
+
+type cachedUserRepositoryAccess struct {
+	access    []state.GitHubInstallationRepositoryAccess
 	expiresAt time.Time
 }
 
@@ -119,19 +127,20 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		logger = slog.Default()
 	}
 	s := &Server{
-		cfg:            cfg,
-		store:          store,
-		gh:             gh,
-		sandbox:        sandbox,
-		sandboxHTTP:    &http.Client{Timeout: 60 * time.Second},
-		logger:         logger,
-		mux:            http.NewServeMux(),
-		slots:          make(chan struct{}, cfg.MaxConcurrentRunners),
-		queueNotify:    make(chan struct{}, 1),
-		oauth:          &http.Client{Timeout: 10 * time.Second},
-		diagnostics:    &http.Client{Timeout: 5 * time.Second},
-		terminals:      newTerminalHub(logger),
-		pullTitleCache: map[string]cachedPullTitle{},
+		cfg:                       cfg,
+		store:                     store,
+		gh:                        gh,
+		sandbox:                   sandbox,
+		sandboxHTTP:               &http.Client{Timeout: 60 * time.Second},
+		logger:                    logger,
+		mux:                       http.NewServeMux(),
+		slots:                     make(chan struct{}, cfg.MaxConcurrentRunners),
+		queueNotify:               make(chan struct{}, 1),
+		oauth:                     &http.Client{Timeout: 10 * time.Second},
+		diagnostics:               &http.Client{Timeout: 5 * time.Second},
+		terminals:                 newTerminalHub(logger),
+		pullTitleCache:            map[string]cachedPullTitle{},
+		userRepositoryAccessCache: map[int64]cachedUserRepositoryAccess{},
 	}
 	hostname, _ := os.Hostname()
 	s.workerID = fmt.Sprintf("%s-%d", hostname, os.Getpid())

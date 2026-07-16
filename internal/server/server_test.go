@@ -374,9 +374,9 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 				t.Fatal("expected app JWT authorization for installation token")
 			}
 			w.Write([]byte(`{"token":"installation-token","expires_at":"2099-01-01T00:00:00Z"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/installation/repositories":
-			if r.Header.Get("Authorization") != "token installation-token" {
-				t.Fatalf("expected installation token authorization, got %q", r.Header.Get("Authorization"))
+		case r.Method == http.MethodGet && r.URL.Path == "/user/installations/987/repositories":
+			if r.Header.Get("Authorization") != "Bearer user-token" {
+				t.Fatalf("expected user token authorization, got %q", r.Header.Get("Authorization"))
 			}
 			w.Write([]byte(`{"repositories":[{"full_name":"o/r"},{"full_name":"o/another"}]}`))
 		default:
@@ -498,6 +498,7 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
 	installations, err := store.ListGitHubInstallations(account.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -537,6 +538,381 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 	}
 	if len(runners) != 1 || runners[0].ID != "visible" {
 		t.Fatalf("unexpected user runners: %#v", runners)
+	}
+}
+
+func TestUserRunnerAuthorizationUsesRepositoryIntersection(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		if r.Header.Get("Authorization") != "Bearer user-token" {
+			t.Fatalf("expected user token authorization, got %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"repositories":[{"full_name":"o/visible"}]}`))
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+	for _, request := range []state.RunnerRequest{
+		{
+			ID:                   "visible-job",
+			Source:               "test",
+			GitHubInstallationID: 987,
+			RepositoryFullName:   "o/visible",
+			Labels:               []string{"self-hosted"},
+		},
+		{
+			ID:                   "hidden-job",
+			Source:               "test",
+			GitHubInstallationID: 987,
+			RepositoryFullName:   "o/hidden",
+			Labels:               []string{"self-hosted"},
+		},
+		{
+			ID:                   "cross-installation-job",
+			Source:               "test",
+			GitHubInstallationID: 456,
+			RepositoryFullName:   "o/visible",
+			Labels:               []string{"self-hosted"},
+		},
+	} {
+		_, runnerState, err := store.CreateRequest(request, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if request.ID == "hidden-job" {
+			runnerState.Status = state.StatusRunning
+			runnerState.SandboxID = "hidden-sandbox"
+			runnerState.WorkflowRunID = 42
+			runnerState.HeadBranch = "secret"
+			runnerState.HeadSHA = "def"
+			runnerState.PullRequestNumber = 7
+		} else {
+			runnerState.Status = state.StatusCompleted
+		}
+		if err := store.WriteState(runnerState); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store.AppendLog("hidden-job", "control.log", []byte("secret runner output\n"))
+
+	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected runner list status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var runners []state.RunnerState
+	if err := json.Unmarshal(rec.Body.Bytes(), &runners); err != nil {
+		t.Fatal(err)
+	}
+	if len(runners) != 1 || runners[0].ID != "visible-job" {
+		t.Fatalf("expected only repository-authorized job, got %#v", runners)
+	}
+
+	deniedRequests := []struct {
+		method string
+		target string
+		body   io.Reader
+	}{
+		{method: http.MethodGet, target: "/user/runner_requests/hidden-job"},
+		{method: http.MethodGet, target: "/user/runner_requests/hidden-job/group"},
+		{method: http.MethodGet, target: "/user/runner_requests/hidden-job/siblings"},
+		{method: http.MethodGet, target: "/user/runner_requests/hidden-job/logs/control.log"},
+		{method: http.MethodGet, target: "/user/runner_requests/hidden-job/github-log"},
+		{method: http.MethodPost, target: "/user/runner_requests/hidden-job/terminal", body: strings.NewReader(`{"cols":120,"rows":32}`)},
+		{method: http.MethodGet, target: "/user/github/pulls/o/hidden/7/jobs"},
+		{method: http.MethodGet, target: "/user/github/runs/o/hidden/42/jobs"},
+		{method: http.MethodGet, target: "/user/github/branches/o/hidden/def/jobs?branch=secret"},
+		{method: http.MethodGet, target: "/user/runner_requests/cross-installation-job"},
+	}
+	for _, denied := range deniedRequests {
+		req = httptest.NewRequest(denied.method, denied.target, denied.body)
+		req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+		rec = httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("expected %s %s to be not found, got %d body=%s", denied.method, denied.target, rec.Code, rec.Body.String())
+		}
+	}
+	if fake.terminals != 0 {
+		t.Fatalf("expected unauthorized terminal request not to start a terminal, got %d", fake.terminals)
+	}
+}
+
+func TestUserRunnerAuthorizationRequiresGitHubOAuthToken(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "https://github.example", &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CreateRequest(state.RunnerRequest{
+		ID:                   "private-job",
+		Source:               "test",
+		GitHubInstallationID: 987,
+		RepositoryFullName:   "o/private",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"code":"REAUTH_REQUIRED"`) {
+		t.Fatalf("expected missing token to require reauthentication, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "private-job") || strings.Contains(rec.Body.String(), "o/private") {
+		t.Fatalf("missing-token response leaked runner data: %s", rec.Body.String())
+	}
+}
+
+func TestUserRunnerAuthorizationRejectsInvalidGitHubOAuthToken(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"message":"Bad credentials"}`))
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "expired-user-token")
+	if _, _, err := store.CreateRequest(state.RunnerRequest{
+		ID:                   "private-job",
+		Source:               "test",
+		GitHubInstallationID: 987,
+		RepositoryFullName:   "o/private",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"code":"REAUTH_REQUIRED"`) {
+		t.Fatalf("expected rejected token to require reauthentication, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "private-job") || strings.Contains(rec.Body.String(), "o/private") {
+		t.Fatalf("rejected-token response leaked runner data: %s", rec.Body.String())
+	}
+}
+
+func TestUserRunnerAuthorizationDoesNotReauthenticateOnGitHubRateLimit(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Retry-After", "60")
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+	if _, _, err := store.CreateRequest(state.RunnerRequest{
+		ID:                   "private-job",
+		Source:               "test",
+		GitHubInstallationID: 987,
+		RepositoryFullName:   "o/private",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected rate limit to be reported as unavailable, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Retry-After") != "60" {
+		t.Fatalf("expected retry-after response header, got %q", rec.Header().Get("Retry-After"))
+	}
+	if strings.Contains(rec.Body.String(), `"code":"REAUTH_REQUIRED"`) {
+		t.Fatalf("rate limit must not trigger GitHub reauthentication: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "private-job") || strings.Contains(rec.Body.String(), "o/private") {
+		t.Fatalf("rate-limit response leaked runner data: %s", rec.Body.String())
+	}
+}
+
+func TestUserRunnerAuthorizationSkipsInaccessibleInstallation(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/user/installations/987/repositories":
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte(`{"message":"Not Found"}`))
+		case "/user/installations/654/repositories":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"repositories":[{"full_name":"other/visible"}]}`))
+		default:
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, installation := range []state.GitHubInstallation{
+		{AccountID: account.ID, InstallationID: 987, AccountLogin: "o"},
+		{AccountID: account.ID, InstallationID: 654, AccountLogin: "other"},
+	} {
+		if _, err := store.UpsertGitHubInstallation(installation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+	for _, request := range []state.RunnerRequest{
+		{
+			ID:                   "inaccessible-job",
+			Source:               "test",
+			GitHubInstallationID: 987,
+			RepositoryFullName:   "o/private",
+		},
+		{
+			ID:                   "accessible-job",
+			Source:               "test",
+			GitHubInstallationID: 654,
+			RepositoryFullName:   "other/visible",
+		},
+	} {
+		if _, _, err := store.CreateRequest(request, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected inaccessible installation to be skipped, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var runners []state.RunnerState
+	if err := json.Unmarshal(rec.Body.Bytes(), &runners); err != nil {
+		t.Fatal(err)
+	}
+	if len(runners) != 1 || runners[0].ID != "accessible-job" {
+		t.Fatalf("expected only job from accessible installation, got %#v", runners)
+	}
+}
+
+func TestUserRunnerAuthorizationCachesRepositoryAccess(t *testing.T) {
+	var permissionRequests int
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		permissionRequests++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"repositories":[{"full_name":"o/r"}]}`))
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+	if _, _, err := store.CreateRequest(state.RunnerRequest{
+		ID:                   "cached-job",
+		Source:               "test",
+		GitHubInstallationID: 987,
+		RepositoryFullName:   "o/r",
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		req := httptest.NewRequest(http.MethodGet, "/user/runner_requests/cached-job", nil)
+		req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("unexpected cached job status: %d body=%s", rec.Code, rec.Body.String())
+		}
+	}
+	if permissionRequests != 1 {
+		t.Fatalf("expected one GitHub permission request, got %d", permissionRequests)
+	}
+}
+
+func TestUserRunnerAuthorizationCacheIsBounded(t *testing.T) {
+	srv := &Server{userRepositoryAccessCache: map[int64]cachedUserRepositoryAccess{}}
+	for accountID := int64(1); accountID <= 513; accountID++ {
+		srv.cacheUserRepositoryAccess(accountID, []state.GitHubInstallationRepositoryAccess{
+			{InstallationID: accountID, Repositories: []string{"o/r"}},
+		})
+	}
+	if got := len(srv.userRepositoryAccessCache); got > 512 {
+		t.Fatalf("expected bounded repository access cache, got %d entries", got)
 	}
 }
 
@@ -621,6 +997,18 @@ func TestUserSyncGitHubInstallationsRequiresOAuthTokenCode(t *testing.T) {
 }
 
 func TestUserRunnerDetailLogAndTerminal(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		if r.Header.Get("Authorization") != "Bearer user-token" {
+			t.Fatalf("expected user token authorization, got %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"repositories":[{"full_name":"o/r"}]}`))
+	}))
+	defer ghServer.Close()
+
 	store := state.New(t.TempDir())
 	account, _, err := store.UpsertAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "hubot-id", OAuthLogin: "hubot"}, "user")
 	if err != nil {
@@ -651,7 +1039,8 @@ func TestUserRunnerDetailLogAndTerminal(t *testing.T) {
 	}
 	store.AppendLog(st.ID, "control.log", []byte("runner request created\n"))
 	fake := &fakeSandbox{}
-	srv := newTestServer(t, store, "http://example.test", fake)
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests/job-detail-1", nil)
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
@@ -721,6 +1110,11 @@ func TestUserRunnerSiblings(t *testing.T) {
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/user/installations/987/repositories":
+			if r.Header.Get("Authorization") != "Bearer user-token" {
+				t.Fatalf("expected user token authorization, got %q", r.Header.Get("Authorization"))
+			}
+			w.Write([]byte(`{"repositories":[{"full_name":"o/r"}]}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/pulls/1":
 			w.WriteHeader(http.StatusForbidden)
 			w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
@@ -785,6 +1179,7 @@ func TestUserRunnerSiblings(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests/current/siblings", nil)
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
@@ -878,11 +1273,19 @@ func TestUserRunnerGitHubLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/repos/o/r/actions/jobs/1001/logs" {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/user/installations/987/repositories":
+			if r.Header.Get("Authorization") != "Bearer user-token" {
+				t.Fatalf("expected user token authorization, got %q", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"repositories":[{"full_name":"o/r"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/jobs/1001/logs":
+			w.Header().Set("Content-Type", "application/zip")
+			w.Write(archive.Bytes())
+		default:
 			t.Fatalf("unexpected github log request: %s %s", r.Method, r.URL.String())
 		}
-		w.Header().Set("Content-Type", "application/zip")
-		w.Write(archive.Bytes())
 	}))
 	defer ghServer.Close()
 
@@ -914,6 +1317,7 @@ func TestUserRunnerGitHubLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests/github-log-1/github-log", nil)
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
@@ -4554,6 +4958,22 @@ func testSessionCookie(subject, login, role string) *http.Cookie {
 		Name:  adminSessionCookieName,
 		Value: payloadValue + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)),
 		Path:  "/",
+	}
+}
+
+func saveTestGitHubOAuthToken(t *testing.T, store state.Store, accountID int64, encryptionKey, token string) {
+	t.Helper()
+	encryptedToken, err := encryptSecret(token, encryptionKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertAccountSecret(state.AccountSecret{
+		ScopeType:      state.AccountScopeTypeAccount,
+		ScopeID:        accountID,
+		KeyType:        state.AccountSecretTypeGitHubOAuthToken,
+		EncryptedValue: encryptedToken,
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -25,6 +25,7 @@
 ## Auth And Routing
 
 - The recommended production GitHub auth path is GitHub App auth for runner operations plus GitHub App OAuth sign-in for ordinary users and administrators. Local account roles gate management APIs.
+- Ordinary-user Jobs authorization is repository-level, not installation-level. Resolve the user's repository intersection for every account-linked GitHub App installation with the stored GitHub user access token, preserve exact `(github_installation_id, repository_full_name)` pairs, filter before query limits, and reuse the same authorization for lists, details, groups, logs, and terminals. Missing or rejected user tokens must fail closed; an inaccessible installation contributes no authorized repositories.
 - Token and basic auth still exist as compatibility modes; their long-term product status is undecided.
 - GitHub Enterprise Server is not supported. Config validation rejects `github.api_base_url` values other than `https://api.github.com`.
 - Runner specs, runner groups, and repository policies are admin API/UI data, not `runnerd.yaml` fields.

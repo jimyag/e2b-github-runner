@@ -26,6 +26,7 @@ import (
 type Client struct {
 	baseURL      string
 	http         *http.Client
+	userHTTP     *http.Client
 	downloadHTTP *http.Client
 	appAuth      *appAuthenticator
 	tokensMu     sync.Mutex
@@ -36,6 +37,54 @@ type AppAuth struct {
 	AppID          int64
 	InstallationID int64
 	PrivateKeyFile string
+}
+
+type apiError struct {
+	Operation          string
+	StatusCode         int
+	Body               string
+	RetryAfter         string
+	RateLimitRemaining string
+}
+
+func (e *apiError) Error() string {
+	return fmt.Sprintf("%s: status %d: %s", e.Operation, e.StatusCode, e.Body)
+}
+
+// ErrorStatus returns the HTTP status carried by a GitHub API error.
+func ErrorStatus(err error) (int, bool) {
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) {
+		return 0, false
+	}
+	return apiErr.StatusCode, true
+}
+
+// IsRateLimitError reports whether GitHub rejected the request because of a primary or secondary rate limit.
+func IsRateLimitError(err error) bool {
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	if apiErr.StatusCode != http.StatusForbidden && apiErr.StatusCode != http.StatusTooManyRequests {
+		return false
+	}
+	return strings.TrimSpace(apiErr.RetryAfter) != "" ||
+		strings.TrimSpace(apiErr.RateLimitRemaining) == "0" ||
+		strings.Contains(strings.ToLower(apiErr.Body), "rate limit")
+}
+
+// RateLimitRetryAfter returns GitHub's Retry-After header for a classified rate-limit response.
+func RateLimitRetryAfter(err error) (string, bool) {
+	if !IsRateLimitError(err) {
+		return "", false
+	}
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) {
+		return "", false
+	}
+	retryAfter := strings.TrimSpace(apiErr.RetryAfter)
+	return retryAfter, retryAfter != ""
 }
 
 type appAuthenticator struct {
@@ -234,6 +283,60 @@ func (c *Client) ListInstallationRepositories(ctx context.Context, installationI
 	return repositories, nil
 }
 
+// ListUserInstallationRepositories lists repositories accessible to both the user token and installation.
+func (c *Client) ListUserInstallationRepositories(ctx context.Context, token string, installationID int64) ([]string, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, fmt.Errorf("github oauth token is required")
+	}
+	if installationID <= 0 {
+		return nil, fmt.Errorf("installation id is required")
+	}
+	nextURL := fmt.Sprintf("%s/user/installations/%d/repositories?per_page=100", c.baseURL, installationID)
+	var repositories []string
+	for nextURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		setGitHubHeaders(req)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := c.userHTTP.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read github user installation repositories response: %w", readErr)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, &apiError{
+				Operation:          "github user installation repositories",
+				StatusCode:         resp.StatusCode,
+				Body:               strings.TrimSpace(string(body)),
+				RetryAfter:         resp.Header.Get("Retry-After"),
+				RateLimitRemaining: resp.Header.Get("X-RateLimit-Remaining"),
+			}
+		}
+		var out struct {
+			Repositories []struct {
+				FullName string `json:"full_name"`
+			} `json:"repositories"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, err
+		}
+		for _, repo := range out.Repositories {
+			if fullName := strings.TrimSpace(repo.FullName); fullName != "" {
+				repositories = append(repositories, fullName)
+			}
+		}
+		nextURL = nextLink(resp.Header.Get("Link"))
+	}
+	return repositories, nil
+}
+
 func (c *Client) ListUserInstallations(ctx context.Context, token string) ([]Installation, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -248,7 +351,7 @@ func (c *Client) ListUserInstallations(ctx context.Context, token string) ([]Ins
 		}
 		setGitHubHeaders(req)
 		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := c.http.Do(req)
+		resp, err := c.userHTTP.Do(req)
 		if err != nil {
 			return nil, err
 		}
@@ -321,6 +424,7 @@ func newClient(baseURL string, httpClient, downloadHTTP *http.Client) *Client {
 	return &Client{
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		http:         httpClient,
+		userHTTP:     httpClient,
 		downloadHTTP: downloadHTTP,
 		regTokens:    map[string]RegistrationToken{},
 	}
@@ -362,17 +466,21 @@ func NewAppClient(baseURL string, auth AppAuth, httpClient *http.Client) (*Clien
 
 func NewTokenClient(baseURL, token string, httpClient *http.Client) *Client {
 	downloadHTTP := cloneHTTPClient(httpClient)
-	return newClient(baseURL, clientWithTransport(downloadHTTP, bearerTransport{
+	client := newClient(baseURL, clientWithTransport(downloadHTTP, bearerTransport{
 		token: strings.TrimSpace(token),
 	}), downloadHTTP)
+	client.userHTTP = downloadHTTP
+	return client
 }
 
 func NewBasicAuthClient(baseURL, username, password string, httpClient *http.Client) *Client {
 	downloadHTTP := cloneHTTPClient(httpClient)
-	return newClient(baseURL, clientWithTransport(downloadHTTP, basicAuthTransport{
+	client := newClient(baseURL, clientWithTransport(downloadHTTP, basicAuthTransport{
 		username: username,
 		password: password,
 	}), downloadHTTP)
+	client.userHTTP = downloadHTTP
+	return client
 }
 
 func (c *Client) RunnerURL(repositoryFullName, runnerGroup string) (string, error) {
