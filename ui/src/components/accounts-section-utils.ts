@@ -28,6 +28,14 @@ export function accountAvatarURL(identities: AccountAvatarIdentity[]) {
   return `https://github.com/${encodeURIComponent(login)}.png?size=96`
 }
 
+export function accountAvatarImageURL(
+  identities: AccountAvatarIdentity[],
+  failedAvatarURL: string,
+) {
+  const avatarURL = accountAvatarURL(identities)
+  return avatarURL === failedAvatarURL ? "" : avatarURL
+}
+
 export function accountListQuery(input: AccountListQuery) {
   const params = new URLSearchParams()
   const query = input.query.trim()

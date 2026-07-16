@@ -133,8 +133,12 @@ func (s *DBStore) ListAccounts(options AccountListOptions) ([]AccountListItem, i
 		return nil, 0, err
 	}
 	for _, identity := range identities {
-		itemByAccountID[identity.AccountID].OAuthIdentities = append(
-			itemByAccountID[identity.AccountID].OAuthIdentities,
+		item, ok := itemByAccountID[identity.AccountID]
+		if !ok || item == nil {
+			return nil, 0, fmt.Errorf("oauth identity %d references unexpected account %d", identity.ID, identity.AccountID)
+		}
+		item.OAuthIdentities = append(
+			item.OAuthIdentities,
 			recordToOAuthIdentity(identity),
 		)
 	}

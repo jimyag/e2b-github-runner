@@ -20,7 +20,7 @@ import {
 } from "@/admin-types"
 import { formatTime } from "@/admin-format"
 import {
-  accountAvatarURL,
+  accountAvatarImageURL,
   accountListQuery,
   accountPageMeta,
   type AccountAvatarIdentity,
@@ -62,7 +62,7 @@ import {
 
 type RequestFunction = (url: string, options?: RequestInit) => Promise<unknown>
 
-type PendingRoleChange = {
+export type PendingRoleChange = {
   account: AdminAccount
   role: AccountRole
 }
@@ -81,7 +81,8 @@ export function AccountAvatar({
   identities: AccountAvatarIdentity[]
   displayLogin: string
 }) {
-  const avatarURL = accountAvatarURL(identities)
+  const [failedAvatarURL, setFailedAvatarURL] = useState("")
+  const avatarURL = accountAvatarImageURL(identities, failedAvatarURL)
   return (
     <div
       className="relative grid size-9 shrink-0 place-items-center overflow-hidden rounded-full border bg-primary/8 font-mono text-sm font-semibold text-primary"
@@ -96,12 +97,66 @@ export function AccountAvatar({
           loading="lazy"
           decoding="async"
           referrerPolicy="no-referrer"
-          onError={(event) => {
-            event.currentTarget.hidden = true
-          }}
+          onError={() => setFailedAvatarURL(avatarURL)}
         />
       ) : null}
     </div>
+  )
+}
+
+export function AccountRoleChangeDialog({
+  pendingRoleChange,
+  pendingLogin,
+  saving,
+  error,
+  onClose,
+  onConfirm,
+}: {
+  pendingRoleChange: PendingRoleChange | null
+  pendingLogin: string
+  saving: boolean
+  error: string
+  onClose: () => void
+  onConfirm: () => void
+}) {
+  return (
+    <Dialog
+      open={pendingRoleChange !== null}
+      onOpenChange={(open) => {
+        if (!open && !saving) onClose()
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Change account role?</DialogTitle>
+          <DialogDescription>
+            @{pendingLogin} will {pendingRoleChange?.role === "admin" ? "gain access to all runner management APIs" : "lose access to the admin console"}. This change takes effect immediately and is recorded in the audit log.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3 text-sm">
+          <span className="text-muted-foreground">Role change</span>
+          <span className="inline-flex items-center gap-2 font-medium">
+            {pendingRoleChange?.account.role}
+            <ChevronRight className="size-3.5 text-muted-foreground" />
+            {pendingRoleChange?.role}
+          </span>
+        </div>
+        {error ? (
+          <div className="text-sm text-destructive" role="alert">
+            {error}
+          </div>
+        ) : null}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="button" onClick={onConfirm} disabled={saving}>
+            {saving ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
+            Confirm role change
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -118,6 +173,7 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
   const [loading, setLoading] = useState(true)
   const [savingAccountID, setSavingAccountID] = useState(0)
   const [error, setError] = useState("")
+  const [roleError, setRoleError] = useState("")
   const [pendingRoleChange, setPendingRoleChange] = useState<PendingRoleChange | null>(null)
   const loadVersion = useRef(0)
 
@@ -178,22 +234,27 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
     setOffset(0)
   }
 
+  const closeRoleChangeDialog = () => {
+    setPendingRoleChange(null)
+    setRoleError("")
+  }
+
   const updateRole = async () => {
     if (!pendingRoleChange) return
     const { account, role: nextRole } = pendingRoleChange
     setSavingAccountID(account.id)
-    setError("")
+    setRoleError("")
     try {
       await request(`/admin/api/accounts/${encodeURIComponent(String(account.id))}/role`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ role: nextRole }),
       })
-      setPendingRoleChange(null)
+      closeRoleChangeDialog()
       toast.success(`@${pendingLogin} is now ${nextRole}`)
       await load()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to update account role")
+      setRoleError(cause instanceof Error ? cause.message : "Failed to update account role")
     } finally {
       setSavingAccountID(0)
     }
@@ -376,6 +437,7 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                             disabled={isCurrent || isSaving}
                             onValueChange={(value) => {
                               if (value !== account.role) {
+                                setRoleError("")
                                 setPendingRoleChange({ account, role: value as AccountRole })
                               }
                             }}
@@ -452,38 +514,14 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
         </CardContent>
       </Card>
 
-      <Dialog
-        open={pendingRoleChange !== null}
-        onOpenChange={(open) => {
-          if (!open && savingAccountID === 0) setPendingRoleChange(null)
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Change account role?</DialogTitle>
-            <DialogDescription>
-              @{pendingLogin} will {pendingRoleChange?.role === "admin" ? "gain access to all runner management APIs" : "lose access to the admin console"}. This change takes effect immediately and is recorded in the audit log.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3 text-sm">
-            <span className="text-muted-foreground">Role change</span>
-            <span className="inline-flex items-center gap-2 font-medium">
-              {pendingRoleChange?.account.role}
-              <ChevronRight className="size-3.5 text-muted-foreground" />
-              {pendingRoleChange?.role}
-            </span>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setPendingRoleChange(null)} disabled={savingAccountID !== 0}>
-              Cancel
-            </Button>
-            <Button type="button" onClick={() => void updateRole()} disabled={savingAccountID !== 0}>
-              {savingAccountID !== 0 ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
-              Confirm role change
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AccountRoleChangeDialog
+        pendingRoleChange={pendingRoleChange}
+        pendingLogin={pendingLogin}
+        saving={savingAccountID !== 0}
+        error={roleError}
+        onClose={closeRoleChangeDialog}
+        onConfirm={() => void updateRole()}
+      />
     </>
   )
 }

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import { accountAvatarURL, accountListQuery, accountPageMeta } from "./accounts-section-utils"
+import * as AccountsSectionUtils from "./accounts-section-utils"
 
 describe("accountAvatarURL", () => {
   test("uses the linked GitHub identity even when it is not first", () => {
@@ -14,6 +15,21 @@ describe("accountAvatarURL", () => {
 
   test("keeps the initial fallback for accounts without a GitHub identity", () => {
     expect(accountAvatarURL([{ oauth_provider: "gitlab", oauth_login: "miclle-lab" }])).toBe("")
+  })
+
+  test("only suppresses the avatar URL that failed", () => {
+    const accountAvatarImageURL = AccountsSectionUtils.accountAvatarImageURL
+    expect(typeof accountAvatarImageURL).toBe("function")
+    if (typeof accountAvatarImageURL !== "function") return
+
+    const firstIdentities = [{ oauth_provider: "github", oauth_login: "miclle" }]
+    const firstURL = accountAvatarURL(firstIdentities)
+    expect(accountAvatarImageURL(firstIdentities, firstURL)).toBe("")
+
+    const renamedIdentities = [{ oauth_provider: "github", oauth_login: "miclle-renamed" }]
+    expect(accountAvatarImageURL(renamedIdentities, firstURL)).toBe(
+      "https://github.com/miclle-renamed.png?size=96",
+    )
   })
 })
 

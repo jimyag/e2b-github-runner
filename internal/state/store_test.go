@@ -581,6 +581,34 @@ func TestListAccountsSearchesFiltersAndPaginates(t *testing.T) {
 	}
 }
 
+func TestListAccountsRejectsUnexpectedIdentityAccount(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	if _, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alpha"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Callback().Query().After("gorm:query").Register("test:append-unexpected-account-identity", func(query *gorm.DB) {
+		if identities, ok := query.Statement.Dest.(*[]oauthIdentityRecord); ok {
+			*identities = append(*identities, oauthIdentityRecord{
+				ID:            999,
+				AccountID:     999,
+				OAuthProvider: "github",
+				OAuthSubject:  "unexpected",
+				OAuthLogin:    "unexpected",
+			})
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := store.ListAccounts(AccountListOptions{Limit: 10}); err == nil || !strings.Contains(err.Error(), "unexpected account") {
+		t.Fatalf("expected unexpected identity account error, got %v", err)
+	}
+}
+
 func TestGetAccountStatsCountsAccountsRolesAndIdentities(t *testing.T) {
 	store := New(t.TempDir()).(*DBStore)
 	if _, _, err := store.UpsertAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "100", OAuthLogin: "alpha"}, "admin"); err != nil {

@@ -6,6 +6,13 @@ import * as AccountsSectionModule from "./accounts-section"
 
 const { AccountsSection } = AccountsSectionModule
 
+function collectText(node) {
+  if (typeof node === "string" || typeof node === "number") return String(node)
+  if (Array.isArray(node)) return node.map(collectText).join("")
+  if (!node || typeof node !== "object") return ""
+  return collectText(node.props?.children)
+}
+
 describe("AccountsSection", () => {
   test("renders account search, role filter, and pagination controls", () => {
     const html = renderToStaticMarkup(
@@ -42,6 +49,7 @@ describe("AccountsSection", () => {
 
   test("renders a GitHub avatar with an initial fallback", () => {
     expect(typeof AccountsSectionModule.AccountAvatar).toBe("function")
+    expect(AccountsSectionModule.AccountAvatar.toString()).not.toContain("currentTarget.hidden")
 
     const html = renderToStaticMarkup(
       createElement(AccountsSectionModule.AccountAvatar, {
@@ -52,5 +60,30 @@ describe("AccountsSection", () => {
 
     expect(html).toContain("https://github.com/miclle.png?size=96")
     expect(html).toContain(">M<")
+  })
+
+  test("keeps role update errors in the dialog and clears them on close", () => {
+    const AccountRoleChangeDialog = AccountsSectionModule.AccountRoleChangeDialog
+    expect(typeof AccountRoleChangeDialog).toBe("function")
+    if (typeof AccountRoleChangeDialog !== "function") return
+
+    let closeCount = 0
+    const dialog = AccountRoleChangeDialog({
+      pendingRoleChange: {
+        account: { id: 2, role: "user", oauth_identities: [] },
+        role: "admin",
+      },
+      pendingLogin: "octocat",
+      saving: false,
+      error: "role update failed",
+      onClose: () => {
+        closeCount++
+      },
+      onConfirm: () => {},
+    })
+
+    expect(collectText(dialog)).toContain("role update failed")
+    dialog.props.onOpenChange(false)
+    expect(closeCount).toBe(1)
   })
 })
