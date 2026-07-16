@@ -30,7 +30,7 @@ go test ./...
 task test
 ```
 
-Old-schema upgrade coverage is required when adding required columns, changing uniqueness semantics, or altering relationship constraints. Fresh sqlite creation is not enough.
+Old-schema upgrade coverage is required when adding required columns, changing uniqueness semantics, or altering relationship constraints. Fresh sqlite creation is not enough. Assert preserved data where migration promises preservation and explicit data reset where the compatibility contract requires reconfiguration.
 
 ## Go Server Or API
 
@@ -41,10 +41,12 @@ Old-schema upgrade coverage is required when adding required columns, changing u
 ## UI
 
 - Edit source under `ui/`, not generated files under `internal/server/ui/`.
+- For focused UI unit tests, run `cd ui && bun run test`.
 - For UI source changes, run `task ui-lint` or `task build` depending on scope.
 - Use `task build` when verifying production embedded UI behavior.
 - Use the real ordinary-user entries `/`, `/repositories`, `/account/repositories`, `/account/preferences`, `/account/sandbox-templates`, and `/account/sandbox-instances` when changing user UI. Also exercise the corresponding `/organizations/{login}/...` route when scope resolution changes.
-- Use the real admin entries `/admin/` and `/admin/sandbox_service`; do not assume the `ui/` tree is all admin-only.
+- Use the real admin entries `/admin/`, `/admin/accounts`, and `/admin/sandbox_service`; do not assume the `ui/` tree is all admin-only.
+- For account-role changes, verify global statistics, linked identity/avatar fallback, search, role filters, pagination, self-role protection, immediate authorization changes, and `account.role.update` audit events. Backend tests must also cover atomic audit rollback and concurrent demotions preserving at least one administrator.
 - For Sandbox fallback changes, verify scoped override, enabled-default fallback, disabled/incomplete default rejection, catalog access, and config-source display without exposing endpoint/key or audience metadata to ordinary users.
 - For audience changes, verify `all`, selected match/miss, selected-empty, user/org stable identity, login rename tolerance, manual preconfiguration before sign-in/sync, GitHub 404 rejection, installation-owner lookup/cache behavior, audit events, and saved snapshot behavior.
 

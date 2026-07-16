@@ -29,14 +29,14 @@ task release-check
 
 ## Documentation Sync
 
-- `README.md` is the operator quick start and should describe current product behavior, setup, run, build, and current limits.
-- `docs/testing.md` is the detailed local/GitHub setup and troubleshooting guide.
-- `docs/deployment-smoke.md` is the production-style smoke checklist.
-- `docs/runner-architecture-comparison.md` and `docs/runner-implementation-review.md` are architecture/status documents, not agent rulebooks.
+- `README.md` and `README.zh.md` are the paired operator quick starts and should describe current product behavior, setup, run, build, and current limits.
+- `docs/testing.md` and `docs/zh/testing.md` are the paired detailed local/GitHub setup and troubleshooting guides.
+- `docs/deployment-smoke.md` and `docs/zh/deployment-smoke.md` are the paired production-style smoke checklists.
+- `docs/runner-architecture-comparison.md` and `docs/runner-implementation-review.md`, plus their `docs/zh/` counterparts, are architecture/status documents, not agent rulebooks.
 - `TODO.md` tracks unresolved product and operations decisions.
 - `.agents/rules/` stores durable agent-only rules; `.agents/skills/` stores repeatable project-local workflows.
 
-When changing config, build, dev, deployment, or UI asset workflows, keep `README.md`, `docs/testing.md`, `TODO.md`, `AGENTS.md`, and relevant `.agents/` files aligned.
+When changing config, build, development, deployment, public APIs, authentication/authorization, state semantics, or UI asset workflows, keep the English/Chinese README and `docs/` pairs, `TODO.md`, `AGENTS.md`, and relevant `.agents/` files aligned.
 
 ## Git
 

@@ -14,6 +14,8 @@
 - Ordinary-user account settings live under `/account/repositories`, `/account/preferences`, `/account/sandbox-templates`, `/account/sandbox-instances`, and `/organizations/{login}/...`.
 - `/user/sandbox/templates` and `/user/sandbox/instances` resolve encrypted Sandbox credentials from the selected account or GitHub installation scope, then the enabled admin default when the scope is incomplete. They are ordinary-user catalog APIs, not admin configuration APIs.
 - The current browser entry for the admin console is `/admin/`.
+- `/admin/accounts`, `GET /admin/api/accounts`, and `PATCH /admin/api/accounts/{id}/role` provide a role-gated account list and role controls. Accounts remain OAuth/bootstrap-created; linked identities are read-only display/search data on this admin surface, while provider plus stable subject still binds authentication to the local account.
+- Account role updates and their audit events commit atomically. Self-role changes and changes that could leave no administrator are rejected, including concurrent demotions.
 - `/admin/sandbox_service` and `/admin/api/sandbox-service-default` manage the platform fallback. Keep this singleton independent from account preferences and disabled by default.
 - UI source lives in `ui/`.
 - Production UI assets are generated into `internal/server/ui/` by `task ui-build` and embedded by `internal/server/ui_assets_production.go`.
@@ -22,7 +24,7 @@
 
 ## Auth And Routing
 
-- The recommended production GitHub auth path is GitHub App auth plus GitHub App OAuth admin login.
+- The recommended production GitHub auth path is GitHub App auth for runner operations plus GitHub App OAuth sign-in for ordinary users and administrators. Local account roles gate management APIs.
 - Token and basic auth still exist as compatibility modes; their long-term product status is undecided.
 - GitHub Enterprise Server is not supported. Config validation rejects `github.api_base_url` values other than `https://api.github.com`.
 - Runner specs, runner groups, and repository policies are admin API/UI data, not `runnerd.yaml` fields.
@@ -36,7 +38,8 @@
 - Runtime state can use sqlite, Postgres, or MySQL.
 - Do not document multi-instance support until two runnerd processes have been verified against the same database.
 - State schema is defined mostly by GORM tags in `internal/state/records.go`.
-- Startup migration runs a narrow legacy-column compatibility pass in `internal/state/db.go`, then GORM `AutoMigrate`.
+- Startup migration runs a narrow legacy compatibility pass in `internal/state/db.go`, then GORM `AutoMigrate`.
+- GORM foreign-key creation is intentionally disabled. Legacy compatibility may remove old constraints or reset incompatible legacy scope tables; keep every such action narrow and covered by old-schema tests. Pre-scope account preference/secret rows are intentionally erased, requiring Sandbox reconfiguration and GitHub reauthentication before installation sync.
 - Keep old-schema upgrade tests when changing state records, GORM tags, indexes, required columns, or relationship constraints.
 - Do not reintroduce legacy `users` migration behavior unless the user explicitly asks for that compatibility path.
 

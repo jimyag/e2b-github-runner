@@ -63,7 +63,7 @@ Runner spec, runner group, and repository policy are not `runnerd.yaml` fields. 
 
 `database.backend` supports `sqlite`, `postgres`, and `mysql`. Prefer sqlite for local development. Before documenting shared-database multi-instance deployment as supported, verify lease behavior with two runnerd processes sharing the same database.
 
-The state schema is mainly defined by GORM tags in `internal/state/records.go`. On startup, the service runs a small old-schema compatibility column pass and then GORM `AutoMigrate`. When changing state records, indexes, or migration helpers, run at least:
+The state schema is mainly defined by GORM tags in `internal/state/records.go`. On startup, the service runs a narrow legacy compatibility pass for older columns, obsolete OAuth constraints, and incompatible legacy scope tables, then runs GORM `AutoMigrate`. Legacy `account_preferences` and `account_secrets` tables without `scope_type`/`scope_id` are dropped and recreated rather than data-migrated. Reconfigure their saved Sandbox Preferences and API keys after that upgrade; stored GitHub OAuth tokens are also cleared, so affected users must sign in with GitHub again before syncing installations. When changing state records, indexes, or migration helpers, run at least:
 
 ```bash
 go test ./internal/state -count=1
@@ -192,10 +192,11 @@ To pin the Vite port:
 RUNNERD_VITE_PORT=5173 task dev
 ```
 
-For production mode or embedded UI asset verification, start the Go service directly:
+For production mode or embedded UI asset verification, rebuild the UI and binary before starting runnerd:
 
 ```bash
-go run ./cmd/runnerd --config ./runnerd.yaml
+task build
+./bin/runnerd --config ./runnerd.yaml
 ```
 
 Health check:
@@ -228,7 +229,7 @@ Admin account page:
 http://127.0.0.1:25500/admin/accounts
 ```
 
-The summary cards report total accounts, administrators, users, and linked OAuth identities. These statistics are global and do not change with search, role filtering, or pagination. The account list searches linked OAuth login, provider, and stable subject values; `role` filters to `admin` or `user`, while `limit` and `offset` control pagination. Role changes take effect immediately and create an `account.role.update` audit event. The current administrator cannot change their own role through this API.
+The summary cards report total accounts, administrators, users, and linked OAuth identities. These statistics are global and do not change with search, role filtering, or pagination. The account list searches linked OAuth login, provider, and stable subject values; `role` filters to `admin` or `user`, while `limit` and `offset` control pagination. The default page size is 20 and the maximum is 100. Linked GitHub identities load the conventional GitHub avatar URL derived from their login and fall back to account initials if it is unavailable. The page only changes another account's role between `admin` and `user`; accounts remain OAuth/bootstrap-created, and it cannot create or delete accounts or link or unlink identities. Role changes take effect immediately and create an `account.role.update` audit event. Self-role changes and changes that could leave no administrator are rejected, including concurrent demotions that race with each other.
 
 ```bash
 curl -fsS -b "$COOKIE_JAR" \
@@ -254,7 +255,15 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/admin/api/sandbox-service-default/api-key | jq
 ```
 
-UI source lives in `ui/` and uses the same React, Vite, Tailwind CSS, shadcn-style components, and theme CSS as `kubevirt-console`. `task build` runs `task ui-build`, writes frontend output to `internal/server/ui/`, and then compiles `runnerd`. In development mode, `internal/server/ui_assets_development.go` proxies UI assets to Vite. In production builds, `internal/server/ui_assets_production.go` embeds `internal/server/ui/*`. The ordinary-user UI includes GitHub App accounts and on-demand authorized repositories at `/account/repositories`, Sandbox service settings at `/account/preferences` and `/organizations/{login}/preferences`, region-filtered templates at `/account/sandbox-templates`, region- and template-filtered runner instances at `/account/sandbox-instances`, the equivalent organization routes, local activity repositories at `/repositories`, the Repo/PR job list at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, and job details at `/jobs/{id}`. The catalog uses `GET /user/sandbox/templates?region=<id>` and `GET /user/sandbox/instances?region=<id>&template_id=<id>`; the instance endpoint lists only runner-created sandboxes and uses the effective scoped/default credential resolver. The admin surface includes account and role management at `/admin/accounts`, the platform fallback at `/admin/sandbox_service`, runners, runner specs, runner groups, runner policies, retry, audit, label match test, and diagnostics pages, but not provider resource catalogs.
+UI source lives in `ui/` and uses the same React, Vite, Tailwind CSS, shadcn-style components, and theme CSS as `kubevirt-console`. `task build` runs `task ui-build`, writes frontend output to `internal/server/ui/`, and then compiles `runnerd`. In development mode, `internal/server/ui_assets_development.go` proxies UI assets to Vite. In production builds, `internal/server/ui_assets_production.go` embeds `internal/server/ui/*`. The ordinary-user UI includes GitHub App accounts and on-demand authorized repositories at `/account/repositories`, Sandbox service settings at `/account/preferences` and `/organizations/{login}/preferences`, region-filtered templates at `/account/sandbox-templates`, region- and template-filtered runner instances at `/account/sandbox-instances`, the equivalent organization routes, local activity repositories at `/repositories`, the Repo/PR job list at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, and job details at `/jobs/{id}`. The catalog uses `GET /user/sandbox/templates?region=<id>` and `GET /user/sandbox/instances?region=<id>&template_id=<id>`; the instance endpoint lists only runner-created sandboxes and uses the effective scoped/default credential resolver. The admin surface includes the account list and role controls at `/admin/accounts`, the platform fallback at `/admin/sandbox_service`, runners, runner specs, runner groups, runner policies, retry, audit, label match test, and diagnostics pages, but not provider resource catalogs.
+
+For focused UI unit tests, run:
+
+```bash
+cd ui && bun run test
+```
+
+`task test` rebuilds the UI, runs the same Bun suite, and then runs Go tests with race detection and coverage. The Bun suite covers helpers and server-rendered component output; use a real browser to verify navigation, dialogs, avatar loading/fallback, and access transitions after a role change.
 
 Create a default runner spec first:
 
@@ -433,14 +442,14 @@ curl -fsS -b "$COOKIE_JAR" \
 Common issues:
 
 - `invalid signature`: GitHub webhook secret and `github.webhook_secret` do not match.
-- `runner concurrency limit reached`: active request count reached `worker.max_concurrent_runners`.
+- `runner start deferred because global concurrency is at capacity` or `runner start deferred because profile is at capacity`: the request remains queued until global or per-spec capacity is available.
 - GitHub job stays queued: workflow `runs-on` labels must include `self-hosted` and `e2b`, and must match runner spec labels.
 - sandbox creation fails: confirm the account/organization Preferences or enabled admin default has a complete Sandbox service config matching the template and local environment; the Runner detail shows which source was selected.
-- registration token fails: confirm the GitHub App installation has the required administration/self-hosted runner permission for the target repository.
+- registration token fails: check the [GitHub App permission table](../README.md#github-app-permissions). Specs without `runner_group` require repository `Administration`; specs with `runner_group` require organization `Self-hosted runners`.
 
 ## 9. How To Read GitHub Actions Logs
 
-This is a repository-level self-hosted GitHub Actions runner. After a job is picked up by the runner inside the sandbox, workflow step logs appear normally in GitHub Actions:
+runnerd creates a repository-level self-hosted GitHub Actions runner by default; a spec with `runner_group` creates an organization runner for the repository owner instead. After a job is picked up by the runner inside the sandbox, workflow step logs appear normally in GitHub Actions:
 
 ```text
 Repository -> Actions -> choose workflow run -> choose job
@@ -471,7 +480,7 @@ curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/<request_id>/logs/stderr.log
 ```
 
-The service's own logs are printed to the terminal that started `go run ./cmd/runnerd`.
+The service's own logs are printed to runnerd's stdout/stderr, whether captured by the terminal or a service manager.
 
 ## 10. Diagnostics / pprof
 
@@ -486,7 +495,7 @@ curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
 
 - discovered pprof address files;
 - dump script paths;
-- current DB path;
+- database backend and redacted DSN/path;
 - GitHub auth mode, `app`, `token`, or `basic`;
 - recent failed runner requests.
 

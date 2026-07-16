@@ -6,12 +6,12 @@
 
 ## 前置条件
 
-- 一个可通过 HTTPS 接收 GitHub webhooks 和 admin login 的 runnerd 部署。
+- 一个可通过 HTTPS 接收 GitHub webhooks 和 console 登录的 runnerd 部署。
 - `runnerd.yaml` 已配置 `database`、`auth`、`github` 和 `worker` sections。
 - 目标 repository 或 organization 已安装 GitHub.com App。
 - GitHub App 已配置当前部署所用 runner 模式需要的[仓库级和组织级权限](../../README.zh.md#github-app-权限)。
 - GitHub App OAuth callback URL 指向 runnerd origin 下的 `/auth/github/callback`。
-- Repository webhook 将 `workflow_job` events 发送到 `POST /webhooks/github`。
+- GitHub App webhook 或 repository webhook 将 `workflow_job` events 发送到 `POST /webhooks/github`。
 - 目标 account/organization Preferences 已配置 Sandbox service API URL 和 API key，或 `/admin/sandbox_service` 已启用 admin fallback。
 - 至少一个 Qiniu sandbox template 包含 `/opt/actions-runner/config.sh` 和 `/opt/actions-runner/run.sh`。
 - 已通过 `runnerd --bootstrap-admin github:<github-user-id>` 引导 admin account。
@@ -35,6 +35,22 @@ https://<runnerd-host>/admin/
 ```
 
 预期结果：GitHub OAuth 完成，signed session 具有 `role: admin`。
+
+准备至少一个次要 account，并打开 Accounts 页面：
+
+```text
+https://<runnerd-host>/admin/accounts
+```
+
+检查：
+
+- 搜索、角色筛选、每页条数和翻页只改变账户列表，全局统计总数保持不变。
+- 关联 GitHub identity 会按 login 加载头像；头像不可用时回退到账户首字母。
+- 当前管理员的角色控件处于禁用状态。
+- `role: user` session 调用账户列表和角色修改 API 都会被拒绝；管理员直接 PATCH 自身 role 会返回 conflict。
+- 把次要 account 从 `user` 改为 `admin` 后立即生效，并生成 `account.role.update` 审计事件。
+- 准备两名管理员和两个已登录 session，并发执行相互降级时不能同时成功；至少保留一名管理员。
+- 完成全部角色检查后，如有需要，先由存活的管理员恢复原管理员，再由预期管理员恢复次要 account 的 role。
 
 ## 2. Diagnostics
 
@@ -89,7 +105,7 @@ curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
 
 ## 4. Webhook Delivery
 
-在目标 repository webhook 设置中重发最近一次 delivery，或触发一个新 workflow。
+在 GitHub App 或目标 repository 的 webhook 设置中重发最近一次 delivery，或触发一个新 workflow。
 
 预期结果：
 

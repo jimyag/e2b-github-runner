@@ -1,18 +1,19 @@
 # Runnerd Implementation Review
 
-Date: 2026-07-13
+[Chinese](zh/runner-implementation-review.md)
+
+Date: 2026-07-16
 
 Scope:
 
-- Current branch at refresh time: `feat/admin-sandbox-lists`.
-- Review target: implementation status after file-based config, GORM-backed DB schema migration, retry/lease/audit handling, ordinary-user Sandbox catalogs, admin console, embedded UI assets, and local development workflow updates.
+- Review target: implementation status after file-based config, GORM-backed DB schema migration, retry/lease/audit handling, ordinary-user Sandbox catalogs, admin account-role controls, embedded UI assets, and local development workflow updates.
 - Local references still useful for future comparison: actions-runner-controller style reconciliation and fireactions style pool/config modeling.
 
 ## Executive Summary
 
-Runnerd has moved past the original 2026-05-19 gap list. Runtime configuration is now file-first, runner state is DB-backed, schema creation is mostly driven by GORM model tags, retry/lease/audit fields exist, GitHub App auth can resolve installations dynamically, the ordinary-user UI covers job/repository/account setup flows, the admin console covers the core management workflow, diagnostics expose pprof/expvar state, and the documented local workflow includes `task dev`.
+Runnerd has moved past the original 2026-05-19 gap list. Runtime configuration is now file-first, runner state is DB-backed, schema creation is mostly driven by GORM model tags, retry/lease/audit fields exist, GitHub App auth can resolve installations dynamically, the ordinary-user UI covers job/repository/account setup flows, the admin console covers the core management workflow including audited account-role changes, diagnostics expose pprof/expvar state, and the documented local workflow includes `task dev`.
 
-The remaining work is no longer a basic architecture catch-up. The next decisions are product and operations hardening: whether to keep token/basic auth as local compatibility modes, whether Activity repositories should include policy-configured repositories before jobs are observed, how much config management belongs in the admin console, and what deployment smoke tests are required before treating the service as production-ready.
+The remaining work is no longer a basic architecture catch-up. The next decisions are product and operations hardening: whether to keep token/basic auth as local compatibility modes, whether Activity repositories should include policy-configured repositories before jobs are observed, how much config management belongs in the admin console, and consistently executing and maintaining the canonical deployment smoke checklist before treating the service as production-ready.
 
 ## Current Baseline
 
@@ -20,10 +21,10 @@ The remaining work is no longer a basic architecture catch-up. The next decision
 - The config schema covers server, database, OAuth session auth, Sandbox lifecycle timeouts, GitHub webhook/auth/OAuth, allowed repositories, and worker retry/lease/concurrency behavior. Sandbox service API URL and API key are database-backed scoped Preferences or the disabled-by-default admin fallback rather than file config.
 - Exactly one GitHub API auth mode is allowed: GitHub App, token, or basic auth. GitHub App mode supports optional static `installation_id`; when omitted, runnerd resolves installation access per job repository and caches transports.
 - Runner requests, events, specs, groups, policies, retry metadata, leases, and audit events are stored in the configured database backend.
-- State schema creation runs through GORM `AutoMigrate` after a small compatibility pass for older schema columns that cannot be safely added as `NOT NULL` without defaults.
+- State schema creation runs through GORM `AutoMigrate` after a narrow compatibility pass for older columns, obsolete OAuth constraints, and incompatible legacy scope tables. GORM foreign-key creation is intentionally disabled. Legacy account preference/secret tables without scope columns are intentionally reset, so Sandbox settings/API keys require reconfiguration and affected users require GitHub reauthentication before installation sync.
 - Worker processing uses DB claim/lease semantics and retry scheduling instead of only in-memory queue ownership.
 - Transient Qiniu sandbox, GitHub, rate-limit, timeout, and temporary network failures are classified for retry or queue deferral. Deterministic auth/config/template failures fail immediately.
-- Admin routes expose runner request management, retry/stop/log access, runner specs, runner groups, repository policies, match tests, audit events, and diagnostics.
+- Admin routes expose the account list and audited role controls at `/admin/accounts` and `/admin/api/accounts`, runner request management, retry/stop/log access, runner specs, runner groups, repository policies, match tests, audit events, and diagnostics. Account administration is role-only; self-role changes and changes that could leave no administrator are rejected.
 - Ordinary-user routes expose the PR/job dashboard at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, local activity repositories at `/repositories`, GitHub App account setup at `/account/repositories`, account or organization Sandbox service Preferences at `/account/preferences` and `/organizations/{login}/preferences`, and scoped Sandbox resource catalogs at `/account/sandbox-templates`, `/account/sandbox-instances`, and their organization equivalents.
 - The admin console exposes `/admin/sandbox_service` and role-gated `/admin/api/sandbox-service-default` endpoints for the global fallback, including all/selected repository-owner audience controls; provider catalogs remain ordinary-user resources.
 - Authenticated catalog APIs expose region-filtered templates and region/template-filtered runner instances through `/user/sandbox/templates` and `/user/sandbox/instances`. They resolve encrypted credentials from the selected account or installation scope and do not expose provider secrets.
@@ -47,7 +48,7 @@ Runtime config is file-first, but the admin console does not yet provide an effe
 
 ### 4. Deployment Smoke
 
-Local build/lint/test coverage validates the code path, but production readiness still depends on a real GitHub App installation, real Qiniu sandbox templates, webhook delivery, and sandbox runner execution. Use `docs/deployment-smoke.md` for the real-deployment checklist covering webhook signature handling, installation resolution, runner spec matching, sandbox creation, GitHub job pickup, cleanup, and diagnostics.
+Local build/lint/test coverage validates the code path, but production readiness still depends on a real GitHub App installation, real Qiniu sandbox templates, webhook delivery, and sandbox runner execution. Run and maintain the [deployment smoke checklist](deployment-smoke.md) covering webhook signature handling, installation resolution, runner spec matching, sandbox creation, GitHub job pickup, cleanup, and diagnostics.
 
 ### 5. Multi-Instance And Operations
 
@@ -55,7 +56,7 @@ The DB lease model is in place, but multi-process behavior should be verified wi
 
 ### 6. Schema Compatibility
 
-The current migration path intentionally avoids a full handwritten migration history. GORM tags in `internal/state/records.go` define the normal schema, while `internal/state/db.go` keeps only narrow upgrade backfills for older state databases. Future schema changes should include old-schema upgrade tests when they add required columns, indexes with uniqueness semantics, or relationship constraints.
+The current migration path intentionally avoids a full handwritten migration history. GORM tags in `internal/state/records.go` define the normal schema, while `internal/state/db.go` keeps only narrow compatibility actions for older state databases, including the explicit reset of pre-scope account preference/secret tables. Future schema changes should include old-schema upgrade tests that assert preservation or intentional data loss as appropriate when they add required columns, indexes with uniqueness semantics, or relationship constraints.
 
 ## Suggested Next Order
 

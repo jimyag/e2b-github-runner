@@ -1,5 +1,7 @@
 # Runner Architecture Comparison
 
+[Chinese](zh/runner-architecture-comparison.md)
+
 This note records the design comparison that shaped runnerd. It should be read as historical context plus current baseline, not as an implementation plan.
 
 ## Current Baseline
@@ -10,16 +12,16 @@ Implemented pieces:
 
 - File-first runtime config loaded from `runnerd.yaml` by default, or from `--config`.
 - SQLite, Postgres, and MySQL state backends through `database.backend` and `database.dsn`.
-- DB-backed runner requests, runner events/logs, runner specs, runner groups, repository policies, OAuth accounts, and audit events.
+- DB-backed runner requests, runner events/logs, runner specs, runner groups, repository policies, local accounts, linked OAuth identities, account preferences/secrets, and audit events.
 - Account and GitHub installation scoped Preferences for Sandbox service settings, with API keys stored as encrypted account secrets.
 - An admin-managed, disabled-by-default Sandbox service fallback stored independently from account preferences.
-- Schema creation is driven by GORM tags in the state record structs, with startup `AutoMigrate` and narrow compatibility backfills for older schema columns.
+- Schema creation is driven by GORM tags in the state record structs, with a narrow legacy compatibility pass followed by `AutoMigrate`; GORM foreign-key creation is intentionally disabled.
 - Fixed runner states: `queued`, `creating`, `running`, `stopping`, `completed`, and `failed`.
 - DB claim/lease processing with retry metadata (`retry_count`, `next_retry_at`, `lease_owner`, `lease_expires_at`).
 - GitHub App auth with optional dynamic installation resolution, plus token and basic auth compatibility modes.
-- GitHub App OAuth login for the admin console, with local roles and signed HttpOnly sessions.
+- GitHub App OAuth sign-in for ordinary users and administrators, with local roles and signed HttpOnly sessions.
 - Ordinary-user UI for PR/job views, local activity repositories, GitHub App installations, authorized repositories, account or organization scoped Sandbox service Preferences, and scoped Sandbox template and runner-instance catalogs.
-- Admin API and UI for runner requests, specs, groups, policies, the global Sandbox service fallback, retry/stop actions, match tests, audit history, and diagnostics.
+- Admin API and UI for the account list and audited role controls, runner requests, specs, groups, policies, the global Sandbox service fallback, retry/stop actions, match tests, audit history, and diagnostics.
 - Production UI assets built from `ui/` into `internal/server/ui/`; development assets are proxied to Vite.
 - Diagnostics through `github.com/jimmicro/pprof`, `/diagnostics/pprof`, `/diagnostics/vars`, and expvar metrics.
 
@@ -30,6 +32,7 @@ Known boundaries:
 - Token and basic auth still exist as compatibility modes. Product policy has not decided whether to keep them for production.
 - Multi-instance behavior should not be advertised until two runnerd processes have been verified against the same database.
 - Sandbox provider catalogs are ordinary-user resources, not admin configuration. `GET /user/sandbox/templates` and `GET /user/sandbox/instances` resolve scoped credentials and then the enabled admin fallback, accept only supported region ids, and keep secrets server-side.
+- Account administration is role-only: accounts and identity links remain OAuth/bootstrap-created. Self-role changes and changes that could leave no administrator are rejected.
 
 ## Architecture Overview
 
@@ -258,7 +261,7 @@ Runner state is database-backed. The worker claims runnable requests with lease 
 
 The design deliberately uses portable DB semantics rather than relying on Postgres-only locking features for the core path. SQLite remains valid for local and small single-node deployments; Postgres and MySQL are available for more durable deployments, pending multi-process validation.
 
-The schema source of truth lives in `internal/state/records.go`. Startup migration runs a narrow legacy-column compatibility pass in `internal/state/db.go` before GORM `AutoMigrate`. This keeps fresh database creation model-driven while preserving known older sqlite upgrade paths such as `runner_profiles.default_available` and `repository_policies.runner_group_name`.
+The schema source of truth lives in `internal/state/records.go`. Startup migration runs a narrow legacy compatibility pass in `internal/state/db.go` before GORM `AutoMigrate`. This keeps fresh database creation model-driven while preserving known older sqlite upgrade paths for missing columns and obsolete OAuth constraints. Incompatible legacy account preference/secret tables without scope columns are intentionally dropped and recreated; their rows are not migrated. Operators must reconfigure affected Sandbox settings/API keys, and affected users must reauthenticate with GitHub before installation sync.
 
 ## Diagnostics
 

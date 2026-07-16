@@ -61,7 +61,7 @@ Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置
 
 `database.backend` 支持 `sqlite`、`postgres` 和 `mysql`。本地开发优先使用 sqlite；共享数据库的多实例部署需要先用两个 runnerd 进程验证 lease 行为，再作为正式运行方式记录。
 
-状态表结构主要由 `internal/state/records.go` 里的 GORM tag 定义，服务启动时会先执行少量旧 schema 兼容补列，再运行 GORM `AutoMigrate`。修改 state record、索引或迁移 helper 时，至少先跑：
+状态表结构主要由 `internal/state/records.go` 里的 GORM tag 定义，服务启动时会先针对旧 columns、obsolete OAuth constraints 和不兼容的 legacy scope tables 执行窄范围 compatibility pass，再运行 GORM `AutoMigrate`。缺少 `scope_type`/`scope_id` 的旧 `account_preferences` 和 `account_secrets` 表会被删除并重建，而不是迁移原数据。升级后必须重新配置其中保存的 Sandbox Preferences 和 API keys；已保存的 GitHub OAuth tokens 也会被清除，相关用户需重新使用 GitHub 登录后才能同步 installations。修改 state record、索引或迁移 helper 时，至少先跑：
 
 ```bash
 go test ./internal/state -count=1
@@ -190,10 +190,11 @@ RUNNERD_CONFIG=./runnerd.yaml task dev
 RUNNERD_VITE_PORT=5173 task dev
 ```
 
-生产模式或验证嵌入式前端资源时，直接启动 Go 服务：
+生产模式或验证嵌入式前端资源时，先重新构建 UI 和 binary，再启动 runnerd：
 
 ```bash
-go run ./cmd/runnerd --config ./runnerd.yaml
+task build
+./bin/runnerd --config ./runnerd.yaml
 ```
 
 健康检查：
@@ -226,7 +227,7 @@ export COOKIE_JAR=./runnerd.cookies
 http://127.0.0.1:25500/admin/accounts
 ```
 
-顶部统计卡展示账户总数、管理员、普通用户和已绑定 OAuth identity 数量；这些统计是全局口径，不受搜索、角色筛选或分页影响。账户列表可搜索关联 OAuth identity 的 login、provider 和 stable subject；`role` 可筛选 `admin` 或 `user`，`limit` 和 `offset` 用于分页。角色修改会立即生效，并写入 `account.role.update` 审计事件。当前管理员不能通过此 API 修改自己的角色。
+顶部统计卡展示账户总数、管理员、普通用户和已绑定 OAuth identity 数量；这些统计是全局口径，不受搜索、角色筛选或分页影响。账户列表可搜索关联 OAuth identity 的 login、provider 和 stable subject；`role` 可筛选 `admin` 或 `user`，`limit` 和 `offset` 用于分页，默认每页 20 条、最多 100 条。关联 GitHub identity 会按 login 加载约定的 GitHub 头像 URL；头像不可用时回退到账户首字母。页面只能把其他 account 的 role 在 `admin` 和 `user` 之间切换；account 仍由 OAuth/bootstrap 创建，页面不能创建或删除 account，也不能绑定或解绑 identity。角色修改会立即生效，并写入 `account.role.update` 审计事件。系统会拒绝修改自身角色，以及可能导致没有管理员的变更，包括相互竞争的并发降级操作。
 
 ```bash
 curl -fsS -b "$COOKIE_JAR" \
@@ -252,7 +253,15 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/admin/api/sandbox-service-default/api-key | jq
 ```
 
-页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。开发模式下 `internal/server/ui_assets_development.go` 会把 UI 资源代理到 Vite；生产构建下 `internal/server/ui_assets_production.go` 会嵌入 `internal/server/ui/*`。普通用户界面包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/account/sandbox-templates` 的区域过滤模板、`/account/sandbox-instances` 的区域和模板过滤 runner instances、对应的 organization 路由、`/repositories` 的本地 activity repositories，以及 `/` 的 Repo/PR 列表和 PR job 明细。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes，并使用统一的 scoped/default credential resolver。管理面包含 `/admin/accounts` 的账户与角色管理、`/admin/sandbox_service` 的平台回退、runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
+页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。开发模式下 `internal/server/ui_assets_development.go` 会把 UI 资源代理到 Vite；生产构建下 `internal/server/ui_assets_production.go` 会嵌入 `internal/server/ui/*`。普通用户界面包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/account/sandbox-templates` 的区域过滤模板、`/account/sandbox-instances` 的区域和模板过滤 runner instances、对应的 organization 路由、`/repositories` 的本地 activity repositories、`/` 的 Repo/PR 列表、`/github/pulls/{owner}/{repo}/{number}/jobs` 这类稳定的 GitHub-context job-group 路由，以及 `/jobs/{id}` 的 job 详情。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes，并使用统一的 scoped/default credential resolver。管理面包含 `/admin/accounts` 的账户列表与角色控制、`/admin/sandbox_service` 的平台回退、runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
+
+只运行 UI unit tests 时使用：
+
+```bash
+cd ui && bun run test
+```
+
+`task test` 会重新构建 UI、运行同一套 Bun tests，然后执行带 race detection 和 coverage 的 Go tests。Bun suite 覆盖 helper 和 server-rendered component output；导航、dialog、头像加载/回退，以及角色变更后的权限切换仍需在真实浏览器中验证。
 
 先创建一个默认 runner spec：
 
@@ -431,14 +440,14 @@ curl -fsS -b "$COOKIE_JAR" \
 常见问题：
 
 - `invalid signature`：GitHub webhook secret 和 `github.webhook_secret` 不一致。
-- `runner concurrency limit reached`：活跃 request 数量达到 `worker.max_concurrent_runners`。
+- `runner start deferred because global concurrency is at capacity` 或 `runner start deferred because profile is at capacity`：request 会保持 queued，直到全局或 per-spec 容量可用。
 - GitHub job 一直 queued：workflow 的 `runs-on` labels 必须包含 `self-hosted` 和 `e2b`，并与 runner spec 的 labels 保持一致。
 - sandbox 创建失败：确认账户/组织 Preferences 或已启用的 admin default 具有与 template 和本地环境匹配的完整 Sandbox service 配置；Runner detail 会显示实际选择的来源。
-- registration token 失败：确认 GitHub App installation 对目标仓库有对应的 administration/self-hosted runner 权限。
+- registration token 失败：检查 [GitHub App 权限表](../../README.zh.md#github-app-权限)。未配置 `runner_group` 的 spec 需要 repository `Administration`；配置了 `runner_group` 的 spec 需要 organization `Self-hosted runners`。
 
 ## 9. GitHub Actions 日志怎么看
 
-这是 repository 级 self-hosted GitHub Actions runner。job 被 sandbox 里的 runner 接走后，workflow step 的日志会正常显示在 GitHub Actions 页面里：
+runnerd 默认创建 repository 级 self-hosted GitHub Actions runner；如果 spec 配置了 `runner_group`，则会为 repository owner 创建 organization runner。job 被 sandbox 里的 runner 接走后，workflow step 的日志会正常显示在 GitHub Actions 页面里：
 
 ```text
 Repository -> Actions -> 选择 workflow run -> 选择 job
@@ -469,7 +478,7 @@ curl -fsS -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/runner_requests/<request_id>/logs/stderr.log
 ```
 
-服务自身日志会输出到启动 `go run ./cmd/runnerd` 的终端。
+服务自身日志会输出到 runnerd 的 stdout/stderr，由启动终端或 service manager 收集。
 
 ## 10. Diagnostics / pprof
 
@@ -484,7 +493,7 @@ curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
 
 - 发现到的 pprof 地址文件
 - dump 脚本路径
-- 当前 DB 路径
+- database backend 和经过脱敏的 DSN/path
 - GitHub 鉴权模式（app、token 或 basic）
 - 最近失败的 runner request
 

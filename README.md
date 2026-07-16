@@ -20,7 +20,7 @@ The config file covers:
 - sqlite, Postgres, or MySQL database backend and DSN/path
 - sandbox lifecycle timeouts
 - GitHub webhook settings plus GitHub App, PAT, or basic auth
-- GitHub App OAuth login for the admin console
+- GitHub App OAuth sign-in for the embedded ordinary-user and admin consoles
 - worker lease / retry / concurrency settings
 
 Relative sqlite `database.dsn` and `github.app.private_key_file` paths are resolved from the directory containing `runnerd.yaml`. Legacy `database.url` is still accepted as a deprecated alias when `database.dsn` is empty.
@@ -52,7 +52,7 @@ Authenticated users can inspect Sandbox resources in the same account or organiz
 `/webhooks/github` uses GitHub HMAC signature verification. The manual management API under `/runner_requests` requires a valid GitHub OAuth admin session cookie.
 
 Runner state is persisted in a DB-backed store instead of per-request JSON directories. Control/stdout/stderr logs are kept as runner events and remain available from the admin API and UI.
-Schema creation is GORM-model driven on startup. Existing state databases are migrated by `AutoMigrate` plus a narrow compatibility pre-pass for older schema columns, so keep old-schema upgrade tests green when changing state records.
+Schema creation is GORM-model driven on startup. Existing state databases run through a narrow legacy compatibility pass before `AutoMigrate`, so keep old-schema upgrade tests green when changing state records. Upgrading a database whose legacy `account_preferences` or `account_secrets` tables predate `scope_type`/`scope_id` intentionally drops and recreates those tables. Reconfigure the affected Sandbox Preferences and API keys, and have affected users sign in with GitHub again before syncing installations.
 
 ## Run
 
@@ -101,13 +101,13 @@ docker run --rm -p 25500:25500 \
 
 Open the ordinary-user console at `http://127.0.0.1:25500/` or the admin console at `http://127.0.0.1:25500/admin/`. The UI is built from `ui/` with the same React, Vite, Tailwind CSS, shadcn-style components, and theme tokens used by `kubevirt-console`. The console offers GitHub sign-in and uses a signed HttpOnly cookie for API calls. Ordinary users see a two-column repository/PR job view at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, local activity repositories at `/repositories`, GitHub App accounts plus on-demand authorized repositories at `/account/repositories`, Sandbox service settings at `/account/preferences` or `/organizations/{login}/preferences`, and scoped resource catalogs at `/account/sandbox-templates`, `/account/sandbox-instances`, and their organization equivalents. Admin users see the management console; provider resource catalogs are not admin configuration.
 
-The admin console manages accounts and roles, runner requests, runner specs, runner groups, runner policies, the global Sandbox service fallback, retry actions, audit history, runner-spec match tests, and diagnostics. Provider template/instance catalogs remain ordinary-user resources. Runner specs, groups, and repository policies are created through the admin API/UI rather than `runnerd.yaml`. runnerd creates repository runners by default; when a matched runner spec has a GitHub runner group, it creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
+The admin console lists local accounts and manages their roles, runner requests, runner specs, runner groups, runner policies, the global Sandbox service fallback, retry actions, audit history, runner-spec match tests, and diagnostics. Provider template/instance catalogs remain ordinary-user resources. Runner specs, groups, and repository policies are created through the admin API/UI rather than `runnerd.yaml`. runnerd creates repository runners by default; when a matched runner spec has a GitHub runner group, it creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
 
 Create runner specs with meaningful names such as `ubuntu-24-04` or `ubuntu-24-04-large`; set each spec `template_id` to the Qiniu sandbox template that contains the GitHub runner image. Template access is checked when runnerd starts a sandbox with the repository owner's Sandbox service Preferences. Runner specs with `default_available: true` are globally available to allowed installed repositories. Use `github.allowed_repositories` to limit which repositories can use this runnerd instance, and use runner policies when a repository needs access to an additional/special spec.
 
 Runner requests are paginated by default: `GET /runner_requests` returns the most recent 100 rows unless `limit` and `offset` are provided, with `X-Total-Count`, `X-Limit`, `X-Offset`, and `Link` response headers. The admin console adds status, repository, and runner-spec filters on top of the current page and links each managed request to the GitHub Actions job when GitHub provides a job URL.
 
-Accounts are managed at `/admin/accounts`. Its summary cards report total accounts, administrators, users, and linked OAuth identities. `GET /admin/api/accounts` accepts `q`, `role=admin|user`, `limit`, and `offset`, and returns the matching accounts with linked OAuth identities, unfiltered account statistics, and pagination metadata. `PATCH /admin/api/accounts/{id}/role` accepts `{"role":"admin"}` or `{"role":"user"}`. An administrator cannot change their own role through this endpoint; successful changes take effect immediately and are written to the audit log.
+The Accounts page at `/admin/accounts` lists OAuth/bootstrap-created local accounts and their linked OAuth identities. Its summary cards report total accounts, administrators, users, and linked identities. `GET /admin/api/accounts` accepts `q`, `role=admin|user`, `limit`, and `offset`; statistics remain global while the list is searched, filtered, or paginated. The default page size is 20 and the maximum is 100. `PATCH /admin/api/accounts/{id}/role` is the page's only mutation and changes another account between `admin` and `user`; it cannot create or delete accounts or link or unlink identities. Self-role changes and changes that could leave the system without an administrator are rejected. Successful changes take effect immediately and create an `account.role.update` audit event.
 
 runnerd enforces both `worker.max_concurrent_runners` and per-spec `max_concurrency`. Requests above those limits remain in the DB as `queued` and are retried later; they are not dropped. Transient capacity signals such as Qiniu sandbox placement failures, HTTP 429, and GitHub secondary rate limits are treated as queue deferrals, so they keep waiting even after the normal retry counter reaches its configured cap. Other transient failures still use the configured retry backoff and eventually become `failed`; deterministic auth/config/template errors fail immediately.
 
@@ -116,8 +116,6 @@ runnerd caches valid GitHub registration tokens per repository or organization, 
 The sandbox runner installs a pre-job hook that prints the Qiniu sandbox id, runner request id, and runner name in the GitHub Actions `Set up runner` log. Use that sandbox id to find the matching instance in the Qiniu sandbox console when debugging a job.
 
 The binary also imports `github.com/jimmicro/pprof`, so a local-only pprof/expvar service is started automatically and discovered through generated `.pprof` address files and dump scripts. The admin console exposes a diagnostics page that summarizes the discovered pprof endpoint, `/debug/vars`, DB state, GitHub auth mode, retry/lease metrics, and recent failures. The expvar metrics include ARC-style workflow job counts, conclusions, failures, queue/run duration totals and counts, runner registration/cleanup counters, GitHub API operation counters, and Fireactions-style profile current/busy/idle/pending/desired gauges.
-
-![Admin console](docs/images/admin-console.png)
 
 ## Build
 
@@ -137,6 +135,8 @@ task test
 task docker-check
 task release-check
 ```
+
+`task test` rebuilds the UI, runs the Bun UI tests, and then runs the Go suite with race detection and coverage. For focused UI tests, run `cd ui && bun run test`.
 
 Use `runs-on: [self-hosted, e2b]` in the target workflow. Configure a GitHub webhook for `workflow_job` events pointing at `POST /webhooks/github`; runnerd handles `queued`, `in_progress`, and `completed` actions. You can also include `workflow_run` events as a compensating signal; runnerd lists all queued jobs in the run and enqueues any matching jobs not already seen from `workflow_job`.
 

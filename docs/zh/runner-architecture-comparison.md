@@ -12,16 +12,16 @@ runnerd 是单个 Go 服务：接收 GitHub `workflow_job` webhooks，根据 rep
 
 - File-first runtime config，默认从 `runnerd.yaml` 加载，也可通过 `--config` 指定。
 - 通过 `database.backend` 和 `database.dsn` 支持 SQLite、Postgres 和 MySQL state backends。
-- DB-backed runner requests、runner events/logs、runner specs、runner groups、repository policies、OAuth accounts 和 audit events。
+- DB-backed runner requests、runner events/logs、runner specs、runner groups、repository policies、本地 accounts、关联 OAuth identities、account preferences/secrets 和 audit events。
 - Account 和 GitHub installation scoped Preferences 用于 Sandbox service settings，API keys 作为 encrypted account secrets 保存。
 - 独立于 account preferences 的 admin-managed Sandbox service fallback，默认关闭。
-- Schema creation 由 state record structs 中的 GORM tags 驱动，启动时执行 `AutoMigrate` 和针对旧 schema columns 的窄范围 compatibility backfills。
+- Schema creation 由 state record structs 中的 GORM tags 驱动，启动时先执行窄范围 legacy compatibility pass，再运行 `AutoMigrate`；GORM foreign-key creation 有意保持关闭。
 - 固定 runner states：`queued`、`creating`、`running`、`stopping`、`completed` 和 `failed`。
 - DB claim/lease processing，带 retry metadata（`retry_count`、`next_retry_at`、`lease_owner`、`lease_expires_at`）。
 - GitHub App auth 支持可选 dynamic installation resolution，同时保留 token 和 basic auth compatibility modes。
-- GitHub App OAuth login 用于 admin console，本地 roles 和 signed HttpOnly sessions。
+- GitHub App OAuth 用于普通用户和管理员登录，本地 roles 决定管理权限，session 使用 signed HttpOnly cookie。
 - Ordinary-user UI 支持 PR/job views、local activity repositories、GitHub App installations、authorized repositories、account 或 organization scoped Sandbox service Preferences，以及 scoped Sandbox template 和 runner-instance catalogs。
-- Admin API 和 UI 支持 runner requests、specs、groups、policies、全局 Sandbox service fallback、retry/stop actions、match tests、audit history 和 diagnostics。
+- Admin API 和 UI 支持账户列表与带审计的角色控制、runner requests、specs、groups、policies、全局 Sandbox service fallback、retry/stop actions、match tests、audit history 和 diagnostics。
 - Production UI assets 从 `ui/` 构建到 `internal/server/ui/`；development assets 代理到 Vite。
 - 通过 `github.com/jimmicro/pprof`、`/diagnostics/pprof`、`/diagnostics/vars` 和 expvar metrics 提供 diagnostics。
 
@@ -32,6 +32,7 @@ runnerd 是单个 Go 服务：接收 GitHub `workflow_job` webhooks，根据 rep
 - Token 和 basic auth 仍作为 compatibility modes 存在。产品策略尚未决定是否为生产长期保留。
 - 在用两个 runnerd 进程连接同一个 database 验证前，不应宣传 multi-instance support。
 - Sandbox provider catalogs 是普通用户资源，不是 admin 配置。`GET /user/sandbox/templates` 和 `GET /user/sandbox/instances` 会先解析 scoped credentials，再尝试已启用的 admin fallback，只接受支持的 region id，并把 secrets 保留在服务端。
+- Account 管理仅包含角色控制：account 和 identity link 仍由 OAuth/bootstrap 创建。系统拒绝修改自身角色，以及可能导致没有管理员的变更。
 
 ## 架构总览
 
@@ -260,7 +261,7 @@ Runner state 是 database-backed。Worker 使用 lease metadata claim runnable r
 
 核心路径有意使用 portable DB semantics，而不是依赖 Postgres-only locking features。SQLite 对本地和小型 single-node deployments 仍有效；Postgres 和 MySQL 可用于更 durable deployments，但 multi-process validation 仍待完成。
 
-Schema source of truth 位于 `internal/state/records.go`。Startup migration 会先在 `internal/state/db.go` 中运行窄范围 legacy-column compatibility pass，再运行 GORM `AutoMigrate`。这样 fresh database creation 仍保持 model-driven，同时保留已知旧 sqlite upgrade paths，例如 `runner_profiles.default_available` 和 `repository_policies.runner_group_name`。
+Schema source of truth 位于 `internal/state/records.go`。Startup migration 会先在 `internal/state/db.go` 中运行窄范围 legacy compatibility pass，再运行 GORM `AutoMigrate`。这样 fresh database creation 仍保持 model-driven，并保留缺失 columns 和 obsolete OAuth constraints 的已知旧 sqlite upgrade paths。缺少 scope columns 的不兼容 legacy account preference/secret tables 会被有意删除并重建，其中的数据不会迁移。运维人员必须重新配置受影响的 Sandbox settings/API keys，相关用户还需重新通过 GitHub 认证后才能同步 installations。
 
 ## Diagnostics
 

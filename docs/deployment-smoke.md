@@ -1,15 +1,17 @@
 # Deployment Smoke Checklist
 
+[Chinese](zh/deployment-smoke.md)
+
 Use this checklist before treating a runnerd deployment as ready for real GitHub Actions traffic.
 
 ## Prerequisites
 
-- A runnerd deployment reachable over HTTPS for GitHub webhooks and admin login.
+- A runnerd deployment reachable over HTTPS for GitHub webhooks and console sign-in.
 - A `runnerd.yaml` with `database`, `auth`, `github`, and `worker` sections configured.
 - A GitHub.com App installed on the target repository or organization.
 - The GitHub App has the [required repository and organization permissions](../README.md#github-app-permissions) for the runner modes used by this deployment.
 - A GitHub App OAuth callback URL pointing at `/auth/github/callback` on the runnerd origin.
-- A repository webhook delivering `workflow_job` events to `POST /webhooks/github`.
+- A GitHub App webhook or repository webhook delivering `workflow_job` events to `POST /webhooks/github`.
 - Sandbox service API URL and API key configured in the target account/organization Preferences page, or an enabled admin fallback at `/admin/sandbox_service`.
 - At least one Qiniu sandbox template that contains `/opt/actions-runner/config.sh` and `/opt/actions-runner/run.sh`.
 - An admin account bootstrapped with `runnerd --bootstrap-admin github:<github-user-id>`.
@@ -33,6 +35,22 @@ https://<runnerd-host>/admin/
 ```
 
 Expected result: GitHub OAuth completes and the signed session has `role: admin`.
+
+Open the Accounts page with at least one secondary account:
+
+```text
+https://<runnerd-host>/admin/accounts
+```
+
+Check:
+
+- Summary totals stay global while search, role filters, page size, and pagination change the account list.
+- Linked GitHub identities load the avatar derived from their login and fall back to account initials if it is unavailable.
+- The current administrator's role control is disabled.
+- A `role: user` session is rejected by both the accounts list and role-update APIs, and an administrator's direct attempt to patch their own role returns a conflict.
+- Changing a secondary account from `user` to `admin` takes effect immediately and creates an `account.role.update` audit event.
+- With exactly two administrators and two signed-in sessions, concurrent cross-demotion attempts cannot both succeed; at least one administrator remains.
+- After all role checks, use the surviving administrator to restore the original administrator if needed, then use the intended administrator to restore the secondary account's role.
 
 ## 2. Diagnostics
 
@@ -87,7 +105,7 @@ Expected result: the response includes the intended runner spec.
 
 ## 4. Webhook Delivery
 
-In the target repository webhook settings, send a recent delivery or trigger a new workflow.
+In the GitHub App or target repository webhook settings, send a recent delivery or trigger a new workflow.
 
 Expected result:
 
