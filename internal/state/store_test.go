@@ -2726,6 +2726,63 @@ func TestMigrateRepairsMissingRunnerRequestInstallationID(t *testing.T) {
 	}
 }
 
+func TestMigrateDoesNotRewriteUnrecoverableRunnerRequestInstallationID(t *testing.T) {
+	dir := t.TempDir()
+	databaseURL := dir + "/runnerd.db"
+	store := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: true,
+	}).(*DBStore)
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflowJobID := int64(87401142868)
+	now := time.Now().UTC()
+	record := runnerRequestRecord{
+		ID:                      "87401142868",
+		Source:                  "github_webhook",
+		WorkflowJobID:           &workflowJobID,
+		GitHubContextBackfilled: true,
+		RepositoryFullName:      "qbox/las",
+		RequestedLabelsJSON:     `["github-runner-ubuntu-24-04"]`,
+		LabelsJSON:              `["self-hosted","e2b","github-runner-ubuntu-24-04"]`,
+		ProfileName:             "github-runner-ubuntu-24-04",
+		RunnerGroup:             "Default",
+		RunnerName:              "e2b-87401142868",
+		Status:                  StatusCompleted,
+		GitHubPayloadJSON:       `{"installation":null}`,
+		QueuedAt:                now.Add(-time.Minute),
+		UpdatedAt:               now,
+	}
+	if err := db.Create(&record).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TRIGGER reject_unrecoverable_installation_rewrite
+		BEFORE UPDATE ON runner_requests
+		WHEN OLD.id = '87401142868'
+		BEGIN
+			SELECT RAISE(ABORT, 'unrecoverable installation row was rewritten');
+		END`).Error; err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	for start := 1; start <= 2; start++ {
+		migrated := NewWithOptions(Options{
+			Backend:        BackendSQLite,
+			DatabaseDSN:    databaseURL,
+			MigrateOnStart: true,
+		}).(*DBStore)
+		db, err = migrated.dbOrEnsure()
+		if err != nil {
+			t.Fatalf("migration start %d rewrote unrecoverable installation row: %v", start, err)
+		}
+		closeTestDB(t, db)
+	}
+}
+
 func TestMigrateSQLiteRunnerRequestSnapshot(t *testing.T) {
 	sourcePath := strings.TrimSpace(os.Getenv("RUNNERD_SQLITE_SNAPSHOT"))
 	if sourcePath == "" {

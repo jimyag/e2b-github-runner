@@ -198,10 +198,10 @@ func migrateSQLiteRunnerRequestSchema(db *gorm.DB) error {
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
 		for _, field := range stmt.Schema.Fields {
-			if field.IgnoreMigration || field.DBName == "" || tx.Migrator().HasColumn(&runnerRequestRecord{}, field.DBName) {
+			if field.IgnoreMigration || field.DBName == "" || tx.Migrator().HasColumn(&runnerRequestRecord{}, field.Name) {
 				continue
 			}
-			if err := tx.Migrator().AddColumn(&runnerRequestRecord{}, field.DBName); err != nil {
+			if err := tx.Migrator().AddColumn(&runnerRequestRecord{}, field.Name); err != nil {
 				return fmt.Errorf("add runner_requests.%s: %w", field.DBName, err)
 			}
 		}
@@ -267,6 +267,9 @@ func backfillRunnerRequestGitHubContext(db *gorm.DB) error {
 			return tx.Transaction(func(batchTx *gorm.DB) error {
 				for _, record := range records {
 					updates := runnerRequestGitHubContextBackfill(record)
+					if len(updates) == 0 {
+						continue
+					}
 					if err := batchTx.Model(&runnerRequestRecord{}).Where("id = ?", record.ID).UpdateColumns(updates).Error; err != nil {
 						return err
 					}
@@ -278,8 +281,9 @@ func backfillRunnerRequestGitHubContext(db *gorm.DB) error {
 
 func runnerRequestGitHubContextBackfill(record runnerRequestRecord) map[string]any {
 	links := githubLinksFromPayload(record)
-	updates := map[string]any{
-		"github_context_backfilled": true,
+	updates := make(map[string]any)
+	if !record.GitHubContextBackfilled {
+		updates["github_context_backfilled"] = true
 	}
 	if record.GitHubInstallationID == 0 {
 		if installationID := githubInstallationIDFromPayload(record.GitHubPayloadJSON); installationID > 0 {
