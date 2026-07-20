@@ -28,6 +28,20 @@ Use sqlite for local and small single-node deployments. Postgres and MySQL are s
 GitHub Enterprise Server is not currently supported; configure a GitHub.com App installation.
 Configure exactly one GitHub auth method: `github.app`, `github.token`, or `github.basic_auth`. For GitHub App auth, `github.app.installation_id` is optional. When it is omitted, runnerd resolves the installation from each job repository and caches installation transports, allowing one GitHub App to serve multiple installed accounts.
 
+### Config value obfuscation
+
+Sensitive scalar fields can use `RUNNERD_ENC(v1:...)` values so `runnerd.yaml` does not display their plaintext directly. Build runnerd, read the value without terminal echo, and generate an obfuscated value from stdin:
+
+```bash
+read -r -s secret_value
+printf '%s' "$secret_value" | ./bin/runnerd --obfuscate-config-value
+unset secret_value
+```
+
+Paste the output in place of the original value. Plaintext remains supported for compatibility. Obfuscation applies to `database.dsn`/`database.url`, `auth.session_secret`, `auth.encryption_key`, `github.webhook_secret`, `github.token`, `github.basic_auth.password`, and `github.oauth.client_secret`. These runtime values are also masked as `******` by their default text, structured-log, JSON, and YAML representations; application code must explicitly request the plaintext when using them.
+
+This feature prevents direct disclosure through casual config inspection or accidental logging. It is not encryption against a host user who can inspect or execute runnerd, because the decoding key is embedded in the binary. Continue to keep configuration files out of source control and restrict access wherever the host permits.
+
 ### GitHub App permissions
 
 When GitHub App auth is used, configure only the permissions below. The required runner-management permission depends on whether the matched runner spec sets `runner_group`.

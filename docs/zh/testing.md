@@ -55,6 +55,8 @@ worker:
   retry_max_attempts: 5
 ```
 
+如果需要避免敏感值被直接展示，先构建 runnerd，再将每个原值通过 stdin 传给 `./bin/runnerd --obfuscate-config-value`，然后把生成的 `RUNNERD_ENC(v1:...)` 填入 YAML。明文配置仍保持兼容。支持的字段包括 `database.dsn`/`database.url`、`auth.session_secret`、`auth.encryption_key`、`github.webhook_secret`、`github.token`、`github.basic_auth.password` 和 `github.oauth.client_secret`。运行时包装类型还会在意外的文本格式、结构化日志、JSON 和 YAML 输出中显示掩码。该能力仅用于混淆：解码 key 位于 runnerd 内，能够检查或执行二进制的主机用户仍可恢复原值。
+
 Sandbox service API URL 和 API Key 不在 `runnerd.yaml` 中配置。登录后可在账户或组织的 Preferences 页面配置 scoped credentials，也可由管理员在 `/admin/sandbox_service` 配置默认关闭的平台回退。fallback audience 为 `all` 或 `selected`；selected entries 按仓库 owner 的稳定 GitHub account ID 和 type 匹配。API Key 使用 `auth.encryption_key` 加密保存。解析顺序为 runner request 已保存快照、installation custom/inherited 配置、符合条件的个人账户配置、已启用且 audience eligible 的 admin default，最后才是未配置错误。
 
 Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置；服务启动后通过后台页面或 admin API 创建。spec 名称建议使用有意义的名字，例如 `ubuntu-24-04`，`template_id` 填对应的 Qiniu sandbox template ID。template 是否可访问会在 runnerd 使用对应账户或组织的 Sandbox service 配置启动 sandbox 时确认。

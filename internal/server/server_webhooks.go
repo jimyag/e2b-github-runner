@@ -22,7 +22,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "read body")
 		return
 	}
-	if !github.VerifyWebhookSignature(s.cfg.GitHubWebhookSecret, body, r.Header.Get("X-Hub-Signature-256")) {
+	if !github.VerifyWebhookSignature(s.cfg.GitHubWebhookSecret.Value(), body, r.Header.Get("X-Hub-Signature-256")) {
 		s.logger.Warn("github webhook signature rejected", "event", r.Header.Get("X-GitHub-Event"), "delivery", r.Header.Get("X-GitHub-Delivery"))
 		writeError(w, http.StatusUnauthorized, "invalid signature")
 		return

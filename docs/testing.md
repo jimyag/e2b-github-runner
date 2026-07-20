@@ -57,6 +57,8 @@ worker:
   retry_max_attempts: 5
 ```
 
+To hide sensitive values from direct display, build runnerd and pipe each value through `./bin/runnerd --obfuscate-config-value`; paste the resulting `RUNNERD_ENC(v1:...)` value into the YAML. Plaintext values remain compatible. Supported fields are `database.dsn`/`database.url`, `auth.session_secret`, `auth.encryption_key`, `github.webhook_secret`, `github.token`, `github.basic_auth.password`, and `github.oauth.client_secret`. Their runtime wrapper masks accidental text, structured-log, JSON, and YAML output. This is obfuscation only: the decoding key is part of runnerd, so a host user able to inspect or execute the binary can recover the value.
+
 Sandbox service API URL and API Key are not configured in `runnerd.yaml`. After signing in, configure scoped credentials on the account or organization Preferences page, or configure the disabled-by-default platform fallback at `/admin/sandbox_service`. The fallback audience is either `all` or `selected`; selected entries match the repository owner's stable GitHub account ID and type. The API Key is encrypted with `auth.encryption_key`. Resolution order is a saved runner-request snapshot, installation custom/inherited settings, an eligible personal account, the enabled and audience-eligible admin default, then a not-configured error.
 
 Runner spec, runner group, and repository policy are not `runnerd.yaml` fields. Create them from the admin page or admin API after the service starts. Use meaningful spec names such as `ubuntu-24-04`; set `template_id` to the matching Qiniu sandbox template ID. Template access is checked when runnerd starts a sandbox with the account or organization Sandbox service config.

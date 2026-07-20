@@ -301,7 +301,7 @@ func (s *Server) githubInstallationLinkedToAccount(accountID, installationID int
 }
 
 func (s *Server) sandboxServiceForConfig(snapshot sandboxServiceConfigSnapshot) (sandboxrunner.Service, error) {
-	apiKey, err := decryptSecret(snapshot.EncryptedAPIKey, s.cfg.AuthEncryptionKey)
+	apiKey, err := decryptSecret(snapshot.EncryptedAPIKey, s.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		return nil, err
 	}

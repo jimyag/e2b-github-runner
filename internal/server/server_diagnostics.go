@@ -45,7 +45,7 @@ func (s *Server) handleDiagnosticsPprof(w http.ResponseWriter, r *http.Request) 
 		"pprof": out,
 		"state": map[string]any{
 			"backend":  s.cfg.StateBackend,
-			"database": redact.DatabaseDSN(s.cfg.StateDatabaseDSN),
+			"database": redact.DatabaseDSN(s.cfg.StateDatabaseDSN.Value()),
 		},
 		"github": map[string]any{
 			"auth_mode":       s.cfg.GitHubAuthMode(),

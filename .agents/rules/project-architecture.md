@@ -5,6 +5,7 @@
 - `runnerd` is a single Go service that receives GitHub `workflow_job` webhooks, admits jobs by repository and labels, creates Qiniu sandboxes, registers ephemeral GitHub Actions self-hosted runners, and cleans them up.
 - Runtime config is file-first. `runnerd` reads `./runnerd.yaml` by default, or another path passed with `--config`.
 - Local development should use `runnerd.local.yaml` for secrets and sqlite state.
+- Sensitive scalar config fields use `config.Secret` and accept plaintext or `RUNNERD_ENC(v1:...)`. Obfuscated values are decoded while loading, and callers must use `Value()` explicitly; default text, slog, JSON, and YAML output stays masked. This is only display/log obfuscation because runnerd embeds the decoding key, not an authorization or host-compromise boundary.
 - Relative sqlite `database.dsn` and `github.app.private_key_file` paths resolve from the directory containing the config file. Legacy `database.url` remains a deprecated alias when `database.dsn` is empty.
 
 ## Admin And UI

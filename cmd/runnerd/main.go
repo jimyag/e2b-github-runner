@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,8 +22,16 @@ import (
 func main() {
 	configPath := flag.String("config", "runnerd.yaml", "path to runnerd config file")
 	bootstrapAdmin := flag.String("bootstrap-admin", "", "bootstrap an admin account as provider:subject, for example github:12345678")
+	obfuscateConfigValue := flag.Bool("obfuscate-config-value", false, "read a secret from stdin and print a RUNNERD_ENC value")
 	flag.Parse()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if *obfuscateConfigValue {
+		if err := writeObfuscatedConfigValue(os.Stdin, os.Stdout); err != nil {
+			logger.Error("obfuscate config value", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		logger.Error("load config", "error", err)
@@ -30,7 +39,7 @@ func main() {
 	}
 	store := state.NewWithOptions(state.Options{
 		Backend:        cfg.StateBackend,
-		DatabaseDSN:    cfg.StateDatabaseDSN,
+		DatabaseDSN:    cfg.StateDatabaseDSN.Value(),
 		MigrateOnStart: true,
 	})
 	if err := store.Ensure(); err != nil {
@@ -55,9 +64,9 @@ func main() {
 			os.Exit(1)
 		}
 	case "token":
-		gh = github.NewTokenClient(cfg.GitHubAPIBaseURL, cfg.GitHubToken, githubHTTPClient)
+		gh = github.NewTokenClient(cfg.GitHubAPIBaseURL, cfg.GitHubToken.Value(), githubHTTPClient)
 	case "basic":
-		gh = github.NewBasicAuthClient(cfg.GitHubAPIBaseURL, cfg.GitHubBasicAuthUsername, cfg.GitHubBasicAuthPassword, githubHTTPClient)
+		gh = github.NewBasicAuthClient(cfg.GitHubAPIBaseURL, cfg.GitHubBasicAuthUsername, cfg.GitHubBasicAuthPassword.Value(), githubHTTPClient)
 	default:
 		logger.Error("unsupported github auth mode", "mode", cfg.GitHubAuthMode())
 		os.Exit(1)
@@ -80,11 +89,32 @@ func main() {
 		IdleTimeout:       cfg.HTTPIdleTimeout,
 		MaxHeaderBytes:    1 << 20,
 	}
-	logger.Info("starting server", "addr", cfg.HTTPAddr, "state_backend", cfg.StateBackend, "state_database_dsn", redact.DatabaseDSN(cfg.StateDatabaseDSN))
+	logger.Info("starting server", "addr", cfg.HTTPAddr, "state_backend", cfg.StateBackend, "state_database_dsn", redact.DatabaseDSN(cfg.StateDatabaseDSN.Value()))
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func writeObfuscatedConfigValue(input io.Reader, output io.Writer) error {
+	const maxSecretBytes = 1 << 20
+	value, err := io.ReadAll(io.LimitReader(input, maxSecretBytes+1))
+	if err != nil {
+		return fmt.Errorf("read secret from stdin: %w", err)
+	}
+	if len(value) > maxSecretBytes {
+		return fmt.Errorf("secret input exceeds %d bytes", maxSecretBytes)
+	}
+	value = []byte(strings.TrimSuffix(strings.TrimSuffix(string(value), "\n"), "\r"))
+	if len(value) == 0 {
+		return fmt.Errorf("secret input is empty")
+	}
+	encoded, err := config.ObfuscateSecret(string(value))
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(output, encoded)
+	return err
 }
 
 func bootstrapAdminAccount(store state.Store, identity string) error {

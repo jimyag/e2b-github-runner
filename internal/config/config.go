@@ -17,21 +17,21 @@ type Config struct {
 	HTTPIdleTimeout           time.Duration
 	StateDir                  string
 	StateBackend              string
-	StateDatabaseDSN          string
+	StateDatabaseDSN          Secret
 	GitHubAppID               int64
 	GitHubAppInstallationID   int64
 	GitHubAppSlug             string
 	GitHubAppPrivateKeyFile   string
-	GitHubToken               string
+	GitHubToken               Secret
 	GitHubBasicAuthUsername   string
-	GitHubBasicAuthPassword   string
-	GitHubWebhookSecret       string
+	GitHubBasicAuthPassword   Secret
+	GitHubWebhookSecret       Secret
 	GitHubAllowedRepositories []string
-	AuthSessionSecret         string
-	AuthEncryptionKey         string
+	AuthSessionSecret         Secret
+	AuthEncryptionKey         Secret
 	AuthSessionTTL            time.Duration
 	GitHubOAuthClientID       string
-	GitHubOAuthClientSecret   string
+	GitHubOAuthClientSecret   Secret
 	GitHubOAuthRedirectURL    string
 	SandboxTimeout            time.Duration
 	SandboxCreateTimeout      time.Duration
@@ -56,12 +56,12 @@ type fileConfig struct {
 	} `yaml:"server"`
 	Database struct {
 		Backend   string `yaml:"backend"`
-		DSN       string `yaml:"dsn"`
-		LegacyURL string `yaml:"url"`
+		DSN       Secret `yaml:"dsn"`
+		LegacyURL Secret `yaml:"url"`
 	} `yaml:"database"`
 	Auth struct {
-		EncryptionKey   string `yaml:"encryption_key"`
-		SessionSecret   string `yaml:"session_secret"`
+		EncryptionKey   Secret `yaml:"encryption_key"`
+		SessionSecret   Secret `yaml:"session_secret"`
 		SessionTTLHours int    `yaml:"session_ttl_hours"`
 	} `yaml:"auth"`
 	Sandbox struct {
@@ -70,15 +70,15 @@ type fileConfig struct {
 		StopTimeoutSec   int `yaml:"stop_timeout_seconds"`
 	} `yaml:"sandbox"`
 	GitHub struct {
-		WebhookSecret       string   `yaml:"webhook_secret"`
+		WebhookSecret       Secret   `yaml:"webhook_secret"`
 		APIBaseURL          string   `yaml:"api_base_url"`
 		AllowedRepositories []string `yaml:"allowed_repositories"`
 		Owner               string   `yaml:"owner"`
 		Repo                string   `yaml:"repo"`
-		Token               string   `yaml:"token"`
+		Token               Secret   `yaml:"token"`
 		BasicAuth           struct {
 			Username string `yaml:"username"`
-			Password string `yaml:"password"`
+			Password Secret `yaml:"password"`
 		} `yaml:"basic_auth"`
 		App struct {
 			ID             int64  `yaml:"id"`
@@ -88,7 +88,7 @@ type fileConfig struct {
 		} `yaml:"app"`
 		OAuth struct {
 			ClientID     string `yaml:"client_id"`
-			ClientSecret string `yaml:"client_secret"`
+			ClientSecret Secret `yaml:"client_secret"`
 			RedirectURL  string `yaml:"redirect_url"`
 		} `yaml:"oauth"`
 	} `yaml:"github"`
@@ -132,7 +132,7 @@ func LoadFile(path string) (Config, error) {
 		HTTPWriteTimeout:          durationSeconds(raw.Server.WriteTimeoutSec, 60),
 		HTTPIdleTimeout:           durationSeconds(raw.Server.IdleTimeoutSec, 120),
 		StateBackend:              strings.ToLower(defaultString(raw.Database.Backend, "sqlite")),
-		StateDatabaseDSN:          defaultString(raw.Database.DSN, raw.Database.LegacyURL),
+		StateDatabaseDSN:          defaultSecret(raw.Database.DSN, raw.Database.LegacyURL),
 		GitHubAppID:               raw.GitHub.App.ID,
 		GitHubAppInstallationID:   raw.GitHub.App.InstallationID,
 		GitHubAppSlug:             strings.TrimSpace(raw.GitHub.App.Slug),
@@ -142,11 +142,11 @@ func LoadFile(path string) (Config, error) {
 		GitHubBasicAuthPassword:   raw.GitHub.BasicAuth.Password,
 		GitHubWebhookSecret:       raw.GitHub.WebhookSecret,
 		GitHubAllowedRepositories: normalizePatterns(raw.GitHub.AllowedRepositories),
-		AuthEncryptionKey:         strings.TrimSpace(raw.Auth.EncryptionKey),
-		AuthSessionSecret:         strings.TrimSpace(raw.Auth.SessionSecret),
+		AuthEncryptionKey:         Secret(strings.TrimSpace(raw.Auth.EncryptionKey.Value())),
+		AuthSessionSecret:         Secret(strings.TrimSpace(raw.Auth.SessionSecret.Value())),
 		AuthSessionTTL:            durationHours(raw.Auth.SessionTTLHours, 12),
 		GitHubOAuthClientID:       strings.TrimSpace(raw.GitHub.OAuth.ClientID),
-		GitHubOAuthClientSecret:   strings.TrimSpace(raw.GitHub.OAuth.ClientSecret),
+		GitHubOAuthClientSecret:   Secret(strings.TrimSpace(raw.GitHub.OAuth.ClientSecret.Value())),
 		GitHubOAuthRedirectURL:    strings.TrimSpace(raw.GitHub.OAuth.RedirectURL),
 		SandboxTimeout:            durationSeconds(raw.Sandbox.TimeoutSec, 3600),
 		SandboxCreateTimeout:      durationSeconds(raw.Sandbox.CreateTimeoutSec, 120),
@@ -162,12 +162,12 @@ func LoadFile(path string) (Config, error) {
 		ConfigPath:                path,
 	}
 	if cfg.StateBackend == "sqlite" {
-		if strings.TrimSpace(cfg.StateDatabaseDSN) == "" {
-			cfg.StateDatabaseDSN = filepath.Join(configDir, "var", "runnerd.db")
+		if strings.TrimSpace(cfg.StateDatabaseDSN.Value()) == "" {
+			cfg.StateDatabaseDSN = Secret(filepath.Join(configDir, "var", "runnerd.db"))
 		} else {
-			cfg.StateDatabaseDSN = resolveConfigPath(configDir, cfg.StateDatabaseDSN)
+			cfg.StateDatabaseDSN = Secret(resolveConfigPath(configDir, cfg.StateDatabaseDSN.Value()))
 		}
-		cfg.StateDir = filepath.Dir(cfg.StateDatabaseDSN)
+		cfg.StateDir = filepath.Dir(cfg.StateDatabaseDSN.Value())
 	}
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
@@ -176,10 +176,10 @@ func LoadFile(path string) (Config, error) {
 }
 
 func (c Config) GitHubAuthMode() string {
-	if strings.TrimSpace(c.GitHubToken) != "" {
+	if strings.TrimSpace(c.GitHubToken.Value()) != "" {
 		return "token"
 	}
-	if strings.TrimSpace(c.GitHubBasicAuthUsername) != "" || strings.TrimSpace(c.GitHubBasicAuthPassword) != "" {
+	if strings.TrimSpace(c.GitHubBasicAuthUsername) != "" || strings.TrimSpace(c.GitHubBasicAuthPassword.Value()) != "" {
 		return "basic"
 	}
 	if c.GitHubAppID == 0 && c.GitHubAppInstallationID == 0 && strings.TrimSpace(c.GitHubAppPrivateKeyFile) == "" {
@@ -191,7 +191,7 @@ func (c Config) GitHubAuthMode() string {
 func (c Config) validate() error {
 	var missing []string
 	for path, value := range map[string]string{
-		"github.webhook_secret": c.GitHubWebhookSecret,
+		"github.webhook_secret": c.GitHubWebhookSecret.Value(),
 	} {
 		if strings.TrimSpace(value) == "" {
 			missing = append(missing, path)
@@ -207,15 +207,15 @@ func (c Config) validate() error {
 			missing = append(missing, "github.app.private_key_file")
 		}
 	}
-	if strings.TrimSpace(c.GitHubToken) != "" {
+	if strings.TrimSpace(c.GitHubToken.Value()) != "" {
 		authModes++
 	}
-	if strings.TrimSpace(c.GitHubBasicAuthUsername) != "" || strings.TrimSpace(c.GitHubBasicAuthPassword) != "" {
+	if strings.TrimSpace(c.GitHubBasicAuthUsername) != "" || strings.TrimSpace(c.GitHubBasicAuthPassword.Value()) != "" {
 		authModes++
 		if strings.TrimSpace(c.GitHubBasicAuthUsername) == "" {
 			missing = append(missing, "github.basic_auth.username")
 		}
-		if strings.TrimSpace(c.GitHubBasicAuthPassword) == "" {
+		if strings.TrimSpace(c.GitHubBasicAuthPassword.Value()) == "" {
 			missing = append(missing, "github.basic_auth.password")
 		}
 	}
@@ -231,10 +231,10 @@ func (c Config) validate() error {
 	if strings.TrimRight(c.GitHubAPIBaseURL, "/") != defaultGitHubAPIBaseURL {
 		return fmt.Errorf("invalid config github.api_base_url: only %s is supported", defaultGitHubAPIBaseURL)
 	}
-	if strings.TrimSpace(c.StateDatabaseDSN) == "" {
+	if strings.TrimSpace(c.StateDatabaseDSN.Value()) == "" {
 		missing = append(missing, "database.dsn")
 	}
-	if strings.TrimSpace(c.AuthEncryptionKey) == "" {
+	if strings.TrimSpace(c.AuthEncryptionKey.Value()) == "" {
 		missing = append(missing, "auth.encryption_key")
 	}
 	if len(missing) > 0 {
@@ -244,10 +244,10 @@ func (c Config) validate() error {
 	if strings.TrimSpace(c.GitHubOAuthClientID) == "" {
 		oauthMissing = append(oauthMissing, "github.oauth.client_id")
 	}
-	if strings.TrimSpace(c.GitHubOAuthClientSecret) == "" {
+	if strings.TrimSpace(c.GitHubOAuthClientSecret.Value()) == "" {
 		oauthMissing = append(oauthMissing, "github.oauth.client_secret")
 	}
-	if strings.TrimSpace(c.AuthSessionSecret) == "" {
+	if strings.TrimSpace(c.AuthSessionSecret.Value()) == "" {
 		oauthMissing = append(oauthMissing, "auth.session_secret")
 	}
 	if len(oauthMissing) > 0 {
@@ -264,8 +264,8 @@ func (c Config) validate() error {
 
 func (c Config) GitHubOAuthEnabled() bool {
 	return strings.TrimSpace(c.GitHubOAuthClientID) != "" &&
-		strings.TrimSpace(c.GitHubOAuthClientSecret) != "" &&
-		strings.TrimSpace(c.AuthSessionSecret) != ""
+		strings.TrimSpace(c.GitHubOAuthClientSecret.Value()) != "" &&
+		strings.TrimSpace(c.AuthSessionSecret.Value()) != ""
 }
 
 func (c Config) RepositoryAllowed(repository string) bool {
@@ -286,6 +286,13 @@ func (c Config) RepositoryAllowed(repository string) bool {
 
 func defaultString(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
+		return fallback
+	}
+	return value
+}
+
+func defaultSecret(value, fallback Secret) Secret {
+	if strings.TrimSpace(value.Value()) == "" {
 		return fallback
 	}
 	return value

@@ -15,6 +15,12 @@ git diff --check
 
 Also inspect the diff and keep `docs/README.md` aligned when adding, removing, or reclassifying docs.
 
+## Config Secret Obfuscation
+
+- Run `go test ./internal/config ./cmd/runnerd -count=1` after changing `config.Secret`, `RUNNERD_ENC(v1:...)`, or the stdin generator.
+- Cover plaintext compatibility, obfuscation round trips, malformed/tampered value rejection, and masking through fmt, slog, JSON, and YAML.
+- When adding a sensitive config field, type it as `config.Secret`, call `Value()` only where plaintext is required, and update the supported-field lists in `README.md`, `README.zh.md`, `docs/testing.md`, and `docs/zh/testing.md`.
+
 ## State Schema
 
 When touching `internal/state/records.go`, GORM tags, indexes, or migration helpers in `internal/state/db.go`, run:

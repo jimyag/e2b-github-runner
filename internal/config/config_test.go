@@ -48,7 +48,7 @@ worker:
 	if cfg.StateBackend != "sqlite" {
 		t.Fatalf("unexpected state backend: %s", cfg.StateBackend)
 	}
-	if cfg.StateDatabaseDSN != filepath.Join(dir, "runnerd.db") {
+	if cfg.StateDatabaseDSN.Value() != filepath.Join(dir, "runnerd.db") {
 		t.Fatalf("unexpected database dsn: %s", cfg.StateDatabaseDSN)
 	}
 	if cfg.GitHubAuthMode() != "app" {
@@ -454,7 +454,7 @@ github:
 		t.Fatal(err)
 	}
 	want := filepath.Join(dir, "runnerd.db")
-	if cfg.StateDatabaseDSN != want {
+	if cfg.StateDatabaseDSN.Value() != want {
 		t.Fatalf("unexpected database dsn: %s, want %s", cfg.StateDatabaseDSN, want)
 	}
 }

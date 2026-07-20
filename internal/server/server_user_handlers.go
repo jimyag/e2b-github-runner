@@ -382,7 +382,7 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 		}
 		value = accountSandboxServicePreferenceValue{APIURL: apiURL}
 		if apiKey != "" {
-			encryptedAPIKey, err := encryptSecret(apiKey, s.cfg.AuthEncryptionKey)
+			encryptedAPIKey, err := encryptSecret(apiKey, s.cfg.AuthEncryptionKey.Value())
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err.Error())
 				return

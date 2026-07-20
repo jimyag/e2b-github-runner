@@ -114,7 +114,7 @@ func (s *Server) handleGitHubOAuthCallback(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "save github oauth account")
 		return
 	}
-	encryptedToken, err := encryptSecret(token, s.cfg.AuthEncryptionKey)
+	encryptedToken, err := encryptSecret(token, s.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		s.logger.Warn("github oauth token encrypt failed", "login", user.Login, "error", err)
 		writeError(w, http.StatusInternalServerError, "save github oauth token")
@@ -208,7 +208,7 @@ func (u githubOAuthUser) Subject() string {
 func (s *Server) exchangeGitHubOAuthCode(ctx context.Context, code, redirectURL string) (string, error) {
 	values := url.Values{
 		"client_id":     {s.cfg.GitHubOAuthClientID},
-		"client_secret": {s.cfg.GitHubOAuthClientSecret},
+		"client_secret": {s.cfg.GitHubOAuthClientSecret.Value()},
 		"code":          {code},
 	}
 	if redirectURL != "" {

@@ -28,6 +28,20 @@ cp runnerd.yaml.example runnerd.yaml
 当前不支持 GitHub Enterprise Server；请配置 GitHub.com App installation。
 GitHub 鉴权方式必须三选一：`github.app`、`github.token` 或 `github.basic_auth`。使用 GitHub App auth 时，`github.app.installation_id` 是可选的；省略时，runnerd 会按每个 job repository 动态解析 installation，并缓存 installation transports，因此一个 GitHub App 可以服务多个已安装账号。
 
+### 配置值混淆
+
+敏感标量字段可以使用 `RUNNERD_ENC(v1:...)`，避免在 `runnerd.yaml` 中直接展示明文。先构建 runnerd，再以不回显的方式读取原值，并从 stdin 生成混淆值：
+
+```bash
+read -r -s secret_value
+printf '%s' "$secret_value" | ./bin/runnerd --obfuscate-config-value
+unset secret_value
+```
+
+将输出替换原配置值即可；为保持兼容，明文仍然可用。支持混淆的字段包括 `database.dsn`/`database.url`、`auth.session_secret`、`auth.encryption_key`、`github.webhook_secret`、`github.token`、`github.basic_auth.password` 和 `github.oauth.client_secret`。这些运行时值通过默认文本格式、结构化日志、JSON 或 YAML 输出时也只显示 `******`；应用代码需要显式请求明文后才能使用。
+
+该功能用于避免直接查看配置或意外日志输出造成明文泄漏，不用于抵御能够检查或执行 runnerd 的主机用户，因为解码 key 内置在二进制中。仍应避免将配置提交到源码仓库，并在主机条件允许时限制访问。
+
 ### GitHub App 权限
 
 使用 GitHub App 鉴权时，只需配置下表中的权限。Runner 管理权限取决于匹配到的 Runner Spec 是否设置了 `runner_group`。

@@ -1,3 +1,7 @@
+# Sensitive scalar values may use RUNNERD_ENC(v1:...) output from
+# `runnerd --obfuscate-config-value`. This only hides plaintext from casual
+# inspection; runnerd contains the key needed to reveal these values.
+
 server:
   http_addr: ":25500"
   read_timeout_seconds: 15

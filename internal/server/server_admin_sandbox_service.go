@@ -103,7 +103,7 @@ func (s *Server) handleAdminSaveSandboxServiceDefault(w http.ResponseWriter, r *
 	hasAPIKey := strings.TrimSpace(current.APIKeyEncrypted) != ""
 	apiKey := strings.TrimSpace(input.APIKey)
 	if apiKey != "" {
-		encryptedAPIKey, err := encryptSecret(apiKey, s.cfg.AuthEncryptionKey)
+		encryptedAPIKey, err := encryptSecret(apiKey, s.cfg.AuthEncryptionKey.Value())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

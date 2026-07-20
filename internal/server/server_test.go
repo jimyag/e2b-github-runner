@@ -498,7 +498,7 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
 	installations, err := store.ListGitHubInstallations(account.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -568,7 +568,7 @@ func TestUserRunnerAuthorizationUsesRepositoryIntersection(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
 	for _, request := range []state.RunnerRequest{
 		{
 			ID:                   "visible-job",
@@ -747,7 +747,7 @@ func TestUserRunnerAuthorizationRejectsInvalidGitHubOAuthToken(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "expired-user-token")
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "expired-user-token")
 	if _, _, err := store.CreateRequest(state.RunnerRequest{
 		ID:                   "private-job",
 		Source:               "test",
@@ -794,7 +794,7 @@ func TestUserRunnerAuthorizationDoesNotReauthenticateOnGitHubRateLimit(t *testin
 	}); err != nil {
 		t.Fatal(err)
 	}
-	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
 	if _, _, err := store.CreateRequest(state.RunnerRequest{
 		ID:                   "private-job",
 		Source:               "test",
@@ -853,7 +853,7 @@ func TestUserRunnerAuthorizationSkipsInaccessibleInstallation(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+			saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
 			for _, request := range []state.RunnerRequest{
 				{
 					ID:                   "inaccessible-job",
@@ -937,7 +937,7 @@ func TestUserRunnerAuthorizationCachesRepositoryAccess(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
 	if _, _, err := store.CreateRequest(state.RunnerRequest{
 		ID:                   "cached-job",
 		Source:               "test",
@@ -1005,7 +1005,7 @@ func TestUserSyncGitHubInstallationsFromOAuthToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encryptedToken, err := encryptSecret("user-token", srv.cfg.AuthEncryptionKey)
+	encryptedToken, err := encryptSecret("user-token", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1108,7 +1108,7 @@ func TestUserSyncGitHubInstallationsRejectsInvalidOAuthTokenCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "expired-user-token")
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "expired-user-token")
 
 	req := httptest.NewRequest(http.MethodPost, "/user/github-app/installations/sync", nil)
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
@@ -1166,7 +1166,7 @@ func TestUserRunnerDetailLogAndTerminal(t *testing.T) {
 	store.AppendLog(st.ID, "control.log", []byte("runner request created\n"))
 	fake := &fakeSandbox{}
 	srv := newTestServer(t, store, ghServer.URL, fake)
-	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests/job-detail-1", nil)
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
@@ -1305,7 +1305,7 @@ func TestUserRunnerSiblings(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
-	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests/current/siblings", nil)
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
@@ -1443,7 +1443,7 @@ func TestUserRunnerGitHubLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
-	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey, "user-token")
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
 
 	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests/github-log-1/github-log", nil)
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
@@ -1639,7 +1639,7 @@ func TestGitHubOAuthLoginCreatesAdminSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decryptedToken, err := decryptSecret(savedToken.EncryptedValue, srv.cfg.AuthEncryptionKey)
+	decryptedToken, err := decryptSecret(savedToken.EncryptedValue, srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1749,7 +1749,7 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	if strings.Contains(saved.EncryptedValue, "sandbox-secret-key") {
 		t.Fatalf("stored sandbox api key should be encrypted, got %q", saved.EncryptedValue)
 	}
-	decrypted, err := decryptSecret(saved.EncryptedValue, srv.cfg.AuthEncryptionKey)
+	decrypted, err := decryptSecret(saved.EncryptedValue, srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2229,7 +2229,7 @@ func TestAdminSandboxServiceDefaultLifecycle(t *testing.T) {
 	if saved.APIKeyEncrypted == "" || saved.APIKeyEncrypted == "secret-value" {
 		t.Fatalf("expected encrypted API key at rest, got %q", saved.APIKeyEncrypted)
 	}
-	decrypted, err := decryptSecret(saved.APIKeyEncrypted, srv.cfg.AuthEncryptionKey)
+	decrypted, err := decryptSecret(saved.APIKeyEncrypted, srv.cfg.AuthEncryptionKey.Value())
 	if err != nil || decrypted != "secret-value" {
 		t.Fatalf("decrypt saved API key: value=%q err=%v", decrypted, err)
 	}
@@ -2244,7 +2244,7 @@ func TestAdminSandboxServiceDefaultLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decrypted, err = decryptSecret(saved.APIKeyEncrypted, srv.cfg.AuthEncryptionKey)
+	decrypted, err = decryptSecret(saved.APIKeyEncrypted, srv.cfg.AuthEncryptionKey.Value())
 	if err != nil || decrypted != "secret-value" {
 		t.Fatalf("expected omitted API key to preserve saved key: value=%q err=%v", decrypted, err)
 	}
@@ -2282,7 +2282,7 @@ func TestAdminSandboxServiceDefaultLifecycle(t *testing.T) {
 func TestAdminSandboxServiceDefaultRejectsStaleSaveAfterAPIKeyDeletion(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "", &fakeSandbox{})
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2462,7 +2462,7 @@ func TestSandboxServiceUsesAdminDefault(t *testing.T) {
 		MaxConcurrentRunners: 10,
 	}
 	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2486,7 +2486,7 @@ func TestSandboxServiceUsesAdminDefault(t *testing.T) {
 func TestSandboxServiceAllAdminDefaultDoesNotRequireInstallationScope(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := New(config.Config{AuthEncryptionKey: "encryption-key", MaxConcurrentRunners: 10}, store, github.NewClient("", http.DefaultClient), nil, nil)
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2525,7 +2525,7 @@ func TestSandboxServiceAdminDefaultAudienceAllowsSelectedInstallationOwner(t *te
 	}
 	cfg := config.Config{AuthEncryptionKey: "encryption-key", MaxConcurrentRunners: 10}
 	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2587,7 +2587,7 @@ func TestSandboxServiceAdminDefaultAudienceResolvesAndCachesUnsynchronizedInstal
 		t.Fatal(err)
 	}
 	srv := New(config.Config{AuthEncryptionKey: "encryption-key", MaxConcurrentRunners: 10}, store, gh, nil, nil)
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2645,7 +2645,7 @@ func TestSandboxServiceAdminDefaultAudienceRejectsUnselectedOwner(t *testing.T) 
 		t.Fatal(err)
 	}
 	srv := New(config.Config{AuthEncryptionKey: "encryption-key", MaxConcurrentRunners: 10}, store, github.NewClient("", http.DefaultClient), nil, nil)
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2677,7 +2677,7 @@ func TestSandboxServiceAdminDefaultAudienceAllowsSelectedPersonalAccount(t *test
 		t.Fatal(err)
 	}
 	srv := New(config.Config{AuthEncryptionKey: "encryption-key", MaxConcurrentRunners: 10}, store, github.NewClient("", http.DefaultClient), nil, nil)
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2710,7 +2710,7 @@ func TestSandboxServiceForScopeUsesAdminDefault(t *testing.T) {
 		MaxConcurrentRunners: 10,
 	}
 	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2734,7 +2734,7 @@ func TestSandboxServiceForScopeUsesAdminDefault(t *testing.T) {
 func TestUserPreferencesReportsAdminDefaultWithoutLeakingMetadata(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "", &fakeSandbox{})
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2772,7 +2772,7 @@ func TestUserPreferencesReportsSelectedAdminDefaultOnlyForEligibleAccount(t *tes
 		t.Fatal(err)
 	}
 	srv := newTestServer(t, store, "", &fakeSandbox{})
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2820,7 +2820,7 @@ func TestSandboxServiceDoesNotUseDisabledAdminDefault(t *testing.T) {
 		MaxConcurrentRunners: 10,
 	}
 	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2844,7 +2844,7 @@ func TestSandboxServiceDoesNotUseAdminDefaultForCorruptScope(t *testing.T) {
 		MaxConcurrentRunners: 10,
 	}
 	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
-	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2878,7 +2878,7 @@ func TestSandboxServicePreservesSnapshotSource(t *testing.T) {
 		MaxConcurrentRunners: 10,
 	}
 	srv := New(cfg, store, github.NewClient("", http.DefaultClient), nil, nil)
-	encrypted, err := encryptSecret("snapshot-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("snapshot-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2908,7 +2908,7 @@ func TestSandboxServiceUsesGitHubInstallationPreferences(t *testing.T) {
 	if _, err := srv.sandboxServiceForRunnerRequest(context.Background(), state.RunnerRequest{ID: "req-1", GitHubInstallationID: 987}); err == nil {
 		t.Fatal("expected missing sandbox service config error")
 	}
-	adminEncrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey)
+	adminEncrypted, err := encryptSecret("admin-sandbox-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2934,7 +2934,7 @@ func TestSandboxServiceUsesGitHubInstallationPreferences(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2998,7 +2998,7 @@ func TestSandboxServiceFallsBackToPersonalAccountPreferences(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3063,7 +3063,7 @@ func TestSandboxServiceUsesInheritedAccountPreferencesForOrgInstallation(t *test
 	}); err != nil {
 		t.Fatal(err)
 	}
-	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3117,7 +3117,7 @@ func TestSandboxServiceInfersInstallationFromRepositoryOwner(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3168,7 +3168,7 @@ func TestSandboxServiceDoesNotFallBackToAccountForOrgInstallation(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey)
+	encrypted, err := encryptSecret("sandbox-secret-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}

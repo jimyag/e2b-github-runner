@@ -23,7 +23,7 @@ func (s *Server) githubUserAccessToken(accountID int64) (string, error) {
 		}
 		return "", err
 	}
-	token, err := decryptSecret(secret.EncryptedValue, s.cfg.AuthEncryptionKey)
+	token, err := decryptSecret(secret.EncryptedValue, s.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		return "", errGitHubUserAccessTokenRequired
 	}
