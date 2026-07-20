@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -11,6 +12,11 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+)
+
+var (
+	plaintextFlag = flag.String("plaintext", "", "plaintext string to obfuscate")
+	encryptedFlag = flag.String("encrypted", "", "RUNNERD_ENC(v1:...) value to decrypt")
 )
 
 func TestObfuscateSecretRoundTripThroughYAML(t *testing.T) {
@@ -32,6 +38,43 @@ func TestObfuscateSecretRoundTripThroughYAML(t *testing.T) {
 	if got := decoded.Value.Value(); got != plaintext {
 		t.Fatalf("decoded secret = %q, want %q", got, plaintext)
 	}
+}
+
+// TestPrintObfuscatedSecret prints an obfuscated value for manual use.
+//
+// Usage:
+//
+//	go test ./internal/config -run '^TestPrintObfuscatedSecret$' -v -args -plaintext='your-secret'
+func TestPrintObfuscatedSecret(t *testing.T) {
+	if *plaintextFlag == "" {
+		t.Skip("pass -args -plaintext=... to print its obfuscated value")
+	}
+
+	encoded, err := ObfuscateSecret(*plaintextFlag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(encoded)
+}
+
+// TestPrintDeobfuscatedSecret prints the plaintext of an obfuscated value.
+//
+// Usage:
+//
+//	go test ./internal/config -run '^TestPrintDeobfuscatedSecret$' -v -args -encrypted='RUNNERD_ENC(v1:...)'
+func TestPrintDeobfuscatedSecret(t *testing.T) {
+	if *encryptedFlag == "" {
+		t.Skip("pass -args -encrypted=... to print its plaintext value")
+	}
+	if !strings.HasPrefix(*encryptedFlag, obfuscatedSecretPrefix) {
+		t.Fatal("-encrypted must be a RUNNERD_ENC(v1:...) value")
+	}
+
+	plaintext, err := revealObfuscatedSecret(*encryptedFlag)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(plaintext)
 }
 
 func TestSecretYAMLAcceptsPlaintextForCompatibility(t *testing.T) {
