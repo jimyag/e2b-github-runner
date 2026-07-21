@@ -124,7 +124,7 @@ func writeObfuscatedConfigValue(input io.Reader, output io.Writer) error {
 	if len(value) == 0 {
 		return fmt.Errorf("secret input is empty")
 	}
-	encoded, err := config.ObfuscateSecret(string(value))
+	encoded, err := config.ObfuscateSecret(value)
 	if err != nil {
 		return err
 	}

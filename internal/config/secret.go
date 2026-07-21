@@ -44,6 +44,19 @@ func (Secret) LogValue() slog.Value { return slog.StringValue(maskedSecret) }
 
 func (Secret) MarshalJSON() ([]byte, error) { return json.Marshal(maskedSecret) }
 
+func (s *Secret) UnmarshalJSON(data []byte) error {
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	plaintext, err := revealObfuscatedSecret(value)
+	if err != nil {
+		return err
+	}
+	*s = Secret(plaintext)
+	return nil
+}
+
 func (Secret) MarshalYAML() (any, error) { return maskedSecret, nil }
 
 func (s *Secret) UnmarshalYAML(node *yaml.Node) error {
@@ -61,7 +74,7 @@ func (s *Secret) UnmarshalYAML(node *yaml.Node) error {
 // ObfuscateSecret returns a portable configuration value that does not expose
 // plaintext on casual inspection. The key is embedded in runnerd, so this is
 // intentionally obfuscation rather than a security boundary.
-func ObfuscateSecret(plaintext string) (string, error) {
+func ObfuscateSecret(plaintext []byte) (string, error) {
 	gcm, err := obfuscationGCM()
 	if err != nil {
 		return "", err
@@ -70,7 +83,7 @@ func ObfuscateSecret(plaintext string) (string, error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", err
 	}
-	sealed := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	sealed := gcm.Seal(nonce, nonce, plaintext, nil)
 	return obfuscatedSecretPrefix + base64.RawURLEncoding.EncodeToString(sealed) + obfuscatedSecretSuffix, nil
 }
 

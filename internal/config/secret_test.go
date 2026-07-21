@@ -21,7 +21,7 @@ var (
 
 func TestObfuscateSecretRoundTripThroughYAML(t *testing.T) {
 	const plaintext = "github-webhook-secret"
-	encoded, err := ObfuscateSecret(plaintext)
+	encoded, err := ObfuscateSecret([]byte(plaintext))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestPrintObfuscatedSecret(t *testing.T) {
 		t.Skip("pass -args -plaintext=... to print its obfuscated value")
 	}
 
-	encoded, err := ObfuscateSecret(*plaintextFlag)
+	encoded, err := ObfuscateSecret([]byte(*plaintextFlag))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,8 +89,26 @@ func TestSecretYAMLAcceptsPlaintextForCompatibility(t *testing.T) {
 	}
 }
 
+func TestSecretJSONRevealsObfuscatedSecret(t *testing.T) {
+	const plaintext = "github-webhook-secret"
+	encoded, err := ObfuscateSecret([]byte(plaintext))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded struct {
+		Value Secret `json:"value"`
+	}
+	if err := json.Unmarshal([]byte(fmt.Sprintf(`{"value":%q}`, encoded)), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if got := decoded.Value.Value(); got != plaintext {
+		t.Fatalf("decoded secret = %q, want %q", got, plaintext)
+	}
+}
+
 func TestSecretYAMLRejectsTamperedObfuscatedValue(t *testing.T) {
-	encoded, err := ObfuscateSecret("secret")
+	encoded, err := ObfuscateSecret([]byte("secret"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +190,7 @@ func TestLoadFileRevealsObfuscatedSecretsAndMasksConfigFormatting(t *testing.T) 
 	encoded := make(map[string]string, len(values))
 	for name, value := range values {
 		var err error
-		encoded[name], err = ObfuscateSecret(value)
+		encoded[name], err = ObfuscateSecret([]byte(value))
 		if err != nil {
 			t.Fatalf("obfuscate %s: %v", name, err)
 		}
