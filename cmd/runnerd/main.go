@@ -24,14 +24,13 @@ func main() {
 	bootstrapAdmin := flag.String("bootstrap-admin", "", "bootstrap an admin account as provider:subject, for example github:12345678")
 	obfuscateConfigValue := flag.Bool("obfuscate-config-value", false, "read a secret from stdin and print a RUNNERD_ENC value")
 	flag.Parse()
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if *obfuscateConfigValue {
-		if err := writeObfuscatedConfigValue(os.Stdin, os.Stdout); err != nil {
-			logger.Error("obfuscate config value", "error", err)
+		if !runObfuscateConfigValue(os.Stdin, os.Stdout, os.Stderr) {
 			os.Exit(1)
 		}
 		return
 	}
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		logger.Error("load config", "error", err)
@@ -96,6 +95,14 @@ func main() {
 	}
 }
 
+func runObfuscateConfigValue(input io.Reader, output, errorOutput io.Writer) bool {
+	if err := writeObfuscatedConfigValue(input, output); err != nil {
+		_, _ = fmt.Fprintln(errorOutput, "obfuscate config value:", err)
+		return false
+	}
+	return true
+}
+
 func writeObfuscatedConfigValue(input io.Reader, output io.Writer) error {
 	const maxSecretBytes = 1 << 20
 	value, err := io.ReadAll(io.LimitReader(input, maxSecretBytes+1))
@@ -105,7 +112,15 @@ func writeObfuscatedConfigValue(input io.Reader, output io.Writer) error {
 	if len(value) > maxSecretBytes {
 		return fmt.Errorf("secret input exceeds %d bytes", maxSecretBytes)
 	}
-	value = []byte(strings.TrimRight(string(value), "\r\n"))
+	secretBuffer := value
+	defer func() {
+		for i := range secretBuffer {
+			secretBuffer[i] = 0
+		}
+	}()
+	for len(value) > 0 && (value[len(value)-1] == '\r' || value[len(value)-1] == '\n') {
+		value = value[:len(value)-1]
+	}
 	if len(value) == 0 {
 		return fmt.Errorf("secret input is empty")
 	}

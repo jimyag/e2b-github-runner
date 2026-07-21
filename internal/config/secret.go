@@ -32,8 +32,6 @@ func (s Secret) Value() string { return string(s) }
 
 func (Secret) String() string { return maskedSecret }
 
-func (Secret) GoString() string { return maskedSecret }
-
 func (Secret) Format(state fmt.State, verb rune) {
 	if verb == 'q' {
 		_, _ = fmt.Fprintf(state, "%q", maskedSecret)

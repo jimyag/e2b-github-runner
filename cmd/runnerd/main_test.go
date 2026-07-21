@@ -47,6 +47,20 @@ func TestWriteObfuscatedConfigValueTrimsTrailingLineEndings(t *testing.T) {
 	}
 }
 
+func TestRunObfuscateConfigValueWritesErrorsToStderr(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if runObfuscateConfigValue(strings.NewReader(""), &stdout, &stderr) {
+		t.Fatal("expected obfuscation to fail")
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "secret input is empty") {
+		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
 func TestBootstrapAdminAccount(t *testing.T) {
 	store := state.New(t.TempDir())
 	if err := bootstrapAdminAccount(store, "github:12345"); err != nil {

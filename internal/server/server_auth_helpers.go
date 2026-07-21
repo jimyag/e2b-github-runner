@@ -116,7 +116,7 @@ func (s *Server) decodeAdminSession(value string) (adminSession, error) {
 }
 
 func (s *Server) signAdminSession(payload string) string {
-	mac := hmac.New(sha256.New, []byte(s.cfg.AuthSessionSecret))
+	mac := hmac.New(sha256.New, []byte(s.cfg.AuthSessionSecret.Value()))
 	_, _ = mac.Write([]byte(payload))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
