@@ -30,6 +30,23 @@ func TestWriteObfuscatedConfigValueReadsSecretFromStdin(t *testing.T) {
 	}
 }
 
+func TestWriteObfuscatedConfigValueTrimsTrailingLineEndings(t *testing.T) {
+	const plaintext = "secret-from-stdin"
+	var output bytes.Buffer
+	if err := writeObfuscatedConfigValue(strings.NewReader(plaintext+"\r\n\r\n"), &output); err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Value config.Secret `yaml:"value"`
+	}
+	if err := yaml.Unmarshal([]byte("value: "+strings.TrimSpace(output.String())+"\n"), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Value.Value() != plaintext {
+		t.Fatalf("decoded value = %q", decoded.Value.Value())
+	}
+}
+
 func TestBootstrapAdminAccount(t *testing.T) {
 	store := state.New(t.TempDir())
 	if err := bootstrapAdminAccount(store, "github:12345"); err != nil {

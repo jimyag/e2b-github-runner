@@ -113,11 +113,20 @@ func TestSecretYAMLRejectsTamperedObfuscatedValue(t *testing.T) {
 
 func TestSecretMasksFormattingJSONAndStructuredLogs(t *testing.T) {
 	secret := Secret("do-not-log-me")
+	format := func(pattern string) string {
+		return fmt.Sprintf(pattern, secret)
+	}
 	for name, got := range map[string]string{
-		"string":    fmt.Sprint(secret),
-		"value":     fmt.Sprintf("%v", secret),
-		"quoted":    fmt.Sprintf("%q", secret),
-		"go-syntax": fmt.Sprintf("%#v", secret),
+		"string":        fmt.Sprint(secret),
+		"value":         format("%v"),
+		"quoted":        format("%q"),
+		"go-syntax":     format("%#v"),
+		"hex":           format("%x"),
+		"integer":       format("%d"),
+		"character":     format("%c"),
+		"alternate-hex": format("%#x"),
+		"width":         format("%10s"),
+		"precision":     format("%.2s"),
 	} {
 		if strings.Contains(got, secret.Value()) || got != `******` && got != `"******"` {
 			t.Fatalf("%s formatting exposed secret: %q", name, got)

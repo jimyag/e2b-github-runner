@@ -105,7 +105,7 @@ func writeObfuscatedConfigValue(input io.Reader, output io.Writer) error {
 	if len(value) > maxSecretBytes {
 		return fmt.Errorf("secret input exceeds %d bytes", maxSecretBytes)
 	}
-	value = []byte(strings.TrimSuffix(strings.TrimSuffix(string(value), "\n"), "\r"))
+	value = []byte(strings.TrimRight(string(value), "\r\n"))
 	if len(value) == 0 {
 		return fmt.Errorf("secret input is empty")
 	}

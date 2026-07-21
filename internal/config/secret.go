@@ -34,6 +34,14 @@ func (Secret) String() string { return maskedSecret }
 
 func (Secret) GoString() string { return maskedSecret }
 
+func (Secret) Format(state fmt.State, verb rune) {
+	if verb == 'q' {
+		_, _ = fmt.Fprintf(state, "%q", maskedSecret)
+		return
+	}
+	_, _ = fmt.Fprint(state, maskedSecret)
+}
+
 func (Secret) LogValue() slog.Value { return slog.StringValue(maskedSecret) }
 
 func (Secret) MarshalJSON() ([]byte, error) { return json.Marshal(maskedSecret) }
