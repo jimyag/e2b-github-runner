@@ -44,6 +44,18 @@ import {
   type SyncedGitHubInstallations,
   type UserPreferences,
 } from "@/admin-types"
+import {
+  adminDataResources,
+  adminPollingResources,
+  shouldPollAdminSection,
+  shouldPollUserRoute,
+  userDataResources,
+  userPollingResources,
+  userRunnerHistoryWindow,
+  userRunnerRequestLimit,
+  userRunnerRequestsPath,
+  type AdminDataResource,
+} from "@/app-load-policy"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
 import {
   createGitHubReauthenticationGate,
@@ -55,6 +67,54 @@ type AccountSettingsTab = "repositories" | "preferences" | "sandbox-templates" |
 type AccountSettingsRoute = {
   accountLogin?: string
   tab: AccountSettingsTab
+}
+
+type UserRunnerPage = {
+  items: RunnerState[]
+  total: number
+}
+
+const adminResourcePaths: Record<AdminDataResource, string> = {
+  runner_requests: "/runner_requests?limit=100&offset=0",
+  runner_specs: "/runner_specs",
+  runner_groups: "/runner_groups",
+  runner_policies: "/runner_policies",
+  audit_events: "/audit-events",
+}
+
+function adminResourcePath(resource: AdminDataResource): string {
+  return adminResourcePaths[resource]
+}
+
+function updateAdminResource(
+  resource: AdminDataResource,
+  data: unknown,
+  setters: {
+    setRunners: (value: RunnerState[]) => void
+    setRunnerSpecs: (value: RunnerSpec[]) => void
+    setRunnerGroups: (value: RunnerGroup[]) => void
+    setRunnerPolicies: (value: RunnerPolicy[]) => void
+    setAuditEvents: (value: AuditEvent[]) => void
+  }
+) {
+  const items = Array.isArray(data) ? data : []
+  switch (resource) {
+    case "runner_requests":
+      setters.setRunners(items as RunnerState[])
+      break
+    case "runner_specs":
+      setters.setRunnerSpecs(items as RunnerSpec[])
+      break
+    case "runner_groups":
+      setters.setRunnerGroups(items as RunnerGroup[])
+      break
+    case "runner_policies":
+      setters.setRunnerPolicies(items as RunnerPolicy[])
+      break
+    case "audit_events":
+      setters.setAuditEvents(items as AuditEvent[])
+      break
+  }
 }
 
 function App() {
@@ -85,6 +145,8 @@ function App() {
   const [diagnosticsVars, setDiagnosticsVars] = useState("")
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([])
   const [userRunners, setUserRunners] = useState<RunnerState[]>([])
+  const [userRunnerTotal, setUserRunnerTotal] = useState(0)
+  const [loadingUserRunnerHistory, setLoadingUserRunnerHistory] = useState(false)
   const [githubApp, setGitHubApp] = useState<GitHubAppConfig | null>(null)
   const [userPreferences, setUserPreferences] = useState<UserPreferences | null>(null)
   const [authorizedRepositories, setAuthorizedRepositories] = useState<Record<number, string[]>>({})
@@ -190,7 +252,7 @@ function App() {
     ]
   }, [runnerSpecs.length, runners])
 
-  const request = useCallback(
+  const requestResponse = useCallback(
     async (url: string, options: RequestInit = {}) => {
       const headers = new Headers(options.headers)
       const response = await fetch(url, { ...options, headers, credentials: "same-origin" })
@@ -220,11 +282,34 @@ function App() {
         error.code = code
         throw error
       }
+      return response
+    },
+    []
+  )
+
+  const request = useCallback(
+    async (url: string, options: RequestInit = {}) => {
+      const response = await requestResponse(url, options)
       const contentType = response.headers.get("content-type") || ""
       if (contentType.includes("application/json")) return response.json()
       return response.text()
     },
-    []
+    [requestResponse]
+  )
+
+  const requestUserRunnerPage = useCallback(
+    async (limit: number, offset: number): Promise<UserRunnerPage> => {
+      const response = await requestResponse(userRunnerRequestsPath(limit, offset))
+      const data = await response.json()
+      const items = Array.isArray(data) ? (data as RunnerState[]) : []
+      const totalHeader = response.headers.get("X-Total-Count")
+      const parsedTotal = totalHeader === null ? Number.NaN : Number(totalHeader)
+      return {
+        items,
+        total: Number.isSafeInteger(parsedTotal) && parsedTotal >= 0 ? parsedTotal : items.length,
+      }
+    },
+    [requestResponse]
   )
 
   const parseLabels = (value: string) =>
@@ -257,53 +342,65 @@ function App() {
     [hasAccess, request]
   )
 
-  const loadAll = useCallback(async () => {
-    if (!hasAccess) return
+  const loadAll = useCallback(async (polling = false) => {
+    if (!hasAccess || !isAdminRoute) return
+    const resources = polling ? adminPollingResources(section) : adminDataResources(section)
+    if (resources.length === 0) return
     setLoading(true)
     try {
-      const [runnerData, runnerSpecData, runnerGroupData, policyData, auditData] = await Promise.all([
-        request("/runner_requests"),
-        request("/runner_specs"),
-        request("/runner_groups"),
-        request("/runner_policies"),
-        request("/audit-events"),
-      ])
-      const nextRunners = Array.isArray(runnerData) ? (runnerData as RunnerState[]) : []
-      setRunners(nextRunners)
-      setRunnerSpecs(Array.isArray(runnerSpecData) ? (runnerSpecData as RunnerSpec[]) : [])
-      setRunnerGroups(Array.isArray(runnerGroupData) ? (runnerGroupData as RunnerGroup[]) : [])
-      setRunnerPolicies(Array.isArray(policyData) ? (policyData as RunnerPolicy[]) : [])
-      setAuditEvents(Array.isArray(auditData) ? (auditData as AuditEvent[]) : [])
-      if (selectedID && !nextRunners.some((runner) => runner.id === selectedID)) {
-        setSelectedID("")
-        setLogText("No runner selected")
+      const entries = await Promise.all(
+        resources.map(async (resource) => [resource, await request(adminResourcePath(resource))] as const)
+      )
+      for (const [resource, data] of entries) {
+        updateAdminResource(resource, data, {
+          setRunners: (nextRunners) => {
+            setRunners(nextRunners)
+            setSelectedID((current) => {
+              if (!current || nextRunners.some((runner) => runner.id === current)) return current
+              setLogText("No runner selected")
+              return ""
+            })
+          },
+          setRunnerSpecs,
+          setRunnerGroups,
+          setRunnerPolicies,
+          setAuditEvents,
+        })
       }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load control plane data")
     } finally {
       setLoading(false)
     }
-  }, [hasAccess, request, selectedID])
+  }, [hasAccess, isAdminRoute, request, section])
 
-  const loadUserAll = useCallback(async () => {
+  const loadUserAll = useCallback(async (polling = false) => {
     if (!authSession.authenticated || (hasAccess && isAdminRoute)) return
+    const resources = polling ? userPollingResources(locationPath) : userDataResources(locationPath)
+    if (resources.length === 0) return
     setLoading(true)
     try {
-      const [appData, runnerData] = await Promise.all([
-        request("/user/github-app"),
-        request("/user/runner_requests"),
+      const [appData, runnerPage] = await Promise.all([
+        resources.includes("github_app") ? request("/user/github-app") : Promise.resolve(null),
+        resources.includes("runner_requests")
+          ? requestUserRunnerPage(userRunnerRequestLimit(locationPath, polling), 0)
+          : Promise.resolve(null),
       ])
-      const nextApp = appData as GitHubAppConfig
-      const nextRunners = Array.isArray(runnerData) ? (runnerData as RunnerState[]) : []
-      const nextRoute = parseAccountSettingsRoute(locationPath, authSession.login)
-      const preferencesPath = userPreferencesPath(
-        preferenceInstallationID(nextApp, nextRoute, authSession.login)
-      )
-      const preferencesData = await request(preferencesPath)
-      setGitHubApp(nextApp)
-      setUserRunners(nextRunners)
-      setUserPreferences(preferencesData as UserPreferences)
-      if (nextRunners.length === 0) setUserSelectedKey("")
+      const nextApp = appData as GitHubAppConfig | null
+      if (nextApp) setGitHubApp(nextApp)
+      if (runnerPage) {
+        setUserRunnerTotal(runnerPage.total)
+        setUserRunners((current) => polling ? mergeUserRunnerPages(runnerPage.items, current) : runnerPage.items)
+        if (runnerPage.total === 0) setUserSelectedKey("")
+      }
+      if (resources.includes("preferences") && nextApp) {
+        const nextRoute = parseAccountSettingsRoute(locationPath, authSession.login)
+        const preferencesPath = userPreferencesPath(
+          preferenceInstallationID(nextApp, nextRoute, authSession.login)
+        )
+        const preferencesData = await request(preferencesPath)
+        setUserPreferences(preferencesData as UserPreferences)
+      }
     } catch (error) {
       if (requiresGitHubReauthentication(error)) {
         if (beginGitHubReauthentication()) {
@@ -316,7 +413,28 @@ function App() {
     } finally {
       setLoading(false)
     }
-  }, [authSession.authenticated, authSession.login, beginGitHubReauthentication, hasAccess, isAdminRoute, locationPath, refreshGitHubOAuthLogin, request])
+  }, [authSession.authenticated, authSession.login, beginGitHubReauthentication, hasAccess, isAdminRoute, locationPath, refreshGitHubOAuthLogin, request, requestUserRunnerPage])
+
+  const loadUserRunnerHistory = useCallback(async () => {
+    if (!authSession.authenticated || loadingUserRunnerHistory) return
+    setLoadingUserRunnerHistory(true)
+    try {
+      const page = await requestUserRunnerPage(userRunnerHistoryWindow, 0)
+      setUserRunnerTotal(page.total)
+      setUserRunners(page.items)
+    } catch (error) {
+      if (requiresGitHubReauthentication(error)) {
+        if (beginGitHubReauthentication()) {
+          toast.message("Refreshing GitHub sign-in...")
+          refreshGitHubOAuthLogin()
+        }
+        return
+      }
+      toast.error(error instanceof Error ? error.message : "Failed to load older jobs")
+    } finally {
+      setLoadingUserRunnerHistory(false)
+    }
+  }, [authSession.authenticated, beginGitHubReauthentication, loadingUserRunnerHistory, refreshGitHubOAuthLogin, requestUserRunnerPage])
 
   const syncGitHubAppSetupFromURL = useCallback(async () => {
     if (!authSession.authenticated || (hasAccess && isAdminRoute) || !isAccountSettingsPath(locationPath)) return
@@ -496,16 +614,20 @@ function App() {
   }, [locationPath, locationSearch])
 
   useEffect(() => {
+    if (!hasAccess || !isAdminRoute) return
     void loadAll()
-    const timer = window.setInterval(() => void loadAll(), 5000)
+    if (!shouldPollAdminSection(section)) return
+    const timer = window.setInterval(() => void loadAll(true), 5000)
     return () => window.clearInterval(timer)
-  }, [loadAll])
+  }, [hasAccess, isAdminRoute, loadAll, section])
 
   useEffect(() => {
+    if (!authSession.authenticated || (hasAccess && isAdminRoute)) return
     void loadUserAll()
-    const timer = window.setInterval(() => void loadUserAll(), 5000)
+    if (!shouldPollUserRoute(locationPath)) return
+    const timer = window.setInterval(() => void loadUserAll(true), 5000)
     return () => window.clearInterval(timer)
-  }, [loadUserAll])
+  }, [authSession.authenticated, hasAccess, isAdminRoute, loadUserAll, locationPath])
 
   useEffect(() => {
     void syncGitHubAppSetupFromURL()
@@ -541,6 +663,7 @@ function App() {
     setRunnerPolicies([])
     setAuditEvents([])
     setUserRunners([])
+    setUserRunnerTotal(0)
     setGitHubApp(null)
     setAuthorizedRepositories({})
     setLoadingRepositoriesFor(null)
@@ -712,6 +835,8 @@ function App() {
           githubApp={githubApp}
           userPreferences={userPreferences}
           runners={userRunners}
+          runnerTotal={userRunnerTotal}
+          loadingRunnerHistory={loadingUserRunnerHistory}
           selectedKey={userSelectedKey}
           selectedJobID={userSelectedJobID}
           page={userPage}
@@ -727,6 +852,7 @@ function App() {
           onNavigateAccountSettings={setAccountSettingsRoute}
           onOpenJob={openUserJob}
           onLoadJobGroup={loadUserJobGroup}
+          onLoadRunnerHistory={() => void loadUserRunnerHistory()}
           request={request}
           onSelectKey={setUserJobsSelection}
           onSignOut={signOut}
@@ -745,7 +871,7 @@ function App() {
       <SidebarInset className="min-h-0 overflow-hidden">
         <SiteHeader authSession={authSession} onSignOut={signOut} />
         <main className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 lg:gap-6 lg:p-6">
-          {section !== "accounts" ? (
+          {section === "overview" || section === "runner_requests" ? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {metrics.map((metric) => (
                 <Card key={metric.label} className="gap-3 py-5">
@@ -1126,6 +1252,17 @@ function withSearchParam(path: string, key: string, value: string) {
 function withPreservedJobSearch(path: string, search: string) {
   const job = new URLSearchParams(search).get("job")
   return job ? withSearchParam(path, "job", job) : path
+}
+
+function mergeUserRunnerPages(primary: RunnerState[], existing: RunnerState[]): RunnerState[] {
+  const merged: RunnerState[] = []
+  const seen = new Set<string>()
+  for (const runner of [...primary, ...existing]) {
+    if (seen.has(runner.id)) continue
+    seen.add(runner.id)
+    merged.push(runner)
+  }
+  return merged
 }
 
 function decodeRepositoryPath(ownerSegment: string, repoSegment: string) {

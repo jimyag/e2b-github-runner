@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ func TestRecordExpandedMetrics(t *testing.T) {
 	RecordRunnerCleanup("metrics-expanded", "removed")
 	RecordRunnerRequest("octo/repo", "metrics-expanded", "github_webhook", "created")
 	RecordGitHubAPI("metrics_api", "success", 5*time.Millisecond)
+	RecordHTTPRequest("GET", "GET /user/runner_requests", http.StatusOK, 7*time.Millisecond)
 	RecordWorkflowFailure("octo/repo", "ci", "test", "metrics-expanded", "runner_exit", "1")
 	RecordWorkflowQueueDuration("octo/repo", "ci", "test", "metrics-expanded", 10*time.Millisecond)
 	RecordWorkflowRunDuration("octo/repo", "ci", "test", "metrics-expanded", "success", 20*time.Millisecond)
@@ -40,6 +42,8 @@ func TestRecordExpandedMetrics(t *testing.T) {
 	assertExpvarContains(t, runnerCleanup.String(), `metrics-expanded|removed`)
 	assertExpvarContains(t, runnerRequestsTotal.String(), `octo/repo|metrics-expanded|github_webhook|created`)
 	assertExpvarContains(t, githubAPIOperations.String(), `metrics_api|success`)
+	assertExpvarContains(t, httpRequestsTotal.String(), `GET|GET /user/runner_requests|200`)
+	assertExpvarContains(t, httpRequestDuration.String(), `GET|GET /user/runner_requests|200`)
 	assertExpvarContains(t, workflowFailures.String(), `octo/repo|ci|test|metrics-expanded|runner_exit|1`)
 	assertExpvarContains(t, workflowQueueCount.String(), `octo/repo|ci|test|metrics-expanded`)
 	assertExpvarContains(t, workflowRunCount.String(), `octo/repo|ci|test|metrics-expanded|success`)

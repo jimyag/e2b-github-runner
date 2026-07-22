@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"expvar"
+	"strconv"
 	"time"
 
 	"github.com/qiniu/ci-runner/internal/state"
@@ -27,6 +28,8 @@ var (
 	runnerCleanup        = expvar.NewMap("e2b_runner_cleanup_total")
 	githubAPIOperations  = expvar.NewMap("e2b_runner_github_api_operations_total")
 	githubAPIDuration    = expvar.NewMap("e2b_runner_github_api_duration_ms_total")
+	httpRequestsTotal    = expvar.NewMap("e2b_runner_http_requests_total")
+	httpRequestDuration  = expvar.NewMap("e2b_runner_http_request_duration_ms_total")
 	workflowQueued       = expvar.NewMap("github_workflow_jobs_queued_total")
 	workflowStarted      = expvar.NewMap("github_workflow_jobs_started_total")
 	workflowComplete     = expvar.NewMap("github_workflow_jobs_completed_total")
@@ -142,6 +145,12 @@ func RecordRunnerRequest(repository, profile, source, result string) {
 func RecordGitHubAPI(operation, result string, d time.Duration) {
 	githubAPIOperations.Add(metricKey(operation, result), 1)
 	githubAPIDuration.Add(metricKey(operation, result), d.Milliseconds())
+}
+
+func RecordHTTPRequest(method, route string, status int, d time.Duration) {
+	key := metricKey(method, route, strconv.Itoa(status))
+	httpRequestsTotal.Add(key, 1)
+	httpRequestDuration.Add(key, d.Milliseconds())
 }
 
 func RecordWorkflowQueued(repository, workflow, job, profile string) {

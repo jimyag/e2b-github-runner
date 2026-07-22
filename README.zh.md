@@ -119,7 +119,7 @@ Admin console 列出本地 accounts 并管理其 roles，同时管理 runner req
 
 创建 runner spec 时使用有意义的名称，例如 `ubuntu-24-04` 或 `ubuntu-24-04-large`；每个 spec 的 `template_id` 应指向包含 GitHub runner image 的 Qiniu sandbox template。runnerd 启动 sandbox 时会使用 repository owner 的 Sandbox service Preferences 检查 template 访问权限。`default_available: true` 的 runner spec 对所有允许的已安装仓库默认可用。使用 `github.allowed_repositories` 限制哪些仓库可以使用该 runnerd 实例；当某个仓库需要额外或特殊 spec 时，使用 runner policies 授权。
 
-Runner requests 默认分页：`GET /runner_requests` 在未提供 `limit` 和 `offset` 时返回最近 100 行，并返回 `X-Total-Count`、`X-Limit`、`X-Offset` 和 `Link` headers。Admin console 会在当前页上叠加 status、repository 和 runner-spec filters，并在 GitHub 提供 job URL 时把每个 managed request 链接到 GitHub Actions job。
+Runner requests 默认分页：`GET /runner_requests` 和经过 repository 授权过滤的 `GET /user/runner_requests` 在未提供 `limit` 和 `offset` 时返回最近 100 行，单页最多 500 行，并返回 `X-Total-Count`、`X-Limit`、`X-Offset` 和 `Link` headers。普通用户接口把 offset 分页限制在最近 500 行，超出该历史窗口的页面会被拒绝。列表查询只读取公开 runner state 所需字段，不再加载已保存的 GitHub webhook payload 或 Sandbox credentials。浏览器只加载当前路由实际使用的数据：首页加载并轮询最近 100 行，稳定 job-group 路由在 500 行历史窗口内解析，列表可按需加载这些更早的 jobs；GitHub App metadata、Preferences、catalog 配置和 audit data 只在对应路由需要时加载。Admin console 会在当前页上叠加 status、repository 和 runner-spec filters，并在 GitHub 提供 job URL 时把每个 managed request 链接到 GitHub Actions job。
 
 `/admin/accounts` 的 Accounts 页面列出通过 OAuth/bootstrap 创建的本地 accounts 及其关联 OAuth identities。顶部统计卡展示账户总数、管理员、普通用户和已绑定 identity 数量；搜索、角色筛选或分页不会改变全局统计。`GET /admin/api/accounts` 接受 `q`、`role=admin|user`、`limit` 和 `offset`，默认每页 20 条、最多 100 条。`PATCH /admin/api/accounts/{id}/role` 是页面唯一的修改操作，只能把其他 account 的 role 在 `admin` 和 `user` 之间切换；不能创建或删除 account，也不能绑定或解绑 identity。系统会拒绝修改自身角色，以及可能导致系统没有管理员的变更。成功修改会立即生效，并写入 `account.role.update` 审计事件。
 
@@ -129,7 +129,7 @@ runnerd 会按 repository 或 organization 缓存有效的 GitHub registration t
 
 sandbox runner 会安装 pre-job hook，在 GitHub Actions `Set up runner` log 中打印 Qiniu sandbox id、runner request id 和 runner name。调试 job 时可用该 sandbox id 在 Qiniu sandbox console 中查找对应实例。
 
-二进制还会导入 `github.com/jimmicro/pprof`，因此会自动启动 local-only pprof/expvar service，并通过生成的 `.pprof` address files 和 dump scripts 发现。Admin console 提供 diagnostics 页面，汇总发现的 pprof endpoint、`/debug/vars`、DB state、GitHub auth mode、retry/lease metrics 和 recent failures。expvar metrics 包括 ARC-style workflow job counts、conclusions、failures、queue/run duration totals and counts、runner registration/cleanup counters、GitHub API operation counters，以及 Fireactions-style profile current/busy/idle/pending/desired gauges。
+二进制还会导入 `github.com/jimmicro/pprof`，因此会自动启动 local-only pprof/expvar service，并通过生成的 `.pprof` address files 和 dump scripts 发现。Admin console 提供 diagnostics 页面，汇总发现的 pprof endpoint、`/debug/vars`、DB state、GitHub auth mode、retry/lease metrics 和 recent failures。expvar metrics 包括 ARC-style workflow job counts、conclusions、failures、queue/run duration totals and counts、runner registration/cleanup counters、GitHub API operation counters、低基数 HTTP route request counts 和 duration totals，以及 Fireactions-style profile current/busy/idle/pending/desired gauges。
 
 ## 构建
 

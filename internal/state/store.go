@@ -288,7 +288,7 @@ type RunnerRequestStore interface {
 	ListStatesPage(limit, offset int) ([]RunnerState, int64, error)
 	ListStatesForRepositories(repositories []string, limit int) ([]RunnerState, error)
 	ListStatesForGitHubInstallations(installationIDs []int64, limit int) ([]RunnerState, error)
-	ListStatesForGitHubInstallationRepositories(access []GitHubInstallationRepositoryAccess, limit int) ([]RunnerState, error)
+	ListStatesForGitHubInstallationRepositories(access []GitHubInstallationRepositoryAccess, limit, offset int) ([]RunnerState, int64, error)
 	ActiveCount() (int, error)
 	InFlightCount() (int, error)
 	ActiveCountForProfile(name string) (int, error)

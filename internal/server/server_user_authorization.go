@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -13,7 +14,13 @@ import (
 
 var errGitHubUserAccessTokenRequired = errors.New("github user access token is required")
 
-const maxUserRepositoryAccessCacheItems = 512
+const (
+	maxUserRepositoryAccessCacheItems  = 512
+	userRepositoryAccessRefreshAfter   = 20 * time.Second
+	userRepositoryAccessCacheTTL       = 30 * time.Second
+	userRepositoryAccessRefreshRetry   = 5 * time.Second
+	userRepositoryAccessRefreshTimeout = 15 * time.Second
+)
 
 func (s *Server) githubUserAccessToken(accountID int64) (string, error) {
 	secret, err := s.store.GetAccountSecret(state.AccountScopeTypeAccount, accountID, state.AccountSecretTypeGitHubOAuthToken)
@@ -35,16 +42,64 @@ func (s *Server) githubUserAccessToken(accountID int64) (string, error) {
 }
 
 func (s *Server) userAuthorizedRepositoryAccess(ctx context.Context, accountID int64) ([]state.GitHubInstallationRepositoryAccess, error) {
-	if access, ok := s.cachedUserRepositoryAccess(accountID); ok {
+	if access, ok, refresh := s.cachedUserRepositoryAccessForRequest(accountID); ok {
+		if refresh {
+			s.refreshUserRepositoryAccessAsync(accountID)
+		}
 		return access, nil
 	}
+	return s.refreshUserRepositoryAccess(ctx, accountID)
+}
+
+func (s *Server) refreshUserRepositoryAccess(ctx context.Context, accountID int64) ([]state.GitHubInstallationRepositoryAccess, error) {
+	for {
+		epoch := s.userRepositoryAccessEpochForRefresh(accountID)
+		result := s.userRepositoryAccessGroup.DoChan(fmt.Sprintf("account:%d:epoch:%d", accountID, epoch), func() (any, error) {
+			refreshCtx, cancel := s.userRepositoryAccessRefreshContext()
+			defer cancel()
+			access, err := s.loadUserRepositoryAccess(refreshCtx, accountID)
+			if err != nil {
+				if isRejectedGitHubUserAccess(err) {
+					s.invalidateUserRepositoryAccessIfCurrent(accountID, epoch)
+				} else {
+					s.finishUserRepositoryAccessRefresh(accountID, epoch)
+				}
+				return nil, err
+			}
+			s.cacheUserRepositoryAccessIfCurrent(accountID, epoch, access)
+			return access, nil
+		})
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case completed := <-result:
+			if completed.Err != nil {
+				return nil, completed.Err
+			}
+			if !s.userRepositoryAccessEpochMatches(accountID, epoch) {
+				continue
+			}
+			access, _ := completed.Val.([]state.GitHubInstallationRepositoryAccess)
+			return cloneUserRepositoryAccess(access), nil
+		}
+	}
+}
+
+func (s *Server) userRepositoryAccessRefreshContext() (context.Context, context.CancelFunc) {
+	parent := context.Background()
+	if s.loopCtx != nil {
+		parent = s.loopCtx
+	}
+	return context.WithTimeout(parent, userRepositoryAccessRefreshTimeout)
+}
+
+func (s *Server) loadUserRepositoryAccess(ctx context.Context, accountID int64) ([]state.GitHubInstallationRepositoryAccess, error) {
 	installations, err := s.store.ListGitHubInstallations(accountID)
 	if err != nil {
 		return nil, err
 	}
 	if len(installations) == 0 {
 		access := []state.GitHubInstallationRepositoryAccess{}
-		s.cacheUserRepositoryAccess(accountID, access)
 		return access, nil
 	}
 	if s.gh == nil {
@@ -82,8 +137,49 @@ func (s *Server) userAuthorizedRepositoryAccess(ctx context.Context, accountID i
 			})
 		}
 	}
-	s.cacheUserRepositoryAccess(accountID, access)
 	return access, nil
+}
+
+func (s *Server) refreshUserRepositoryAccessAsync(accountID int64) {
+	go func() {
+		parent := context.Background()
+		if s.loopCtx != nil {
+			parent = s.loopCtx
+		}
+		ctx, cancel := context.WithTimeout(parent, userRepositoryAccessRefreshTimeout)
+		defer cancel()
+		if _, err := s.refreshUserRepositoryAccess(ctx, accountID); err != nil && !errors.Is(err, context.Canceled) {
+			s.logger.Warn("refresh github user repository access in background", "account_id", accountID, "error", err)
+		}
+	}()
+}
+
+func isRejectedGitHubUserAccess(err error) bool {
+	if errors.Is(err, errGitHubUserAccessTokenRequired) {
+		return true
+	}
+	status, ok := github.ErrorStatus(err)
+	return ok && status == http.StatusUnauthorized
+}
+
+func (s *Server) cachedUserRepositoryAccessForRequest(accountID int64) ([]state.GitHubInstallationRepositoryAccess, bool, bool) {
+	now := time.Now()
+	s.userRepositoryAccessMu.Lock()
+	defer s.userRepositoryAccessMu.Unlock()
+	cached, ok := s.userRepositoryAccessCache[accountID]
+	if !ok {
+		return nil, false, false
+	}
+	if !now.Before(cached.expiresAt) {
+		delete(s.userRepositoryAccessCache, accountID)
+		return nil, false, false
+	}
+	refresh := !now.Before(cached.refreshAfter) && !cached.refreshing
+	if refresh {
+		cached.refreshing = true
+		s.userRepositoryAccessCache[accountID] = cached
+	}
+	return cloneUserRepositoryAccess(cached.access), true, refresh
 }
 
 func (s *Server) cachedUserRepositoryAccess(accountID int64) ([]state.GitHubInstallationRepositoryAccess, bool) {
@@ -102,7 +198,16 @@ func (s *Server) cachedUserRepositoryAccess(accountID int64) ([]state.GitHubInst
 }
 
 func (s *Server) cacheUserRepositoryAccess(accountID int64, access []state.GitHubInstallationRepositoryAccess) {
+	epoch := s.userRepositoryAccessEpochForRefresh(accountID)
+	s.cacheUserRepositoryAccessIfCurrent(accountID, epoch, access)
+}
+
+func (s *Server) cacheUserRepositoryAccessIfCurrent(accountID int64, epoch uint64, access []state.GitHubInstallationRepositoryAccess) bool {
 	s.userRepositoryAccessMu.Lock()
+	defer s.userRepositoryAccessMu.Unlock()
+	if s.userRepositoryAccessEpoch[accountID] != epoch {
+		return false
+	}
 	if s.userRepositoryAccessCache == nil {
 		s.userRepositoryAccessCache = map[int64]cachedUserRepositoryAccess{}
 	}
@@ -112,10 +217,30 @@ func (s *Server) cacheUserRepositoryAccess(accountID int64, access []state.GitHu
 		evictOneUserRepositoryAccess(s.userRepositoryAccessCache)
 	}
 	s.userRepositoryAccessCache[accountID] = cachedUserRepositoryAccess{
-		access:    cloneUserRepositoryAccess(access),
-		expiresAt: now.Add(30 * time.Second),
+		access:       cloneUserRepositoryAccess(access),
+		refreshAfter: now.Add(userRepositoryAccessRefreshAfter),
+		expiresAt:    now.Add(userRepositoryAccessCacheTTL),
 	}
-	s.userRepositoryAccessMu.Unlock()
+	return true
+}
+
+func (s *Server) finishUserRepositoryAccessRefresh(accountID int64, epoch uint64) {
+	s.userRepositoryAccessMu.Lock()
+	defer s.userRepositoryAccessMu.Unlock()
+	if s.userRepositoryAccessEpoch[accountID] != epoch {
+		return
+	}
+	cached, ok := s.userRepositoryAccessCache[accountID]
+	if !ok {
+		return
+	}
+	cached.refreshing = false
+	nextRefresh := time.Now().Add(userRepositoryAccessRefreshRetry)
+	if nextRefresh.After(cached.expiresAt) {
+		nextRefresh = cached.expiresAt
+	}
+	cached.refreshAfter = nextRefresh
+	s.userRepositoryAccessCache[accountID] = cached
 }
 
 func evictOneUserRepositoryAccess(cache map[int64]cachedUserRepositoryAccess) {
@@ -127,8 +252,39 @@ func evictOneUserRepositoryAccess(cache map[int64]cachedUserRepositoryAccess) {
 
 func (s *Server) invalidateUserRepositoryAccess(accountID int64) {
 	s.userRepositoryAccessMu.Lock()
+	defer s.userRepositoryAccessMu.Unlock()
+	if s.userRepositoryAccessEpoch == nil {
+		s.userRepositoryAccessEpoch = map[int64]uint64{}
+	}
+	s.userRepositoryAccessEpoch[accountID]++
 	delete(s.userRepositoryAccessCache, accountID)
+}
+
+func (s *Server) invalidateUserRepositoryAccessIfCurrent(accountID int64, epoch uint64) {
+	s.userRepositoryAccessMu.Lock()
+	defer s.userRepositoryAccessMu.Unlock()
+	if s.userRepositoryAccessEpoch[accountID] != epoch {
+		return
+	}
+	if s.userRepositoryAccessEpoch == nil {
+		s.userRepositoryAccessEpoch = map[int64]uint64{}
+	}
+	s.userRepositoryAccessEpoch[accountID]++
+	delete(s.userRepositoryAccessCache, accountID)
+}
+
+func (s *Server) userRepositoryAccessEpochForRefresh(accountID int64) uint64 {
+	s.userRepositoryAccessMu.Lock()
+	epoch := s.userRepositoryAccessEpoch[accountID]
 	s.userRepositoryAccessMu.Unlock()
+	return epoch
+}
+
+func (s *Server) userRepositoryAccessEpochMatches(accountID int64, epoch uint64) bool {
+	s.userRepositoryAccessMu.Lock()
+	matches := s.userRepositoryAccessEpoch[accountID] == epoch
+	s.userRepositoryAccessMu.Unlock()
+	return matches
 }
 
 func cloneUserRepositoryAccess(access []state.GitHubInstallationRepositoryAccess) []state.GitHubInstallationRepositoryAccess {

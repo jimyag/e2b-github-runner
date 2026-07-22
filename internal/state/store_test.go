@@ -1555,6 +1555,34 @@ func TestListStatesPage(t *testing.T) {
 	}
 }
 
+func TestRunnerRequestListProjectionExcludesHeavyAndSecretColumns(t *testing.T) {
+	projection := "," + strings.Join(runnerRequestListSelectColumns, ",") + ","
+	for _, excluded := range []string{
+		"github_payload_json",
+		"labels_json",
+		"sandbox_api_url",
+		"sandbox_api_key_encrypted",
+	} {
+		if strings.Contains(projection, ","+excluded+",") {
+			t.Fatalf("list projection must not read %s: %s", excluded, projection)
+		}
+	}
+	for _, required := range []string{
+		"id",
+		"status",
+		"github_installation_id",
+		"repository_full_name",
+		"workflow_run_id",
+		"github_job_url",
+		"queued_at",
+		"updated_at",
+	} {
+		if !strings.Contains(projection, ","+required+",") {
+			t.Fatalf("list projection must retain %s: %s", required, projection)
+		}
+	}
+}
+
 func TestGitHubInstallationsAndRepositoryRunnerList(t *testing.T) {
 	store := New(t.TempDir())
 	account, _, err := store.EnsureAccountForOAuthIdentity(OAuthIdentity{OAuthProvider: "github", OAuthSubject: "12345", OAuthLogin: "octocat"}, "user")
@@ -1656,10 +1684,10 @@ func TestListStatesForGitHubInstallationRepositoriesPreservesPairs(t *testing.T)
 		}
 	}
 
-	states, err := store.ListStatesForGitHubInstallationRepositories([]GitHubInstallationRepositoryAccess{
+	states, _, err := store.ListStatesForGitHubInstallationRepositories([]GitHubInstallationRepositoryAccess{
 		{InstallationID: 987, Repositories: []string{"o/first"}},
 		{InstallationID: 654, Repositories: []string{"other/second"}},
-	}, 10)
+	}, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1684,9 +1712,9 @@ func TestListStatesForGitHubInstallationRepositoriesMatchesRepositoryCaseInsensi
 		t.Fatal(err)
 	}
 
-	states, err := store.ListStatesForGitHubInstallationRepositories([]GitHubInstallationRepositoryAccess{
+	states, _, err := store.ListStatesForGitHubInstallationRepositories([]GitHubInstallationRepositoryAccess{
 		{InstallationID: 987, Repositories: []string{"octo/visible"}},
-	}, 10)
+	}, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1719,9 +1747,9 @@ func TestListStatesForGitHubInstallationRepositoriesFiltersBeforeLimit(t *testin
 		}
 	}
 
-	states, err := store.ListStatesForGitHubInstallationRepositories([]GitHubInstallationRepositoryAccess{
+	states, _, err := store.ListStatesForGitHubInstallationRepositories([]GitHubInstallationRepositoryAccess{
 		{InstallationID: 987, Repositories: []string{"o/visible"}},
-	}, 1)
+	}, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1777,14 +1805,64 @@ func TestListStatesForGitHubInstallationRepositoriesHandlesLargeAccessSet(t *tes
 		repositories = append(repositories, fmt.Sprintf("o/repo-%d", index))
 	}
 
-	states, err := store.ListStatesForGitHubInstallationRepositories([]GitHubInstallationRepositoryAccess{
+	states, _, err := store.ListStatesForGitHubInstallationRepositories([]GitHubInstallationRepositoryAccess{
 		{InstallationID: 987, Repositories: repositories},
-	}, 1)
+	}, 1, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(states) != 1 || states[0].ID != "newer-in-later-batch" {
 		t.Fatalf("expected global newest state from a later query batch, got %#v", states)
+	}
+}
+
+func TestListStatesForGitHubInstallationRepositoriesPaginatesAcrossBatches(t *testing.T) {
+	store := New(t.TempDir())
+	now := time.Now().UTC()
+	for _, request := range []RunnerRequest{
+		{
+			ID:                   "older-first-batch",
+			Source:               "test",
+			GitHubInstallationID: 987,
+			RepositoryFullName:   "o/repo-0",
+			CreatedAt:            now.Add(-2 * time.Minute),
+		},
+		{
+			ID:                   "middle-other-installation",
+			Source:               "test",
+			GitHubInstallationID: 654,
+			RepositoryFullName:   "other/visible",
+			CreatedAt:            now.Add(-time.Minute),
+		},
+		{
+			ID:                   "newer-later-batch",
+			Source:               "test",
+			GitHubInstallationID: 987,
+			RepositoryFullName:   "o/repo-900",
+			CreatedAt:            now,
+		},
+	} {
+		if _, _, err := store.CreateRequest(request, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repositories := make([]string, 0, 901)
+	for index := range 901 {
+		repositories = append(repositories, fmt.Sprintf("o/repo-%d", index))
+	}
+
+	states, total, err := store.ListStatesForGitHubInstallationRepositories([]GitHubInstallationRepositoryAccess{
+		{InstallationID: 987, Repositories: repositories},
+		{InstallationID: 654, Repositories: []string{"other/visible"}},
+	}, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 {
+		t.Fatalf("total = %d, want 3", total)
+	}
+	if len(states) != 1 || states[0].ID != "middle-other-installation" {
+		t.Fatalf("unexpected second page: %#v", states)
 	}
 }
 

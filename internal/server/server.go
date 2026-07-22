@@ -13,6 +13,7 @@ import (
 
 	"github.com/qiniu/ci-runner/internal/config"
 	"github.com/qiniu/ci-runner/internal/github"
+	"github.com/qiniu/ci-runner/internal/metrics"
 	"github.com/qiniu/ci-runner/internal/sandboxrunner"
 	"github.com/qiniu/ci-runner/internal/state"
 	"golang.org/x/sync/singleflight"
@@ -46,6 +47,8 @@ type Server struct {
 
 	userRepositoryAccessMu    sync.Mutex
 	userRepositoryAccessCache map[int64]cachedUserRepositoryAccess
+	userRepositoryAccessEpoch map[int64]uint64
+	userRepositoryAccessGroup singleflight.Group
 }
 
 type cachedPullTitle struct {
@@ -55,8 +58,10 @@ type cachedPullTitle struct {
 }
 
 type cachedUserRepositoryAccess struct {
-	access    []state.GitHubInstallationRepositoryAccess
-	expiresAt time.Time
+	access       []state.GitHubInstallationRepositoryAccess
+	refreshAfter time.Time
+	expiresAt    time.Time
+	refreshing   bool
 }
 
 type manualCreateRequest struct {
@@ -111,6 +116,7 @@ const runnerJobStartedMarker = "__runner_job_started__"
 const (
 	defaultRunnerRequestListLimit = 100
 	maxRunnerRequestListLimit     = 500
+	maxUserRunnerHistoryWindow    = 500
 	oauthStateCookieName          = "runnerd_oauth_state"
 	oauthReturnToCookieName       = "runnerd_oauth_return_to"
 	githubAppSetupStateCookieName = "runnerd_github_app_setup_state"
@@ -141,6 +147,7 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		terminals:                 newTerminalHub(logger),
 		pullTitleCache:            map[string]cachedPullTitle{},
 		userRepositoryAccessCache: map[int64]cachedUserRepositoryAccess{},
+		userRepositoryAccessEpoch: map[int64]uint64{},
 	}
 	hostname, _ := os.Hostname()
 	s.workerID = fmt.Sprintf("%s-%d", hostname, os.Getpid())
@@ -153,13 +160,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	startedAt := time.Now()
 	lw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
 	s.mux.ServeHTTP(lw, r)
+	duration := time.Since(startedAt)
+	routePattern := r.Pattern
+	if routePattern == "" {
+		routePattern = "unmatched"
+	}
+	metrics.RecordHTTPRequest(r.Method, routePattern, lw.status, duration)
 	s.logger.Info(
 		"http request",
 		"method", r.Method,
 		"path", r.URL.Path,
 		"status", lw.status,
 		"bytes", lw.bytes,
-		"duration_ms", time.Since(startedAt).Milliseconds(),
+		"duration_ms", duration.Milliseconds(),
 		"remote_addr", r.RemoteAddr,
 		"github_event", r.Header.Get("X-GitHub-Event"),
 		"github_delivery", r.Header.Get("X-GitHub-Delivery"),

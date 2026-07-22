@@ -187,9 +187,17 @@ func parsePagination(r *http.Request, defaultLimit, maxLimit int) (int, int, err
 }
 
 func writePaginationHeaders(w http.ResponseWriter, r *http.Request, total int64, limit, offset int) {
+	writePaginationHeadersWithinWindow(w, r, total, limit, offset, 0)
+}
+
+func writePaginationHeadersWithinWindow(w http.ResponseWriter, r *http.Request, total int64, limit, offset, maxWindow int) {
 	w.Header().Set("X-Total-Count", strconv.FormatInt(total, 10))
 	w.Header().Set("X-Limit", strconv.Itoa(limit))
 	w.Header().Set("X-Offset", strconv.Itoa(offset))
+	linkTotal := total
+	if maxWindow > 0 && linkTotal > int64(maxWindow) {
+		linkTotal = int64(maxWindow)
+	}
 	links := make([]string, 0, 2)
 	if offset > 0 {
 		prevOffset := offset - limit
@@ -198,8 +206,15 @@ func writePaginationHeaders(w http.ResponseWriter, r *http.Request, total int64,
 		}
 		links = append(links, fmt.Sprintf("<%s>; rel=\"prev\"", pageURL(r, limit, prevOffset)))
 	}
-	if int64(offset+limit) < total {
-		links = append(links, fmt.Sprintf("<%s>; rel=\"next\"", pageURL(r, limit, offset+limit)))
+	nextOffset := int64(offset) + int64(limit)
+	if nextOffset < linkTotal {
+		nextLimit := limit
+		if maxWindow > 0 && nextOffset+int64(nextLimit) > int64(maxWindow) {
+			nextLimit = maxWindow - int(nextOffset)
+		}
+		if nextLimit > 0 {
+			links = append(links, fmt.Sprintf("<%s>; rel=\"next\"", pageURL(r, nextLimit, int(nextOffset))))
+		}
 	}
 	if len(links) > 0 {
 		w.Header().Set("Link", strings.Join(links, ", "))

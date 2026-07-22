@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -293,16 +294,26 @@ func (s *Server) handleUserListRunners(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	limit, offset, err := parsePagination(r, defaultRunnerRequestListLimit, maxRunnerRequestListLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if offset > maxUserRunnerHistoryWindow-limit {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("requested page exceeds the %d-runner history window", maxUserRunnerHistoryWindow))
+		return
+	}
 	access, err := s.userAuthorizedRepositoryAccess(r.Context(), account.ID)
 	if err != nil {
 		s.writeUserRepositoryAuthorizationError(w, err)
 		return
 	}
-	states, err := s.store.ListStatesForGitHubInstallationRepositories(access, 500)
+	states, total, err := s.store.ListStatesForGitHubInstallationRepositories(access, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	writePaginationHeadersWithinWindow(w, r, total, limit, offset, maxUserRunnerHistoryWindow)
 	writeJSON(w, http.StatusOK, states)
 }
 

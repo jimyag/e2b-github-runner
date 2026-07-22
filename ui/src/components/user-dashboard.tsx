@@ -20,6 +20,7 @@ import { type CSSProperties, type FormEvent, type MouseEvent, type ReactNode, us
 import type { AuthSession, GitHubAppConfig, RunnerJobGroup, RunnerState, UserPreferences } from "@/admin-types"
 import { logNames } from "@/admin-types"
 import { formatRunnerDuration, formatTime } from "@/admin-format"
+import { userRunnerHistoryWindow } from "@/app-load-policy"
 import { AccountMenu } from "@/components/account-menu"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -93,6 +94,8 @@ export function UserDashboard({
   githubApp,
   userPreferences,
   runners,
+  runnerTotal,
+  loadingRunnerHistory,
   selectedKey,
   selectedJobID,
   page,
@@ -108,6 +111,7 @@ export function UserDashboard({
   onNavigateAccountSettings,
   onOpenJob,
   onLoadJobGroup,
+  onLoadRunnerHistory,
   request,
   onSelectKey,
   onSignOut,
@@ -116,6 +120,8 @@ export function UserDashboard({
   githubApp: GitHubAppConfig | null
   userPreferences: UserPreferences | null
   runners: RunnerState[]
+  runnerTotal: number
+  loadingRunnerHistory: boolean
   selectedKey: string
   selectedJobID: string
   page: UserPage
@@ -131,6 +137,7 @@ export function UserDashboard({
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
   onOpenJob: (id: string) => void
   onLoadJobGroup: (key: string) => Promise<unknown>
+  onLoadRunnerHistory: () => void
   request: (url: string, options?: RequestInit) => Promise<unknown>
   onSelectKey: (key: string) => void
   onSignOut: () => void
@@ -252,6 +259,10 @@ export function UserDashboard({
           onSyncGitHubInstallations={onSyncGitHubInstallations}
           onOpenJob={onOpenJob}
           request={request}
+          runnerCount={runners.length}
+          runnerTotal={runnerTotal}
+          loadingRunnerHistory={loadingRunnerHistory}
+          onLoadRunnerHistory={onLoadRunnerHistory}
         />
       )}
     </main>
@@ -1034,6 +1045,10 @@ function PullRequestsPage({
   onSyncGitHubInstallations,
   onOpenJob,
   request,
+  runnerCount,
+  runnerTotal,
+  loadingRunnerHistory,
+  onLoadRunnerHistory,
 }: {
   groups: BuildGroup[]
   hasInstallations: boolean
@@ -1046,6 +1061,10 @@ function PullRequestsPage({
   onSyncGitHubInstallations: () => void
   onOpenJob: (id: string) => void
   request: (url: string, options?: RequestInit) => Promise<unknown>
+  runnerCount: number
+  runnerTotal: number
+  loadingRunnerHistory: boolean
+  onLoadRunnerHistory: () => void
 }) {
   const currentJobs = selectedJobGroup?.current_jobs || (selected ? currentBuildJobs(selected) : [])
   const previousJobs = selectedJobGroup?.previous_jobs || (selected ? previousBuildJobs(selected, currentJobs) : [])
@@ -1054,6 +1073,8 @@ function PullRequestsPage({
   const effectiveSelectedJobID = selectedJob?.id || ""
   const workflows = workflowGroups(allJobs)
   const selectedStatus = selected ? buildGroupStatus(selected) : null
+  const visibleHistoryTotal = Math.min(runnerTotal, userRunnerHistoryWindow)
+  const olderRunnerCount = Math.max(0, visibleHistoryTotal - runnerCount)
 
   return (
     <>
@@ -1071,7 +1092,8 @@ function PullRequestsPage({
           <div className="flex h-full flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto">
               {groups.length ? (
-                groups.map((group) => {
+                <>
+                  {groups.map((group) => {
                   const isSelected = selected?.key === group.key
                   const showSubmenu = isSelected && allJobs.length > 1
                   return (
@@ -1092,7 +1114,21 @@ function PullRequestsPage({
                       ) : null}
                     </div>
                   )
-                })
+                  })}
+                  {olderRunnerCount > 0 ? (
+                    <div className="border-b p-3">
+                      <Button
+                        className="w-full"
+                        disabled={loadingRunnerHistory}
+                        onClick={onLoadRunnerHistory}
+                        type="button"
+                        variant="outline"
+                      >
+                        {loadingRunnerHistory ? "Loading older jobs..." : `Load ${olderRunnerCount} older jobs`}
+                      </Button>
+                    </div>
+                  ) : null}
+                </>
               ) : (
                 <div className="p-4 text-sm text-muted-foreground">
                   {hasInstallations ? (

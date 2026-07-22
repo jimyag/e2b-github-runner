@@ -474,7 +474,7 @@ func (s *Server) userRunnerStatesForRequest(w http.ResponseWriter, r *http.Reque
 		s.writeUserRepositoryAuthorizationError(w, err)
 		return nil, false
 	}
-	states, err := s.store.ListStatesForGitHubInstallationRepositories(access, 500)
+	states, _, err := s.store.ListStatesForGitHubInstallationRepositories(access, 500, 0)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return nil, false

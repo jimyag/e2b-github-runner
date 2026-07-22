@@ -17,6 +17,50 @@ import (
 
 const maxRunnerRequestRepositoryAccessQueryParameters = 900
 
+var runnerRequestListSelectColumns = []string{
+	"id",
+	"workflow_job_id",
+	"github_installation_id",
+	"workflow_run_id",
+	"workflow_name",
+	"workflow_run_attempt",
+	"head_branch",
+	"head_sha",
+	"github_job_url",
+	"pull_request_number",
+	"github_context_backfilled",
+	"repository_full_name",
+	"requested_labels_json",
+	"profile_name",
+	"runner_group",
+	"runner_name",
+	"status",
+	"failure_stage",
+	"failure_reason",
+	"last_error_code",
+	"last_error_message",
+	"last_error_retryable",
+	"retry_count",
+	"sandbox_id",
+	"sandbox_config_source",
+	"process_pid",
+	"assigned_job_id",
+	"assigned_job_name",
+	"error",
+	"queued_at",
+	"last_attempt_at",
+	"next_retry_at",
+	"creating_at",
+	"running_at",
+	"stopping_at",
+	"completed_at",
+	"failed_at",
+	"lease_owner",
+	"lease_expires_at",
+	"updated_at",
+	"version",
+}
+
 type githubInstallationRepositoryAccessQueryBatch struct {
 	predicates     []string
 	args           []any
@@ -283,7 +327,12 @@ func (s *DBStore) ListStatesPage(limit, offset int) ([]RunnerState, int64, error
 		return nil, 0, err
 	}
 	var records []runnerRequestRecord
-	if err := db.Order("queued_at DESC").Limit(limit).Offset(offset).Find(&records).Error; err != nil {
+	if err := db.
+		Select(runnerRequestListSelectColumns).
+		Order("queued_at DESC, id ASC").
+		Limit(limit).
+		Offset(offset).
+		Find(&records).Error; err != nil {
 		return nil, 0, err
 	}
 	states := make([]RunnerState, 0, len(records))
@@ -320,27 +369,53 @@ func (s *DBStore) ListStatesForRepositories(repositories []string, limit int) ([
 	return states, nil
 }
 
-func (s *DBStore) ListStatesForGitHubInstallationRepositories(access []GitHubInstallationRepositoryAccess, limit int) ([]RunnerState, error) {
+func (s *DBStore) ListStatesForGitHubInstallationRepositories(access []GitHubInstallationRepositoryAccess, limit, offset int) ([]RunnerState, int64, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	batches := githubInstallationRepositoryAccessQueryBatches(access, maxRunnerRequestRepositoryAccessQueryParameters)
 	if len(batches) == 0 {
-		return []RunnerState{}, nil
+		return []RunnerState{}, 0, nil
 	}
 	if limit <= 0 || limit > 500 {
 		limit = 500
 	}
-	recordsByID := make(map[string]runnerRequestRecord, limit)
+	if offset < 0 {
+		offset = 0
+	}
+	var total int64
+	for _, batch := range batches {
+		var batchTotal int64
+		if err := db.Model(&runnerRequestRecord{}).
+			Where(strings.Join(batch.predicates, " OR "), batch.args...).
+			Count(&batchTotal).Error; err != nil {
+			return nil, 0, err
+		}
+		total += batchTotal
+	}
+	if int64(offset) >= total {
+		return []RunnerState{}, total, nil
+	}
+	queryLimit64 := total
+	if int64(limit) <= total-int64(offset) {
+		queryLimit64 = int64(offset) + int64(limit)
+	}
+	maxInt := int64(^uint(0) >> 1)
+	if queryLimit64 > maxInt {
+		queryLimit64 = maxInt
+	}
+	queryLimit := int(queryLimit64)
+	recordsByID := make(map[string]runnerRequestRecord)
 	for _, batch := range batches {
 		var batchRecords []runnerRequestRecord
 		if err := db.
+			Select(runnerRequestListSelectColumns).
 			Where(strings.Join(batch.predicates, " OR "), batch.args...).
 			Order("queued_at DESC, id ASC").
-			Limit(limit).
+			Limit(queryLimit).
 			Find(&batchRecords).Error; err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		for _, record := range batchRecords {
 			recordsByID[record.ID] = record
@@ -356,14 +431,20 @@ func (s *DBStore) ListStatesForGitHubInstallationRepositories(access []GitHubIns
 		}
 		return records[i].QueuedAt.After(records[j].QueuedAt)
 	})
-	if len(records) > limit {
-		records = records[:limit]
+	start := offset
+	if start > len(records) {
+		start = len(records)
 	}
-	states := make([]RunnerState, 0, len(records))
-	for _, record := range records {
+	end := start + limit
+	if end > len(records) {
+		end = len(records)
+	}
+	page := records[start:end]
+	states := make([]RunnerState, 0, len(page))
+	for _, record := range page {
 		states = append(states, recordToState(record))
 	}
-	return states, nil
+	return states, total, nil
 }
 
 func githubInstallationRepositoryAccessQueryBatches(access []GitHubInstallationRepositoryAccess, maxParameters int) []githubInstallationRepositoryAccessQueryBatch {
@@ -379,11 +460,8 @@ func githubInstallationRepositoryAccessQueryBatches(access []GitHubInstallationR
 		batches = append(batches, current)
 		current = githubInstallationRepositoryAccessQueryBatch{}
 	}
-	for _, item := range access {
-		repositories := uniqueLowerTrimmed(item.Repositories)
-		if item.InstallationID <= 0 || len(repositories) == 0 {
-			continue
-		}
+	for _, item := range normalizeGitHubInstallationRepositoryAccess(access) {
+		repositories := item.Repositories
 		for len(repositories) > 0 {
 			available := maxParameters - current.parameterCount
 			if available < 2 {
@@ -400,6 +478,41 @@ func githubInstallationRepositoryAccessQueryBatches(access []GitHubInstallationR
 	}
 	flush()
 	return batches
+}
+
+func normalizeGitHubInstallationRepositoryAccess(access []GitHubInstallationRepositoryAccess) []GitHubInstallationRepositoryAccess {
+	repositoriesByInstallation := make(map[int64]map[string]struct{})
+	for _, item := range access {
+		if item.InstallationID <= 0 {
+			continue
+		}
+		if repositoriesByInstallation[item.InstallationID] == nil {
+			repositoriesByInstallation[item.InstallationID] = make(map[string]struct{})
+		}
+		for _, repository := range uniqueLowerTrimmed(item.Repositories) {
+			repositoriesByInstallation[item.InstallationID][repository] = struct{}{}
+		}
+	}
+	installationIDs := make([]int64, 0, len(repositoriesByInstallation))
+	for installationID, repositories := range repositoriesByInstallation {
+		if len(repositories) > 0 {
+			installationIDs = append(installationIDs, installationID)
+		}
+	}
+	sort.Slice(installationIDs, func(i, j int) bool { return installationIDs[i] < installationIDs[j] })
+	normalized := make([]GitHubInstallationRepositoryAccess, 0, len(installationIDs))
+	for _, installationID := range installationIDs {
+		repositories := make([]string, 0, len(repositoriesByInstallation[installationID]))
+		for repository := range repositoriesByInstallation[installationID] {
+			repositories = append(repositories, repository)
+		}
+		sort.Strings(repositories)
+		normalized = append(normalized, GitHubInstallationRepositoryAccess{
+			InstallationID: installationID,
+			Repositories:   repositories,
+		})
+	}
+	return normalized
 }
 
 func (s *DBStore) ListStatesForGitHubInstallations(installationIDs []int64, limit int) ([]RunnerState, error) {

@@ -626,6 +626,9 @@ func TestUserRunnerAuthorizationUsesRepositoryIntersection(t *testing.T) {
 	if len(runners) != 1 || runners[0].ID != "visible-job" {
 		t.Fatalf("expected only repository-authorized job, got %#v", runners)
 	}
+	if rec.Header().Get("X-Total-Count") != "1" || rec.Header().Get("X-Limit") != "100" || rec.Header().Get("X-Offset") != "0" {
+		t.Fatalf("unexpected default user runner pagination headers: %#v", rec.Header())
+	}
 
 	deniedRequests := []struct {
 		method string
@@ -654,6 +657,86 @@ func TestUserRunnerAuthorizationUsesRepositoryIntersection(t *testing.T) {
 	}
 	if fake.terminals != 0 {
 		t.Fatalf("expected unauthorized terminal request not to start a terminal, got %d", fake.terminals)
+	}
+}
+
+func TestUserRunnerListPagination(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"repositories":[{"full_name":"o/visible"}]}`))
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
+	now := time.Now().UTC()
+	for index, id := range []string{"oldest", "middle", "newest"} {
+		if _, _, err := store.CreateRequest(state.RunnerRequest{
+			ID:                   id,
+			Source:               "test",
+			GitHubInstallationID: 987,
+			RepositoryFullName:   "o/visible",
+			CreatedAt:            now.Add(time.Duration(index) * time.Minute),
+		}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests?limit=1&offset=1", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected paginated runner list status: %d body=%s", rec.Code, rec.Body.String())
+	}
+	var runners []state.RunnerState
+	if err := json.Unmarshal(rec.Body.Bytes(), &runners); err != nil {
+		t.Fatal(err)
+	}
+	if len(runners) != 1 || runners[0].ID != "middle" {
+		t.Fatalf("unexpected paginated user runners: %#v", runners)
+	}
+	if rec.Header().Get("X-Total-Count") != "3" || rec.Header().Get("X-Limit") != "1" || rec.Header().Get("X-Offset") != "1" {
+		t.Fatalf("unexpected pagination headers: %#v", rec.Header())
+	}
+	link := rec.Header().Get("Link")
+	if !strings.Contains(link, "</user/runner_requests?limit=1&offset=0>; rel=\"prev\"") ||
+		!strings.Contains(link, "</user/runner_requests?limit=1&offset=2>; rel=\"next\"") {
+		t.Fatalf("unexpected pagination link header: %q", link)
+	}
+
+	outOfWindowReq := httptest.NewRequest(http.MethodGet, "/user/runner_requests?limit=500&offset=1", nil)
+	outOfWindowReq.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	outOfWindowRec := httptest.NewRecorder()
+	srv.ServeHTTP(outOfWindowRec, outOfWindowReq)
+	if outOfWindowRec.Code != http.StatusBadRequest || !strings.Contains(outOfWindowRec.Body.String(), "history window") {
+		t.Fatalf("expected bounded history-window error, got status=%d body=%s", outOfWindowRec.Code, outOfWindowRec.Body.String())
+	}
+}
+
+func TestPaginationHeadersStopAtHistoryWindow(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/user/runner_requests?limit=500&offset=0", nil)
+	rec := httptest.NewRecorder()
+	writePaginationHeadersWithinWindow(rec, req, 501, 500, 0, 500)
+	if rec.Header().Get("X-Total-Count") != "501" {
+		t.Fatalf("unexpected total count: %q", rec.Header().Get("X-Total-Count"))
+	}
+	if strings.Contains(rec.Header().Get("Link"), "rel=\"next\"") {
+		t.Fatalf("history-window response exposed an unusable next link: %q", rec.Header().Get("Link"))
 	}
 }
 
@@ -958,6 +1041,425 @@ func TestUserRunnerAuthorizationCachesRepositoryAccess(t *testing.T) {
 	}
 	if permissionRequests != 1 {
 		t.Fatalf("expected one GitHub permission request, got %d", permissionRequests)
+	}
+}
+
+func TestUserRunnerAuthorizationRefreshesValidCacheInBackground(t *testing.T) {
+	var (
+		requestMu       sync.Mutex
+		permissionCalls int
+	)
+	refreshStarted := make(chan struct{})
+	releaseRefresh := make(chan struct{})
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		requestMu.Lock()
+		permissionCalls++
+		call := permissionCalls
+		requestMu.Unlock()
+		if call == 2 {
+			close(refreshStarted)
+			select {
+			case <-releaseRefresh:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if call == 1 {
+			w.Write([]byte(`{"repositories":[{"full_name":"o/old"}]}`))
+			return
+		}
+		w.Write([]byte(`{"repositories":[{"full_name":"o/new"}]}`))
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	defer srv.Close()
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
+
+	access, err := srv.userAuthorizedRepositoryAccess(t.Context(), account.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRepositoryAccess(access, 987, "o/old") {
+		t.Fatalf("unexpected initial access: %#v", access)
+	}
+	srv.userRepositoryAccessMu.Lock()
+	cached := srv.userRepositoryAccessCache[account.ID]
+	cached.refreshAfter = time.Now().Add(-time.Second)
+	cached.expiresAt = time.Now().Add(time.Minute)
+	srv.userRepositoryAccessCache[account.ID] = cached
+	srv.userRepositoryAccessMu.Unlock()
+
+	for range 2 {
+		access, err = srv.userAuthorizedRepositoryAccess(t.Context(), account.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hasRepositoryAccess(access, 987, "o/old") {
+			t.Fatalf("valid cache must be returned while refresh runs: %#v", access)
+		}
+	}
+	select {
+	case <-refreshStarted:
+	case <-time.After(time.Second):
+		t.Fatal("background permission refresh did not start")
+	}
+	requestMu.Lock()
+	callsWhileBlocked := permissionCalls
+	requestMu.Unlock()
+	if callsWhileBlocked != 2 {
+		t.Fatalf("expected one background refresh, got %d total permission calls", callsWhileBlocked)
+	}
+	close(releaseRefresh)
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		access, ok := srv.cachedUserRepositoryAccess(account.ID)
+		if ok && hasRepositoryAccess(access, 987, "o/new") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("background refresh did not replace cached access: %#v", access)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestUserRunnerAuthorizationBackgroundRefreshInvalidatesRejectedCredentials(t *testing.T) {
+	var calls int
+	rejected := make(chan struct{})
+	var rejectOnce sync.Once
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"repositories":[{"full_name":"o/r"}]}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"message":"Bad credentials"}`))
+		rejectOnce.Do(func() { close(rejected) })
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	defer srv.Close()
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
+	if _, err := srv.userAuthorizedRepositoryAccess(t.Context(), account.ID); err != nil {
+		t.Fatal(err)
+	}
+	srv.userRepositoryAccessMu.Lock()
+	cached := srv.userRepositoryAccessCache[account.ID]
+	cached.refreshAfter = time.Now().Add(-time.Second)
+	srv.userRepositoryAccessCache[account.ID] = cached
+	srv.userRepositoryAccessMu.Unlock()
+
+	access, err := srv.userAuthorizedRepositoryAccess(t.Context(), account.ID)
+	if err != nil || !hasRepositoryAccess(access, 987, "o/r") {
+		t.Fatalf("valid cache should be returned before rejection completes: access=%#v err=%v", access, err)
+	}
+	select {
+	case <-rejected:
+	case <-time.After(time.Second):
+		t.Fatal("background rejected-credential refresh did not finish")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, ok := srv.cachedUserRepositoryAccess(account.ID); !ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("rejected credentials did not invalidate repository access cache")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestUserRunnerAuthorizationInvalidationSupersedesInFlightRefresh(t *testing.T) {
+	var (
+		requestMu sync.Mutex
+		calls     int
+		release   sync.Once
+	)
+	refreshStarted := make(chan struct{})
+	supersedingRefreshStarted := make(chan struct{})
+	releaseStaleRefresh := make(chan struct{})
+	releaseRefresh := func() { release.Do(func() { close(releaseStaleRefresh) }) }
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		requestMu.Lock()
+		calls++
+		call := calls
+		requestMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch call {
+		case 1:
+			w.Write([]byte(`{"repositories":[{"full_name":"o/old"}]}`))
+		case 2:
+			close(refreshStarted)
+			<-releaseStaleRefresh
+			w.Write([]byte(`{"repositories":[{"full_name":"o/stale"}]}`))
+		case 3:
+			close(supersedingRefreshStarted)
+			w.Write([]byte(`{"repositories":[{"full_name":"o/new"}]}`))
+		default:
+			t.Fatalf("unexpected github permission request %d", call)
+		}
+	}))
+	defer ghServer.Close()
+	defer releaseRefresh()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	defer srv.Close()
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
+	if _, err := srv.userAuthorizedRepositoryAccess(t.Context(), account.ID); err != nil {
+		t.Fatal(err)
+	}
+	staleResult := make(chan error, 1)
+	go func() {
+		_, err := srv.refreshUserRepositoryAccess(t.Context(), account.ID)
+		staleResult <- err
+	}()
+	select {
+	case <-refreshStarted:
+	case <-time.After(time.Second):
+		t.Fatal("stale background refresh did not start")
+	}
+
+	srv.invalidateUserRepositoryAccess(account.ID)
+	type accessResult struct {
+		access []state.GitHubInstallationRepositoryAccess
+		err    error
+	}
+	result := make(chan accessResult, 1)
+	go func() {
+		access, err := srv.userAuthorizedRepositoryAccess(t.Context(), account.ID)
+		result <- accessResult{access: access, err: err}
+	}()
+	select {
+	case <-supersedingRefreshStarted:
+	case <-time.After(time.Second):
+		t.Fatal("cache invalidation did not start a superseding permission refresh")
+	}
+	completed := <-result
+	if completed.err != nil || !hasRepositoryAccess(completed.access, 987, "o/new") {
+		t.Fatalf("unexpected superseding access: access=%#v err=%v", completed.access, completed.err)
+	}
+	releaseRefresh()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		access, ok := srv.cachedUserRepositoryAccess(account.ID)
+		if ok && hasRepositoryAccess(access, 987, "o/new") && !hasRepositoryAccess(access, 987, "o/stale") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stale refresh replaced superseding cache entry: %#v", access)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestUserRunnerAuthorizationRejectedStaleRefreshDoesNotInvalidateNewEpoch(t *testing.T) {
+	var (
+		requestMu sync.Mutex
+		calls     int
+		release   sync.Once
+	)
+	refreshStarted := make(chan struct{})
+	supersedingRefreshStarted := make(chan struct{})
+	releaseStaleRefresh := make(chan struct{})
+	releaseRefresh := func() { release.Do(func() { close(releaseStaleRefresh) }) }
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		requestMu.Lock()
+		calls++
+		call := calls
+		requestMu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch call {
+		case 1:
+			w.Write([]byte(`{"repositories":[{"full_name":"o/old"}]}`))
+		case 2:
+			close(refreshStarted)
+			<-releaseStaleRefresh
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"message":"Bad credentials"}`))
+		case 3:
+			close(supersedingRefreshStarted)
+			w.Write([]byte(`{"repositories":[{"full_name":"o/new"}]}`))
+		default:
+			t.Fatalf("unexpected github permission request %d", call)
+		}
+	}))
+	defer ghServer.Close()
+	defer releaseRefresh()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
+	if _, err := srv.userAuthorizedRepositoryAccess(t.Context(), account.ID); err != nil {
+		t.Fatal(err)
+	}
+	staleResult := make(chan error, 1)
+	go func() {
+		_, err := srv.refreshUserRepositoryAccess(t.Context(), account.ID)
+		staleResult <- err
+	}()
+	select {
+	case <-refreshStarted:
+	case <-time.After(time.Second):
+		t.Fatal("stale background refresh did not start")
+	}
+
+	srv.invalidateUserRepositoryAccess(account.ID)
+	type accessResult struct {
+		access []state.GitHubInstallationRepositoryAccess
+		err    error
+	}
+	result := make(chan accessResult, 1)
+	go func() {
+		access, err := srv.userAuthorizedRepositoryAccess(t.Context(), account.ID)
+		result <- accessResult{access: access, err: err}
+	}()
+	select {
+	case <-supersedingRefreshStarted:
+	case <-time.After(time.Second):
+		t.Fatal("cache invalidation did not start a superseding permission refresh")
+	}
+	completed := <-result
+	if completed.err != nil || !hasRepositoryAccess(completed.access, 987, "o/new") {
+		t.Fatalf("unexpected superseding access: access=%#v err=%v", completed.access, completed.err)
+	}
+	releaseRefresh()
+	if err := <-staleResult; err == nil {
+		t.Fatal("expected stale refresh rejection")
+	}
+	access, ok := srv.cachedUserRepositoryAccess(account.ID)
+	if !ok || !hasRepositoryAccess(access, 987, "o/new") {
+		t.Fatalf("rejected stale refresh invalidated the new epoch cache: %#v", access)
+	}
+}
+
+func TestUserRunnerAuthorizationSharedRefreshSurvivesCallerCancellation(t *testing.T) {
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+		close(requestStarted)
+		select {
+		case <-releaseRequest:
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"repositories":[{"full_name":"o/visible"}]}`))
+		case <-r.Context().Done():
+			return
+		}
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, ghServer.URL, &fakeSandbox{})
+	defer srv.Close()
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
+
+	firstCtx, cancelFirst := context.WithCancel(t.Context())
+	firstResult := make(chan error, 1)
+	go func() {
+		_, err := srv.userAuthorizedRepositoryAccess(firstCtx, account.ID)
+		firstResult <- err
+	}()
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("shared permission refresh did not start")
+	}
+	type accessResult struct {
+		access []state.GitHubInstallationRepositoryAccess
+		err    error
+	}
+	secondResult := make(chan accessResult, 1)
+	go func() {
+		access, err := srv.userAuthorizedRepositoryAccess(t.Context(), account.ID)
+		secondResult <- accessResult{access: access, err: err}
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancelFirst()
+	if err := <-firstResult; !errors.Is(err, context.Canceled) {
+		t.Fatalf("first caller error = %v, want context canceled", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	close(releaseRequest)
+	completed := <-secondResult
+	if completed.err != nil || !hasRepositoryAccess(completed.access, 987, "o/visible") {
+		t.Fatalf("shared refresh was canceled with first caller: access=%#v err=%v", completed.access, completed.err)
 	}
 }
 
