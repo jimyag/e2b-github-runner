@@ -14,7 +14,7 @@
 - GitHub App webhook 或 repository webhook 将 `workflow_job` events 发送到 `POST /webhooks/github`。
 - 目标 account/organization Preferences 已配置 Sandbox service API URL 和 API key，或 `/admin/sandbox_service` 已启用 admin fallback。
 - 至少一个 Qiniu sandbox template 包含 `/opt/actions-runner/config.sh` 和 `/opt/actions-runner/run.sh`。
-- 已通过 `runnerd --bootstrap-admin github:<github-user-id>` 引导 admin account。
+- 已通过 `runnerd --bootstrap-admin github:<github-user-id>` 引导 admin account（该命令设置 admin 后直接退出，需在启动服务前执行）。
 
 不要在本文档中写入真实 secret，也不要提交部署本地文件，例如 `runnerd.local.yaml`、`.smee-url`、sqlite databases、private keys 或 cookie jars。
 

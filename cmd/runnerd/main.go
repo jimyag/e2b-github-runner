@@ -21,7 +21,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "runnerd.yaml", "path to runnerd config file")
-	bootstrapAdmin := flag.String("bootstrap-admin", "", "bootstrap an admin account as provider:subject, for example github:12345678")
+	bootstrapAdmin := flag.String("bootstrap-admin", "", "set an admin account as provider:subject (for example github:12345678) and exit without starting the server")
 	obfuscateConfigValue := flag.Bool("obfuscate-config-value", false, "read a secret from stdin and print a RUNNERD_ENC value")
 	flag.Parse()
 	if *obfuscateConfigValue {
@@ -45,9 +45,13 @@ func main() {
 		logger.Error("ensure state store", "error", err)
 		os.Exit(1)
 	}
-	if err := bootstrapAdminAccount(store, *bootstrapAdmin); err != nil {
-		logger.Error("bootstrap admin account", "error", err)
-		os.Exit(1)
+	if *bootstrapAdmin != "" {
+		if err := bootstrapAdminAccount(store, *bootstrapAdmin); err != nil {
+			logger.Error("bootstrap admin account", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("bootstrap admin account done, exiting", "identity", *bootstrapAdmin)
+		return
 	}
 	githubHTTPClient := &http.Client{Timeout: 30 * time.Second}
 	var gh *github.Client
