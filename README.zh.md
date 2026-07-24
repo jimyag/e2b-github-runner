@@ -1,29 +1,21 @@
-# Qiniu Sandbox GitHub Runner
+<h1 align="center">Qiniu Sandbox GitHub Runner</h1>
 
-[English](README.md)
+<p align="center">
+  <strong>基于 Qiniu Sandbox，按 Job 即时创建、用完即销毁的 GitHub Actions Runner</strong>
+</p>
 
-一个轻量级 Go 服务，在 [Qiniu Sandbox](https://www.qiniu.com/) 实例中运行临时的 [GitHub Actions self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners)。每个 workflow job 都会获得一个干净、隔离的沙箱环境，并在完成后自动销毁。
+<p align="center">
+  <a href="./README.md">English</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#文档">文档</a> ·
+  <a href="#社区与贡献">社区与贡献</a>
+</p>
 
-## 目录
+---
 
-- [特性](#特性)
-- [工作原理](#工作原理)
-- [快速开始](#快速开始)
-- [配置](#配置)
-  - [配置值混淆](#配置值混淆)
-- [GitHub App 设置](#github-app-设置)
-  - [所需权限](#所需权限)
-  - [OAuth 登录](#oauth-登录)
-  - [Webhook 事件订阅](#webhook-事件订阅)
-- [Webhook 与 Workflow 配置](#webhook-与-workflow-配置)
-- [Runner Spec 与 Policy](#runner-spec-与-policy)
-- [管理控制台](#管理控制台)
-- [常见问题排查](#常见问题排查)
-- [Docker](#docker)
-- [构建与开发](#构建与开发)
-- [文档](#文档)
+Qiniu Sandbox GitHub Runner 为每个 GitHub Actions workflow job 按需创建独立的 [Qiniu Sandbox](https://www.qiniu.com/)，即时注册 [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners)，并在 job 结束后自动移除 runner、停止沙箱。团队可以沿用熟悉的 GitHub Actions 工作流，同时让每个 job 都在一次性的隔离环境中运行。
 
-## 特性
+## 核心能力
 
 - **临时 Runner** — 每个 job 一个沙箱，完成后自动清理
 - **GitHub App 鉴权** — 推荐的生产鉴权方式，内置 Web 控制台支持 OAuth 登录
@@ -248,3 +240,20 @@ task release-check # 验证发布构建
 | [docs/zh/deployment-smoke.md](docs/zh/deployment-smoke.md)                             | 生产环境就绪检查清单                                    |
 | [docs/zh/runner-architecture-comparison.md](docs/zh/runner-architecture-comparison.md) | 架构图及与 ARC / Fireactions 的对比                     |
 | [docs/zh/runner-implementation-review.md](docs/zh/runner-implementation-review.md)     | 实现状态与 schema 迁移说明                              |
+
+## 社区与贡献
+
+我们欢迎各种形式的贡献，包括 Bug 报告、功能建议、文档改进和代码提交。
+
+- **发现问题或有新想法？** —— 前往 [GitHub Issues](https://github.com/qiniu/ci-runner/issues) 报告问题或提出建议。
+- **想改进代码或文档？** —— 提交 [Pull Request](https://github.com/qiniu/ci-runner/pulls)，与我们一起完善 Qiniu CI Runner。
+- **想交流使用经验？** —— 扫描下方二维码，加入交流群。
+
+---
+
+<p align="center">
+  <img src="./docs/assets/qrcode.png" width="220" alt="Qiniu CI Runner 交流群二维码" />
+</p>
+<p align="center">
+  <em>扫描上方二维码加入交流群，与维护者和社区用户一起交流使用经验和改进建议。</em>
+</p>

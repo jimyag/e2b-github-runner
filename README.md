@@ -1,29 +1,21 @@
-# Qiniu Sandbox GitHub Runner
+<h1 align="center">Qiniu Sandbox GitHub Runner</h1>
 
-[中文](README.zh.md)
+<p align="center">
+  <strong>Ephemeral, isolated GitHub Actions runners powered by Qiniu Sandbox</strong>
+</p>
 
-A lightweight Go service that runs ephemeral [GitHub Actions self-hosted runners](https://docs.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners) inside [Qiniu Sandbox](https://www.qiniu.com/) instances. Each workflow job gets a clean, isolated sandbox that is automatically created and destroyed.
+<p align="center">
+  <a href="./README.zh.md">中文</a> ·
+  <a href="#quick-start">Quick Start</a> ·
+  <a href="#documentation">Documentation</a> ·
+  <a href="#community--contributing">Community &amp; Contributing</a>
+</p>
 
-## Table of Contents
+---
 
-- [Features](#features)
-- [How It Works](#how-it-works)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-  - [Config Value Obfuscation](#config-value-obfuscation)
-- [GitHub App Setup](#github-app-setup)
-  - [Required Permissions](#required-permissions)
-  - [OAuth Sign-in](#oauth-sign-in)
-  - [Webhook Events](#webhook-events)
-- [Webhook & Workflow Setup](#webhook--workflow-setup)
-- [Runner Specs & Policies](#runner-specs--policies)
-- [Admin Console](#admin-console)
-- [Troubleshooting](#troubleshooting)
-- [Docker](#docker)
-- [Build & Development](#build--development)
-- [Documentation](#documentation)
+Qiniu Sandbox GitHub Runner provisions a clean [Qiniu Sandbox](https://www.qiniu.com/) for each GitHub Actions workflow job, registers a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners) just in time, and removes the runner and sandbox when the job ends. Teams keep the familiar GitHub Actions workflow while moving each job into a disposable environment.
 
-## Features
+## Core Capabilities
 
 - **Ephemeral runners** — one sandbox per job, automatically cleaned up after completion
 - **GitHub App auth** — recommended production path with OAuth sign-in for the built-in web console
@@ -247,3 +239,20 @@ Build templates with `task template-build-prod`. The qbox-kodo base image can be
 | [docs/deployment-smoke.md](docs/deployment-smoke.md) | Production-style readiness checklist |
 | [docs/runner-architecture-comparison.md](docs/runner-architecture-comparison.md) | Architecture diagrams and comparison with ARC / Fireactions |
 | [docs/runner-implementation-review.md](docs/runner-implementation-review.md) | Implementation status and schema migration notes |
+
+## Community & Contributing
+
+Bug reports, feature ideas, documentation improvements, and code contributions are welcome.
+
+- [Report a bug or propose a feature](https://github.com/qiniu/ci-runner/issues).
+- [Open a Pull Request](https://github.com/qiniu/ci-runner/pulls) to improve the code or documentation.
+- Scan the QR code below to join the community chat.
+
+---
+
+<p align="center">
+  <img src="./docs/assets/qrcode.png" width="220" alt="Qiniu CI Runner community chat QR code" />
+</p>
+<p align="center">
+  <em>Scan the QR code to connect with maintainers and other Qiniu CI Runner users.</em>
+</p>
