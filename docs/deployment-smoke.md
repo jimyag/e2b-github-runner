@@ -9,7 +9,7 @@ Use this checklist before treating a runnerd deployment as ready for real GitHub
 - A runnerd deployment reachable over HTTPS for GitHub webhooks and console sign-in.
 - A `runnerd.yaml` with `database`, `auth`, `github`, and `worker` sections configured.
 - A GitHub.com App installed on the target repository or organization.
-- The GitHub App has the [required repository and organization permissions](../README.md#github-app-permissions) for the runner modes used by this deployment.
+- The GitHub App has the [required repository and organization permissions](../README.md#required-permissions) for the runner modes used by this deployment.
 - A GitHub App OAuth callback URL pointing at `/auth/github/callback` on the runnerd origin.
 - A GitHub App webhook or repository webhook delivering `workflow_job` events to `POST /webhooks/github`.
 - Sandbox service API URL and API key configured in the target account/organization Preferences page, or an enabled admin fallback at `/admin/sandbox_service`.
