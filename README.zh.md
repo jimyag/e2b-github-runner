@@ -2,35 +2,111 @@
 
 [English](README.md)
 
-这是一个小型 Go 服务，用于在 Qiniu sandbox 实例中启动临时 GitHub Actions self-hosted runner。
+一个轻量级 Go 服务，在 [Qiniu Sandbox](https://www.qiniu.com/) 实例中运行临时的 [GitHub Actions self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners)。每个 workflow job 都会获得一个干净、隔离的沙箱环境，并在完成后自动销毁。
+
+## 目录
+
+- [特性](#特性)
+- [工作原理](#工作原理)
+- [快速开始](#快速开始)
+- [配置](#配置)
+  - [配置值混淆](#配置值混淆)
+- [GitHub App 设置](#github-app-设置)
+  - [所需权限](#所需权限)
+  - [OAuth 登录](#oauth-登录)
+  - [Webhook 事件订阅](#webhook-事件订阅)
+- [Webhook 与 Workflow 配置](#webhook-与-workflow-配置)
+- [Runner Spec 与 Policy](#runner-spec-与-policy)
+- [管理控制台](#管理控制台)
+- [常见问题排查](#常见问题排查)
+- [Docker](#docker)
+- [构建与开发](#构建与开发)
+- [文档](#文档)
+
+## 特性
+
+- **临时 Runner** — 每个 job 一个沙箱，完成后自动清理
+- **GitHub App 鉴权** — 推荐的生产鉴权方式，内置 Web 控制台支持 OAuth 登录
+- **多数据库支持** — SQLite（默认）、PostgreSQL 或 MySQL 存储运行时状态
+- **并发控制** — 全局 `max_concurrent_runners` 和 per-spec `max_concurrency`，基于队列的背压机制
+- **内置 Web UI** — 管理控制台（Runner Spec、分组、策略、账户、诊断）；普通用户控制台（Job 分组、日志、沙箱管理）
+- **配置混淆** — 敏感值可避免在配置文件中直接暴露明文
+- **重试与恢复** — 瞬时故障自动退避重试；容量信号延迟处理而非丢弃请求
+
+## 工作原理
+
+```
+GitHub webhook (workflow_job)
+        │
+        ▼
+   ┌─────────┐     创建沙箱             ┌──────────────────┐
+   │ runnerd  │ ──────────────────────►  │  Qiniu Sandbox   │
+   │ (服务端) │     注册 runner          │  (临时虚拟机)     │
+   │          │ ──────────────────────►  │                  │
+   └─────────┘                          │  GitHub Actions  │
+        │                               │  self-hosted     │
+        │  job 完成 / 超时               │  runner          │
+        │◄────────────────────────────── │                  │
+        │     停止并清理沙箱             └──────────────────┘
+        ▼
+   状态数据库 (sqlite / postgres / mysql)
+```
+
+1. GitHub 向 runnerd 发送 `workflow_job`（queued）webhook。
+2. runnerd 将 job labels 与 runner spec 和 policy 进行匹配。
+3. runnerd 创建 Qiniu Sandbox 实例，并在其中注册 self-hosted runner。
+4. GitHub Actions 将 job 分派到该 runner，job 在沙箱中执行。
+5. job 完成（或超时）后，runnerd 移除 runner 注册并停止沙箱。
+
+## 快速开始
+
+```bash
+# 1. 构建
+task build
+
+# 2. 从示例创建配置
+cp runnerd.yaml.example runnerd.yaml
+#    编辑 runnerd.yaml：设置数据库、GitHub App 凭据、沙箱参数
+
+# 3. 初始化首个管理员（一次性命令，执行后直接退出，不会启动服务）
+./bin/runnerd --bootstrap-admin github:<github-user-id> --config runnerd.yaml
+
+# 4. 启动 runnerd
+./bin/runnerd --config runnerd.yaml
+```
+
+5. 打开 `http://<host>:25500/`，使用 GitHub OAuth 登录。
+6. 在账户/组织 **Preferences** 中配置 **Sandbox Service** 凭据（或在 `/admin/sandbox_service` 配置管理员级兜底）。
+7. 在**管理控制台**中创建 **Runner Spec**，设置有意义的 label（如 `ubuntu-24-04`），填写 `template_id`，并启用 `default_available`。
+8. 配置 GitHub webhook → `POST http://<host>:25500/webhooks/github`。
+9. 在 workflow 中使用 `runs-on: [self-hosted, <your-runner-label>]`。
+
+本地开发请使用 `task dev` 配合 `runnerd.local.yaml`。详细的本地环境搭建（包括 GitHub App 创建和 webhook 转发）请参阅 [docs/zh/testing.md](docs/zh/testing.md)。
 
 ## 配置
 
-运行时配置以文件为主。`runnerd` 默认读取 `./runnerd.yaml`，也可以通过 `--config` 指定其他路径。
+`runnerd` 默认读取 `./runnerd.yaml`，也可通过 `--config` 指定路径。完整注释的参考配置见 [`runnerd.yaml.example`](runnerd.yaml.example)。
 
-从示例配置开始：
+| 配置段     | 说明                                                             |
+| ---------- | ---------------------------------------------------------------- |
+| `server`   | 监听地址、读/写/空闲超时                                         |
+| `database` | 后端类型（`sqlite` / `postgres` / `mysql`）和 DSN                |
+| `auth`     | Session secret、加密密钥、Session TTL                            |
+| `sandbox`  | 沙箱生命周期超时（创建、运行、停止）                             |
+| `github`   | Webhook secret、鉴权方式（App / PAT / basic）、OAuth、允许的仓库 |
+| `worker`   | Lease、重试和并发设置                                            |
 
-```bash
-cp runnerd.yaml.example runnerd.yaml
-```
+要点：
 
-配置文件覆盖：
-
-- 服务监听地址和超时；
-- sqlite、Postgres 或 MySQL 数据库后端和 DSN/path；
-- sandbox 生命周期超时；
-- GitHub webhook 设置，以及 GitHub App、PAT 或 basic auth；
-- 内置普通用户与管理员 console 的 GitHub App OAuth 登录；
-- worker lease、retry、concurrency 设置。
-
-相对路径的 sqlite `database.dsn` 和 `github.app.private_key_file` 会按 `runnerd.yaml` 所在目录解析。旧的 `database.url` 在 `database.dsn` 为空时仍作为 deprecated alias 兼容读取。
-本地和小型单节点部署建议使用 sqlite。状态存储支持 Postgres 和 MySQL，但不要在两个 runnerd 进程共用同一个数据库验证前，把 shared-database multi-instance 作为已支持能力对外说明。
-当前不支持 GitHub Enterprise Server；请配置 GitHub.com App installation。
-GitHub 鉴权方式必须三选一：`github.app`、`github.token` 或 `github.basic_auth`。使用 GitHub App auth 时，`github.app.installation_id` 是可选的；省略时，runnerd 会按每个 job repository 动态解析 installation，并缓存 installation transports，因此一个 GitHub App 可以服务多个已安装账号。
+- 相对路径的 `database.dsn` 和 `github.app.private_key_file` 按配置文件所在目录解析。
+- 本地和单节点部署建议使用 SQLite。支持 PostgreSQL 和 MySQL，但多实例共享数据库尚未验证。
+- **不支持** GitHub Enterprise Server，请使用 GitHub.com App。
+- GitHub 鉴权方式三选一：`github.app`、`github.token` 或 `github.basic_auth`。
+- 省略 `github.app.installation_id` 时，runnerd 按仓库动态解析 installation，一个 App 可服务多个账号。
 
 ### 配置值混淆
 
-敏感标量字段可以使用 `RUNNERD_ENC(v1:...)`，避免在 `runnerd.yaml` 中直接展示明文。先构建 runnerd，再以不回显的方式读取原值，并从 stdin 生成混淆值：
+敏感字段支持 `RUNNERD_ENC(v1:...)` 格式，避免配置文件中出现明文：
 
 ```bash
 read -r -s secret_value
@@ -38,73 +114,97 @@ printf '%s' "$secret_value" | ./bin/runnerd --obfuscate-config-value
 unset secret_value
 ```
 
-将输出替换原配置值即可；为保持兼容，明文仍然可用。支持混淆的字段包括 `database.dsn`/`database.url`、`auth.session_secret`、`auth.encryption_key`、`github.webhook_secret`、`github.token`、`github.basic_auth.password` 和 `github.oauth.client_secret`。这些运行时值通过默认文本格式、结构化日志、JSON 或 YAML 输出时也只显示 `******`；应用代码需要显式请求明文后才能使用。
+支持的字段：`database.dsn`、`auth.session_secret`、`auth.encryption_key`、`github.webhook_secret`、`github.token`、`github.basic_auth.password`、`github.oauth.client_secret`。这些值在日志和序列化输出中也会显示为 `******`。
 
-该功能用于避免直接查看配置或意外日志输出造成明文泄漏，不用于抵御能够检查或执行 runnerd 的主机用户，因为解码 key 内置在二进制中。仍应避免将配置提交到源码仓库，并在主机条件允许时限制访问。
+> **注意：** 此功能仅防止直接查看配置时的明文泄漏，解码 key 内置在二进制中，不能抵御主机级别的攻击者。
 
-### GitHub App 权限
+## GitHub App 设置
 
-使用 GitHub App 鉴权时，只需配置下表中的权限。Runner 管理权限取决于匹配到的 Runner Spec 是否设置了 `runner_group`。
+### 所需权限
 
-| 范围 | 权限 | 访问级别 | 必要用途 |
-| --- | --- | --- | --- |
-| Repository | Actions | Read-only | 查询 workflow job 和 run 状态、列出 queued jobs，并读取 job 或 run 日志；通过 GitHub App webhook 接收 `workflow_job` 和 `workflow_run` 事件时，也需要此权限。 |
-| Repository | Administration | Read and write | 匹配到的 Runner Spec **未配置 `runner_group`** 时，用于生成仓库级 runner 注册令牌、查询已注册 runner，并在任务结束后清理 runner。若不配置此权限，仓库级 runner 将注册失败，只能使用配置了 `runner_group` 的组织级 runner，且不再支持个人账户仓库。 |
-| Repository | Metadata | Read-only | 识别仓库及其所属账户，并获取登录用户与 GitHub App installation 均有权访问的仓库列表。 |
-| Repository | Pull requests | Read-only | 获取普通用户 PR job group 的 pull request 标题，包括私有仓库。若不配置此权限，job group 仍可使用，但标题会显示为不可用。 |
-| Organization | Self-hosted runners | Read and write | 匹配到的 Runner Spec **配置了 `runner_group`** 时，用于生成组织级 runner 注册令牌、将 runner 注册到指定 group，并在任务结束后查询和清理 runner。 |
+| 范围         | 权限                | 访问级别     | 用途                                                             |
+| ------------ | ------------------- | ------------ | ---------------------------------------------------------------- |
+| Repository   | Actions             | Read-only    | 查询 job/run 状态、列出排队 job、读取日志；接收 webhook 事件所需 |
+| Repository   | Administration      | Read & write | 仓库级 runner 注册（spec 未设置 `runner_group` 时）              |
+| Repository   | Metadata            | Read-only    | 识别仓库及其所属账户                                             |
+| Repository   | Pull requests       | Read-only    | 在 job 分组中显示 PR 标题                                        |
+| Organization | Self-hosted runners | Read & write | 组织级 runner 注册（spec 设置了 `runner_group` 时）              |
 
-如果希望普通用户 UI 显示 Install GitHub App 链接，请设置 `github.app.slug` 为 GitHub App URL slug。
-`github.allowed_repositories` 是可选 allowlist，支持 `owner/repo` 或 `owner/*`。为空表示允许所有能发送有效 webhook 且能匹配 runner labels/policies 的仓库。
+设置 `github.app.slug` 可在用户 UI 中显示"安装 GitHub App"链接。使用 `github.allowed_repositories`（支持 `owner/repo` 或 `owner/*` 模式）限制哪些仓库可以使用此 runnerd 实例。
 
-`github.oauth` 用于启用内置 console 的 GitHub App OAuth 登录。使用 GitHub App 的 Client ID 和 Client secret，设置单独的 `auth.session_secret` 用于签名 session，设置单独的 `auth.encryption_key` 用于加密用户 secret，并把 App callback URL 配成 runnerd origin 下的 `/auth/github/callback`。本地 account 保存 role，OAuth identity 按 provider 和 stable subject 匹配；GitHub 的 stable subject 是 numeric user ID，login 只作为展示元数据保存。首次 OAuth callback 会创建 `role: user` 的 account 并绑定 GitHub identity。普通用户安装配置的 GitHub App，runnerd 会记录返回的 installation id。普通用户的 Jobs 列表、详情、分组、日志和终端接口，都按用户的 GitHub App access token 与每个已绑定 installation 仓库范围的交集，精确校验 `(installation_id, repository_full_name)`。Account repositories 页面使用相同的交集。runnerd 不会持久化完整的仓库授权列表，只会在内存中缓存成功结果 30 秒。用户 token 缺失或被 GitHub 拒绝时会默认拒绝访问，并要求用户重新使用 GitHub 登录；已失去访问权的 installation 会被忽略，直到 installation sync 将其移除。只有 `role: admin` 的 account 可以访问管理 API。首个管理员通过 `runnerd --bootstrap-admin github:<github-user-id>` 一次性引导，该命令设置 admin 账户后直接退出，不会启动服务。OAuth session 存储为 signed HttpOnly cookie。
+### OAuth 登录
 
-Sandbox service API URL 和 API key 通常在普通用户的 account 或 organization Preferences 页面配置。管理员可以在 `/admin/sandbox_service` 配置一个默认关闭的平台回退，供缺少完整 scoped 配置的 account 使用；可用范围可以是全部 GitHub repository owners，或按 login 选择的 GitHub users/organizations。runnerd 会通过 GitHub 解析并保存稳定 account identity，因此选择不依赖此前登录或 installation 同步；匹配对象是 repository owner，不是 workflow actor 或 organization membership。Scoped credentials 始终优先，解析顺序为已保存的 request snapshot、installation custom/inherited 配置、符合条件的个人 account，以及已启用且 audience eligible 的 admin default。所有 API key 都使用 `auth.encryption_key` 加密；runnerd 不会从 `runnerd.yaml` 读取 Sandbox service 凭据。
+`github.oauth` 用于启用内置控制台的 GitHub App OAuth 登录：
 
-登录用户可以在同一 account 或 organization scope 下查看 Sandbox 资源。Sandbox Templates 按支持的区域列出模板，Sandbox Instances 按区域和可选模板筛选 runner 创建的实例。页面位于 `/account/sandbox-templates`、`/account/sandbox-instances` 及对应的 `/organizations/{login}/...` 路由；凭据只在服务端使用，目录 API 不会返回凭据。
+- 使用 GitHub App 的 **Client ID** 和 **Client Secret**。
+- 将 App callback URL 设置为 `http://<host>:<port>/auth/github/callback`。
+- 将 `auth.session_secret`（session 签名）和 `auth.encryption_key`（用户 secret 加密）设为不同的随机值。
 
-`/webhooks/github` 使用 GitHub HMAC signature verification。`/runner_requests` 下的手动管理 API 需要有效的 GitHub OAuth admin session cookie。
+首次 OAuth 登录会创建 `role: user` 的账户。使用 `--bootstrap-admin <github-user-id>` 将账户提升为管理员。
 
-Runner state 持久化到 DB-backed store，不再使用按请求拆分的 JSON 目录。Control/stdout/stderr logs 会作为 runner events 保存，并继续通过 admin API 和 UI 查看。
-Schema 创建由 GORM model 驱动。已有 SQLite `runner_requests` 表只执行 additive column/index migration，不再由 GORM 重建整张表，以保留历史 installation 和 Sandbox configuration 字段；这张表未来如需 non-additive 变更，必须增加显式 compatibility migration 和数据保全测试。其他旧状态表会先执行窄范围 legacy compatibility pass，再运行 `AutoMigrate`。修改 state records 时需要保持旧 schema upgrade tests 通过。如果旧数据库的 `account_preferences` 或 `account_secrets` 表早于 `scope_type`/`scope_id`，升级会有意删除并重建这些表。升级后需要重新配置受影响的 Sandbox Preferences 和 API keys，相关用户还需重新使用 GitHub 登录，才能继续同步 installations。
+### Webhook 事件订阅
 
-## 运行
+在 GitHub App 设置页面（**Settings → Developer settings → GitHub Apps → 你的 App → General**）中配置：
 
-```bash
-go run ./cmd/runnerd --config ./runnerd.yaml
+1. 将 **Webhook URL** 设置为 `https://<你的runnerd地址>/webhooks/github`。
+2. 在 **Subscribe to events** 中勾选：
+   - **Workflow jobs**（`workflow_job`）— **必需**，触发 runner 创建。
+   - **Workflow runs**（`workflow_run`）— 可选，作为 `workflow_job` 丢失时的补偿信号。
+3. 保存更改。
+
+> **⚠️ 常见坑：** 如果没有订阅任何事件，GitHub 不会发送任何 webhook，job 将永远卡在 queued 状态。此配置在 **GitHub App 设置页面**，不是仓库的 webhook 设置。
+
+## Webhook 与 Workflow 配置
+
+1. 确保已按上述 [Webhook 事件订阅](#webhook-事件订阅) 配置好 GitHub App webhook，且 `webhook_secret` 与配置文件中的 `github.webhook_secret` 一致。
+2. 在 workflow 中使用：
+
+```yaml
+runs-on: [self-hosted, <your-runner-label>]
 ```
 
-## 开发
+runnerd 处理 `queued`、`in_progress` 和 `completed` 动作。对于 `workflow_run` 事件，runnerd 会列出该 run 下所有排队 job，并将尚未入队的匹配 job 创建 runner request。
 
-首次安装本地工具和 UI 依赖：
+## Runner Spec 与 Policy
 
-```bash
-task deps
-task ui-deps
-```
+Runner spec、runner group 和 repository policy 通过管理 API 和控制台管理，**不在** `runnerd.yaml` 中配置。
 
-开发时使用本地配置文件，避免把 secret 和本地 sqlite 状态提交进仓库：
+- **Runner Spec**：定义 runner label、沙箱模板和可选的 `runner_group`。设置 `default_available: true` 使其对所有允许的仓库可用。
+- **Runner Group**：spec 设置了 `runner_group` 时，runnerd 创建组织级 runner；否则创建仓库级 runner。
 
-```bash
-cp runnerd.yaml.example runnerd.local.yaml
-task dev
-```
+> **⚠️ 个人账号注意：** `runner_group` 需要调用组织级 GitHub API。如果仓库属于个人账号（而非组织），必须将 `runner_group` 留**空**，否则 runner 注册会返回 404 错误。
 
-`task dev` 会从 `5173` 开始选择第一个可用 localhost 端口启动 Vite UI dev server；当 `.smee-url` 存在时启动 smee webhook forwarder；并用 `development` build tag 运行 `runnerd`。Go server 仍监听 `runnerd.local.yaml` 中的地址，通常是 `:25500`，并把嵌入式 UI 资源代理到 Vite。开发时可打开 `http://127.0.0.1:25500/` 查看普通用户 PR/job 视图，打开 `http://127.0.0.1:25500/github/pulls/{owner}/{repo}/{number}/jobs` 查看稳定的 GitHub pull request job-group 路由，打开 `http://127.0.0.1:25500/repositories` 查看普通用户 activity repositories，打开 `http://127.0.0.1:25500/account/repositories` 查看 GitHub App accounts 和 authorized repositories，打开 `http://127.0.0.1:25500/account/preferences` 配置个人 Sandbox service，打开 `http://127.0.0.1:25500/account/sandbox-templates` 或 `/account/sandbox-instances` 查看个人 Sandbox 目录，打开 `http://127.0.0.1:25500/admin/accounts` 管理账户角色，打开 `http://127.0.0.1:25500/admin/sandbox_service` 管理平台回退，或打开 `http://127.0.0.1:25500/admin/` 查看 admin console。
+- **Repository Policy**：为特定仓库授权访问默认之外的额外 spec。
 
-可设置 `RUNNERD_CONFIG` 使用其他配置文件，或设置 `RUNNERD_VITE_PORT` 要求固定 Vite 端口。
+每个 spec 的 `template_id` 应指向包含 GitHub runner 镜像的 Qiniu Sandbox 模板。创建沙箱时会使用仓库 owner 的 Sandbox service Preferences 检查模板访问权限。
 
-本地 GitHub webhook forwarding 可创建 per-developer smee channel 文件：
+## 管理控制台
 
-```bash
-echo 'https://smee.io/<your-channel>' > .smee-url
-```
+内置 Web UI 提供：
 
-`task dev` 会自动启动 forwarder。`task smee` 也可单独启动 webhook forwarding，默认转发到 `http://127.0.0.1:25500/webhooks/github`。如果 runnerd 监听其他地址，请设置 `SMEE_TARGET`。
+| 路由                     | 说明                           |
+| ------------------------ | ------------------------------ |
+| `/admin/`                | 仪表盘：诊断、指标、最近失败   |
+| `/admin/accounts`        | 账户管理：列表、搜索、角色变更 |
+| `/admin/sandbox_service` | Sandbox 服务配置               |
+
+普通用户路由包括 `/repositories`、PR job 分组（`/github/pulls/{owner}/{repo}/{number}/jobs`）、账户设置（`/account/preferences`、`/account/sandbox-templates`、`/account/sandbox-instances`），以及对应的 `/organizations/{login}/...` 路由。
+
+## 常见问题排查
+
+| 现象                                                 | 可能原因                                 | 解决方法                                                                           |
+| ---------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------- |
+| Job 一直卡在 **queued**，runnerd 日志无 webhook 记录 | GitHub App 未订阅事件                    | 进入 GitHub App 设置 → 勾选 **Workflow jobs** 事件                                 |
+| `github registration token: status 404`              | 设置了 `runner_group` 但仓库属于个人账号 | 清空 runner spec 中的 `runner_group`，改用仓库级注册                               |
+| 日志中出现 `invalid signature`                       | Webhook secret 不匹配                    | 确保 `github.webhook_secret` 与 GitHub App/仓库 webhook 设置中的 secret 一致       |
+| `runner start deferred ... at capacity`              | 全局或 spec 并发上限已满                 | 等待运行中的 job 完成，或调大 `max_concurrent_runners` / spec 的 `max_concurrency` |
+| 沙箱创建失败                                         | 未配置 Sandbox 服务凭据                  | 在账户/组织 Preferences 或 `/admin/sandbox_service` 管理面板中配置 API 凭据        |
+
+更多本地调试步骤请参阅 [docs/zh/testing.md](docs/zh/testing.md)。
 
 ## Docker
 
-容器镜像只使用文件配置。把 `runnerd.yaml` 和其中引用的 secret 文件挂载进容器；`HTTP_ADDR` 这类环境变量不会作为运行时配置使用。
+容器镜像仅使用文件配置。将 `runnerd.yaml` 和引用的密钥文件挂载到容器中：
 
 ```bash
 docker run --rm -p 25500:25500 \
@@ -113,45 +213,35 @@ docker run --rm -p 25500:25500 \
   ghcr.io/qiniu/ci-runner
 ```
 
-普通用户 console 地址是 `http://127.0.0.1:25500/`，admin console 地址是 `http://127.0.0.1:25500/admin/`。UI 从 `ui/` 构建，使用 React、Vite、Tailwind CSS、shadcn-style components，以及与 `kubevirt-console` 相同的 theme tokens。Console 提供 GitHub sign-in，并使用 signed HttpOnly cookie 调用 API。普通用户可以在 `/` 看到两列 repository/PR job 视图，通过 `/github/pulls/{owner}/{repo}/{number}/jobs` 这类稳定的 GitHub-context 路由查看 job group，在 `/repositories` 看到本地 activity repositories，在 `/account/repositories` 看到 GitHub App accounts 和按需加载的 authorized repositories，在 `/account/preferences` 或 `/organizations/{login}/preferences` 配置 Sandbox service，并在 `/account/sandbox-templates`、`/account/sandbox-instances` 及对应的 organization 路由查看 scoped resource catalogs。Admin 用户看到管理 console；provider resource catalogs 不属于 admin 配置。
-
-Admin console 列出本地 accounts 并管理其 roles，同时管理 runner requests、runner specs、runner groups、runner policies、全局 Sandbox service fallback、retry actions、audit history、runner-spec match tests 和 diagnostics。Provider template/instance catalogs 仍属于普通用户资源。Runner specs、groups 和 repository policies 通过 admin API/UI 创建，不是 `runnerd.yaml` 字段。runnerd 默认创建 repository runner；当匹配到的 runner spec 配置了 GitHub runner group 时，它会为 job repository owner 创建 organization runner，并把该 group 作为 `--runnergroup` 传入。
-
-创建 runner spec 时使用有意义的名称，例如 `ubuntu-24-04` 或 `ubuntu-24-04-large`；每个 spec 的 `template_id` 应指向包含 GitHub runner image 的 Qiniu sandbox template。runnerd 启动 sandbox 时会使用 repository owner 的 Sandbox service Preferences 检查 template 访问权限。`default_available: true` 的 runner spec 对所有允许的已安装仓库默认可用。使用 `github.allowed_repositories` 限制哪些仓库可以使用该 runnerd 实例；当某个仓库需要额外或特殊 spec 时，使用 runner policies 授权。
-
-Runner requests 默认分页：`GET /runner_requests` 和经过 repository 授权过滤的 `GET /user/runner_requests` 在未提供 `limit` 和 `offset` 时返回最近 100 行，单页最多 500 行，并返回 `X-Total-Count`、`X-Limit`、`X-Offset` 和 `Link` headers。普通用户接口把 offset 分页限制在最近 500 行，超出该历史窗口的页面会被拒绝。列表查询只读取公开 runner state 所需字段，不再加载已保存的 GitHub webhook payload 或 Sandbox credentials。浏览器只加载当前路由实际使用的数据：首页加载并轮询最近 100 行，稳定 job-group 路由在 500 行历史窗口内解析，列表可按需加载这些更早的 jobs；GitHub App metadata、Preferences、catalog 配置和 audit data 只在对应路由需要时加载。Admin console 会在当前页上叠加 status、repository 和 runner-spec filters，并在 GitHub 提供 job URL 时把每个 managed request 链接到 GitHub Actions job。
-
-`/admin/accounts` 的 Accounts 页面列出通过 OAuth/bootstrap 创建的本地 accounts 及其关联 OAuth identities。顶部统计卡展示账户总数、管理员、普通用户和已绑定 identity 数量；搜索、角色筛选或分页不会改变全局统计。`GET /admin/api/accounts` 接受 `q`、`role=admin|user`、`limit` 和 `offset`，默认每页 20 条、最多 100 条。`PATCH /admin/api/accounts/{id}/role` 是页面唯一的修改操作，只能把其他 account 的 role 在 `admin` 和 `user` 之间切换；不能创建或删除 account，也不能绑定或解绑 identity。系统会拒绝修改自身角色，以及可能导致系统没有管理员的变更。成功修改会立即生效，并写入 `account.role.update` 审计事件。
-
-runnerd 同时执行 `worker.max_concurrent_runners` 和 per-spec `max_concurrency`。超过这些限制的请求会以 `queued` 状态留在数据库中，并在之后重试；不会被丢弃。Qiniu sandbox placement failures、HTTP 429、GitHub secondary rate limits 等瞬时 capacity 信号会作为 queue deferrals 处理，因此即使普通 retry counter 达到配置上限，仍会继续等待。其他 transient failures 使用配置的 retry backoff，最终可能变成 `failed`；确定性的 auth/config/template 错误会立即失败。
-
-runnerd 会按 repository 或 organization 缓存有效的 GitHub registration token，在 sandbox 内重试 runner registration，并在 sandbox stopped 或 recovery 时 best-effort 移除 GitHub runner registration。
-
-sandbox runner 会安装 pre-job hook，在 GitHub Actions `Set up runner` log 中打印 Qiniu sandbox id、runner request id 和 runner name。调试 job 时可用该 sandbox id 在 Qiniu sandbox console 中查找对应实例。
-
-二进制还会导入 `github.com/jimmicro/pprof`，因此会自动启动 local-only pprof/expvar service，并通过生成的 `.pprof` address files 和 dump scripts 发现。Admin console 提供 diagnostics 页面，汇总发现的 pprof endpoint、`/debug/vars`、DB state、GitHub auth mode、retry/lease metrics 和 recent failures。expvar metrics 包括 ARC-style workflow job counts、conclusions、failures、queue/run duration totals and counts、runner registration/cleanup counters、GitHub API operation counters、低基数 HTTP route request counts 和 duration totals，以及 Fireactions-style profile current/busy/idle/pending/desired gauges。
-
-## 构建
+## 构建与开发
 
 ```bash
-task build
-task docker-build
-task template-build-prod
+task deps          # 安装 Go 依赖
+task ui-deps       # 安装 UI 依赖
+task build         # 构建 runnerd（内嵌生产 UI）
+task dev           # 启动本地开发环境（runnerd + Vite + smee）
+task lint          # 运行代码检查
+task test          # 重建 UI + 运行全部测试（Go race detection + Bun UI tests）
+task docker-check  # 验证 Docker 构建
+task release-check # 验证发布构建
 ```
 
-`templates/github-runner-ubuntu-24.04` 是默认 GitHub runner image，包含 runner runtime、Docker support、helper tools 和 `rclone`。Qiniu sandbox template 构建使用 Taskfile target 调用 `qshell sandbox template build`，并使用各模板目录下 `qshell.sandbox.toml` 的临时副本，避免 qshell 生成的 `template_id` 写回已跟踪配置。`templates/qbox-kodo-ubuntu-16.04` 是额外的 legacy Ubuntu 16.04 template，用于仍需要旧 Go toolchains、apt packages、Docker support 和 `rclone` 的 qbox/kodo-style jobs。它的 Docker base image 定义在 `templates/qbox-kodo-ubuntu-16.04/base.Dockerfile`，可先运行 `task qbox-kodo-base-build` 重建，再重建 Qiniu sandbox template。
+单独运行 UI 测试：`cd ui && bun run test`。
 
-常用验证命令：
+### 沙箱模板
 
-```bash
-task lint
-task test
-task docker-check
-task release-check
-```
+| 模板                                   | 说明                                                               |
+| -------------------------------------- | ------------------------------------------------------------------ |
+| `templates/github-runner-ubuntu-24.04` | 默认 GitHub runner 镜像（runner 运行时、Docker、辅助工具、rclone） |
+| `templates/qbox-kodo-ubuntu-16.04`     | 旧版 Ubuntu 16.04，用于 qbox/kodo 风格的 job                       |
 
-`task test` 会重新构建 UI、运行 Bun UI tests，然后执行带 race detection 和 coverage 的 Go test suite。只运行 UI tests 时，可使用 `cd ui && bun run test`。
+使用 `task template-build-prod` 构建模板。qbox-kodo 基础镜像可通过 `task qbox-kodo-base-build` 单独重建。
 
-目标 workflow 使用 `runs-on: [self-hosted, e2b]`。配置 GitHub webhook，把 `workflow_job` events 发送到 `POST /webhooks/github`；runnerd 处理 `queued`、`in_progress` 和 `completed` actions。也可以加入 `workflow_run` events 作为补偿信号；runnerd 会列出该 run 下所有 queued jobs，并为尚未通过 `workflow_job` 入队的 matching jobs 创建 runner request。
+## 文档
 
-生产风格 readiness pass 请使用 [docs/zh/deployment-smoke.md](docs/zh/deployment-smoke.md)。
+| 文档                                                                                   | 说明                                                    |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| [docs/zh/testing.md](docs/zh/testing.md)                                               | 本地测试、GitHub App/OAuth 设置、webhook 转发、故障排查 |
+| [docs/zh/deployment-smoke.md](docs/zh/deployment-smoke.md)                             | 生产环境就绪检查清单                                    |
+| [docs/zh/runner-architecture-comparison.md](docs/zh/runner-architecture-comparison.md) | 架构图及与 ARC / Fireactions 的对比                     |
+| [docs/zh/runner-implementation-review.md](docs/zh/runner-implementation-review.md)     | 实现状态与 schema 迁移说明                              |

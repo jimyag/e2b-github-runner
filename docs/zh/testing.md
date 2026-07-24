@@ -91,7 +91,7 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
 
 推荐使用 GitHub App。PAT token 和 basic auth 也支持，主要用于本地验证或已有凭据场景。
 
-继续前，请先配置[必要的 GitHub App 权限](../../README.zh.md#github-app-权限)。以下步骤只说明本地设置细节。
+继续前，请先配置[必要的 GitHub App 权限](../../README.zh.md#所需权限)。以下步骤只说明本地设置细节。
 
 建议流程：
 
@@ -101,7 +101,7 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
    - Homepage URL：先填仓库地址或本地项目文档地址
    - Setup URL：填 runnerd 的 `/github-app/setup` 地址，例如 `http://127.0.0.1:25500/github-app/setup`
    - Webhook：如果 runnerd 自己收 webhook，可以先不开 App webhook，这里和 `workflow_job` webhook 不是一回事
-3. 在 `Permissions` 中应用[必要权限表](../../README.zh.md#github-app-权限)中的设置。
+3. 在 `Permissions` 中应用[必要权限表](../../README.zh.md#所需权限)中的设置。
 4. Where can this GitHub App be installed：
    - 本地验证一般选 `Only on this account`
 5. 创建后，在 App 页面生成 private key，下载 `.pem` 文件，保存到本地，例如 `./secrets/github-app.pem`
@@ -227,7 +227,7 @@ curl -fsS http://127.0.0.1:25500/healthz
 http://127.0.0.1:25500/
 ```
 
-页面会跳转到 GitHub OAuth 登录。首次登录会在数据库中创建 `role=user` 的本地 account，并把 GitHub OAuth identity 绑定到该 account；首个管理员需要在启动时显式 bootstrap：
+页面会跳转到 GitHub OAuth 登录。首次登录会在数据库中创建 `role=user` 的本地 account，并把 GitHub OAuth identity 绑定到该 account；首个管理员需要在启动服务之前单独执行一次 bootstrap 命令；该命令会设置管理员角色后直接退出，不会启动 runnerd：
 
 ```bash
 go run ./cmd/runnerd --config ./runnerd.yaml --bootstrap-admin github:<your-github-user-id>
@@ -461,7 +461,7 @@ curl -fsS -b "$COOKIE_JAR" \
 - `runner start deferred because global concurrency is at capacity` 或 `runner start deferred because profile is at capacity`：request 会保持 queued，直到全局或 per-spec 容量可用。
 - GitHub job 一直 queued：workflow 的 `runs-on` labels 必须包含 `self-hosted` 和 `e2b`，并与 runner spec 的 labels 保持一致。
 - sandbox 创建失败：确认账户/组织 Preferences 或已启用的 admin default 具有与 template 和本地环境匹配的完整 Sandbox service 配置；Runner detail 会显示实际选择的来源。
-- registration token 失败：检查 [GitHub App 权限表](../../README.zh.md#github-app-权限)。未配置 `runner_group` 的 spec 需要 repository `Administration`；配置了 `runner_group` 的 spec 需要 organization `Self-hosted runners`。
+- registration token 失败：检查 [GitHub App 权限表](../../README.zh.md#所需权限)。未配置 `runner_group` 的 spec 需要 repository `Administration`；配置了 `runner_group` 的 spec 需要 organization `Self-hosted runners`。
 
 ## 9. GitHub Actions 日志怎么看
 

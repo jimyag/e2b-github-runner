@@ -93,7 +93,7 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
 
 GitHub App is recommended. PAT token and basic auth are also supported, mainly for local verification or existing credential scenarios.
 
-Configure the [required GitHub App permissions](../README.md#github-app-permissions) before continuing. The steps below cover local setup details.
+Configure the [required GitHub App permissions](../README.md#required-permissions) before continuing. The steps below cover local setup details.
 
 Suggested setup:
 
@@ -103,7 +103,7 @@ Suggested setup:
    - Homepage URL: use the repository URL or local project docs URL
    - Setup URL: runnerd's `/github-app/setup`, for example `http://127.0.0.1:25500/github-app/setup`
    - Webhook: if runnerd receives repository webhooks itself, you can leave the App webhook disabled; this is different from the `workflow_job` webhook
-3. Under `Permissions`, apply the settings in the [required permissions table](../README.md#github-app-permissions).
+3. Under `Permissions`, apply the settings in the [required permissions table](../README.md#required-permissions).
 4. Where can this GitHub App be installed:
    - For local verification, usually choose `Only on this account`
 5. After creating the App, generate a private key on the App page, download the `.pem`, and save it locally, for example `./secrets/github-app.pem`
@@ -229,7 +229,7 @@ Ordinary-user page:
 http://127.0.0.1:25500/
 ```
 
-The page redirects to GitHub OAuth login. The first login creates a local account with `role=user` and links the GitHub OAuth identity. The first admin must be explicitly bootstrapped at startup:
+The page redirects to GitHub OAuth login. The first login creates a local account with `role=user` and links the GitHub OAuth identity. The first admin must be bootstrapped as a separate one-time step before starting the server; the command sets the admin role and exits without starting runnerd:
 
 ```bash
 go run ./cmd/runnerd --config ./runnerd.yaml --bootstrap-admin github:<your-github-user-id>
@@ -463,7 +463,7 @@ Common issues:
 - `runner start deferred because global concurrency is at capacity` or `runner start deferred because profile is at capacity`: the request remains queued until global or per-spec capacity is available.
 - GitHub job stays queued: workflow `runs-on` labels must include `self-hosted` and `e2b`, and must match runner spec labels.
 - sandbox creation fails: confirm the account/organization Preferences or enabled admin default has a complete Sandbox service config matching the template and local environment; the Runner detail shows which source was selected.
-- registration token fails: check the [GitHub App permission table](../README.md#github-app-permissions). Specs without `runner_group` require repository `Administration`; specs with `runner_group` require organization `Self-hosted runners`.
+- registration token fails: check the [GitHub App permission table](../README.md#required-permissions). Specs without `runner_group` require repository `Administration`; specs with `runner_group` require organization `Self-hosted runners`.
 
 ## 9. How To Read GitHub Actions Logs
 
