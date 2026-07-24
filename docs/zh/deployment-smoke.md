@@ -28,6 +28,20 @@ curl -fsS https://<runnerd-host>/healthz
 
 预期结果：HTTP 200，响应包含 `status: ok`。
 
+从 `index.html` 找到当前带哈希的 JavaScript 或 CSS 路径，验证生产 UI 的缓存和压缩响应头：
+
+```bash
+curl -sS -D - -o /dev/null https://<runnerd-host>/
+curl -sS --compressed -D - -o /dev/null https://<runnerd-host>/assets/<current-hashed-asset>.js
+```
+
+预期结果：
+
+- HTML shell 返回 `Cache-Control: no-store`。
+- `/assets/` 下带内容哈希的文件返回 `Cache-Control: public, max-age=31536000, immutable`。
+- 请求接受 gzip 时，大型 JavaScript 和 CSS 响应返回 `Content-Encoding: gzip`，同时包含 `Vary: Accept-Encoding`。
+- 未版本化的静态文件使用短期浏览器缓存，而不是 immutable 策略。
+
 通过 admin console 登录：
 
 ```text

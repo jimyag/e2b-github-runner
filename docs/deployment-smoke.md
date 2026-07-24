@@ -28,6 +28,20 @@ curl -fsS https://<runnerd-host>/healthz
 
 Expected result: HTTP 200 with `status: ok`.
 
+Verify the production UI cache and compression headers using the current hashed JavaScript or CSS path from `index.html`:
+
+```bash
+curl -sS -D - -o /dev/null https://<runnerd-host>/
+curl -sS --compressed -D - -o /dev/null https://<runnerd-host>/assets/<current-hashed-asset>.js
+```
+
+Expected result:
+
+- The HTML shell returns `Cache-Control: no-store`.
+- Content-hashed files under `/assets/` return `Cache-Control: public, max-age=31536000, immutable`.
+- Large JavaScript and CSS responses return `Content-Encoding: gzip` when the request accepts gzip, plus `Vary: Accept-Encoding`.
+- Unversioned static files use a short browser cache instead of the immutable policy.
+
 Log in through the admin console:
 
 ```text
