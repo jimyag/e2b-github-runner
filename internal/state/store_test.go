@@ -1275,6 +1275,81 @@ func TestRepositoryPolicyIndexesArePortable(t *testing.T) {
 	}
 }
 
+func TestRunnerRequestListIndexSupportsNewestPageOrder(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !db.Migrator().HasIndex(&runnerRequestRecord{}, "idx_runner_requests_queued_id") {
+		t.Fatal("expected runner request list ordering index")
+	}
+
+	var plan []struct {
+		Detail string `gorm:"column:detail"`
+	}
+	if err := db.Raw(`
+		EXPLAIN QUERY PLAN
+		SELECT id, queued_at
+		FROM runner_requests
+		ORDER BY queued_at DESC, id ASC
+		LIMIT 100
+	`).Scan(&plan).Error; err != nil {
+		t.Fatal(err)
+	}
+	var details []string
+	for _, step := range plan {
+		details = append(details, step.Detail)
+	}
+	joined := strings.Join(details, "\n")
+	if !strings.Contains(joined, "idx_runner_requests_queued_id") {
+		t.Fatalf("expected list query to use ordering index, plan:\n%s", joined)
+	}
+	if strings.Contains(joined, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("list query still sorts through a temporary B-tree, plan:\n%s", joined)
+	}
+}
+
+func TestRunnerRequestAuthorizedListIndexSupportsNewestPageOrder(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const indexName = "idx_runner_requests_github_installation_queued_id"
+	if !db.Migrator().HasIndex(&runnerRequestRecord{}, indexName) {
+		t.Fatalf("expected authorized runner request list ordering index %s", indexName)
+	}
+
+	var plan []struct {
+		Detail string `gorm:"column:detail"`
+	}
+	if err := db.Raw(`
+		EXPLAIN QUERY PLAN
+		SELECT id, queued_at
+		FROM runner_requests
+		WHERE github_installation_id = ?
+		  AND LOWER(repository_full_name) IN ?
+		ORDER BY queued_at DESC, id ASC
+		LIMIT 100
+	`, 987, []string{"o/first", "o/second"}).Scan(&plan).Error; err != nil {
+		t.Fatal(err)
+	}
+	var details []string
+	for _, step := range plan {
+		details = append(details, step.Detail)
+	}
+	joined := strings.Join(details, "\n")
+	if !strings.Contains(joined, indexName) {
+		t.Fatalf("expected authorized list query to use ordering index, plan:\n%s", joined)
+	}
+	if strings.Contains(joined, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("authorized list query still sorts through a temporary B-tree, plan:\n%s", joined)
+	}
+}
+
 func TestMigrateAddsGitHubInstallationLookupIndex(t *testing.T) {
 	databaseURL := t.TempDir() + "/runnerd.db"
 	store := NewWithOptions(Options{
@@ -1773,6 +1848,21 @@ func TestGitHubInstallationRepositoryAccessQueryBatchesStayWithinParameterLimit(
 	for index, batch := range batches {
 		if batch.parameterCount > maxRunnerRequestRepositoryAccessQueryParameters {
 			t.Fatalf("batch %d has %d parameters, limit %d", index, batch.parameterCount, maxRunnerRequestRepositoryAccessQueryParameters)
+		}
+	}
+}
+
+func TestGitHubInstallationRepositoryAccessQueryBatchesSeparateInstallations(t *testing.T) {
+	batches := githubInstallationRepositoryAccessQueryBatches([]GitHubInstallationRepositoryAccess{
+		{InstallationID: 987, Repositories: []string{"o/first", "o/second"}},
+		{InstallationID: 654, Repositories: []string{"other/visible"}},
+	}, maxRunnerRequestRepositoryAccessQueryParameters)
+	if len(batches) != 2 {
+		t.Fatalf("expected one ordered query per installation, got %d batches", len(batches))
+	}
+	for index, batch := range batches {
+		if len(batch.predicates) != 1 {
+			t.Fatalf("batch %d combines %d authorization predicates", index, len(batch.predicates))
 		}
 	}
 }
@@ -2885,6 +2975,14 @@ func TestMigratePreservesAdditiveRunnerRequestColumns(t *testing.T) {
 	}
 	if !record.UpdatedAt.Equal(originalUpdatedAt) {
 		t.Fatalf("updated_at changed during migration: got %s want %s", record.UpdatedAt, originalUpdatedAt)
+	}
+	for _, indexName := range []string{
+		"idx_runner_requests_queued_id",
+		"idx_runner_requests_github_installation_queued_id",
+	} {
+		if !db.Migrator().HasIndex(&runnerRequestRecord{}, indexName) {
+			t.Fatalf("expected runner request list ordering index %s after additive migration", indexName)
+		}
 	}
 }
 

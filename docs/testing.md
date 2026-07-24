@@ -65,13 +65,25 @@ Runner spec, runner group, and repository policy are not `runnerd.yaml` fields. 
 
 `database.backend` supports `sqlite`, `postgres`, and `mysql`. Prefer sqlite for local development. Before documenting shared-database multi-instance deployment as supported, verify lease behavior with two runnerd processes sharing the same database.
 
-The state schema is mainly defined by GORM tags in `internal/state/records.go`. On startup, an existing SQLite `runner_requests` table is migrated additively by creating missing model columns and indexes; it is deliberately excluded from generic SQLite `AutoMigrate` table recreation because historical ALTER-added columns must remain intact. A future non-additive `runner_requests` change requires a narrow explicit migration and a preserved-data regression fixture. Other tables run through a narrow legacy compatibility pass for older columns, obsolete OAuth constraints, and incompatible legacy scope tables, then run GORM `AutoMigrate`. Legacy `account_preferences` and `account_secrets` tables without `scope_type`/`scope_id` are dropped and recreated rather than data-migrated. Reconfigure their saved Sandbox Preferences and API keys after that upgrade; stored GitHub OAuth tokens are also cleared, so affected users must sign in with GitHub again before syncing installations. When changing state records, indexes, or migration helpers, run at least:
+The state schema is mainly defined by GORM tags in `internal/state/records.go`. On startup, an existing SQLite `runner_requests` table is migrated additively by creating missing model columns and indexes; it is deliberately excluded from generic SQLite `AutoMigrate` table recreation because historical ALTER-added columns must remain intact. Admin newest-first lists depend on `idx_runner_requests_queued_id` over `(queued_at DESC, id ASC)`. Repository-authorized lists query each installation separately through `idx_runner_requests_github_installation_queued_id` over `(github_installation_id, queued_at DESC, id ASC)`, then merge the bounded results. Creating either missing index does not rewrite rows, but benchmark startup I/O and lock time on a disposable production-sized copy. A future non-additive `runner_requests` change requires a narrow explicit migration and a preserved-data regression fixture. Other tables run through a narrow legacy compatibility pass for older columns, obsolete OAuth constraints, and incompatible legacy scope tables, then run GORM `AutoMigrate`. Legacy `account_preferences` and `account_secrets` tables without `scope_type`/`scope_id` are dropped and recreated rather than data-migrated. Reconfigure their saved Sandbox Preferences and API keys after that upgrade; stored GitHub OAuth tokens are also cleared, so affected users must sign in with GitHub again before syncing installations. When changing state records, indexes, or migration helpers, run at least:
 
 ```bash
 go test ./internal/state -count=1
 ```
 
 Do not validate migrations only with a fresh sqlite file. Old-schema upgrade paths also need coverage, especially when adding `NOT NULL` columns, unique indexes, or relationship constraints.
+
+Verify that SQLite can satisfy the newest-page order from the index without a temporary sort:
+
+```bash
+sqlite3 ./var/runnerd.db \
+  "EXPLAIN QUERY PLAN SELECT id, queued_at FROM runner_requests ORDER BY queued_at DESC, id ASC LIMIT 100;"
+
+sqlite3 ./var/runnerd.db \
+  "EXPLAIN QUERY PLAN SELECT id, queued_at FROM runner_requests WHERE github_installation_id = 123 AND LOWER(repository_full_name) IN ('owner/repo') ORDER BY queued_at DESC, id ASC LIMIT 100;"
+```
+
+Expected result: the first plan uses `idx_runner_requests_queued_id`, the second uses `idx_runner_requests_github_installation_queued_id`, and neither contains `USE TEMP B-TREE FOR ORDER BY`. Verify each installation predicate separately; combining installations with `OR` can reintroduce a temporary sort.
 
 For a production SQLite snapshot, record data-integrity counts before and after starting the candidate binary against a disposable copy:
 

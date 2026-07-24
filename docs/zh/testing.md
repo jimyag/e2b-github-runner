@@ -63,13 +63,25 @@ Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置
 
 `database.backend` 支持 `sqlite`、`postgres` 和 `mysql`。本地开发优先使用 sqlite；共享数据库的多实例部署需要先用两个 runnerd 进程验证 lease 行为，再作为正式运行方式记录。
 
-状态表结构主要由 `internal/state/records.go` 里的 GORM tag 定义。服务启动时，已有 SQLite `runner_requests` 表只通过创建缺失的 model columns 和 indexes 做 additive migration；它会跳过通用 SQLite `AutoMigrate` 表重建，避免历史上通过 ALTER 添加的字段丢失。未来如需对 `runner_requests` 做 non-additive 变更，必须增加窄范围显式 migration 和数据保全回归 fixture。其他表会先针对旧 columns、obsolete OAuth constraints 和不兼容的 legacy scope tables 执行窄范围 compatibility pass，再运行 GORM `AutoMigrate`。缺少 `scope_type`/`scope_id` 的旧 `account_preferences` 和 `account_secrets` 表会被删除并重建，而不是迁移原数据。升级后必须重新配置其中保存的 Sandbox Preferences 和 API keys；已保存的 GitHub OAuth tokens 也会被清除，相关用户需重新使用 GitHub 登录后才能同步 installations。修改 state record、索引或迁移 helper 时，至少先跑：
+状态表结构主要由 `internal/state/records.go` 里的 GORM tag 定义。服务启动时，已有 SQLite `runner_requests` 表只通过创建缺失的 model columns 和 indexes 做 additive migration；它会跳过通用 SQLite `AutoMigrate` 表重建，避免历史上通过 ALTER 添加的字段丢失。Admin newest-first 列表依赖 `(queued_at DESC, id ASC)` 上的 `idx_runner_requests_queued_id`。Repository-authorized 列表通过 `(github_installation_id, queued_at DESC, id ASC)` 上的 `idx_runner_requests_github_installation_queued_id` 分别查询每个 installation，再合并有界结果。创建任一缺失索引都不会重写 rows，但应先在 disposable production-sized copy 上测量启动 I/O 和锁等待。未来如需对 `runner_requests` 做 non-additive 变更，必须增加窄范围显式 migration 和数据保全回归 fixture。其他表会先针对旧 columns、obsolete OAuth constraints 和不兼容的 legacy scope tables 执行窄范围 compatibility pass，再运行 GORM `AutoMigrate`。缺少 `scope_type`/`scope_id` 的旧 `account_preferences` 和 `account_secrets` 表会被删除并重建，而不是迁移原数据。升级后必须重新配置其中保存的 Sandbox Preferences 和 API keys；已保存的 GitHub OAuth tokens 也会被清除，相关用户需重新使用 GitHub 登录后才能同步 installations。修改 state record、索引或迁移 helper 时，至少先跑：
 
 ```bash
 go test ./internal/state -count=1
 ```
 
 不要只用全新 sqlite 文件验证迁移；旧 schema 升级路径也需要覆盖，尤其是新增 `NOT NULL` 列、唯一索引或关系约束时。
+
+确认 SQLite 可以直接通过索引满足 newest-page 排序，不需要临时排序：
+
+```bash
+sqlite3 ./var/runnerd.db \
+  "EXPLAIN QUERY PLAN SELECT id, queued_at FROM runner_requests ORDER BY queued_at DESC, id ASC LIMIT 100;"
+
+sqlite3 ./var/runnerd.db \
+  "EXPLAIN QUERY PLAN SELECT id, queued_at FROM runner_requests WHERE github_installation_id = 123 AND LOWER(repository_full_name) IN ('owner/repo') ORDER BY queued_at DESC, id ASC LIMIT 100;"
+```
+
+预期结果：第一条计划使用 `idx_runner_requests_queued_id`，第二条使用 `idx_runner_requests_github_installation_queued_id`，并且都不包含 `USE TEMP B-TREE FOR ORDER BY`。需要分别验证每个 installation predicate；用 `OR` 合并多个 installation 可能重新触发临时排序。
 
 验证生产 SQLite snapshot 时，应在 disposable copy 启动前后记录数据完整性计数：
 

@@ -451,32 +451,20 @@ func githubInstallationRepositoryAccessQueryBatches(access []GitHubInstallationR
 	if maxParameters < 2 {
 		maxParameters = 2
 	}
-	batches := make([]githubInstallationRepositoryAccessQueryBatch, 0, 1)
-	current := githubInstallationRepositoryAccessQueryBatch{}
-	flush := func() {
-		if len(current.predicates) == 0 {
-			return
-		}
-		batches = append(batches, current)
-		current = githubInstallationRepositoryAccessQueryBatch{}
-	}
+	batches := make([]githubInstallationRepositoryAccessQueryBatch, 0, len(access))
 	for _, item := range normalizeGitHubInstallationRepositoryAccess(access) {
 		repositories := item.Repositories
 		for len(repositories) > 0 {
-			available := maxParameters - current.parameterCount
-			if available < 2 {
-				flush()
-				available = maxParameters
-			}
-			repositoryCount := min(len(repositories), available-1)
+			repositoryCount := min(len(repositories), maxParameters-1)
 			repositoryChunk := append([]string(nil), repositories[:repositoryCount]...)
-			current.predicates = append(current.predicates, "(github_installation_id = ? AND LOWER(repository_full_name) IN ?)")
-			current.args = append(current.args, item.InstallationID, repositoryChunk)
-			current.parameterCount += 1 + repositoryCount
+			batches = append(batches, githubInstallationRepositoryAccessQueryBatch{
+				predicates:     []string{"(github_installation_id = ? AND LOWER(repository_full_name) IN ?)"},
+				args:           []any{item.InstallationID, repositoryChunk},
+				parameterCount: 1 + repositoryCount,
+			})
 			repositories = repositories[repositoryCount:]
 		}
 	}
-	flush()
 	return batches
 }
 
