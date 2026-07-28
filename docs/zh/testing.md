@@ -171,10 +171,16 @@ task dev
 
 `task dev` 默认读取 `runnerd.local.yaml`，从 `127.0.0.1:5173` 开始选择第一个可用端口启动 Vite dev server，并用 `development` build tag 启动 Go 服务。浏览器仍然访问 runnerd 的地址。
 
-普通用户界面：
+公开产品首页：
 
 ```text
 http://127.0.0.1:25500/
+```
+
+受保护的普通用户 Jobs 首页：
+
+```text
+http://127.0.0.1:25500/jobs
 ```
 
 普通用户 Activity repositories 页面：
@@ -233,13 +239,13 @@ task build
 curl -fsS http://127.0.0.1:25500/healthz
 ```
 
-普通用户页面：
+受保护的普通用户 Jobs 页面：
 
 ```text
-http://127.0.0.1:25500/
+http://127.0.0.1:25500/jobs
 ```
 
-页面会跳转到 GitHub OAuth 登录。首次登录会在数据库中创建 `role=user` 的本地 account，并把 GitHub OAuth identity 绑定到该 account；首个管理员需要在启动服务之前单独执行一次 bootstrap 命令；该命令会设置管理员角色后直接退出，不会启动 runnerd：
+页面会显示 GitHub OAuth 登录入口，并在认证后返回 `/jobs`。首次登录会在数据库中创建 `role=user` 的本地 account，并把 GitHub OAuth identity 绑定到该 account；首个管理员需要在启动服务之前单独执行一次 bootstrap 命令；该命令会设置管理员角色后直接退出，不会启动 runnerd：
 
 ```bash
 go run ./cmd/runnerd --config ./runnerd.yaml --bootstrap-admin github:<your-github-user-id>
@@ -283,7 +289,7 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/admin/api/sandbox-service-default/api-key | jq
 ```
 
-页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。开发模式下 `internal/server/ui_assets_development.go` 会把 UI 资源代理到 Vite；生产构建下 `internal/server/ui_assets_production.go` 会嵌入 `internal/server/ui/*`。普通用户界面包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/account/sandbox-templates` 的区域过滤模板、`/account/sandbox-instances` 的区域和模板过滤 runner instances、对应的 organization 路由、`/repositories` 的本地 activity repositories、`/` 的 Repo/PR 列表、`/github/pulls/{owner}/{repo}/{number}/jobs` 这类稳定的 GitHub-context job-group 路由，以及 `/jobs/{id}` 的 job 详情。首次进入页面时只加载当前路由实际使用的资源。Jobs 首页加载第一页 `GET /user/runner_requests?limit=100&offset=0` 并每 5 秒轮询该页，同时保留已经加载的历史；稳定 job-group 路由和 Load older jobs 操作可以加载受限的 500 行历史窗口。API 会拒绝 `limit + offset` 超过 500 的请求，也不会返回不可用的 next link。GitHub App metadata 和 Preferences 不进入轮询。Admin 路由只加载当前 section 所需的 request/spec/group/policy/audit 依赖，且只有 Overview 和 Runner Requests 会轮询 runner requests。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes，并使用统一的 scoped/default credential resolver。管理面包含 `/admin/accounts` 的账户列表与角色控制、`/admin/sandbox_service` 的平台回退、runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
+页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。`/` 始终显示公开产品首页，提供文档和 Jobs 入口，并且不会加载受保护的用户资源；受保护的普通用户 Jobs 首页位于 `/jobs`。未登录访问 `/jobs`、Job 分组深链、账户设置或 Admin 路由时，会显示独立登录页，其 OAuth 链接通过 `return_to` 保留完整的同源目标地址。未知路由显示 404；已登录但没有管理员角色的用户访问 Admin 路由时，会看到明确的无权限页面。普通用户界面还包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/account/sandbox-templates` 的区域过滤模板、`/account/sandbox-instances` 的区域和模板过滤 runner instances、对应的 organization 路由、`/repositories` 的本地 activity repositories、`/github/pulls/{owner}/{repo}/{number}/jobs` 这类稳定的 GitHub-context job-group 路由，以及 `/jobs/{id}` 的 job 详情。首次进入页面时只加载当前路由实际使用的资源。Jobs 首页加载第一页 `GET /user/runner_requests?limit=100&offset=0` 并每 5 秒轮询该页，同时保留已经加载的历史；稳定 job-group 路由和 Load older jobs 操作可以加载受限的 500 行历史窗口。API 会拒绝 `limit + offset` 超过 500 的请求，也不会返回不可用的 next link。GitHub App metadata 和 Preferences 不进入轮询。Admin 路由只加载当前 section 所需的 request/spec/group/policy/audit 依赖，且只有 Overview 和 Runner Requests 会轮询 runner requests。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes，并使用统一的 scoped/default credential resolver。管理面包含 `/admin/accounts` 的账户列表与角色控制、`/admin/sandbox_service` 的平台回退、runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
 
 只运行 UI unit tests 时使用：
 

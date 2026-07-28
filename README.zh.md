@@ -67,7 +67,7 @@ cp runnerd.yaml.example runnerd.yaml
 ./bin/runnerd --config runnerd.yaml
 ```
 
-5. 打开 `http://<host>:25500/`，使用 GitHub OAuth 登录。
+5. 打开 `http://<host>:25500/`。公开产品首页提供当前 GitHub 文档入口，以及指向 `/jobs` 受保护的 Jobs 控制台入口。
 6. 在账户/组织 **Preferences** 中配置 **Sandbox Service** 凭据（或在 `/admin/sandbox_service` 配置管理员级兜底）。
 7. 在**管理控制台**中创建 **Runner Spec**，设置有意义的 label（如 `ubuntu-24-04`），填写 `template_id`，并启用 `default_available`。
 8. 配置 GitHub webhook → `POST http://<host>:25500/webhooks/github`。
@@ -181,7 +181,7 @@ Runner spec、runner group 和 repository policy 通过管理 API 和控制台�
 | `/admin/accounts`        | 账户管理：列表、搜索、角色变更 |
 | `/admin/sandbox_service` | Sandbox 服务配置               |
 
-普通用户路由包括 `/repositories`、PR job 分组（`/github/pulls/{owner}/{repo}/{number}/jobs`）、账户设置（`/account/preferences`、`/account/sandbox-templates`、`/account/sandbox-instances`），以及对应的 `/organizations/{login}/...` 路由。
+`/` 始终是公开的 Qiniu CI Runner 产品首页。普通用户 Jobs 首页位于 `/jobs`；其他受保护路由包括 `/repositories`、PR job 分组（`/github/pulls/{owner}/{repo}/{number}/jobs`）、账户设置（`/account/preferences`、`/account/sandbox-templates`、`/account/sandbox-instances`），以及对应的 `/organizations/{login}/...` 路由。未登录访问受保护路由时会显示独立的 GitHub 登录页，并在 OAuth 完成后返回原 URL。
 
 Runner request 列表默认返回最新 100 行，单页最多 500 行，并且只读取公开 runner state 所需字段，不加载已保存的 webhook payload 或 Sandbox credentials。Admin 轮询使用 `(queued_at DESC, id ASC)` 索引；经过 repository 授权的普通用户轮询通过 `(github_installation_id, queued_at DESC, id ASC)` 分别查询每个 installation，再合并有界结果，同时保留精确的 installation/repository 授权关系。
 

@@ -189,7 +189,7 @@ export function UserDashboard({
           <div className="text-sm font-semibold tracking-wide">Qiniu Runner</div>
         </div>
         <nav className="ml-3 hidden items-center gap-1 md:flex" aria-label="Workspace">
-          <a href="/" className={navItemClass(page === "home")} onClick={(event) => goToPage(event, "home")}>
+          <a href="/jobs" className={navItemClass(page === "home")} onClick={(event) => goToPage(event, "home")}>
             <Workflow className="h-4 w-4" />
             Jobs
           </a>
@@ -208,7 +208,7 @@ export function UserDashboard({
       </header>
 
       <nav className="flex items-center gap-1 border-b px-4 py-2 md:hidden" aria-label="Workspace">
-        <a href="/" className={navItemClass(page === "home")} onClick={(event) => goToPage(event, "home")}>
+        <a href="/jobs" className={navItemClass(page === "home")} onClick={(event) => goToPage(event, "home")}>
           <Workflow className="h-4 w-4" />
           Jobs
         </a>

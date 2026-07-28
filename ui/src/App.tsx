@@ -4,7 +4,8 @@ import { toast } from "sonner"
 import { AppSidebar } from "@/components/app-sidebar"
 import { AccountsSection } from "@/components/accounts-section"
 import { AuditSection, DiagnosticsSection, MatchSection, OverviewSection } from "@/components/admin-sections"
-import { LoginPage } from "@/components/login-page"
+import { AccessDeniedPage, NotFoundPage, SessionLoadingPage, SignInPage } from "@/components/auth-pages"
+import { LandingPage } from "@/components/landing-page"
 import { RunnerJobDetail } from "@/components/runner-job-detail"
 import { RunnerGroupsSection } from "@/components/runner-groups-section"
 import { RunnerPoliciesSection } from "@/components/runner-policies-section"
@@ -47,6 +48,7 @@ import {
 import {
   adminDataResources,
   adminPollingResources,
+  appRouteAccess,
   shouldPollAdminSection,
   shouldPollUserRoute,
   userDataResources,
@@ -119,6 +121,7 @@ function updateAdminResource(
 
 function App() {
   const [authSession, setAuthSession] = useState<AuthSession>({ authenticated: false, oauth_enabled: false })
+  const [authSessionLoaded, setAuthSessionLoaded] = useState(false)
   const [locationPath, setLocationPath] = useState(() => window.location.pathname)
   const [locationSearch, setLocationSearch] = useState(() => window.location.search)
   const [section, setSectionState] = useState<AdminSection>(() => sectionFromPath())
@@ -232,7 +235,8 @@ function App() {
   )
 
   const hasAccess = authSession.authenticated && authSession.role === "admin"
-  const isAdminRoute = locationPath === "/admin" || locationPath.startsWith("/admin/")
+  const routeAccess = appRouteAccess(locationPath)
+  const isAdminRoute = routeAccess === "admin"
   const userJobID = userJobIDFromPath(locationPath)
   const userSelectedJobID = userJobIDFromSearch(locationSearch)
   const accountSettingsRoute = parseAccountSettingsRoute(locationPath, authSession.login)
@@ -569,6 +573,8 @@ function App() {
         if (response.ok) setAuthSession((await response.json()) as AuthSession)
       } catch {
         setAuthSession({ authenticated: false, oauth_enabled: false })
+      } finally {
+        setAuthSessionLoaded(true)
       }
     })()
   }, [])
@@ -768,7 +774,7 @@ function App() {
 
   const openUserJob = (id: string) => {
     const groupPath = userSelectedKey ? userJobsPath(userSelectedKey) : ""
-    const nextPath = groupPath && groupPath !== "/" ? withSearchParam(groupPath, "job", id) : `/jobs/${encodeURIComponent(id)}`
+    const nextPath = groupPath && groupPath !== "/jobs" ? withSearchParam(groupPath, "job", id) : `/jobs/${encodeURIComponent(id)}`
     window.history.pushState(null, "", nextPath)
     setLocationPath(window.location.pathname)
     setLocationSearch(window.location.search)
@@ -786,21 +792,37 @@ function App() {
     return path ? request(path) : Promise.resolve(null)
   }, [request])
 
-  if (!authSession.authenticated || !authSession.oauth_enabled) {
+  if (routeAccess === "public") {
     return (
       <>
-        <LoginPage
-          oauthEnabled={authSession.oauth_enabled}
-          currentLogin={authSession.login}
-          currentRole={authSession.role}
-          onSignOut={signOut}
-        />
+        <LandingPage />
         <Toaster richColors />
       </>
     )
   }
 
-  if (!hasAccess || !isAdminRoute) {
+  if (routeAccess === "not-found") {
+    return <NotFoundPage />
+  }
+
+  if (!authSessionLoaded) {
+    return <SessionLoadingPage />
+  }
+
+  if (!authSession.authenticated) {
+    return (
+      <SignInPage
+        oauthEnabled={authSession.oauth_enabled}
+        returnTo={`${locationPath}${locationSearch}`}
+      />
+    )
+  }
+
+  if (isAdminRoute && !hasAccess) {
+    return <AccessDeniedPage login={authSession.login} onSignOut={signOut} />
+  }
+
+  if (!isAdminRoute) {
     if (userJobID) {
       return (
         <>
@@ -1133,13 +1155,13 @@ function isRunnerJobGroupResponse(value: unknown): value is { key: string } {
 }
 
 function isUserJobsRoute(path: string) {
-  return path === "/" || Boolean(userJobsGroupKeyFromPath(path))
+  return path === "/jobs" || Boolean(userJobsGroupKeyFromPath(path))
 }
 
 function userJobsGroupKeyFromLocation(path: string, search: string) {
   const pathKey = userJobsGroupKeyFromPath(path, search)
   if (pathKey) return pathKey
-  if (path !== "/") return ""
+  if (path !== "/jobs") return ""
   return new URLSearchParams(search).get("group") || ""
 }
 
@@ -1203,7 +1225,7 @@ function userJobsGroupKeyFromPath(path: string, search = "") {
 }
 
 function userJobsPath(groupKey: string) {
-  if (!groupKey) return "/"
+  if (!groupKey) return "/jobs"
   const pullRequestMatch = groupKey.match(/^pr:(.+):(\d+)$/)
   if (pullRequestMatch) return `/github/pulls/${encodeRepositoryPath(pullRequestMatch[1])}/${pullRequestMatch[2]}/jobs`
 
@@ -1218,7 +1240,7 @@ function userJobsPath(groupKey: string) {
   const manualMatch = groupKey.match(/^manual:(.+):([^:]+)$/)
   if (manualMatch) return `/jobs/manual/${encodeRepositoryPath(manualMatch[1])}/${encodeURIComponent(manualMatch[2])}`
 
-  return `/?group=${encodeURIComponent(groupKey)}`
+  return `/jobs?group=${encodeURIComponent(groupKey)}`
 }
 
 function userJobGroupAPIPath(groupKey: string) {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import * as appPolicy from "./app-load-policy"
 
 import {
   adminDataResources,
@@ -38,7 +39,8 @@ describe("app load policy", () => {
   })
 
   test.each([
-    ["/", ["github_app", "runner_requests"]],
+    ["/", []],
+    ["/jobs", ["github_app", "runner_requests"]],
     ["/github/pulls/octo/repo/12/jobs", ["github_app", "runner_requests"]],
     ["/github/runs/octo/repo/34/jobs", ["github_app", "runner_requests"]],
     ["/github/branches/octo/repo/deadbeef/jobs", ["github_app", "runner_requests"]],
@@ -53,19 +55,45 @@ describe("app load policy", () => {
   })
 
   test("polls only user job-list routes", () => {
-    expect(shouldPollUserRoute("/")).toBe(true)
+    expect(shouldPollUserRoute("/")).toBe(false)
+    expect(shouldPollUserRoute("/jobs")).toBe(true)
     expect(shouldPollUserRoute("/github/pulls/octo/repo/12/jobs")).toBe(true)
     expect(shouldPollUserRoute("/repositories")).toBe(false)
     expect(shouldPollUserRoute("/account/preferences")).toBe(false)
     expect(shouldPollUserRoute("/jobs/job-1")).toBe(false)
-    expect(userPollingResources("/")).toEqual(["runner_requests"])
+    expect(userPollingResources("/")).toEqual([])
+    expect(userPollingResources("/jobs")).toEqual(["runner_requests"])
     expect(userPollingResources("/repositories")).toEqual([])
   })
 
-  test("keeps the homepage light while making stable job routes resolve the bounded history", () => {
-    expect(userRunnerRequestLimit("/", false)).toBe(100)
+  test("keeps the jobs home light while making stable job routes resolve the bounded history", () => {
+    expect(userRunnerRequestLimit("/jobs", false)).toBe(100)
     expect(userRunnerRequestLimit("/github/pulls/octo/repo/12/jobs", false)).toBe(500)
     expect(userRunnerRequestLimit("/github/pulls/octo/repo/12/jobs", true)).toBe(100)
     expect(userRunnerRequestsPath(500, 0)).toBe("/user/runner_requests?limit=500&offset=0")
+  })
+
+  test("classifies public, protected, admin, and unknown routes explicitly", () => {
+    expect(appPolicy.appRouteAccess?.("/")).toBe("public")
+    expect(appPolicy.appRouteAccess?.("/jobs")).toBe("user")
+    expect(appPolicy.appRouteAccess?.("/jobs/job-1")).toBe("user")
+    expect(appPolicy.appRouteAccess?.("/github/pulls/octo/repo/12/jobs")).toBe("user")
+    expect(appPolicy.appRouteAccess?.("/account/preferences")).toBe("user")
+    expect(appPolicy.appRouteAccess?.("/admin/runner_specs")).toBe("admin")
+    expect(appPolicy.appRouteAccess?.("/admin/not-a-section")).toBe("not-found")
+    expect(appPolicy.appRouteAccess?.("/not-a-route")).toBe("not-found")
+  })
+
+  test("rejects incomplete legacy Jobs routes", () => {
+    expect(appPolicy.appRouteAccess?.("/jobs/pulls/octo")).toBe("not-found")
+    expect(appPolicy.appRouteAccess?.("/jobs/runs/octo/repo")).toBe("not-found")
+    expect(appPolicy.appRouteAccess?.("/jobs/branches/octo/repo/main")).toBe("not-found")
+    expect(appPolicy.appRouteAccess?.("/jobs/manual/octo/repo")).toBe("not-found")
+  })
+
+  test("builds a same-origin sign-in URL that returns to the protected destination", () => {
+    expect(appPolicy.signInURL?.("/jobs/job-1", "?tab=logs")).toBe(
+      "/auth/github/login?return_to=%2Fjobs%2Fjob-1%3Ftab%3Dlogs",
+    )
   })
 })

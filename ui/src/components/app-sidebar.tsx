@@ -1,5 +1,6 @@
-import { Activity, ClipboardList, CloudCog, ListTree, Route, ScrollText, Server, Settings2, Stethoscope, Terminal, UsersRound } from "lucide-react"
+import { Activity, ClipboardList, CloudCog, ListTree, Route, ScrollText, Server, Settings2, Stethoscope, UsersRound } from "lucide-react"
 
+import { QiniuRunnerLogo } from "@/components/qiniu-runner-logo"
 import {
   Sidebar,
   SidebarContent,
@@ -40,17 +41,7 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton asChild className="data-[slot=sidebar-menu-button]:!p-1.5">
               <a href="/" aria-label="Qiniu Runner home">
-                <div className="rounded-lg bg-sidebar-primary p-1.5 shadow-sm">
-                  <Terminal className="h-4 w-4 text-sidebar-primary-foreground" />
-                </div>
-                <div className="flex flex-col">
-                  <span className="bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-base font-semibold text-transparent">
-                    Qiniu
-                  </span>
-                  <span className="text-[10px] font-medium leading-none text-muted-foreground">
-                    Runner
-                  </span>
-                </div>
+                <QiniuRunnerLogo />
               </a>
             </SidebarMenuButton>
           </SidebarMenuItem>
