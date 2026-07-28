@@ -46,3 +46,11 @@ export function shouldShowSandboxSetupTask(
 ): boolean {
   return Boolean(onboarding && onboarding.status !== "completed")
 }
+
+export function shouldCompleteProductTour(
+  onboarding: ProductTourOnboarding | null,
+  preferences: UserPreferences | null,
+): boolean {
+  return shouldShowSandboxSetupTask(onboarding) &&
+    sandboxSetupCompletesProductTour(preferences)
+}

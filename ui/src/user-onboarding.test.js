@@ -72,6 +72,29 @@ describe("product tour onboarding", () => {
     expect(onboardingPolicy.shouldShowSandboxSetupTask?.(null)).toBe(false)
   })
 
+  test("completes a skipped tour after the account saves its Sandbox API Key", () => {
+    const configuredPreferences = {
+      sandbox: {
+        mode: "custom",
+        resolved_source: "custom",
+        api_url: "https://sandbox.qiniu.com",
+        api_key: { configured: true },
+      },
+    }
+    expect(
+      onboardingPolicy.shouldCompleteProductTour?.(
+        { version: 1, status: "skipped", tour_seen: true },
+        configuredPreferences,
+      ),
+    ).toBe(true)
+    expect(
+      onboardingPolicy.shouldCompleteProductTour?.(
+        { version: 1, status: "completed", tour_seen: true },
+        configuredPreferences,
+      ),
+    ).toBe(false)
+  })
+
   test("describes the cross-route path from Jobs to Sandbox service settings", () => {
     expect(productTourSteps.map(({ id, route, target }) => ({ id, route, target }))).toEqual([
       { id: "welcome", route: "/jobs", target: "product-shell" },

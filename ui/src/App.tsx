@@ -63,7 +63,7 @@ import {
   type AuthSessionCheckStatus,
 } from "@/app-load-policy"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
-import { productTourVersion, sandboxSetupCompletesProductTour } from "@/user-onboarding"
+import { productTourVersion, shouldCompleteProductTour } from "@/user-onboarding"
 import {
   createGitHubReauthenticationGate,
   requiresGitHubReauthentication,
@@ -673,11 +673,10 @@ function App() {
 
   useEffect(() => {
     if (
-      productTourOnboarding?.status !== "pending" ||
       accountSettingsTab !== "preferences" ||
       accountSettingsLogin !== authSession.login ||
       userPreferencesScope !== "account" ||
-      !sandboxSetupCompletesProductTour(userPreferences)
+      !shouldCompleteProductTour(productTourOnboarding, userPreferences)
     ) {
       return
     }
@@ -696,7 +695,7 @@ function App() {
     accountSettingsLogin,
     accountSettingsTab,
     authSession.login,
-    productTourOnboarding?.status,
+    productTourOnboarding,
     saveProductTourOnboarding,
     userPreferences,
     userPreferencesScope,
