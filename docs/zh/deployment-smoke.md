@@ -157,7 +157,19 @@ jobs:
 - Job 的 `Set up runner` log 包含 Qiniu sandbox id、runner request id 和 runner name。
 - Job 结束后，runner request 变为 `completed`。
 
-## 6. Cleanup
+## 6. 重启恢复
+
+在 workflow 中增加一个持续时间足够长的步骤，并在 job 运行期间重启 runnerd。只重启 runnerd 服务，不要直接停止沙箱。
+
+预期结果：
+
+- runnerd 完成启动恢复后才启动 worker loops 并处理新的排队任务。
+- 原 runner request 保持 `running`，sandbox ID 和 runner PID 不变，并记录成功重连事件。
+- GitHub Actions job 持续运行，不会重新排队或丢失 runner。
+- 由旧进程持有 lease 的 `queued` 请求能够被新 worker 继续处理。
+- GitHub 或沙箱状态查询暂时失败时只记录错误，不会停止已有沙箱。
+
+## 7. Cleanup
 
 Workflow 完成后确认：
 
@@ -166,7 +178,7 @@ Workflow 完成后确认：
 - Runner request 的 control/stdout/stderr logs 可以通过 admin UI 或 `/runner_requests/{id}/logs/{name}` 查看。
 - `/diagnostics/vars` 显示更新后的 workflow job、runner registration、cleanup 和 duration counters。
 
-## 7. Failure Drill
+## 8. Failure Drill
 
 部署仍在观察期时，运行一个受控失败：
 

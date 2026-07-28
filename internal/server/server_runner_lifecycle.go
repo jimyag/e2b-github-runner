@@ -634,67 +634,166 @@ func (s *Server) recoverRunner(ctx context.Context, id string) error {
 	}
 	s.logger.Info("recovering runner after restart", "id", id, "status", st.Status, "sandbox_id", st.SandboxID)
 	s.store.AppendLog(id, "control.log", []byte("recovering runner after service restart\n"))
-	stateVersion := st.Version
-	unlock()
-
-	var sandboxErr error
-	if st.SandboxID != "" {
-		sandboxErr = s.stopSandboxWithTimeout(ctx, id, st.SandboxID, st.ProcessPID)
-		if sandboxErr != nil && isSandboxGone(sandboxErr) {
-			s.logger.Info("sandbox already gone during recovery", "id", id, "sandbox_id", st.SandboxID, "error", sandboxErr)
-			s.store.AppendLog(id, "control.log", []byte("sandbox already gone during recovery: "+sandboxErr.Error()+"\n"))
-			sandboxErr = nil
+	switch st.Status {
+	case state.StatusQueued:
+		st.LeaseOwner = ""
+		st.LeaseExpiresAt = time.Time{}
+		if err := s.store.WriteState(st); err != nil {
+			unlock()
+			return fmt.Errorf("clear queued runner lease: %w", err)
 		}
+		unlock()
+		s.store.AppendLog(id, "control.log", []byte("queued runner lease cleared after restart\n"))
+		s.signalQueue()
+		s.refreshMetrics()
+		return nil
+	case state.StatusStopping:
+		unlock()
+		_, _, err := s.stopRunner(ctx, id, github.WorkflowJob{})
+		return err
+	case state.StatusCreating, state.StatusRunning:
+		stateVersion := st.Version
+		unlock()
+		return s.recoverActiveRunner(ctx, st, stateVersion)
+	default:
+		unlock()
+		return nil
 	}
-	var cleanupErr error
-	if sandboxErr == nil {
-		cleanupErr = s.cleanupGitHubRunner(ctx, st)
+}
+
+func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, stateVersion int64) error {
+	job, hasJob, err := s.workflowJobForRecovery(ctx, st)
+	if err != nil {
+		s.store.AppendLog(st.ID, "control.log", []byte("workflow job status check during recovery failed: "+err.Error()+"\n"))
+		s.logger.Warn("workflow job status check during recovery failed; continuing sandbox reconnect", "id", st.ID, "error", err)
+		job = github.WorkflowJob{}
+		hasJob = false
+	}
+	if hasJob && strings.EqualFold(strings.TrimSpace(job.Status), "completed") {
+		_, _, err := s.stopRunner(ctx, st.ID, job)
+		return err
 	}
 
-	unlock = s.lockRunner(id)
+	timeout := s.remainingSandboxTimeout(st, time.Now().UTC())
+	if timeout <= 0 {
+		s.failAndStopRunner(ctx, st.ID, "sandbox_timeout", "timeout", "runner exceeded sandbox timeout during recovery")
+		return nil
+	}
+	req, err := s.store.ReadRequest(st.ID)
+	if err != nil {
+		return fmt.Errorf("read runner request for recovery: %w", err)
+	}
+	sandboxService, err := s.sandboxServiceForRunnerRequest(ctx, req)
+	if err != nil {
+		return fmt.Errorf("resolve sandbox service for recovery: %w", err)
+	}
+	result, err := sandboxService.RecoverRunner(ctx, sandboxrunner.RecoverInput{
+		RequestID:      st.ID,
+		SandboxID:      st.SandboxID,
+		PID:            st.ProcessPID,
+		Timeout:        timeout,
+		CommandContext: s.loopCtx,
+		OnExit: func(result sandboxrunner.ExitResult, err error) {
+			s.runnerExited(st.ID, result, err)
+		},
+	})
+	if err != nil {
+		if st.Status == state.StatusCreating && errors.Is(err, sandboxrunner.ErrSandboxNotFound) &&
+			(!hasJob || strings.EqualFold(strings.TrimSpace(job.Status), "queued")) {
+			return s.requeueInterruptedCreation(st.ID, stateVersion)
+		}
+		s.store.AppendLog(st.ID, "control.log", []byte("runner reconnect after restart failed; preserving sandbox state: "+err.Error()+"\n"))
+		return fmt.Errorf("reconnect runner: %w", err)
+	}
+
+	unlock := s.lockRunner(st.ID)
 	defer unlock()
-	latest, err := s.store.ReadState(id)
+	latest, err := s.store.ReadState(st.ID)
 	if err != nil {
 		return err
 	}
-	if !isActiveStatus(latest.Status) || latest.Version != stateVersion {
+	if latest.Version != stateVersion || (latest.Status != state.StatusCreating && latest.Status != state.StatusRunning) {
 		return nil
 	}
-	if sandboxErr != nil {
-		latest.Status = state.StatusFailed
-		latest.FailureStage = "recovery"
-		latest.FailureReason = "cleanup_failed"
-		latest.Error = "recover cleanup sandbox: " + sandboxErr.Error()
-		s.recordAudit("recovery", "runner.recovery_failed", "runner_request", latest.ID, map[string]any{"error": latest.Error})
-		return s.store.WriteState(latest)
-	}
-	if cleanupErr != nil {
-		if s.scheduleCleanupRetry(&latest, cleanupErr) {
-			s.recordAudit("recovery", "runner.cleanup_retry_scheduled", "runner_request", latest.ID, map[string]any{"error": cleanupErr.Error(), "next_retry_at": latest.NextRetryAt})
-			return s.store.WriteState(latest)
-		}
-		latest.Status = state.StatusFailed
-		latest.FailureStage = "recovery"
-		latest.FailureReason = "cleanup_failed"
-		latest.Error = "recover cleanup github runner: " + cleanupErr.Error()
-		s.recordAudit("recovery", "runner.recovery_failed", "runner_request", latest.ID, map[string]any{"error": latest.Error})
-		return s.store.WriteState(latest)
-	}
-	latest.Status = state.StatusFailed
-	latest.FailureStage = "recovery"
-	latest.FailureReason = "interrupted_runner"
-	latest.Error = "runner interrupted by runnerd restart"
+	latest.Status = state.StatusRunning
+	latest.SandboxID = result.SandboxID
+	latest.ProcessPID = result.PID
 	latest.LeaseOwner = ""
 	latest.LeaseExpiresAt = time.Time{}
-	latest.CompletedAt = time.Time{}
+	latest.Error = ""
+	latest.FailureStage = ""
+	latest.FailureReason = ""
+	latest.LastErrorCode = ""
+	latest.LastErrorMessage = ""
+	latest.LastErrorRetryable = false
 	if err := s.store.WriteState(latest); err != nil {
+		return fmt.Errorf("write recovered runner state: %w", err)
+	}
+	s.logger.Info("runner reconnected after restart", "id", st.ID, "sandbox_id", result.SandboxID, "pid", result.PID)
+	s.store.AppendLog(st.ID, "control.log", []byte(fmt.Sprintf("runner reconnected after restart sandbox_id=%s pid=%d\n", result.SandboxID, result.PID)))
+	s.recordAudit("recovery", "runner.reconnected", "runner_request", latest.ID, map[string]any{
+		"sandbox_id": result.SandboxID,
+		"pid":        result.PID,
+	})
+	s.refreshMetrics()
+	return nil
+}
+
+func (s *Server) workflowJobForRecovery(ctx context.Context, st state.RunnerState) (github.WorkflowJob, bool, error) {
+	if st.WorkflowJobID == 0 || strings.TrimSpace(st.RepositoryFullName) == "" {
+		return github.WorkflowJob{}, false, nil
+	}
+	jobCtx, cancel := context.WithTimeout(ctx, workflowJobLookupTimeout)
+	defer cancel()
+	job, err := s.gh.GetWorkflowJob(jobCtx, st.RepositoryFullName, st.WorkflowJobID)
+	if err != nil {
+		return github.WorkflowJob{}, false, fmt.Errorf("get workflow job %d: %w", st.WorkflowJobID, err)
+	}
+	return job, true, nil
+}
+
+func (s *Server) remainingSandboxTimeout(st state.RunnerState, now time.Time) time.Duration {
+	startedAt := st.RunningAt
+	if startedAt.IsZero() {
+		startedAt = st.CreatingAt
+	}
+	if startedAt.IsZero() {
+		return s.cfg.SandboxTimeout
+	}
+	return s.cfg.SandboxTimeout - now.Sub(startedAt)
+}
+
+func (s *Server) requeueInterruptedCreation(id string, stateVersion int64) error {
+	unlock := s.lockRunner(id)
+	defer unlock()
+	st, err := s.store.ReadState(id)
+	if err != nil {
 		return err
 	}
-	s.store.AppendLog(id, "control.log", []byte("runner marked failed during recovery\n"))
-	s.recordAudit("recovery", "runner.recovered", "runner_request", latest.ID, map[string]any{
-		"status":         latest.Status,
-		"failure_reason": latest.FailureReason,
-	})
+	if st.Version != stateVersion || st.Status != state.StatusCreating {
+		return nil
+	}
+	st.Status = state.StatusQueued
+	st.SandboxID = ""
+	st.ProcessPID = 0
+	st.Error = ""
+	st.FailureStage = ""
+	st.FailureReason = ""
+	st.LastErrorCode = ""
+	st.LastErrorMessage = ""
+	st.LastErrorRetryable = false
+	st.LeaseOwner = ""
+	st.LeaseExpiresAt = time.Time{}
+	st.NextRetryAt = time.Time{}
+	st.CreatingAt = time.Time{}
+	st.RunningAt = time.Time{}
+	st.StoppingAt = time.Time{}
+	if err := s.store.WriteState(st); err != nil {
+		return fmt.Errorf("requeue interrupted runner creation: %w", err)
+	}
+	s.logger.Info("interrupted runner creation requeued after restart", "id", id)
+	s.store.AppendLog(id, "control.log", []byte("runner creation had no sandbox after restart; request requeued\n"))
+	s.signalQueue()
 	s.refreshMetrics()
 	return nil
 }

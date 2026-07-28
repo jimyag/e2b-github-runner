@@ -75,14 +75,12 @@ func main() {
 		os.Exit(1)
 	}
 	handler := server.New(cfg, store, gh, nil, logger)
-	go func() {
-		recoveryCtx, cancel := context.WithTimeout(context.Background(), cfg.RecoveryTimeout)
-		defer cancel()
-		if err := handler.Recover(recoveryCtx); err != nil {
-			logger.Error("recover runner state", "error", err)
-		}
-		handler.Start()
-	}()
+	recoveryCtx, cancelRecovery := context.WithTimeout(context.Background(), cfg.RecoveryTimeout)
+	if err := handler.Recover(recoveryCtx); err != nil {
+		logger.Error("recover runner state", "error", err)
+	}
+	cancelRecovery()
+	handler.Start()
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           handler,

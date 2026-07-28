@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+	"time"
 
 	qnsandbox "github.com/qiniu/go-sdk/v7/sandbox"
 )
@@ -97,5 +98,32 @@ func TestTemplateBuildUsableAcceptsRunnableStatuses(t *testing.T) {
 		if templateBuildUsable(status) {
 			t.Fatalf("expected status %q to be unusable", status)
 		}
+	}
+}
+
+func TestRecoveredRunnerPIDRequiresRunnerTagAndExpectedPID(t *testing.T) {
+	runnerTag := "github-runner"
+	otherTag := "other"
+	processes := []qnsandbox.ProcessInfo{
+		{PID: 10, Tag: &otherTag},
+		{PID: 20, Tag: &runnerTag},
+	}
+	if pid, ok := recoveredRunnerPID(processes, 20); !ok || pid != 20 {
+		t.Fatalf("expected persisted runner PID, got pid=%d ok=%t", pid, ok)
+	}
+	if pid, ok := recoveredRunnerPID(processes, 0); !ok || pid != 20 {
+		t.Fatalf("expected tagged runner PID, got pid=%d ok=%t", pid, ok)
+	}
+	if _, ok := recoveredRunnerPID(processes, 10); ok {
+		t.Fatal("expected non-runner tag to be rejected")
+	}
+}
+
+func TestSandboxTimeoutSecondsRoundsUpAndClamps(t *testing.T) {
+	if got := sandboxTimeoutSeconds(1500 * time.Millisecond); got != 2 {
+		t.Fatalf("expected timeout to round up, got %d", got)
+	}
+	if got := sandboxTimeoutSeconds(0); got != 1 {
+		t.Fatalf("expected minimum timeout of one second, got %d", got)
 	}
 }

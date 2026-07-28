@@ -157,7 +157,19 @@ Expected result:
 - The job's `Set up runner` log includes the Qiniu sandbox id, runner request id, and runner name.
 - After the job finishes, the runner request becomes `completed`.
 
-## 6. Cleanup
+## 6. Restart Recovery
+
+Add a step that runs long enough to restart runnerd while the job is active. Restart only the runnerd service; do not stop the sandbox directly.
+
+Expected result:
+
+- Startup recovery finishes before runnerd starts its worker loops and accepts new queued work.
+- The existing request remains `running`, keeps the same sandbox ID and runner PID, and records a successful reconnect event.
+- The GitHub Actions job continues without returning to the queue or losing its runner.
+- A queued request with a lease owned by the previous process becomes eligible for the new worker.
+- A temporary GitHub or sandbox status lookup failure is logged without stopping the existing sandbox.
+
+## 7. Cleanup
 
 After the workflow completes, verify:
 
@@ -166,7 +178,7 @@ After the workflow completes, verify:
 - The runner request has control/stdout/stderr logs available from the admin UI or `/runner_requests/{id}/logs/{name}`.
 - `/diagnostics/vars` shows updated workflow job, runner registration, cleanup, and duration counters.
 
-## 7. Failure Drill
+## 8. Failure Drill
 
 Run one controlled failure while the deployment is still under observation:
 

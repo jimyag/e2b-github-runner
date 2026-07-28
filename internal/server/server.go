@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -222,15 +223,16 @@ func (s *Server) Recover(ctx context.Context) error {
 		return err
 	}
 	s.logger.Info("recovering runner state", "count", len(states))
+	var recoveryErrors []error
 	for _, st := range states {
 		if !isActiveStatus(st.Status) {
 			continue
 		}
 		if err := s.recoverRunner(ctx, st.ID); err != nil {
-			return err
+			recoveryErrors = append(recoveryErrors, fmt.Errorf("recover runner %s: %w", st.ID, err))
 		}
 	}
-	return nil
+	return errors.Join(recoveryErrors...)
 }
 
 func (s *Server) routes() {
