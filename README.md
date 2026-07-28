@@ -8,12 +8,15 @@
   <a href="./README.zh.md">中文</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="#documentation">Documentation</a> ·
+  <a href="#license">License</a> ·
   <a href="#community--contributing">Community &amp; Contributing</a>
 </p>
 
 ---
 
 Qiniu Sandbox GitHub Runner provisions a clean [Qiniu Sandbox](https://www.qiniu.com/) for each GitHub Actions workflow job, registers a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners) just in time, and removes the runner and sandbox when the job ends. Teams keep the familiar GitHub Actions workflow while moving each job into a disposable environment.
+
+The Qiniu CI Runner control plane is open source. Qiniu Sandbox, where workflow jobs execute, is a cloud service provided and operated by Qiniu.
 
 ## Core Capabilities
 
@@ -239,6 +242,10 @@ Build templates with `task template-build-prod`. The qbox-kodo base image can be
 | [docs/deployment-smoke.md](docs/deployment-smoke.md) | Production-style readiness checklist |
 | [docs/runner-architecture-comparison.md](docs/runner-architecture-comparison.md) | Architecture diagrams and comparison with ARC / Fireactions |
 | [docs/runner-implementation-review.md](docs/runner-implementation-review.md) | Implementation status and schema migration notes |
+
+## License
+
+Qiniu CI Runner is licensed under the [Apache License 2.0](LICENSE).
 
 ## Community & Contributing
 

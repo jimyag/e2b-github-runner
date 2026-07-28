@@ -18,7 +18,10 @@ import {
 import { RunnerLifecyclePreview } from "@/components/landing-lifecycle-preview"
 import { QiniuRunnerLogo } from "@/components/qiniu-runner-logo"
 
-const documentationURL = "https://github.com/qiniu/ci-runner#documentation"
+const repositoryURL = "https://github.com/qiniu/ci-runner"
+const documentationURL = `${repositoryURL}#documentation`
+const quickStartURL = `${repositoryURL}#quick-start`
+const licenseURL = `${repositoryURL}/blob/main/LICENSE`
 
 const capabilities = [
   {
@@ -277,15 +280,25 @@ export function LandingPage() {
                   The runner orchestration, policies, and GitHub integration live in a public repository—
                   ready to inspect, deploy, and contribute to.
                 </p>
-                <a
-                  href="https://github.com/qiniu/ci-runner"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="group mt-8 inline-flex items-center gap-2 text-sm font-semibold text-[#7ddcff] transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#27c5f5]"
-                >
-                  View the source
-                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                </a>
+                <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-3">
+                  <a
+                    href={repositoryURL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="group inline-flex items-center gap-2 text-sm font-semibold text-[#7ddcff] transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#27c5f5]"
+                  >
+                    View the source
+                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                  </a>
+                  <a
+                    href={licenseURL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="border-l border-white/20 pl-5 text-sm font-medium text-[#b7ccd7] transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#27c5f5]"
+                  >
+                    Apache-2.0 licensed
+                  </a>
+                </div>
               </div>
             </article>
 
@@ -361,18 +374,46 @@ export function LandingPage() {
 
       <section className="relative overflow-hidden bg-[#00aae7] py-20 sm:py-24">
         <div className="brand-grid brand-grid-dark absolute inset-0 opacity-30" />
-        <div className="relative mx-auto flex max-w-[1440px] flex-col items-start justify-between gap-10 px-5 sm:px-8 lg:flex-row lg:items-end lg:px-12">
+        <div className="relative mx-auto grid max-w-[1440px] gap-10 px-5 sm:px-8 lg:grid-cols-[1.08fr_0.92fr] lg:items-end lg:gap-16 lg:px-12">
           <div>
             <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#073149]">
-              Ready for the next job
+              Choose your path
             </p>
             <h2 className="mt-4 max-w-3xl text-4xl font-semibold leading-[1.02] tracking-[-0.055em] text-[#07131b] sm:text-5xl lg:text-6xl">
-              Give every workflow a clean place to run.
+              Start hosted. Or deploy runnerd.
             </h2>
+            <p className="mt-6 max-w-3xl text-base leading-7 text-[#073149] sm:text-lg sm:leading-8">
+              Use the hosted Qiniu CI Runner or deploy the open-source runnerd control plane. Both run
+              workflow jobs on Qiniu Sandbox, a cloud service operated by Qiniu.
+            </p>
           </div>
-          <LandingAccessAction inverted />
+          <div className="rounded-xl border border-[#07131b]/15 bg-white/20 p-5 backdrop-blur-sm sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <LandingAccessAction inverted label="Use hosted service" />
+              <a
+                href={quickStartURL}
+                target="_blank"
+                rel="noreferrer"
+                className="group inline-flex h-12 items-center justify-center gap-2.5 rounded-md border border-[#07131b]/25 bg-white/35 px-5 text-sm font-semibold text-[#07131b] transition-all hover:border-[#07131b]/45 hover:bg-white/55 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#07131b]"
+              >
+                Deploy runnerd
+                <ArrowRight className="h-4 w-4 -rotate-45 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+              </a>
+            </div>
+            <p className="mt-5 text-xs font-semibold uppercase tracking-[0.12em] text-[#073149]">
+              For a runnerd deployment
+            </p>
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-[#073149]">
+              {["GitHub.com", "Qiniu Sandbox credentials", "Self-hosted runner label"].map((item) => (
+                <span key={item} className="inline-flex items-center gap-2">
+                  <CircleDot className="h-3.5 w-3.5" />
+                  {item}
+                </span>
+              ))}
+            </div>
+          </div>
         </div>
-        </section>
+      </section>
       </main>
 
       <footer className="border-t border-[#e5edf4] bg-white">
@@ -400,12 +441,20 @@ export function LandingPage() {
             </a>
             <a
               className="inline-flex items-center gap-1.5 transition-colors hover:text-[#006b91]"
-              href="https://github.com/qiniu/ci-runner"
+              href={repositoryURL}
               target="_blank"
               rel="noreferrer"
             >
               GitHub
               <Github className="h-3.5 w-3.5" />
+            </a>
+            <a
+              className="transition-colors hover:text-[#006b91]"
+              href={licenseURL}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Apache-2.0
             </a>
           </div>
         </div>
@@ -417,11 +466,12 @@ export function LandingPage() {
 function LandingAccessAction({
   inverted = false,
   compact = false,
+  label = "Get started",
 }: {
   inverted?: boolean
   compact?: boolean
+  label?: string
 }) {
-  const label = "Get started"
   const colorClass = inverted
     ? "bg-[#07131b] text-white hover:bg-[#0d2533] focus-visible:outline-[#07131b]"
     : compact

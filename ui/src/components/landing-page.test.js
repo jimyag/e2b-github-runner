@@ -73,6 +73,35 @@ describe("LandingPage", () => {
     expect(html).toContain('href="https://github.com/qiniu/ci-runner"')
   })
 
+  test("links the open-source claim to the Apache-2.0 license", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandingPage),
+    )
+
+    expect(html).toContain("Apache-2.0 licensed")
+    expect(html).toContain(
+      'href="https://github.com/qiniu/ci-runner/blob/main/LICENSE"',
+    )
+  })
+
+  test("offers hosted and deployment paths without blurring the Sandbox boundary", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandingPage),
+    )
+
+    expect(html).toContain("Use hosted service")
+    expect(html).toContain("Deploy runnerd")
+    expect(html).toContain('href="/jobs"')
+    expect(html).toContain(
+      'href="https://github.com/qiniu/ci-runner#quick-start"',
+    )
+    expect(html).toContain("Both run workflow jobs on Qiniu Sandbox")
+    expect(html).toContain("cloud service operated by Qiniu")
+    expect(html).toContain("GitHub.com")
+    expect(html).toContain("Qiniu Sandbox credentials")
+    expect(html).toContain("Self-hosted runner label")
+  })
+
   test("keeps the source card content above its decorative grid", () => {
     const html = renderToStaticMarkup(
       createElement(LandingPage),

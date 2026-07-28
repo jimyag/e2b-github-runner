@@ -8,12 +8,15 @@
   <a href="./README.md">English</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#文档">文档</a> ·
+  <a href="#许可证">许可证</a> ·
   <a href="#社区与贡献">社区与贡献</a>
 </p>
 
 ---
 
 Qiniu Sandbox GitHub Runner 为每个 GitHub Actions workflow job 按需创建独立的 [Qiniu Sandbox](https://www.qiniu.com/)，即时注册 [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners)，并在 job 结束后自动移除 runner、停止沙箱。团队可以沿用熟悉的 GitHub Actions 工作流，同时让每个 job 都在一次性的隔离环境中运行。
+
+Qiniu CI Runner 控制面是开源方案；Workflow Job 实际运行所依赖的 Qiniu Sandbox，是由七牛提供并运营的云服务。
 
 ## 核心能力
 
@@ -240,6 +243,10 @@ task release-check # 验证发布构建
 | [docs/zh/deployment-smoke.md](docs/zh/deployment-smoke.md)                             | 生产环境就绪检查清单                                    |
 | [docs/zh/runner-architecture-comparison.md](docs/zh/runner-architecture-comparison.md) | 架构图及与 ARC / Fireactions 的对比                     |
 | [docs/zh/runner-implementation-review.md](docs/zh/runner-implementation-review.md)     | 实现状态与 schema 迁移说明                              |
+
+## 许可证
+
+Qiniu CI Runner 基于 [Apache License 2.0](LICENSE) 开源。
 
 ## 社区与贡献
 
