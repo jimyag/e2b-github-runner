@@ -92,6 +92,24 @@ export function SessionLoadingPage() {
   )
 }
 
+export function SessionErrorPage({ onRetry }: { onRetry: () => void }) {
+  return (
+    <RouteMessagePage
+      eyebrow="Secure route"
+      title="Unable to check your session"
+      description="Runnerd could not confirm your GitHub access. Try again before signing in."
+    >
+      <button
+        type="button"
+        onClick={onRetry}
+        className="inline-flex h-11 items-center justify-center rounded-md bg-[#00aae7] px-5 text-sm font-semibold text-[#041018] transition-colors hover:bg-[#27c5f5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00aae7]"
+      >
+        Try again
+      </button>
+    </RouteMessagePage>
+  )
+}
+
 function RouteMessagePage({
   eyebrow,
   icon,

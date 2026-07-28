@@ -4,7 +4,7 @@ import { toast } from "sonner"
 import { AppSidebar } from "@/components/app-sidebar"
 import { AccountsSection } from "@/components/accounts-section"
 import { AuditSection, DiagnosticsSection, MatchSection, OverviewSection } from "@/components/admin-sections"
-import { AccessDeniedPage, NotFoundPage, SessionLoadingPage, SignInPage } from "@/components/auth-pages"
+import { AccessDeniedPage, NotFoundPage, SessionErrorPage, SessionLoadingPage, SignInPage } from "@/components/auth-pages"
 import { LandingPage } from "@/components/landing-page"
 import { RunnerJobDetail } from "@/components/runner-job-detail"
 import { RunnerGroupsSection } from "@/components/runner-groups-section"
@@ -49,6 +49,7 @@ import {
   adminDataResources,
   adminPollingResources,
   appRouteAccess,
+  authRouteViewState,
   shouldPollAdminSection,
   shouldPollUserRoute,
   userDataResources,
@@ -57,6 +58,7 @@ import {
   userRunnerRequestLimit,
   userRunnerRequestsPath,
   type AdminDataResource,
+  type AuthSessionCheckStatus,
 } from "@/app-load-policy"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
 import {
@@ -121,7 +123,7 @@ function updateAdminResource(
 
 function App() {
   const [authSession, setAuthSession] = useState<AuthSession>({ authenticated: false, oauth_enabled: false })
-  const [authSessionLoaded, setAuthSessionLoaded] = useState(false)
+  const [authSessionStatus, setAuthSessionStatus] = useState<AuthSessionCheckStatus>("checking")
   const [locationPath, setLocationPath] = useState(() => window.location.pathname)
   const [locationSearch, setLocationSearch] = useState(() => window.location.search)
   const [section, setSectionState] = useState<AdminSection>(() => sectionFromPath())
@@ -566,18 +568,21 @@ function App() {
     parseLabels,
   })
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const response = await fetch("/auth/session", { credentials: "same-origin" })
-        if (response.ok) setAuthSession((await response.json()) as AuthSession)
-      } catch {
-        setAuthSession({ authenticated: false, oauth_enabled: false })
-      } finally {
-        setAuthSessionLoaded(true)
-      }
-    })()
+  const loadAuthSession = useCallback(async () => {
+    setAuthSessionStatus("checking")
+    try {
+      const response = await fetch("/auth/session", { credentials: "same-origin" })
+      if (!response.ok) throw new Error(`session check failed with status ${response.status}`)
+      setAuthSession((await response.json()) as AuthSession)
+      setAuthSessionStatus("ready")
+    } catch {
+      setAuthSessionStatus("error")
+    }
   }, [])
+
+  useEffect(() => {
+    void loadAuthSession()
+  }, [loadAuthSession])
 
   useEffect(() => {
     const handlePopState = () => {
@@ -805,11 +810,17 @@ function App() {
     return <NotFoundPage />
   }
 
-  if (!authSessionLoaded) {
+  const authViewState = authRouteViewState(authSessionStatus, authSession.authenticated)
+
+  if (authViewState === "loading") {
     return <SessionLoadingPage />
   }
 
-  if (!authSession.authenticated) {
+  if (authViewState === "error") {
+    return <SessionErrorPage onRetry={() => void loadAuthSession()} />
+  }
+
+  if (authViewState === "sign-in") {
     return (
       <SignInPage
         oauthEnabled={authSession.oauth_enabled}

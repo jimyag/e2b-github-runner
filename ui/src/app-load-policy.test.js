@@ -96,4 +96,11 @@ describe("app load policy", () => {
       "/auth/github/login?return_to=%2Fjobs%2Fjob-1%3Ftab%3Dlogs",
     )
   })
+
+  test("does not treat an unchecked session as signed out", () => {
+    expect(appPolicy.authRouteViewState?.("checking", false)).toBe("loading")
+    expect(appPolicy.authRouteViewState?.("ready", true)).toBe("authenticated")
+    expect(appPolicy.authRouteViewState?.("ready", false)).toBe("sign-in")
+    expect(appPolicy.authRouteViewState?.("error", false)).toBe("error")
+  })
 })
