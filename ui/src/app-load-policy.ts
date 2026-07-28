@@ -12,6 +12,8 @@ export type AdminDataResource =
 
 export type UserDataResource = "github_app" | "runner_requests" | "preferences"
 export type AppRouteAccess = "public" | "user" | "admin" | "not-found"
+export type AuthSessionCheckStatus = "checking" | "ready" | "error"
+export type AuthRouteViewState = "loading" | "authenticated" | "sign-in" | "error"
 
 const adminResourcesBySection: Record<AdminSection, readonly AdminDataResource[]> = {
   overview: ["runner_requests", "runner_specs", "runner_policies"],
@@ -67,6 +69,15 @@ export function appRouteAccess(path: string): AppRouteAccess {
   if (isAdminRoute(path)) return "admin"
   if (isUserRoute(path)) return "user"
   return "not-found"
+}
+
+export function authRouteViewState(
+  status: AuthSessionCheckStatus,
+  authenticated: boolean,
+): AuthRouteViewState {
+  if (status === "checking") return "loading"
+  if (status === "error") return "error"
+  return authenticated ? "authenticated" : "sign-in"
 }
 
 export function signInURL(path: string, search = ""): string {

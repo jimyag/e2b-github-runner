@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { AccessDeniedPage, NotFoundPage, SessionLoadingPage, SignInPage } from "./auth-pages"
+import * as authPages from "./auth-pages"
+
+const { AccessDeniedPage, NotFoundPage, SessionLoadingPage, SignInPage } = authPages
 
 describe("authentication route pages", () => {
   test("preserves the protected destination through GitHub sign-in", () => {
@@ -52,5 +54,19 @@ describe("authentication route pages", () => {
   test("renders distinct loading and not-found states", () => {
     expect(renderToStaticMarkup(createElement(SessionLoadingPage))).toContain("Checking your session")
     expect(renderToStaticMarkup(createElement(NotFoundPage))).toContain("Page not found")
+  })
+
+  test("offers retry when the session check fails", () => {
+    expect(typeof authPages.SessionErrorPage).toBe("function")
+    if (!authPages.SessionErrorPage) return
+
+    const html = renderToStaticMarkup(
+      createElement(authPages.SessionErrorPage, {
+        onRetry: () => {},
+      }),
+    )
+
+    expect(html).toContain("Unable to check your session")
+    expect(html).toContain("Try again")
   })
 })
