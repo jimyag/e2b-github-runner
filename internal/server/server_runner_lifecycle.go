@@ -685,6 +685,9 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 	if err != nil {
 		return fmt.Errorf("resolve sandbox service for recovery: %w", err)
 	}
+	// Keep this gate buffered and signal it exactly once after RecoverRunner
+	// returns: false on error or a deferred version-guard decision on success.
+	// That prevents an attached OnExit watcher from owning rejected state.
 	exitWatchAccepted := make(chan bool, 1)
 	result, err := sandboxService.RecoverRunner(ctx, sandboxrunner.RecoverInput{
 		RequestID:      st.ID,

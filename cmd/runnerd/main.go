@@ -97,6 +97,8 @@ func main() {
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- srv.Serve(listener)
+		// A premature Serve return makes recovery useless; abort it so the
+		// startup path can surface the server error without waiting for timeout.
 		cancelRecovery()
 	}()
 	logger.Info("starting server", "addr", cfg.HTTPAddr, "state_backend", cfg.StateBackend, "state_database_dsn", redact.DatabaseDSN(cfg.StateDatabaseDSN.Value()))

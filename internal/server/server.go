@@ -309,6 +309,7 @@ func (s *Server) recoveryTimeoutPerRunner(ctx context.Context, requestCount, wor
 		if !hasDeadline {
 			return maxSingleRecoveryTimeout
 		}
+		// Zero explicitly tells Recover not to create workers or dispatch jobs.
 		return 0
 	}
 	waves := (requestCount + workerCount - 1) / workerCount
