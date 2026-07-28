@@ -59,6 +59,8 @@ worker:
 
 Sandbox service API URL 和 API Key 不在 `runnerd.yaml` 中配置。登录后可在账户或组织的 Preferences 页面配置 scoped credentials，也可由管理员在 `/admin/sandbox_service` 配置默认关闭的平台回退。fallback audience 为 `all` 或 `selected`；selected entries 按仓库 owner 的稳定 GitHub account ID 和 type 匹配。API Key 使用 `auth.encryption_key` 加密保存。解析顺序为 runner request 已保存快照、installation custom/inherited 配置、符合条件的个人账户配置、已启用且 audience eligible 的 admin default，最后才是未配置错误。
 
+首次使用产品引导只会在现有账户级 `account_preferences` 表的 `onboarding/product-tour` 下保存版本号、状态和 `tour_seen` 标记，不会保存 Sandbox API Key。记录缺失或版本过旧时返回 `pending` 且 `tour_seen=false`。走完引导浮层后写入 `pending` 且 `tour_seen=true`，因此不会再次自动弹出，但页面内的 Sandbox 设置任务仍会保留。只有当前登录账户已保存自己的 Sandbox API Key 后才写入 `completed`。首次引导中显式跳过会写入 `skipped` 并关闭浮层，但不会隐藏页面内的设置任务。从账户菜单重播引导不会重置或覆盖已保存状态。
+
 Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置；服务启动后通过后台页面或 admin API 创建。spec 名称建议使用有意义的名字，例如 `ubuntu-24-04`，`template_id` 填对应的 Qiniu sandbox template ID。template 是否可访问会在 runnerd 使用对应账户或组织的 Sandbox service 配置启动 sandbox 时确认。
 
 `database.backend` 支持 `sqlite`、`postgres` 和 `mysql`。本地开发优先使用 sqlite；共享数据库的多实例部署需要先用两个 runnerd 进程验证 lease 行为，再作为正式运行方式记录。
@@ -289,7 +291,7 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/admin/api/sandbox-service-default/api-key | jq
 ```
 
-页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。`/` 始终显示公开产品首页，提供文档和 Jobs 入口，并且不会加载受保护的用户资源；受保护的普通用户 Jobs 首页位于 `/jobs`。未登录访问 `/jobs`、Job 分组深链、账户设置或 Admin 路由时，会显示独立登录页，其 OAuth 链接通过 `return_to` 保留完整的同源目标地址。未知路由显示 404；已登录但没有管理员角色的用户访问 Admin 路由时，会看到明确的无权限页面。普通用户界面还包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/account/sandbox-templates` 的区域过滤模板、`/account/sandbox-instances` 的区域和模板过滤 runner instances、对应的 organization 路由、`/repositories` 的本地 activity repositories、`/github/pulls/{owner}/{repo}/{number}/jobs` 这类稳定的 GitHub-context job-group 路由，以及 `/jobs/{id}` 的 job 详情。首次进入页面时只加载当前路由实际使用的资源。Jobs 首页加载第一页 `GET /user/runner_requests?limit=100&offset=0` 并每 5 秒轮询该页，同时保留已经加载的历史；稳定 job-group 路由和 Load older jobs 操作可以加载受限的 500 行历史窗口。API 会拒绝 `limit + offset` 超过 500 的请求，也不会返回不可用的 next link。GitHub App metadata 和 Preferences 不进入轮询。Admin 路由只加载当前 section 所需的 request/spec/group/policy/audit 依赖，且只有 Overview 和 Runner Requests 会轮询 runner requests。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes，并使用统一的 scoped/default credential resolver。管理面包含 `/admin/accounts` 的账户列表与角色控制、`/admin/sandbox_service` 的平台回退、runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
+页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。`/` 始终显示公开产品首页，提供文档和 Jobs 入口，并且不会加载受保护的用户资源；受保护的普通用户 Jobs 首页位于 `/jobs`。未登录访问 `/jobs`、Job 分组深链、账户设置或 Admin 路由时，会显示独立登录页，其 OAuth 链接通过 `return_to` 保留完整的同源目标地址。未知路由显示 404；已登录但没有管理员角色的用户访问 Admin 路由时，会看到明确的无权限页面。普通用户界面还包含 `/account/repositories` 的 GitHub App accounts 和按需加载的授权 repositories、`/account/preferences` 和 `/organizations/{login}/preferences` 的 Sandbox service 设置、`/account/sandbox-templates` 的区域过滤模板、`/account/sandbox-instances` 的区域和模板过滤 runner instances、对应的 organization 路由、`/repositories` 的本地 activity repositories、`/github/pulls/{owner}/{repo}/{number}/jobs` 这类稳定的 GitHub-context job-group 路由，以及 `/jobs/{id}` 的 job 详情。首次进入页面时只加载当前路由实际使用的资源。已登录的用户路由会读取一次 `GET /user/onboarding/product-tour` 获取账户级引导状态；该增强请求失败时会被忽略，不会阻断核心 workspace 数据，也不会参与轮询。只有状态为 `pending`、尚未看过引导且精确进入 `/jobs` 首页的账户会自动开始六步引导，深链不会被打断。最后一步会导航到 `/account/preferences` 并记录已看过浮层；页面内的 Sandbox 设置任务仍会保留，直到该账户成功保存 API Key。已看过、已完成或跳过的账户都可从账户菜单重播，且不修改已保存状态。Jobs 首页加载第一页 `GET /user/runner_requests?limit=100&offset=0` 并每 5 秒轮询该页，同时保留已经加载的历史；稳定 job-group 路由和 Load older jobs 操作可以加载受限的 500 行历史窗口。API 会拒绝 `limit + offset` 超过 500 的请求，也不会返回不可用的 next link。GitHub App metadata、Preferences 和 onboarding state 都不进入轮询。Admin 路由只加载当前 section 所需的 request/spec/group/policy/audit 依赖，且只有 Overview 和 Runner Requests 会轮询 runner requests。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes，并使用统一的 scoped/default credential resolver。管理面包含 `/admin/accounts` 的账户列表与角色控制、`/admin/sandbox_service` 的平台回退、runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
 
 只运行 UI unit tests 时使用：
 
@@ -297,7 +299,7 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
 cd ui && bun run test
 ```
 
-`task test` 会重新构建 UI、运行同一套 Bun tests，然后执行带 race detection 和 coverage 的 Go tests。Bun suite 覆盖 helper 和 server-rendered component output；导航、dialog、头像加载/回退，以及角色变更后的权限切换仍需在真实浏览器中验证。
+`task test` 会重新构建 UI、运行同一套 Bun tests，然后执行带 race detection 和 coverage 的 Go tests。Bun suite 覆盖 helper 和 server-rendered component output；导航、dialog、头像加载/回退，以及角色变更后的权限切换仍需在真实浏览器中验证。修改 onboarding 时还要验证：`/jobs` 自动启动、六个目标、跳转到 `/account/preferences`、遮罩关闭后持续显示设置任务、显式跳过的持久化，以及重播不修改状态。
 
 先创建一个默认 runner spec：
 

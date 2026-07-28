@@ -191,6 +191,12 @@ export type UserPreferences = {
   }
 }
 
+export type ProductTourOnboarding = {
+  version: 1
+  status: "pending" | "completed" | "skipped"
+  tour_seen: boolean
+}
+
 export type SandboxServiceDefault = {
   enabled: boolean
   configured: boolean

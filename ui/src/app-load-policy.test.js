@@ -40,14 +40,14 @@ describe("app load policy", () => {
 
   test.each([
     ["/", []],
-    ["/jobs", ["github_app", "runner_requests"]],
-    ["/github/pulls/octo/repo/12/jobs", ["github_app", "runner_requests"]],
-    ["/github/runs/octo/repo/34/jobs", ["github_app", "runner_requests"]],
-    ["/github/branches/octo/repo/deadbeef/jobs", ["github_app", "runner_requests"]],
-    ["/jobs/manual/octo/repo/manual-1", ["github_app", "runner_requests"]],
-    ["/repositories", ["github_app"]],
-    ["/account/preferences", ["github_app", "preferences"]],
-    ["/organizations/octo/sandbox-templates", ["github_app", "preferences"]],
+    ["/jobs", ["github_app", "runner_requests", "onboarding"]],
+    ["/github/pulls/octo/repo/12/jobs", ["github_app", "runner_requests", "onboarding"]],
+    ["/github/runs/octo/repo/34/jobs", ["github_app", "runner_requests", "onboarding"]],
+    ["/github/branches/octo/repo/deadbeef/jobs", ["github_app", "runner_requests", "onboarding"]],
+    ["/jobs/manual/octo/repo/manual-1", ["github_app", "runner_requests", "onboarding"]],
+    ["/repositories", ["github_app", "onboarding"]],
+    ["/account/preferences", ["github_app", "preferences", "onboarding"]],
+    ["/organizations/octo/sandbox-templates", ["github_app", "preferences", "onboarding"]],
     ["/jobs/job-1", []],
     ["/admin/", []],
   ])("loads only data used by user route %s", (path, expected) => {
@@ -102,5 +102,12 @@ describe("app load policy", () => {
     expect(appPolicy.authRouteViewState?.("ready", true)).toBe("authenticated")
     expect(appPolicy.authRouteViewState?.("ready", false)).toBe("sign-in")
     expect(appPolicy.authRouteViewState?.("error", false)).toBe("error")
+  })
+
+  test("loads optional user resources without failing the primary workspace request", async () => {
+    await expect(appPolicy.loadOptionalUserResource?.(Promise.resolve({ status: "pending" }))).resolves.toEqual({
+      status: "pending",
+    })
+    await expect(appPolicy.loadOptionalUserResource?.(Promise.reject(new Error("onboarding unavailable")))).resolves.toBeNull()
   })
 })

@@ -2177,6 +2177,112 @@ func TestSanitizeOAuthReturnToRejectsBackslashRedirects(t *testing.T) {
 	}
 }
 
+func TestUserProductTourOnboarding(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+
+	request := func(t *testing.T, method, subject, login, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, "/user/onboarding/product-tour", strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if subject != "" {
+			req.AddCookie(testSessionCookie(subject, login, "user"))
+		}
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+	assertState := func(t *testing.T, rec *httptest.ResponseRecorder, wantStatus string) {
+		t.Helper()
+		if rec.Code != http.StatusOK {
+			t.Fatalf("unexpected onboarding status: %d body=%s", rec.Code, rec.Body.String())
+		}
+		var got struct {
+			Version  int    `json:"version"`
+			Status   string `json:"status"`
+			TourSeen bool   `json:"tour_seen"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Version != 1 || got.Status != wantStatus {
+			t.Fatalf("unexpected onboarding state: %#v", got)
+		}
+	}
+
+	t.Run("starts pending and persists completion per account", func(t *testing.T) {
+		assertState(t, request(t, http.MethodGet, "hubot-id", "hubot", ""), "pending")
+		assertState(t, request(t, http.MethodPut, "hubot-id", "hubot", `{"version":1,"status":"completed"}`), "completed")
+		assertState(t, request(t, http.MethodGet, "hubot-id", "hubot", ""), "completed")
+		assertState(t, request(t, http.MethodGet, "12345", "octocat", ""), "pending")
+	})
+
+	t.Run("persists a finished tour while Sandbox setup remains pending", func(t *testing.T) {
+		rec := request(t, http.MethodPut, "12345", "octocat", `{"version":1,"status":"pending","tour_seen":true}`)
+		assertState(t, rec, "pending")
+		var got struct {
+			TourSeen bool `json:"tour_seen"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if !got.TourSeen {
+			t.Fatal("expected a finished tour to be recorded as seen")
+		}
+		rec = request(t, http.MethodGet, "12345", "octocat", "")
+		if !strings.Contains(rec.Body.String(), `"tour_seen":true`) {
+			t.Fatalf("expected seen state to persist: %s", rec.Body.String())
+		}
+	})
+
+	t.Run("persists an explicit skip", func(t *testing.T) {
+		assertState(t, request(t, http.MethodPut, "12345", "octocat", `{"version":1,"status":"skipped"}`), "skipped")
+		assertState(t, request(t, http.MethodGet, "12345", "octocat", ""), "skipped")
+	})
+
+	t.Run("restarts an outdated stored tour version", func(t *testing.T) {
+		account, _, err := store.GetAccountByOAuthIdentity("github", "12345")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.UpsertAccountPreference(state.AccountPreference{
+			ScopeType: state.AccountScopeTypeAccount,
+			ScopeID:   account.ID,
+			Namespace: "onboarding",
+			Key:       "product-tour",
+			ValueJSON: `{"version":0,"status":"completed"}`,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		assertState(t, request(t, http.MethodGet, "12345", "octocat", ""), "pending")
+	})
+
+	t.Run("rejects invalid updates without replacing the stored state", func(t *testing.T) {
+		for _, body := range []string{
+			`{"version":2,"status":"completed"}`,
+			`{"version":1,"status":"pending"}`,
+			`{"version":1,"status":"unknown"}`,
+			`{"version":1,"status":"completed"}{"status":"skipped"}`,
+			`{`,
+		} {
+			rec := request(t, http.MethodPut, "hubot-id", "hubot", body)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected invalid update %q to fail, status=%d body=%s", body, rec.Code, rec.Body.String())
+			}
+		}
+		assertState(t, request(t, http.MethodGet, "hubot-id", "hubot", ""), "completed")
+	})
+
+	t.Run("requires authentication", func(t *testing.T) {
+		rec := request(t, http.MethodGet, "", "", "")
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("expected unauthenticated request to fail, status=%d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+}
+
 func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "", &fakeSandbox{})

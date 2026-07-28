@@ -15,13 +15,14 @@ import {
   Workflow,
   X,
 } from "lucide-react"
-import { type CSSProperties, type FormEvent, type MouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import { type CSSProperties, type FormEvent, type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import type { AuthSession, GitHubAppConfig, RunnerJobGroup, RunnerState, UserPreferences } from "@/admin-types"
+import type { AuthSession, GitHubAppConfig, ProductTourOnboarding, RunnerJobGroup, RunnerState, UserPreferences } from "@/admin-types"
 import { logNames } from "@/admin-types"
 import { formatRunnerDuration, formatTime } from "@/admin-format"
 import { userRunnerHistoryWindow } from "@/app-load-policy"
 import { AccountMenu } from "@/components/account-menu"
+import { UserOnboardingTour } from "@/components/user-onboarding-tour"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -37,6 +38,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { shouldShowSandboxSetupTask } from "@/user-onboarding"
 import { SandboxesSection, SandboxTemplatesSection } from "@/components/sandbox-catalog-sections"
 import { sandboxRegions } from "@/components/sandbox-catalog-utils"
 import { Switch } from "@/components/ui/switch"
@@ -92,6 +94,8 @@ function resolveSandboxRegionAPIURL(value: string) {
 export function UserDashboard({
   authSession,
   githubApp,
+  locationPath,
+  productTourOnboarding,
   userPreferences,
   runners,
   runnerTotal,
@@ -105,6 +109,8 @@ export function UserDashboard({
   syncingGitHubInstallations,
   onLoadAuthorizedRepositories,
   onSyncGitHubInstallations,
+  onNavigateProductTourStart,
+  onSaveProductTourOnboarding,
   onSaveSandboxConfig,
   onDeleteSandboxAPIKey,
   onNavigate,
@@ -118,6 +124,8 @@ export function UserDashboard({
 }: {
   authSession: AuthSession
   githubApp: GitHubAppConfig | null
+  locationPath: string
+  productTourOnboarding: ProductTourOnboarding | null
   userPreferences: UserPreferences | null
   runners: RunnerState[]
   runnerTotal: number
@@ -131,6 +139,8 @@ export function UserDashboard({
   syncingGitHubInstallations: boolean
   onLoadAuthorizedRepositories: (id: number) => void
   onSyncGitHubInstallations: () => void
+  onNavigateProductTourStart: () => void
+  onSaveProductTourOnboarding: (state: ProductTourOnboarding) => Promise<void>
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   onNavigate: (page: UserPage) => void
@@ -152,6 +162,11 @@ export function UserDashboard({
   )
   const canSyncGitHubInstallations = Boolean(githubApp?.install_url || githubApp?.app_slug)
   const hasInstallations = installations.length > 0
+  const [productTourReplayRequest, setProductTourReplayRequest] = useState(0)
+  const openAccountPreferences = useCallback(
+    () => onNavigateAccountSettings(undefined, "preferences"),
+    [onNavigateAccountSettings],
+  )
   const navItemClass = (active: boolean) =>
     cn(
       "inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium transition-colors",
@@ -181,7 +196,18 @@ export function UserDashboard({
 
   return (
     <main className="flex min-h-screen flex-col bg-background text-foreground">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b px-4 lg:px-6">
+      <UserOnboardingTour
+        key={productTourReplayRequest}
+        locationPath={locationPath}
+        onboarding={productTourOnboarding}
+        onNavigateAccountPreferences={openAccountPreferences}
+        onStatusChange={onSaveProductTourOnboarding}
+        replay={productTourReplayRequest > 0}
+      />
+      <header
+        className="flex h-14 shrink-0 items-center gap-3 border-b px-4 lg:px-6"
+        data-onboarding="product-shell"
+      >
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-foreground text-background">
           <Play className="h-5 w-5" />
         </div>
@@ -189,13 +215,19 @@ export function UserDashboard({
           <div className="text-sm font-semibold tracking-wide">Qiniu Runner</div>
         </div>
         <nav className="ml-3 hidden items-center gap-1 md:flex" aria-label="Workspace">
-          <a href="/jobs" className={navItemClass(page === "home")} onClick={(event) => goToPage(event, "home")}>
+          <a
+            href="/jobs"
+            className={navItemClass(page === "home")}
+            data-onboarding="jobs-nav"
+            onClick={(event) => goToPage(event, "home")}
+          >
             <Workflow className="h-4 w-4" />
             Jobs
           </a>
           <a
             href="/repositories"
             className={navItemClass(page === "repositories")}
+            data-onboarding="repositories-nav"
             onClick={(event) => goToPage(event, "repositories")}
           >
             <BookOpen className="h-4 w-4" />
@@ -203,18 +235,31 @@ export function UserDashboard({
           </a>
         </nav>
         <div className="ml-auto flex items-center gap-2">
-          <AccountMenu authSession={authSession} onSignOut={onSignOut} />
+          <AccountMenu
+            authSession={authSession}
+            onReplayProductTour={() => {
+              onNavigateProductTourStart()
+              setProductTourReplayRequest((current) => current + 1)
+            }}
+            onSignOut={onSignOut}
+          />
         </div>
       </header>
 
       <nav className="flex items-center gap-1 border-b px-4 py-2 md:hidden" aria-label="Workspace">
-        <a href="/jobs" className={navItemClass(page === "home")} onClick={(event) => goToPage(event, "home")}>
+        <a
+          href="/jobs"
+          className={navItemClass(page === "home")}
+          data-onboarding="jobs-nav"
+          onClick={(event) => goToPage(event, "home")}
+        >
           <Workflow className="h-4 w-4" />
           Jobs
         </a>
         <a
           href="/repositories"
           className={navItemClass(page === "repositories")}
+          data-onboarding="repositories-nav"
           onClick={(event) => goToPage(event, "repositories")}
         >
           <BookOpen className="h-4 w-4" />
@@ -240,6 +285,7 @@ export function UserDashboard({
           syncingGitHubInstallations={syncingGitHubInstallations}
           onLoadAuthorizedRepositories={onLoadAuthorizedRepositories}
           onSyncGitHubInstallations={onSyncGitHubInstallations}
+          showProductTourSetup={shouldShowSandboxSetupTask(productTourOnboarding)}
           onSaveSandboxConfig={onSaveSandboxConfig}
           onDeleteSandboxAPIKey={onDeleteSandboxAPIKey}
           currentLogin={authSession.login}
@@ -431,6 +477,7 @@ function AccountsPage({
   syncingGitHubInstallations,
   onLoadAuthorizedRepositories,
   onSyncGitHubInstallations,
+  showProductTourSetup,
   onSaveSandboxConfig,
   onDeleteSandboxAPIKey,
   currentLogin,
@@ -446,6 +493,7 @@ function AccountsPage({
   syncingGitHubInstallations: boolean
   onLoadAuthorizedRepositories: (id: number) => void
   onSyncGitHubInstallations: () => void
+  showProductTourSetup: boolean
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   currentLogin?: string
@@ -473,7 +521,10 @@ function AccountsPage({
 
   return (
     <>
-      <section className="border-b bg-muted/35 px-4 py-4 lg:px-6">
+      <section
+        className="border-b bg-muted/35 px-4 py-4 lg:px-6"
+        data-onboarding="settings-tabs"
+      >
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-xl font-semibold">Settings</h1>
@@ -635,6 +686,7 @@ function AccountsPage({
                   <SandboxAPIKeyCard
                     preferences={userPreferences}
                     allowInheritance={Boolean(preferenceInstallationID)}
+                    showOnboardingSetup={showProductTourSetup && !preferenceInstallationID}
                     onSave={(apiURL, apiKey, mode, replaceInheritedSource) => onSaveSandboxConfig(apiURL, apiKey, preferenceInstallationID, mode, replaceInheritedSource)}
                     onDelete={() => onDeleteSandboxAPIKey(preferenceInstallationID)}
                   />
@@ -664,6 +716,7 @@ function AccountsPage({
                 </div>
                 <SandboxAPIKeyCard
                   preferences={userPreferences}
+                  showOnboardingSetup={showProductTourSetup}
                   onSave={(apiURL, apiKey, mode) => onSaveSandboxConfig(apiURL, apiKey, undefined, mode)}
                   onDelete={onDeleteSandboxAPIKey}
                 />
@@ -716,11 +769,13 @@ function AccountsPage({
 function SandboxAPIKeyCard({
   preferences,
   allowInheritance = false,
+  showOnboardingSetup = false,
   onSave,
   onDelete,
 }: {
   preferences: UserPreferences | null
   allowInheritance?: boolean
+  showOnboardingSetup?: boolean
   onSave: (apiURL: string, apiKey: string, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDelete: () => Promise<void>
 }) {
@@ -823,7 +878,7 @@ function SandboxAPIKeyCard({
   }
 
   return (
-    <Card className="rounded-lg">
+    <Card className="rounded-lg" data-onboarding="sandbox-service">
       <form onSubmit={submit}>
         <CardHeader className="gap-3 pb-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -840,6 +895,36 @@ function SandboxAPIKeyCard({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {showOnboardingSetup ? (
+            <div className="flex flex-col gap-3 rounded-lg border border-primary/25 bg-primary/[0.04] p-4 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">Setup step</Badge>
+                  <span className="text-sm font-semibold">Connect your Sandbox service</span>
+                </div>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+                  {usingAdminDefault
+                    ? "The platform default is available now. Save your own API Key to make this account's Sandbox access independent."
+                    : "Choose the nearest region, paste your Sandbox API Key, and save it. The key is encrypted before it is stored."}
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" asChild>
+                  <a href="https://developer.qiniu.com/las/13283/sandbox-quickstart" target="_blank" rel="noreferrer">
+                    Quickstart
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </Button>
+                <Button type="button" size="sm" asChild>
+                  <a href="https://portal.qiniu.com/developer/user/api-key" target="_blank" rel="noreferrer">
+                    Get API Key
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
           {allowInheritance ? (
             <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/20 px-3 py-3">
               <Switch

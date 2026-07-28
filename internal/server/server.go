@@ -258,6 +258,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /user/github-app/installations/sync", s.handleUserSyncGitHubInstallations)
 	s.mux.HandleFunc("GET /user/github-app/installations/{id}/repositories", s.handleUserListGitHubInstallationRepositories)
 	s.mux.HandleFunc("DELETE /user/github-app/installations/{id}", s.handleUserDeleteGitHubInstallation)
+	s.mux.HandleFunc("GET /user/onboarding/product-tour", s.handleUserProductTourOnboarding)
+	s.mux.HandleFunc("PUT /user/onboarding/product-tour", s.handleUserSaveProductTourOnboarding)
 	s.mux.HandleFunc("GET /user/runner_requests", s.handleUserListRunners)
 	s.mux.HandleFunc("GET /user/runner_requests/{id}", s.handleUserGetRunner)
 	s.mux.HandleFunc("GET /user/runner_requests/{id}/group", s.handleUserGetRunnerJobGroup)

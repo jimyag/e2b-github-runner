@@ -70,8 +70,8 @@ cp runnerd.yaml.example runnerd.yaml
 ./bin/runnerd --config runnerd.yaml
 ```
 
-5. 打开 `http://<host>:25500/`。公开产品首页提供当前 GitHub 文档入口，以及指向 `/jobs` 受保护的 Jobs 控制台入口。
-6. 在账户/组织 **Preferences** 中配置 **Sandbox Service** 凭据（或在 `/admin/sandbox_service` 配置管理员级兜底）。
+5. 打开 `http://<host>:25500/`。公开产品首页提供当前 GitHub 文档入口，以及指向 `/jobs` 受保护的 Jobs 控制台入口。用户首次登录访问 `/jobs` 时，会看到介绍 Jobs、Repositories、Settings 和 Sandbox 设置的六步引导；之后可从账户菜单重播。
+6. 按照 **Settings → Preferences** 中持续显示的设置任务，保存当前账户自己的 **Sandbox Service** API Key（也可使用 `/admin/sandbox_service` 中符合条件的管理员级兜底）。
 7. 在**管理控制台**中创建 **Runner Spec**，设置有意义的 label（如 `ubuntu-24-04`），填写 `template_id`，并启用 `default_available`。
 8. 配置 GitHub webhook → `POST http://<host>:25500/webhooks/github`。
 9. 在 workflow 中使用 `runs-on: [self-hosted, <your-runner-label>]`。
