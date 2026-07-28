@@ -98,10 +98,10 @@ func (f *fakeSandbox) RecoverRunner(ctx context.Context, input sandboxrunner.Rec
 	f.recovered++
 	f.recoverInput = input
 	if err := f.recoverErrors[input.RequestID]; err != nil {
-		return sandboxrunner.StartResult{}, err
+		return f.recoverResult, err
 	}
 	if f.recoverErr != nil {
-		return sandboxrunner.StartResult{}, f.recoverErr
+		return f.recoverResult, f.recoverErr
 	}
 	if f.recoverResult.SandboxID != "" {
 		return f.recoverResult, nil
@@ -4860,6 +4860,80 @@ func TestRecoverRequeuesCreatingRunnerWhenSandboxIsAbsent(t *testing.T) {
 	}
 	if fake.stoppedCount() != 0 {
 		t.Fatalf("expected missing creation not to stop a sandbox, got %d stops", fake.stoppedCount())
+	}
+}
+
+func TestRecoverStopsDiscoveredSandboxWithoutRunnerBeforeRequeue(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-creating-without-runner",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-creating-without-runner",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusCreating
+	st.CreatingAt = time.Now().UTC().Add(-time.Minute)
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{
+		recoverResult: sandboxrunner.StartResult{SandboxID: "sb-without-runner"},
+		recoverErr:    sandboxrunner.ErrRunnerNotFound,
+	}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusQueued || got.SandboxID != "" || got.ProcessPID != 0 {
+		t.Fatalf("expected interrupted creation to be requeued, got %#v", got)
+	}
+	if fake.stoppedCount() != 1 {
+		t.Fatalf("expected discovered sandbox to be stopped before requeue, got %d stops", fake.stoppedCount())
+	}
+}
+
+func TestRecoverDoesNotRequeueRunnerWhenDiscoveredSandboxCleanupFails(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-creating-cleanup-error",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-creating-cleanup-error",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusCreating
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{
+		recoverResult: sandboxrunner.StartResult{SandboxID: "sb-cleanup-error"},
+		recoverErr:    sandboxrunner.ErrRunnerNotFound,
+		stopErr:       errors.New("temporary sandbox cleanup failure"),
+	}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err == nil {
+		t.Fatal("expected sandbox cleanup error")
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusCreating {
+		t.Fatalf("expected failed cleanup to preserve creating state, got %#v", got)
+	}
+	if fake.stoppedCount() != 1 {
+		t.Fatalf("expected one sandbox cleanup attempt, got %d", fake.stoppedCount())
 	}
 }
 

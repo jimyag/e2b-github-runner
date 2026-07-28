@@ -698,9 +698,19 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 		},
 	})
 	if err != nil {
-		if st.Status == state.StatusCreating && errors.Is(err, sandboxrunner.ErrSandboxNotFound) &&
-			(!hasJob || strings.EqualFold(strings.TrimSpace(job.Status), "queued")) {
-			return s.requeueInterruptedCreation(st.ID, stateVersion)
+		if st.Status == state.StatusCreating && (!hasJob || strings.EqualFold(strings.TrimSpace(job.Status), "queued")) {
+			switch {
+			case errors.Is(err, sandboxrunner.ErrSandboxNotFound):
+				return s.requeueInterruptedCreation(st.ID, stateVersion)
+			case errors.Is(err, sandboxrunner.ErrRunnerNotFound) && result.SandboxID != "":
+				stopErr := s.stopSandboxWithTimeout(ctx, st.ID, result.SandboxID, 0)
+				if stopErr != nil && !isSandboxGone(stopErr) {
+					s.store.AppendLog(st.ID, "control.log", []byte("cleanup interrupted runner creation failed: "+stopErr.Error()+"\n"))
+					return fmt.Errorf("stop sandbox without runner before requeue: %w", stopErr)
+				}
+				s.store.AppendLog(st.ID, "control.log", []byte("stopped sandbox without runner process after restart\n"))
+				return s.requeueInterruptedCreation(st.ID, stateVersion)
+			}
 		}
 		s.store.AppendLog(st.ID, "control.log", []byte("runner reconnect after restart failed; preserving sandbox state: "+err.Error()+"\n"))
 		return fmt.Errorf("reconnect runner: %w", err)

@@ -285,7 +285,7 @@ func (s *E2BService) RecoverRunner(ctx context.Context, input RecoverInput) (Sta
 	}
 	pid, ok := recoveredRunnerPID(processes, input.PID)
 	if !ok {
-		return StartResult{}, fmt.Errorf("%w in sandbox %s", ErrRunnerNotFound, sandboxID)
+		return StartResult{SandboxID: sandboxID}, fmt.Errorf("%w in sandbox %s", ErrRunnerNotFound, sandboxID)
 	}
 
 	commandCtx := input.CommandContext
