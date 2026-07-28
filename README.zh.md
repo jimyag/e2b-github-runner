@@ -8,12 +8,15 @@
   <a href="./README.md">English</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#文档">文档</a> ·
+  <a href="#许可证">许可证</a> ·
   <a href="#社区与贡献">社区与贡献</a>
 </p>
 
 ---
 
 Qiniu Sandbox GitHub Runner 为每个 GitHub Actions workflow job 按需创建独立的 [Qiniu Sandbox](https://www.qiniu.com/)，即时注册 [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners)，并在 job 结束后自动移除 runner、停止沙箱。团队可以沿用熟悉的 GitHub Actions 工作流，同时让每个 job 都在一次性的隔离环境中运行。
+
+Qiniu CI Runner 控制面是开源方案；Workflow Job 实际运行所依赖的 Qiniu Sandbox，是由七牛提供并运营的云服务。
 
 ## 核心能力
 
@@ -67,7 +70,7 @@ cp runnerd.yaml.example runnerd.yaml
 ./bin/runnerd --config runnerd.yaml
 ```
 
-5. 打开 `http://<host>:25500/`，使用 GitHub OAuth 登录。
+5. 打开 `http://<host>:25500/`。公开产品首页提供当前 GitHub 文档入口，以及指向 `/jobs` 受保护的 Jobs 控制台入口。
 6. 在账户/组织 **Preferences** 中配置 **Sandbox Service** 凭据（或在 `/admin/sandbox_service` 配置管理员级兜底）。
 7. 在**管理控制台**中创建 **Runner Spec**，设置有意义的 label（如 `ubuntu-24-04`），填写 `template_id`，并启用 `default_available`。
 8. 配置 GitHub webhook → `POST http://<host>:25500/webhooks/github`。
@@ -181,7 +184,7 @@ Runner spec、runner group 和 repository policy 通过管理 API 和控制台�
 | `/admin/accounts`        | 账户管理：列表、搜索、角色变更 |
 | `/admin/sandbox_service` | Sandbox 服务配置               |
 
-普通用户路由包括 `/repositories`、PR job 分组（`/github/pulls/{owner}/{repo}/{number}/jobs`）、账户设置（`/account/preferences`、`/account/sandbox-templates`、`/account/sandbox-instances`），以及对应的 `/organizations/{login}/...` 路由。
+`/` 始终是公开的 Qiniu CI Runner 产品首页。普通用户 Jobs 首页位于 `/jobs`；其他受保护路由包括 `/repositories`、PR job 分组（`/github/pulls/{owner}/{repo}/{number}/jobs`）、账户设置（`/account/preferences`、`/account/sandbox-templates`、`/account/sandbox-instances`），以及对应的 `/organizations/{login}/...` 路由。未登录访问受保护路由时会显示独立的 GitHub 登录页，并在 OAuth 完成后返回原 URL。
 
 Runner request 列表默认返回最新 100 行，单页最多 500 行，并且只读取公开 runner state 所需字段，不加载已保存的 webhook payload 或 Sandbox credentials。Admin 轮询使用 `(queued_at DESC, id ASC)` 索引；经过 repository 授权的普通用户轮询通过 `(github_installation_id, queued_at DESC, id ASC)` 分别查询每个 installation，再合并有界结果，同时保留精确的 installation/repository 授权关系。
 
@@ -240,6 +243,10 @@ task release-check # 验证发布构建
 | [docs/zh/deployment-smoke.md](docs/zh/deployment-smoke.md)                             | 生产环境就绪检查清单                                    |
 | [docs/zh/runner-architecture-comparison.md](docs/zh/runner-architecture-comparison.md) | 架构图及与 ARC / Fireactions 的对比                     |
 | [docs/zh/runner-implementation-review.md](docs/zh/runner-implementation-review.md)     | 实现状态与 schema 迁移说明                              |
+
+## 许可证
+
+Qiniu CI Runner 基于 [Apache License 2.0](LICENSE) 开源。
 
 ## 社区与贡献
 

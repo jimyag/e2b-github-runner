@@ -55,6 +55,69 @@ samp {
   font-family: var(--font-mono) !important;
 }
 
+.brand-home {
+  font-family: var(--font-sans);
+}
+
+.brand-home .font-mono {
+  font-family: var(--font-mono) !important;
+}
+
+.brand-grid {
+  background-image:
+    linear-gradient(rgba(125, 220, 255, 0.075) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 220, 255, 0.075) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: linear-gradient(to bottom, black, transparent 92%);
+}
+
+.brand-grid-dark {
+  background-image:
+    linear-gradient(rgba(7, 49, 73, 0.18) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(7, 49, 73, 0.18) 1px, transparent 1px);
+  mask-image: linear-gradient(to right, transparent, black 20%, black 80%, transparent);
+}
+
+@keyframes brand-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes brand-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(39, 197, 245, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(39, 197, 245, 0);
+  }
+}
+
+.brand-reveal {
+  animation: brand-reveal 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.brand-reveal-delay {
+  animation-delay: 140ms;
+}
+
+.brand-pulse {
+  animation: brand-pulse 1.8s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-reveal,
+  .brand-pulse {
+    animation: none;
+  }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

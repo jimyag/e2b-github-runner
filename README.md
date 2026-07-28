@@ -8,12 +8,15 @@
   <a href="./README.zh.md">中文</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="#documentation">Documentation</a> ·
+  <a href="#license">License</a> ·
   <a href="#community--contributing">Community &amp; Contributing</a>
 </p>
 
 ---
 
 Qiniu Sandbox GitHub Runner provisions a clean [Qiniu Sandbox](https://www.qiniu.com/) for each GitHub Actions workflow job, registers a [self-hosted runner](https://docs.github.com/en/actions/hosting-your-own-runners/about-self-hosted-runners) just in time, and removes the runner and sandbox when the job ends. Teams keep the familiar GitHub Actions workflow while moving each job into a disposable environment.
+
+The Qiniu CI Runner control plane is open source. Qiniu Sandbox, where workflow jobs execute, is a cloud service provided and operated by Qiniu.
 
 ## Core Capabilities
 
@@ -67,7 +70,7 @@ cp runnerd.yaml.example runnerd.yaml
 ./bin/runnerd --config runnerd.yaml
 ```
 
-5. Open `http://<host>:25500/` and sign in with GitHub OAuth.
+5. Open `http://<host>:25500/`. The public product landing page links to the current GitHub documentation and the protected Jobs console at `/jobs`.
 6. Configure **Sandbox Service** credentials in account/org **Preferences** (or admin fallback at `/admin/sandbox_service`).
 7. In the **Admin Console**, create a **Runner Spec** with a meaningful label (e.g. `ubuntu-24-04`), set its `template_id`, and enable `default_available`.
 8. Configure a GitHub webhook → `POST http://<host>:25500/webhooks/github`.
@@ -180,7 +183,7 @@ The built-in web UI provides:
 | `/admin/accounts` | Account management — list, search, and change roles |
 | `/admin/sandbox_service` | Sandbox service configuration |
 
-Ordinary-user routes include `/repositories`, PR job groups (`/github/pulls/{owner}/{repo}/{number}/jobs`), and account settings (`/account/preferences`, `/account/sandbox-templates`, `/account/sandbox-instances`), with matching `/organizations/{login}/...` routes.
+`/` is always the public Qiniu CI Runner product landing page. The ordinary-user Jobs homepage is `/jobs`; other protected routes include `/repositories`, PR job groups (`/github/pulls/{owner}/{repo}/{number}/jobs`), and account settings (`/account/preferences`, `/account/sandbox-templates`, `/account/sandbox-instances`), with matching `/organizations/{login}/...` routes. Opening a protected route without a session shows a focused GitHub sign-in page and returns to the original URL after OAuth.
 
 Runner request lists return the newest 100 rows by default and cap pages at 500. They project only public runner-state fields instead of stored webhook payloads or Sandbox credentials. Admin polling uses the `(queued_at DESC, id ASC)` index; repository-authorized user polling queries each installation through `(github_installation_id, queued_at DESC, id ASC)` and merges the bounded results while preserving exact installation/repository access pairs.
 
@@ -239,6 +242,10 @@ Build templates with `task template-build-prod`. The qbox-kodo base image can be
 | [docs/deployment-smoke.md](docs/deployment-smoke.md) | Production-style readiness checklist |
 | [docs/runner-architecture-comparison.md](docs/runner-architecture-comparison.md) | Architecture diagrams and comparison with ARC / Fireactions |
 | [docs/runner-implementation-review.md](docs/runner-implementation-review.md) | Implementation status and schema migration notes |
+
+## License
+
+Qiniu CI Runner is licensed under the [Apache License 2.0](LICENSE).
 
 ## Community & Contributing
 

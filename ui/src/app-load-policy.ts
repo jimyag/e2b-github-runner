@@ -1,4 +1,4 @@
-import type { AdminSection } from "@/admin-types"
+import { adminSections, type AdminSection } from "@/admin-types"
 
 export const userRunnerInitialPageSize = 100
 export const userRunnerHistoryWindow = 500
@@ -11,6 +11,7 @@ export type AdminDataResource =
   | "audit_events"
 
 export type UserDataResource = "github_app" | "runner_requests" | "preferences"
+export type AppRouteAccess = "public" | "user" | "admin" | "not-found"
 
 const adminResourcesBySection: Record<AdminSection, readonly AdminDataResource[]> = {
   overview: ["runner_requests", "runner_specs", "runner_policies"],
@@ -53,7 +54,7 @@ export function userPollingResources(path: string): UserDataResource[] {
 }
 
 export function userRunnerRequestLimit(path: string, polling: boolean): number {
-  if (polling || path === "/") return userRunnerInitialPageSize
+  if (polling || path === "/jobs") return userRunnerInitialPageSize
   return isUserJobsRoute(path) ? userRunnerHistoryWindow : userRunnerInitialPageSize
 }
 
@@ -61,20 +62,50 @@ export function userRunnerRequestsPath(limit: number, offset: number): string {
   return `/user/runner_requests?limit=${limit}&offset=${offset}`
 }
 
-function isUserJobsRoute(path: string): boolean {
+export function appRouteAccess(path: string): AppRouteAccess {
+  if (path === "/") return "public"
+  if (isAdminRoute(path)) return "admin"
+  if (isUserRoute(path)) return "user"
+  return "not-found"
+}
+
+export function signInURL(path: string, search = ""): string {
+  const safePath = path.startsWith("/") && !path.startsWith("//") ? path : "/jobs"
+  const safeSearch = search.startsWith("?") ? search : ""
+  return `/auth/github/login?return_to=${encodeURIComponent(`${safePath}${safeSearch}`)}`
+}
+
+export function isUserJobsRoute(path: string): boolean {
   return (
-    path === "/" ||
+    path === "/jobs" ||
     /^\/github\/(pulls|runs)\/[^/]+\/[^/]+\/[^/]+\/jobs$/.test(path) ||
     /^\/github\/branches\/[^/]+\/[^/]+\/.+\/jobs$/.test(path) ||
-    /^\/jobs\/(pulls|runs|branches|manual)\//.test(path)
+    /^\/jobs\/(pulls|runs)\/[^/]+\/[^/]+\/\d+$/.test(path) ||
+    /^\/jobs\/branches\/[^/]+\/[^/]+\/.+\/[^/]+$/.test(path) ||
+    /^\/jobs\/manual\/[^/]+\/[^/]+\/[^/]+$/.test(path)
   )
 }
 
-function isAccountSettingsRoute(path: string): boolean {
+export function isAccountSettingsRoute(path: string): boolean {
   return (
     path === "/settings" ||
     path === "/accounts" ||
     /^\/account\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path) ||
     /^\/organizations\/[^/]+\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path)
+  )
+}
+
+function isAdminRoute(path: string): boolean {
+  if (path === "/admin" || path === "/admin/") return true
+  const match = path.match(/^\/admin\/([^/]+)$/)
+  return Boolean(match && adminSections.includes(match[1] as AdminSection))
+}
+
+function isUserRoute(path: string): boolean {
+  return (
+    isUserJobsRoute(path) ||
+    /^\/jobs\/[^/]+$/.test(path) ||
+    path === "/repositories" ||
+    isAccountSettingsRoute(path)
   )
 }

@@ -3907,6 +3907,7 @@ func TestAdminUIIsServedWithoutAPIAccess(t *testing.T) {
 	}
 
 	for _, path := range []string{
+		"/jobs",
 		"/repositories",
 		"/account/repositories",
 		"/account/preferences",

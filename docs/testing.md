@@ -173,10 +173,16 @@ task dev
 
 `task dev` reads `runnerd.local.yaml` by default, starts the Vite dev server on the first available port at or after `127.0.0.1:5173`, and starts the Go service with the `development` build tag. Browsers still access the runnerd address.
 
-Ordinary-user UI:
+Public landing page:
 
 ```text
 http://127.0.0.1:25500/
+```
+
+Protected ordinary-user Jobs homepage:
+
+```text
+http://127.0.0.1:25500/jobs
 ```
 
 Ordinary-user Activity repositories page:
@@ -235,13 +241,13 @@ Health check:
 curl -fsS http://127.0.0.1:25500/healthz
 ```
 
-Ordinary-user page:
+Protected ordinary-user Jobs page:
 
 ```text
-http://127.0.0.1:25500/
+http://127.0.0.1:25500/jobs
 ```
 
-The page redirects to GitHub OAuth login. The first login creates a local account with `role=user` and links the GitHub OAuth identity. The first admin must be bootstrapped as a separate one-time step before starting the server; the command sets the admin role and exits without starting runnerd:
+The page presents GitHub OAuth sign-in and returns to `/jobs` after authentication. The first login creates a local account with `role=user` and links the GitHub OAuth identity. The first admin must be bootstrapped as a separate one-time step before starting the server; the command sets the admin role and exits without starting runnerd:
 
 ```bash
 go run ./cmd/runnerd --config ./runnerd.yaml --bootstrap-admin github:<your-github-user-id>
@@ -285,7 +291,7 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/admin/api/sandbox-service-default/api-key | jq
 ```
 
-UI source lives in `ui/` and uses the same React, Vite, Tailwind CSS, shadcn-style components, and theme CSS as `kubevirt-console`. `task build` runs `task ui-build`, writes frontend output to `internal/server/ui/`, and then compiles `runnerd`. In development mode, `internal/server/ui_assets_development.go` proxies UI assets to Vite. In production builds, `internal/server/ui_assets_production.go` embeds `internal/server/ui/*`. The ordinary-user UI includes GitHub App accounts and on-demand authorized repositories at `/account/repositories`, Sandbox service settings at `/account/preferences` and `/organizations/{login}/preferences`, region-filtered templates at `/account/sandbox-templates`, region- and template-filtered runner instances at `/account/sandbox-instances`, the equivalent organization routes, local activity repositories at `/repositories`, the Repo/PR job list at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, and job details at `/jobs/{id}`. Initial navigation loads only resources used by that route. The Jobs homepage loads the first `GET /user/runner_requests?limit=100&offset=0` page and polls that page every five seconds while preserving any already-loaded history. Stable job-group routes and the Load older jobs action can load the bounded 500-row history window; the API rejects `limit + offset` values past 500 and does not advertise an unusable next link. GitHub App metadata and preferences are not part of the polling loop. Admin routes load only the active section's request/spec/group/policy/audit dependencies, and only Overview and Runner Requests poll runner requests. The catalog uses `GET /user/sandbox/templates?region=<id>` and `GET /user/sandbox/instances?region=<id>&template_id=<id>`; the instance endpoint lists only runner-created sandboxes and uses the effective scoped/default credential resolver. The admin surface includes the account list and role controls at `/admin/accounts`, the platform fallback at `/admin/sandbox_service`, runners, runner specs, runner groups, runner policies, retry, audit, label match test, and diagnostics pages, but not provider resource catalogs.
+UI source lives in `ui/` and uses the same React, Vite, Tailwind CSS, shadcn-style components, and theme CSS as `kubevirt-console`. `task build` runs `task ui-build`, writes frontend output to `internal/server/ui/`, and then compiles `runnerd`. In development mode, `internal/server/ui_assets_development.go` proxies UI assets to Vite. In production builds, `internal/server/ui_assets_production.go` embeds `internal/server/ui/*`. `/` always renders the public product landing page with documentation and Jobs destinations; it does not load protected user resources. The protected ordinary-user Jobs homepage is `/jobs`. Opening `/jobs`, a job-group deep link, account settings, or an admin route without a session renders a focused sign-in page whose OAuth link preserves the full same-origin destination through `return_to`. Unknown routes render 404, and authenticated non-admin users receive an explicit access-denied page on admin routes. The ordinary-user UI also includes GitHub App accounts and on-demand authorized repositories at `/account/repositories`, Sandbox service settings at `/account/preferences` and `/organizations/{login}/preferences`, region-filtered templates at `/account/sandbox-templates`, region- and template-filtered runner instances at `/account/sandbox-instances`, the equivalent organization routes, local activity repositories at `/repositories`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, and job details at `/jobs/{id}`. Initial navigation loads only resources used by that route. The Jobs homepage loads the first `GET /user/runner_requests?limit=100&offset=0` page and polls that page every five seconds while preserving any already-loaded history. Stable job-group routes and the Load older jobs action can load the bounded 500-row history window; the API rejects `limit + offset` values past 500 and does not advertise an unusable next link. GitHub App metadata and preferences are not part of the polling loop. Admin routes load only the active section's request/spec/group/policy/audit dependencies, and only Overview and Runner Requests poll runner requests. The catalog uses `GET /user/sandbox/templates?region=<id>` and `GET /user/sandbox/instances?region=<id>&template_id=<id>`; the instance endpoint lists only runner-created sandboxes and uses the effective scoped/default credential resolver. The admin surface includes the account list and role controls at `/admin/accounts`, the platform fallback at `/admin/sandbox_service`, runners, runner specs, runner groups, runner policies, retry, audit, label match test, and diagnostics pages, but not provider resource catalogs.
 
 For focused UI unit tests, run:
 

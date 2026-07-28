@@ -10,7 +10,7 @@
 
 ## Admin And UI
 
-- The current browser entry for the ordinary-user UI is `/`.
+- `/` always serves the public Qiniu CI Runner landing page. `/jobs` is the protected ordinary-user Jobs homepage. The landing page links to Jobs and documentation without loading protected user resources.
 - Ordinary-user job group routes use a source-context path with the jobs view as the terminal resource, such as `/github/pulls/{owner}/{repo}/{number}/jobs`; individual runner job details remain `/jobs/{id}`.
 - Ordinary-user account settings live under `/account/repositories`, `/account/preferences`, `/account/sandbox-templates`, `/account/sandbox-instances`, and `/organizations/{login}/...`.
 - `/user/sandbox/templates` and `/user/sandbox/instances` resolve encrypted Sandbox credentials from the selected account or GitHub installation scope, then the enabled admin default when the scope is incomplete. They are ordinary-user catalog APIs, not admin configuration APIs.
@@ -26,6 +26,7 @@
 ## Auth And Routing
 
 - The recommended production GitHub auth path is GitHub App auth for runner operations plus GitHub App OAuth sign-in for ordinary users and administrators. Local account roles gate management APIs.
+- Protected browser routes render a focused sign-in page after session loading and preserve the full same-origin destination through OAuth `return_to`. Authenticated non-admin users see an explicit access-denied page on admin routes, and unknown routes render 404.
 - Ordinary-user Jobs authorization is repository-level, not installation-level. Resolve the user's repository intersection for every account-linked GitHub App installation with the stored GitHub user access token, preserve exact `(github_installation_id, repository_full_name)` pairs, filter before query limits, and reuse the same authorization for lists, details, groups, logs, and terminals. Missing or rejected user tokens must fail closed; an inaccessible installation contributes no authorized repositories.
 - Token and basic auth still exist as compatibility modes; their long-term product status is undecided.
 - GitHub Enterprise Server is not supported. Config validation rejects `github.api_base_url` values other than `https://api.github.com`.
