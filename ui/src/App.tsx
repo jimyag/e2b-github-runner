@@ -36,6 +36,7 @@ import {
   type GitHubAppConfig,
   type GitHubInstallation,
   type Metric,
+  type ProductTourOnboarding,
   type RunnerGroup,
   type RunnerPolicy,
   type RunnerSpec,
@@ -50,6 +51,7 @@ import {
   adminPollingResources,
   appRouteAccess,
   authRouteViewState,
+  loadOptionalUserResource,
   shouldPollAdminSection,
   shouldPollUserRoute,
   userDataResources,
@@ -61,6 +63,7 @@ import {
   type AuthSessionCheckStatus,
 } from "@/app-load-policy"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
+import { productTourVersion, sandboxSetupCompletesProductTour } from "@/user-onboarding"
 import {
   createGitHubReauthenticationGate,
   requiresGitHubReauthentication,
@@ -154,6 +157,8 @@ function App() {
   const [loadingUserRunnerHistory, setLoadingUserRunnerHistory] = useState(false)
   const [githubApp, setGitHubApp] = useState<GitHubAppConfig | null>(null)
   const [userPreferences, setUserPreferences] = useState<UserPreferences | null>(null)
+  const [userPreferencesScope, setUserPreferencesScope] = useState("")
+  const [productTourOnboarding, setProductTourOnboarding] = useState<ProductTourOnboarding | null>(null)
   const [authorizedRepositories, setAuthorizedRepositories] = useState<Record<number, string[]>>({})
   const [loadingRepositoriesFor, setLoadingRepositoriesFor] = useState<number | null>(null)
   const [syncingGitHubInstallations, setSyncingGitHubInstallations] = useState(false)
@@ -178,6 +183,15 @@ function App() {
     setLocationPath(window.location.pathname)
     setLocationSearch(window.location.search)
   }, [userSelectedKey])
+
+  const openProductTourStart = useCallback(() => {
+    setUserSelectedKey("")
+    if (window.location.pathname !== "/jobs" || window.location.search) {
+      window.history.pushState(null, "", "/jobs")
+    }
+    setLocationPath("/jobs")
+    setLocationSearch("")
+  }, [])
 
   const setAccountSettingsRoute = useCallback(
     (accountLogin: string | undefined, tab: AccountSettingsTab) => {
@@ -242,6 +256,8 @@ function App() {
   const userJobID = userJobIDFromPath(locationPath)
   const userSelectedJobID = userJobIDFromSearch(locationSearch)
   const accountSettingsRoute = parseAccountSettingsRoute(locationPath, authSession.login)
+  const accountSettingsLogin = accountSettingsRoute?.accountLogin
+  const accountSettingsTab = accountSettingsRoute?.tab
   const userPage = accountSettingsRoute ? "settings" : locationPath === "/repositories" ? "repositories" : "home"
 
   const metrics = useMemo<Metric[]>(() => {
@@ -386,10 +402,13 @@ function App() {
     if (resources.length === 0) return
     setLoading(true)
     try {
-      const [appData, runnerPage] = await Promise.all([
+      const [appData, runnerPage, onboardingData] = await Promise.all([
         resources.includes("github_app") ? request("/user/github-app") : Promise.resolve(null),
         resources.includes("runner_requests")
           ? requestUserRunnerPage(userRunnerRequestLimit(locationPath, polling), 0)
+          : Promise.resolve(null),
+        resources.includes("onboarding")
+          ? loadOptionalUserResource(request("/user/onboarding/product-tour"))
           : Promise.resolve(null),
       ])
       const nextApp = appData as GitHubAppConfig | null
@@ -399,13 +418,14 @@ function App() {
         setUserRunners((current) => polling ? mergeUserRunnerPages(runnerPage.items, current) : runnerPage.items)
         if (runnerPage.total === 0) setUserSelectedKey("")
       }
+      if (onboardingData) setProductTourOnboarding(onboardingData as ProductTourOnboarding)
       if (resources.includes("preferences") && nextApp) {
         const nextRoute = parseAccountSettingsRoute(locationPath, authSession.login)
-        const preferencesPath = userPreferencesPath(
-          preferenceInstallationID(nextApp, nextRoute, authSession.login)
-        )
+        const installationID = preferenceInstallationID(nextApp, nextRoute, authSession.login)
+        const preferencesPath = userPreferencesPath(installationID)
         const preferencesData = await request(preferencesPath)
         setUserPreferences(preferencesData as UserPreferences)
+        setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
       }
     } catch (error) {
       if (requiresGitHubReauthentication(error)) {
@@ -420,6 +440,15 @@ function App() {
       setLoading(false)
     }
   }, [authSession.authenticated, authSession.login, beginGitHubReauthentication, hasAccess, isAdminRoute, locationPath, refreshGitHubOAuthLogin, request, requestUserRunnerPage])
+
+  const saveProductTourOnboarding = useCallback(async (state: ProductTourOnboarding) => {
+    const saved = (await request("/user/onboarding/product-tour", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state),
+    })) as ProductTourOnboarding
+    setProductTourOnboarding(saved)
+  }, [request])
 
   const loadUserRunnerHistory = useCallback(async () => {
     if (!authSession.authenticated || loadingUserRunnerHistory) return
@@ -521,6 +550,7 @@ function App() {
       body: JSON.stringify({ mode, api_url: apiURL, api_key: apiKey, replace_inherited_source: replaceInheritedSource }),
     })) as UserPreferences
     setUserPreferences(preferences)
+    setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
     toast.success("Sandbox service settings saved")
   }, [request])
 
@@ -529,6 +559,7 @@ function App() {
       method: "DELETE",
     })) as UserPreferences
     setUserPreferences(preferences)
+    setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
     toast.success("Sandbox API Key removed")
   }, [request])
 
@@ -639,6 +670,37 @@ function App() {
     const timer = window.setInterval(() => void loadUserAll(true), 5000)
     return () => window.clearInterval(timer)
   }, [authSession.authenticated, hasAccess, isAdminRoute, loadUserAll, locationPath])
+
+  useEffect(() => {
+    if (
+      productTourOnboarding?.status !== "pending" ||
+      accountSettingsTab !== "preferences" ||
+      accountSettingsLogin !== authSession.login ||
+      userPreferencesScope !== "account" ||
+      !sandboxSetupCompletesProductTour(userPreferences)
+    ) {
+      return
+    }
+    void saveProductTourOnboarding({
+      version: productTourVersion,
+      status: "completed",
+      tour_seen: true,
+    }).catch((error) => {
+      toast.error(
+        error instanceof Error
+          ? `Sandbox settings are saved, but product tour progress was not updated: ${error.message}`
+          : "Sandbox settings are saved, but product tour progress was not updated",
+      )
+    })
+  }, [
+    accountSettingsLogin,
+    accountSettingsTab,
+    authSession.login,
+    productTourOnboarding?.status,
+    saveProductTourOnboarding,
+    userPreferences,
+    userPreferencesScope,
+  ])
 
   useEffect(() => {
     void syncGitHubAppSetupFromURL()
@@ -866,6 +928,8 @@ function App() {
         <UserDashboard
           authSession={authSession}
           githubApp={githubApp}
+          locationPath={locationPath}
+          productTourOnboarding={productTourOnboarding}
           userPreferences={userPreferences}
           runners={userRunners}
           runnerTotal={userRunnerTotal}
@@ -879,6 +943,8 @@ function App() {
           syncingGitHubInstallations={syncingGitHubInstallations}
           onLoadAuthorizedRepositories={(id) => void loadAuthorizedRepositories(id)}
           onSyncGitHubInstallations={() => void syncGitHubInstallations()}
+          onNavigateProductTourStart={openProductTourStart}
+          onSaveProductTourOnboarding={saveProductTourOnboarding}
           onSaveSandboxConfig={saveSandboxConfig}
           onDeleteSandboxAPIKey={deleteSandboxAPIKey}
           onNavigate={setUserPage}

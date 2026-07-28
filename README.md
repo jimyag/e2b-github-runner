@@ -70,8 +70,8 @@ cp runnerd.yaml.example runnerd.yaml
 ./bin/runnerd --config runnerd.yaml
 ```
 
-5. Open `http://<host>:25500/`. The public product landing page links to the current GitHub documentation and the protected Jobs console at `/jobs`.
-6. Configure **Sandbox Service** credentials in account/org **Preferences** (or admin fallback at `/admin/sandbox_service`).
+5. Open `http://<host>:25500/`. The public product landing page links to the current GitHub documentation and the protected Jobs console at `/jobs`. On the first authenticated visit to `/jobs`, a six-step product tour introduces Jobs, Repositories, Settings, and Sandbox setup; it can be replayed from the account menu.
+6. Follow the persistent setup task in **Settings → Preferences** to save the account's own **Sandbox Service** API Key (or use an eligible admin fallback from `/admin/sandbox_service`).
 7. In the **Admin Console**, create a **Runner Spec** with a meaningful label (e.g. `ubuntu-24-04`), set its `template_id`, and enable `default_available`.
 8. Configure a GitHub webhook → `POST http://<host>:25500/webhooks/github`.
 9. Use `runs-on: [self-hosted, <your-runner-label>]` in your workflow.

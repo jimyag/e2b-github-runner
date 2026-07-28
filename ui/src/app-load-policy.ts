@@ -10,7 +10,7 @@ export type AdminDataResource =
   | "runner_policies"
   | "audit_events"
 
-export type UserDataResource = "github_app" | "runner_requests" | "preferences"
+export type UserDataResource = "github_app" | "runner_requests" | "preferences" | "onboarding"
 export type AppRouteAccess = "public" | "user" | "admin" | "not-found"
 export type AuthSessionCheckStatus = "checking" | "ready" | "error"
 export type AuthRouteViewState = "loading" | "authenticated" | "sign-in" | "error"
@@ -41,9 +41,9 @@ export function adminPollingResources(section: AdminSection): AdminDataResource[
 }
 
 export function userDataResources(path: string): UserDataResource[] {
-  if (isUserJobsRoute(path)) return ["github_app", "runner_requests"]
-  if (path === "/repositories") return ["github_app"]
-  if (isAccountSettingsRoute(path)) return ["github_app", "preferences"]
+  if (isUserJobsRoute(path)) return ["github_app", "runner_requests", "onboarding"]
+  if (path === "/repositories") return ["github_app", "onboarding"]
+  if (isAccountSettingsRoute(path)) return ["github_app", "preferences", "onboarding"]
   return []
 }
 
@@ -53,6 +53,14 @@ export function shouldPollUserRoute(path: string): boolean {
 
 export function userPollingResources(path: string): UserDataResource[] {
   return shouldPollUserRoute(path) ? ["runner_requests"] : []
+}
+
+export async function loadOptionalUserResource<T>(resource: Promise<T>): Promise<T | null> {
+  try {
+    return await resource
+  } catch {
+    return null
+  }
 }
 
 export function userRunnerRequestLimit(path: string, polling: boolean): number {

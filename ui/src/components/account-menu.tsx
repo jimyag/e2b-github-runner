@@ -1,4 +1,4 @@
-import { LogOut, Monitor, Moon, Settings, ShieldCheck, Sun } from "lucide-react"
+import { CircleHelp, LogOut, Monitor, Moon, Settings, ShieldCheck, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
 
 import type { AuthSession } from "@/admin-types"
@@ -14,7 +14,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-export function AccountMenu({ authSession, onSignOut }: { authSession: AuthSession; onSignOut: () => void }) {
+export function AccountMenu({
+  authSession,
+  onReplayProductTour,
+  onSignOut,
+}: {
+  authSession: AuthSession
+  onReplayProductTour?: () => void
+  onSignOut: () => void
+}) {
   const { setTheme, theme } = useTheme()
   const avatarURL = userAvatarURL(authSession)
   const login = authSession.login || "github"
@@ -22,7 +30,14 @@ export function AccountMenu({ authSession, onSignOut }: { authSession: AuthSessi
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="ghost" size="icon" className="rounded-full" aria-label="Account menu">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="rounded-full"
+          aria-label="Account menu"
+          data-onboarding="account-menu"
+        >
           {avatarURL ? (
             <img
               src={avatarURL}
@@ -46,6 +61,12 @@ export function AccountMenu({ authSession, onSignOut }: { authSession: AuthSessi
             Settings
           </a>
         </DropdownMenuItem>
+        {onReplayProductTour ? (
+          <DropdownMenuItem onClick={onReplayProductTour}>
+            <CircleHelp className="h-4 w-4" />
+            Replay product tour
+          </DropdownMenuItem>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Theme</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={theme || "system"} onValueChange={setTheme}>
