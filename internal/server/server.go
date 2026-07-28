@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/qiniu/ci-runner/internal/config"
@@ -41,6 +42,8 @@ type Server struct {
 	loopCtx     context.Context
 	loopCancel  context.CancelFunc
 	loopWG      sync.WaitGroup
+
+	recoveryMetricsDeferred atomic.Int32
 
 	pullTitleMu    sync.Mutex
 	pullTitleCache map[string]cachedPullTitle
@@ -220,6 +223,13 @@ func (s *Server) Start() {
 }
 
 func (s *Server) Recover(ctx context.Context) error {
+	s.recoveryMetricsDeferred.Add(1)
+	defer func() {
+		if s.recoveryMetricsDeferred.Add(-1) == 0 {
+			s.refreshMetrics()
+		}
+	}()
+
 	states, err := s.store.ListActiveStates()
 	if err != nil {
 		return err

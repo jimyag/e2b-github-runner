@@ -166,7 +166,7 @@ jobs:
 - 启动恢复期间 `/healthz` 仍可访问，其他 HTTP 路由在恢复完成前返回 `503`。
 - 活跃请求通过有界并发恢复，不再串行等待所有更早的请求；单请求超时由启动恢复总预算和 worker 波次数共同确定，父 context 的 deadline 仍是硬上限。
 - runnerd 完成启动恢复后才启动 worker loops 并处理新的排队任务。
-- 原 runner request 保持 `running`，sandbox ID 和 runner PID 不变，并记录成功重连事件。
+- `running` request 保持 `running`，sandbox ID 和 runner PID 不变，并记录成功重连事件；可恢复的 `creating` request 可能会发现并补写重启前尚未持久化的 sandbox ID 和 runner PID。
 - GitHub Actions job 持续运行，不会重新排队或丢失 runner。
 - 由旧进程持有 lease 的 `queued` 请求能够被新 worker 继续处理。
 - GitHub 或沙箱状态查询暂时失败时只记录错误，不会停止已有沙箱。

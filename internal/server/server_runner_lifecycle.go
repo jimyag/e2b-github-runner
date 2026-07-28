@@ -645,7 +645,6 @@ func (s *Server) recoverRunner(ctx context.Context, id string) error {
 		unlock()
 		s.store.AppendLog(id, "control.log", []byte("queued runner lease cleared after restart\n"))
 		s.signalQueue()
-		s.refreshMetrics()
 		return nil
 	case state.StatusStopping:
 		unlock()
@@ -686,6 +685,7 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 	if err != nil {
 		return fmt.Errorf("resolve sandbox service for recovery: %w", err)
 	}
+	exitWatchAccepted := make(chan bool, 1)
 	result, err := sandboxService.RecoverRunner(ctx, sandboxrunner.RecoverInput{
 		RequestID:      st.ID,
 		SandboxID:      st.SandboxID,
@@ -693,10 +693,13 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 		Timeout:        timeout,
 		CommandContext: s.loopCtx,
 		OnExit: func(result sandboxrunner.ExitResult, err error) {
-			s.runnerExited(st.ID, result, err)
+			if <-exitWatchAccepted {
+				s.runnerExited(st.ID, result, err)
+			}
 		},
 	})
 	if err != nil {
+		exitWatchAccepted <- false
 		if st.Status == state.StatusRunning && errors.Is(err, sandboxrunner.ErrSandboxNotFound) {
 			s.failAndStopRunner(ctx, st.ID, "recovery", "sandbox_not_found", "runner sandbox no longer exists after restart")
 			return nil
@@ -718,10 +721,14 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 		// A running request must reconnect to its persisted PID. If that exact
 		// process is missing, preserve the sandbox because reconnect/list results
 		// can be transient and attaching to a replacement process is unsafe.
-		s.store.AppendLog(st.ID, "control.log", []byte("runner reconnect after restart failed; preserving sandbox state\n"))
+		s.store.AppendLog(st.ID, "control.log", []byte("runner reconnect after restart failed; preserving request state\n"))
 		return fmt.Errorf("reconnect runner: %w", err)
 	}
 
+	acceptExitWatch := false
+	defer func() {
+		exitWatchAccepted <- acceptExitWatch
+	}()
 	unlock := s.lockRunner(st.ID)
 	defer unlock()
 	latest, err := s.store.ReadState(st.ID)
@@ -745,13 +752,13 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 	if err := s.store.WriteState(latest); err != nil {
 		return fmt.Errorf("write recovered runner state: %w", err)
 	}
+	acceptExitWatch = true
 	s.logger.Info("runner reconnected after restart", "id", st.ID, "sandbox_id", result.SandboxID, "pid", result.PID)
 	s.store.AppendLog(st.ID, "control.log", []byte(fmt.Sprintf("runner reconnected after restart sandbox_id=%s pid=%d\n", result.SandboxID, result.PID)))
 	s.recordAudit("recovery", "runner.reconnected", "runner_request", latest.ID, map[string]any{
 		"sandbox_id": result.SandboxID,
 		"pid":        result.PID,
 	})
-	s.refreshMetrics()
 	return nil
 }
 
@@ -810,7 +817,6 @@ func (s *Server) requeueInterruptedCreation(id string, stateVersion int64) error
 	s.logger.Info("interrupted runner creation requeued after restart", "id", id)
 	s.store.AppendLog(id, "control.log", []byte("runner creation had no sandbox after restart; request requeued\n"))
 	s.signalQueue()
-	s.refreshMetrics()
 	return nil
 }
 

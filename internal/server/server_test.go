@@ -4881,8 +4881,9 @@ func TestRecoverDoesNotOverwriteConcurrentStateChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	exitDone := make(chan struct{})
 	var hookErr error
-	fake := &fakeSandbox{recoverHook: func(sandboxrunner.RecoverInput) {
+	fake := &fakeSandbox{recoverHook: func(input sandboxrunner.RecoverInput) {
 		latest, err := store.ReadState(st.ID)
 		if err != nil {
 			hookErr = err
@@ -4890,6 +4891,10 @@ func TestRecoverDoesNotOverwriteConcurrentStateChange(t *testing.T) {
 		}
 		latest.Status = state.StatusStopping
 		hookErr = store.WriteState(latest)
+		go func() {
+			input.OnExit(sandboxrunner.ExitResult{ExitCode: 1}, errors.New("discarded watcher exit"))
+			close(exitDone)
+		}()
 	}}
 	srv := newTestServer(t, store, "http://example.test", fake)
 	srv.Close()
@@ -4898,6 +4903,11 @@ func TestRecoverDoesNotOverwriteConcurrentStateChange(t *testing.T) {
 	}
 	if hookErr != nil {
 		t.Fatal(hookErr)
+	}
+	select {
+	case <-exitDone:
+	case <-time.After(time.Second):
+		t.Fatal("discarded recovery exit watcher was not released")
 	}
 	got, err := store.ReadState(st.ID)
 	if err != nil {

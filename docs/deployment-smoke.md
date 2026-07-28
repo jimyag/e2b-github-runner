@@ -166,7 +166,7 @@ Expected result:
 - `/healthz` remains available during startup recovery; other HTTP routes return `503` until recovery finishes.
 - Active requests recover with bounded concurrency instead of waiting for every earlier request serially; the whole-startup timeout determines a per-request sub-budget from the worker-wave count, while the parent deadline remains the hard limit.
 - Startup recovery finishes before runnerd starts its worker loops and accepts new queued work.
-- The existing request remains `running`, keeps the same sandbox ID and runner PID, and records a successful reconnect event.
+- A `running` request remains `running`, keeps the same sandbox ID and runner PID, and records a successful reconnect event. A recoverable `creating` request may discover and persist the sandbox ID and runner PID that were not saved before restart.
 - The GitHub Actions job continues without returning to the queue or losing its runner.
 - A queued request with a lease owned by the previous process becomes eligible for the new worker.
 - A temporary GitHub or sandbox status lookup failure is logged without stopping the existing sandbox.
