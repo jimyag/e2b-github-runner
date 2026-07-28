@@ -34,6 +34,32 @@ describe("LandingPage", () => {
     expect(html).toContain('gap-8 text-[15px] text-white/70')
   })
 
+  test("exposes a public color-theme control without forcing the landing page to light mode", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandingPage),
+    )
+
+    expect(html).toContain('data-theme-toggle="landing"')
+    expect(html).toContain('aria-label="Switch to dark mode"')
+    expect(html).toContain("lucide-moon")
+    expect(html).toContain("lucide-sun")
+    expect(html).not.toContain("[color-scheme:light]")
+  })
+
+  test("defines dark surfaces and text contrast for each light landing-page section", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandingPage),
+    )
+
+    expect(html).toContain("dark:bg-[#050d12]")
+    expect(html).toContain("dark:bg-[#07131b]")
+    expect(html).toContain("dark:bg-[#0b1e29]")
+    expect(html).toContain("dark:border-white/10")
+    expect(html).toContain("dark:text-[#edf8fc]")
+    expect(html).toContain("dark:text-[#a9bfcb]")
+    expect(html).toContain("dark:text-[#7ddcff]")
+  })
+
   test("links the Open source navigation item to the product boundary section", () => {
     const html = renderToStaticMarkup(
       createElement(LandingPage),

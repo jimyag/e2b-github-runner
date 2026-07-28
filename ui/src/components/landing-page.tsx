@@ -7,13 +7,16 @@ import {
   Github,
   GitPullRequest,
   Layers3,
+  Moon,
   ShieldCheck,
   Sparkles,
+  Sun,
   Terminal,
   Trash2,
   Workflow,
   Zap,
 } from "lucide-react"
+import { useTheme } from "next-themes"
 
 import { RunnerLifecyclePreview } from "@/components/landing-lifecycle-preview"
 import { QiniuRunnerLogo } from "@/components/qiniu-runner-logo"
@@ -79,7 +82,7 @@ const workflowSteps = [
 
 export function LandingPage() {
   return (
-    <div className="brand-home min-h-screen overflow-x-hidden bg-white text-[#0a0d12] [color-scheme:light]">
+    <div className="brand-home min-h-screen overflow-x-hidden bg-white text-[#0a0d12] transition-colors duration-300 dark:bg-[#050d12] dark:text-[#edf8fc]">
       <a
         href="#main-content"
         className="fixed left-4 top-4 z-[60] -translate-y-24 rounded-md bg-[#0a0d12] px-4 py-2 text-sm font-semibold text-white transition-transform focus:translate-y-0"
@@ -124,6 +127,7 @@ export function LandingPage() {
             >
               <BookOpen className="h-4 w-4" />
             </a>
+            <LandingThemeToggle />
             <LandingAccessAction compact />
           </div>
         </div>
@@ -184,22 +188,22 @@ export function LandingPage() {
         <div className="pointer-events-none absolute bottom-0 left-1/2 h-20 w-px bg-gradient-to-b from-[#27c5f5]/0 to-[#27c5f5]/70" />
       </section>
 
-      <section className="border-b border-[#e5edf4] bg-[#f8fcfe]">
-        <div className="mx-auto grid max-w-[1440px] divide-y divide-[#e5edf4] px-5 sm:px-8 md:grid-cols-3 md:divide-x md:divide-y-0 lg:px-12">
+      <section className="border-b border-[#e5edf4] bg-[#f8fcfe] transition-colors dark:border-white/10 dark:bg-[#07131b]">
+        <div className="mx-auto grid max-w-[1440px] divide-y divide-[#e5edf4] px-5 sm:px-8 md:grid-cols-3 md:divide-x md:divide-y-0 lg:px-12 dark:divide-white/10">
           {[
             ["01", "GitHub sends the job"],
             ["02", "runnerd creates capacity"],
             ["03", "Qiniu Sandbox executes"],
           ].map(([number, label]) => (
             <div key={number} className="flex items-center gap-4 py-5 md:px-6 first:md:pl-0">
-              <span className="font-mono text-xs text-[#006b91]">{number}</span>
-              <span className="text-sm font-medium text-[#384b57]">{label}</span>
+              <span className="font-mono text-xs text-[#006b91] dark:text-[#7ddcff]">{number}</span>
+              <span className="text-sm font-medium text-[#384b57] dark:text-[#b7ccd7]">{label}</span>
             </div>
           ))}
         </div>
       </section>
 
-      <section id="capabilities" className="scroll-mt-8 bg-white py-24 sm:py-32">
+      <section id="capabilities" className="scroll-mt-8 bg-white py-24 transition-colors sm:py-32 dark:bg-[#050d12]">
         <div className="mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-12">
           <SectionIntro
             label="Built for clean execution"
@@ -207,26 +211,26 @@ export function LandingPage() {
             description="Qiniu CI Runner turns GitHub workflow demand into short-lived, isolated compute—with the controls teams need around it."
           />
 
-          <div className="mt-14 grid gap-px overflow-hidden rounded-xl border border-[#e5edf4] bg-[#e5edf4] lg:grid-cols-3">
+          <div className="mt-14 grid gap-px overflow-hidden rounded-xl border border-[#e5edf4] bg-[#e5edf4] lg:grid-cols-3 dark:border-white/10 dark:bg-white/10">
             {capabilities.map(({ icon: Icon, eyebrow, title, description, detail }, index) => (
               <article
                 key={title}
-                className="group relative min-h-[360px] overflow-hidden bg-white p-7 transition-colors hover:bg-[#f7fcff] sm:p-9"
+                className="group relative min-h-[360px] overflow-hidden bg-white p-7 transition-colors hover:bg-[#f7fcff] sm:p-9 dark:bg-[#0b1e29] dark:hover:bg-[#0d2633]"
               >
-                <div className="absolute right-0 top-0 font-mono text-[92px] font-semibold leading-none tracking-[-0.08em] text-[#f0f7fa] transition-colors group-hover:text-[#e7f7fc]">
+                <div className="absolute right-0 top-0 font-mono text-[92px] font-semibold leading-none tracking-[-0.08em] text-[#f0f7fa] transition-colors group-hover:text-[#e7f7fc] dark:text-white/[0.035] dark:group-hover:text-[#102d3b]">
                   0{index + 1}
                 </div>
                 <div className="relative flex h-full flex-col">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#bdeaf8] bg-[#f2fcff] text-[#006b91]">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#bdeaf8] bg-[#f2fcff] text-[#006b91] dark:border-[#27c5f5]/20 dark:bg-[#00aae7]/10 dark:text-[#7ddcff]">
                     <Icon className="h-5 w-5" />
                   </div>
-                  <p className="mt-14 font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[#006b91]">
+                  <p className="mt-14 font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[#006b91] dark:text-[#7ddcff]">
                     {eyebrow}
                   </p>
-                  <h3 className="mt-4 text-2xl font-semibold tracking-[-0.035em] text-[#0a0d12]">{title}</h3>
-                  <p className="mt-4 max-w-sm text-[15px] leading-7 text-[#596b75]">{description}</p>
-                  <div className="mt-auto flex items-center gap-2 border-t border-[#e5edf4] pt-6 text-xs font-medium text-[#384b57]">
-                    <CircleDot className="h-3.5 w-3.5 text-[#006b91]" />
+                  <h3 className="mt-4 text-2xl font-semibold tracking-[-0.035em] text-[#0a0d12] dark:text-[#edf8fc]">{title}</h3>
+                  <p className="mt-4 max-w-sm text-[15px] leading-7 text-[#596b75] dark:text-[#a9bfcb]">{description}</p>
+                  <div className="mt-auto flex items-center gap-2 border-t border-[#e5edf4] pt-6 text-xs font-medium text-[#384b57] dark:border-white/10 dark:text-[#b7ccd7]">
+                    <CircleDot className="h-3.5 w-3.5 text-[#006b91] dark:text-[#7ddcff]" />
                     {detail}
                   </div>
                 </div>
@@ -239,28 +243,28 @@ export function LandingPage() {
       <section
         id="open-source"
         aria-labelledby="open-foundation-title"
-        className="scroll-mt-8 border-b border-[#dceaf1] bg-[#f8fcfe] py-16 sm:py-20"
+        className="scroll-mt-8 border-b border-[#dceaf1] bg-[#f8fcfe] py-16 transition-colors sm:py-20 dark:border-white/10 dark:bg-[#07131b]"
       >
         <div className="mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-12">
           <div className="grid gap-6 lg:grid-cols-[0.75fr_1.25fr] lg:items-end">
             <div>
-              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#006b91]">
+              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#006b91] dark:text-[#7ddcff]">
                 Open source, cloud powered
               </p>
               <h2
                 id="open-foundation-title"
-                className="mt-4 max-w-xl text-3xl font-semibold leading-[1.06] tracking-[-0.045em] text-[#0a0d12] sm:text-4xl"
+                className="mt-4 max-w-xl text-3xl font-semibold leading-[1.06] tracking-[-0.045em] text-[#0a0d12] sm:text-4xl dark:text-[#edf8fc]"
               >
                 Open where you orchestrate. Managed where jobs run.
               </h2>
             </div>
-            <p className="max-w-2xl text-base leading-7 text-[#596b75] lg:justify-self-end">
+            <p className="max-w-2xl text-base leading-7 text-[#596b75] lg:justify-self-end dark:text-[#a9bfcb]">
               The control plane is open for teams to inspect and extend. The execution plane runs on
               Qiniu&apos;s managed Sandbox cloud service.
             </p>
           </div>
 
-          <div className="mt-10 grid overflow-hidden rounded-xl border border-[#cfe2eb] bg-[#cfe2eb] lg:grid-cols-[1.08fr_0.92fr] lg:gap-px">
+          <div className="mt-10 grid overflow-hidden rounded-xl border border-[#cfe2eb] bg-[#cfe2eb] lg:grid-cols-[1.08fr_0.92fr] lg:gap-px dark:border-white/10 dark:bg-white/10">
             <article className="relative overflow-hidden bg-[#07131b] p-7 text-white sm:p-10 lg:p-12">
               <div
                 aria-hidden="true"
@@ -302,17 +306,17 @@ export function LandingPage() {
               </div>
             </article>
 
-            <article className="bg-white p-7 sm:p-10 lg:p-12">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#bdeaf8] bg-[#f2fcff] text-[#006b91]">
+            <article className="bg-white p-7 transition-colors sm:p-10 lg:p-12 dark:bg-[#0b1e29]">
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#bdeaf8] bg-[#f2fcff] text-[#006b91] dark:border-[#27c5f5]/20 dark:bg-[#00aae7]/10 dark:text-[#7ddcff]">
                 <Layers3 className="h-5 w-5" />
               </div>
-              <p className="mt-10 font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[#006b91]">
+              <p className="mt-10 font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[#006b91] dark:text-[#7ddcff]">
                 Qiniu cloud service
               </p>
-              <h3 className="mt-4 text-2xl font-semibold tracking-[-0.035em] text-[#0a0d12] sm:text-3xl">
+              <h3 className="mt-4 text-2xl font-semibold tracking-[-0.035em] text-[#0a0d12] sm:text-3xl dark:text-[#edf8fc]">
                 Qiniu Sandbox is a Qiniu-provided cloud service.
               </h3>
-              <p className="mt-4 max-w-xl text-[15px] leading-7 text-[#596b75]">
+              <p className="mt-4 max-w-xl text-[15px] leading-7 text-[#596b75] dark:text-[#a9bfcb]">
                 It provides the managed, isolated cloud compute where workflow jobs execute. The Sandbox
                 service and its underlying capacity are operated by Qiniu.
               </p>
@@ -416,12 +420,12 @@ export function LandingPage() {
       </section>
       </main>
 
-      <footer className="border-t border-[#e5edf4] bg-white">
-        <div className="mx-auto flex max-w-[1440px] flex-col gap-6 px-5 py-8 text-sm text-[#596b75] sm:px-8 md:flex-row md:items-center md:justify-between lg:px-12">
-          <div className="flex items-center gap-4 text-[#0a0d12]">
+      <footer className="border-t border-[#e5edf4] bg-white transition-colors dark:border-white/10 dark:bg-[#050d12]">
+        <div className="mx-auto flex max-w-[1440px] flex-col gap-6 px-5 py-8 text-sm text-[#596b75] sm:px-8 md:flex-row md:items-center md:justify-between lg:px-12 dark:text-[#a9bfcb]">
+          <div className="flex items-center gap-4 text-[#0a0d12] dark:text-[#edf8fc]">
             <QiniuRunnerLogo />
-            <span className="hidden h-8 w-px bg-[#d5e4eb] sm:block" aria-hidden="true" />
-            <div className="hidden text-xs text-[#596b75] sm:block">Powered by Qiniu Sandbox</div>
+            <span className="hidden h-8 w-px bg-[#d5e4eb] sm:block dark:bg-white/10" aria-hidden="true" />
+            <div className="hidden text-xs text-[#596b75] sm:block dark:text-[#a9bfcb]">Powered by Qiniu Sandbox</div>
           </div>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
             <a className="transition-colors hover:text-[#006b91]" href="#capabilities">
@@ -460,6 +464,26 @@ export function LandingPage() {
         </div>
       </footer>
     </div>
+  )
+}
+
+function LandingThemeToggle() {
+  const { resolvedTheme, setTheme } = useTheme()
+  const nextTheme = resolvedTheme === "dark" ? "light" : "dark"
+  const label = `Switch to ${nextTheme} mode`
+
+  return (
+    <button
+      type="button"
+      data-theme-toggle="landing"
+      aria-label={label}
+      title={label}
+      onClick={() => setTheme(nextTheme)}
+      className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/20 text-white transition-all hover:border-white/40 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#27c5f5]"
+    >
+      <Moon className="h-4 w-4 dark:hidden" />
+      <Sun className="hidden h-4 w-4 dark:block" />
+    </button>
   )
 }
 
@@ -504,12 +528,12 @@ function SectionIntro({
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_0.7fr] lg:items-end">
       <div>
-        <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#006b91]">{label}</p>
-        <h2 className="mt-5 max-w-4xl text-4xl font-semibold leading-[1.04] tracking-[-0.05em] text-[#0a0d12] sm:text-5xl lg:text-6xl">
+        <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#006b91] dark:text-[#7ddcff]">{label}</p>
+        <h2 className="mt-5 max-w-4xl text-4xl font-semibold leading-[1.04] tracking-[-0.05em] text-[#0a0d12] sm:text-5xl lg:text-6xl dark:text-[#edf8fc]">
           {title}
         </h2>
       </div>
-      <p className="max-w-lg text-base leading-7 text-[#596b75] lg:justify-self-end">{description}</p>
+      <p className="max-w-lg text-base leading-7 text-[#596b75] lg:justify-self-end dark:text-[#a9bfcb]">{description}</p>
     </div>
   )
 }
