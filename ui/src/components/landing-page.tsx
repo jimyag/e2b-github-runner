@@ -94,6 +94,9 @@ export function LandingPage() {
             <a className="transition-colors hover:text-white" href="#capabilities">
               Product
             </a>
+            <a className="transition-colors hover:text-white" href="#open-source">
+              Open source
+            </a>
             <a className="transition-colors hover:text-white" href="#how-it-works">
               How it works
             </a>
@@ -231,8 +234,9 @@ export function LandingPage() {
       </section>
 
       <section
+        id="open-source"
         aria-labelledby="open-foundation-title"
-        className="border-b border-[#dceaf1] bg-[#f8fcfe] py-16 sm:py-20"
+        className="scroll-mt-8 border-b border-[#dceaf1] bg-[#f8fcfe] py-16 sm:py-20"
       >
         <div className="mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-12">
           <div className="grid gap-6 lg:grid-cols-[0.75fr_1.25fr] lg:items-end">

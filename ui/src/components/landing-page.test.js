@@ -34,6 +34,21 @@ describe("LandingPage", () => {
     expect(html).toContain('gap-8 text-[15px] text-white/70')
   })
 
+  test("links the Open source navigation item to the product boundary section", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandingPage),
+    )
+
+    const productLink = html.indexOf('href="#capabilities"')
+    const openSourceLink = html.indexOf('href="#open-source"')
+    const howItWorksLink = html.indexOf('href="#how-it-works"')
+
+    expect(openSourceLink).toBeGreaterThan(productLink)
+    expect(howItWorksLink).toBeGreaterThan(openSourceLink)
+    expect(html).toContain('id="open-source"')
+    expect(html).toContain(">Open source</a>")
+  })
+
   test("presents the runner product before asking visitors to sign in", () => {
     const html = renderToStaticMarkup(
       createElement(LandingPage),
