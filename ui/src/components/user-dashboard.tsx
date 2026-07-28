@@ -38,6 +38,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { shouldShowSandboxSetupTask } from "@/user-onboarding"
 import { SandboxesSection, SandboxTemplatesSection } from "@/components/sandbox-catalog-sections"
 import { sandboxRegions } from "@/components/sandbox-catalog-utils"
 import { Switch } from "@/components/ui/switch"
@@ -284,7 +285,7 @@ export function UserDashboard({
           syncingGitHubInstallations={syncingGitHubInstallations}
           onLoadAuthorizedRepositories={onLoadAuthorizedRepositories}
           onSyncGitHubInstallations={onSyncGitHubInstallations}
-          productTourPending={productTourOnboarding?.status === "pending"}
+          showProductTourSetup={shouldShowSandboxSetupTask(productTourOnboarding)}
           onSaveSandboxConfig={onSaveSandboxConfig}
           onDeleteSandboxAPIKey={onDeleteSandboxAPIKey}
           currentLogin={authSession.login}
@@ -476,7 +477,7 @@ function AccountsPage({
   syncingGitHubInstallations,
   onLoadAuthorizedRepositories,
   onSyncGitHubInstallations,
-  productTourPending,
+  showProductTourSetup,
   onSaveSandboxConfig,
   onDeleteSandboxAPIKey,
   currentLogin,
@@ -492,7 +493,7 @@ function AccountsPage({
   syncingGitHubInstallations: boolean
   onLoadAuthorizedRepositories: (id: number) => void
   onSyncGitHubInstallations: () => void
-  productTourPending: boolean
+  showProductTourSetup: boolean
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   currentLogin?: string
@@ -685,7 +686,7 @@ function AccountsPage({
                   <SandboxAPIKeyCard
                     preferences={userPreferences}
                     allowInheritance={Boolean(preferenceInstallationID)}
-                    showOnboardingSetup={productTourPending && !preferenceInstallationID}
+                    showOnboardingSetup={showProductTourSetup && !preferenceInstallationID}
                     onSave={(apiURL, apiKey, mode, replaceInheritedSource) => onSaveSandboxConfig(apiURL, apiKey, preferenceInstallationID, mode, replaceInheritedSource)}
                     onDelete={() => onDeleteSandboxAPIKey(preferenceInstallationID)}
                   />
@@ -715,7 +716,7 @@ function AccountsPage({
                 </div>
                 <SandboxAPIKeyCard
                   preferences={userPreferences}
-                  showOnboardingSetup={productTourPending}
+                  showOnboardingSetup={showProductTourSetup}
                   onSave={(apiURL, apiKey, mode) => onSaveSandboxConfig(apiURL, apiKey, undefined, mode)}
                   onDelete={onDeleteSandboxAPIKey}
                 />

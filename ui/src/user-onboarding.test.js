@@ -47,6 +47,31 @@ describe("product tour onboarding", () => {
     ).toBeNull()
   })
 
+  test("keeps the Sandbox setup task after the first-run overlay is skipped", () => {
+    expect(
+      onboardingPolicy.shouldShowSandboxSetupTask?.({
+        version: 1,
+        status: "pending",
+        tour_seen: true,
+      }),
+    ).toBe(true)
+    expect(
+      onboardingPolicy.shouldShowSandboxSetupTask?.({
+        version: 1,
+        status: "skipped",
+        tour_seen: true,
+      }),
+    ).toBe(true)
+    expect(
+      onboardingPolicy.shouldShowSandboxSetupTask?.({
+        version: 1,
+        status: "completed",
+        tour_seen: true,
+      }),
+    ).toBe(false)
+    expect(onboardingPolicy.shouldShowSandboxSetupTask?.(null)).toBe(false)
+  })
+
   test("describes the cross-route path from Jobs to Sandbox service settings", () => {
     expect(productTourSteps.map(({ id, route, target }) => ({ id, route, target }))).toEqual([
       { id: "welcome", route: "/jobs", target: "product-shell" },

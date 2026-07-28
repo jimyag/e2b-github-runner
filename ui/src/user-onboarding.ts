@@ -40,3 +40,9 @@ export function productTourStateAfterEnd(
     tour_seen: true,
   }
 }
+
+export function shouldShowSandboxSetupTask(
+  onboarding: ProductTourOnboarding | null,
+): boolean {
+  return Boolean(onboarding && onboarding.status !== "completed")
+}

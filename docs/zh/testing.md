@@ -59,7 +59,7 @@ worker:
 
 Sandbox service API URL 和 API Key 不在 `runnerd.yaml` 中配置。登录后可在账户或组织的 Preferences 页面配置 scoped credentials，也可由管理员在 `/admin/sandbox_service` 配置默认关闭的平台回退。fallback audience 为 `all` 或 `selected`；selected entries 按仓库 owner 的稳定 GitHub account ID 和 type 匹配。API Key 使用 `auth.encryption_key` 加密保存。解析顺序为 runner request 已保存快照、installation custom/inherited 配置、符合条件的个人账户配置、已启用且 audience eligible 的 admin default，最后才是未配置错误。
 
-首次使用产品引导只会在现有账户级 `account_preferences` 表的 `onboarding/product-tour` 下保存版本号、状态和 `tour_seen` 标记，不会保存 Sandbox API Key。记录缺失或版本过旧时返回 `pending` 且 `tour_seen=false`。走完引导浮层后写入 `pending` 且 `tour_seen=true`，因此不会再次自动弹出，但页面内的 Sandbox 设置任务仍会保留。只有当前登录账户已保存自己的 Sandbox API Key 后才写入 `completed`，首次引导中显式跳过则写入 `skipped`。从账户菜单重播引导不会重置或覆盖已保存状态。
+首次使用产品引导只会在现有账户级 `account_preferences` 表的 `onboarding/product-tour` 下保存版本号、状态和 `tour_seen` 标记，不会保存 Sandbox API Key。记录缺失或版本过旧时返回 `pending` 且 `tour_seen=false`。走完引导浮层后写入 `pending` 且 `tour_seen=true`，因此不会再次自动弹出，但页面内的 Sandbox 设置任务仍会保留。只有当前登录账户已保存自己的 Sandbox API Key 后才写入 `completed`。首次引导中显式跳过会写入 `skipped` 并关闭浮层，但不会隐藏页面内的设置任务。从账户菜单重播引导不会重置或覆盖已保存状态。
 
 Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置；服务启动后通过后台页面或 admin API 创建。spec 名称建议使用有意义的名字，例如 `ubuntu-24-04`，`template_id` 填对应的 Qiniu sandbox template ID。template 是否可访问会在 runnerd 使用对应账户或组织的 Sandbox service 配置启动 sandbox 时确认。
 
