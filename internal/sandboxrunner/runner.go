@@ -337,13 +337,20 @@ func (s *E2BService) findRunnerSandbox(ctx context.Context, requestID string) (s
 }
 
 func recoveredRunnerPID(processes []qnsandbox.ProcessInfo, expectedPID uint32) (uint32, bool) {
+	var recoveredPID uint32
+	taggedCount := 0
 	for _, process := range processes {
 		if process.Tag == nil || *process.Tag != "github-runner" {
 			continue
 		}
-		if expectedPID == 0 || process.PID == expectedPID {
+		if expectedPID != 0 && process.PID == expectedPID {
 			return process.PID, true
 		}
+		taggedCount++
+		recoveredPID = process.PID
+	}
+	if expectedPID == 0 && taggedCount == 1 {
+		return recoveredPID, true
 	}
 	return 0, false
 }

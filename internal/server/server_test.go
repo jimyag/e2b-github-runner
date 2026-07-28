@@ -4972,6 +4972,38 @@ func TestRecoverPreservesRunningStateWhenReconnectFails(t *testing.T) {
 	}
 }
 
+func TestRecoverFailsRunningRunnerWhenSandboxIsAbsent(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-running-missing",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-running-missing",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-running-missing"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{recoverErr: sandboxrunner.ErrSandboxNotFound}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusFailed || got.FailureStage != "recovery" || got.FailureReason != "sandbox_not_found" {
+		t.Fatalf("expected missing running sandbox to fail during recovery, got %#v", got)
+	}
+}
+
 func TestRecoverContinuesAfterOneRunnerFails(t *testing.T) {
 	store := state.New(t.TempDir())
 	_, queued, err := store.CreateRequest(state.RunnerRequest{

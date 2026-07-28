@@ -49,7 +49,7 @@
 ## Runner Lifecycle
 
 - Runner request states are `queued`, `creating`, `running`, `stopping`, `completed`, and `failed`.
-- Startup recovery clears stale leases for queued requests, reconnects creating/running requests to their existing sandbox runner process, and reserves destructive sandbox cleanup for stopping or completed work. Temporary recovery lookup failures must preserve the remote workload.
+- Startup recovery clears stale leases for queued requests, reconnects creating/running requests to their existing sandbox runner process, and reserves destructive sandbox cleanup for stopping, completed, or definitively missing work. Keep `/healthz` available during recovery, but return `503` for other HTTP routes and do not start worker loops until recovery finishes. Temporary recovery lookup failures must preserve the remote workload.
 - Global `worker.max_concurrent_runners` and per-spec `max_concurrency` are enforced by worker processing; excess work stays queued.
 - Transient Qiniu sandbox placement failures, HTTP 429s, and GitHub secondary rate limits are queue deferrals. Deterministic auth/config/template failures should fail immediately.
 - Control/stdout/stderr logs are persisted as runner events and exposed through the admin API/UI.

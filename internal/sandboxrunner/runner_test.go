@@ -117,6 +117,13 @@ func TestRecoveredRunnerPIDRequiresRunnerTagAndExpectedPID(t *testing.T) {
 	if _, ok := recoveredRunnerPID(processes, 10); ok {
 		t.Fatal("expected non-runner tag to be rejected")
 	}
+	processes = append(processes, qnsandbox.ProcessInfo{PID: 30, Tag: &runnerTag})
+	if _, ok := recoveredRunnerPID(processes, 0); ok {
+		t.Fatal("expected ambiguous tagged runner processes to be rejected")
+	}
+	if pid, ok := recoveredRunnerPID(processes, 20); !ok || pid != 20 {
+		t.Fatalf("expected persisted PID to disambiguate tagged processes, got pid=%d ok=%t", pid, ok)
+	}
 }
 
 func TestSandboxTimeoutSecondsRoundsUpAndClamps(t *testing.T) {

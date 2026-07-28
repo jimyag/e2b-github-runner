@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -9,6 +11,36 @@ import (
 	"github.com/qiniu/ci-runner/internal/state"
 	"gopkg.in/yaml.v3"
 )
+
+func TestRecoveryGateAllowsOnlyHealthUntilReady(t *testing.T) {
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	gate := &recoveryGate{next: next}
+
+	health := httptest.NewRecorder()
+	gate.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if health.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want %d", health.Code, http.StatusOK)
+	}
+
+	blocked := httptest.NewRecorder()
+	gate.ServeHTTP(blocked, httptest.NewRequest(http.MethodPost, "/webhooks/github", nil))
+	if blocked.Code != http.StatusServiceUnavailable || blocked.Header().Get("Retry-After") != "1" {
+		t.Fatalf("recovery response = %d Retry-After=%q", blocked.Code, blocked.Header().Get("Retry-After"))
+	}
+
+	gate.ready.Store(true)
+	ready := httptest.NewRecorder()
+	gate.ServeHTTP(ready, httptest.NewRequest(http.MethodPost, "/webhooks/github", nil))
+	if ready.Code != http.StatusNoContent {
+		t.Fatalf("ready status = %d, want %d", ready.Code, http.StatusNoContent)
+	}
+}
 
 func TestWriteObfuscatedConfigValueReadsSecretFromStdin(t *testing.T) {
 	const plaintext = "secret-from-stdin"

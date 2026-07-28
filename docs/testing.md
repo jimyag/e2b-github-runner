@@ -106,11 +106,12 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
 Restart recovery has focused tests that do not require a live sandbox:
 
 ```bash
+go test -tags development ./cmd/runnerd -run TestRecoveryGateAllowsOnlyHealthUntilReady -count=1
 go test -tags development ./internal/server -run TestRecover -count=1
 go test ./internal/sandboxrunner -count=1
 ```
 
-The recovery cases must verify that queued requests have stale leases cleared, creating/running requests reconnect without stopping their sandbox, missing interrupted creations are requeued, completed workflow jobs continue through cleanup, and one reconnect failure does not prevent other requests from being recovered.
+The recovery cases must verify that only `/healthz` remains available before recovery finishes, queued requests have stale leases cleared, creating/running requests reconnect without stopping their sandbox, missing interrupted creations are requeued, completed workflow jobs continue through cleanup, and one reconnect failure does not prevent other requests from being recovered.
 
 ## 2. Configure GitHub Auth
 

@@ -104,11 +104,12 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
 服务重启恢复有一组不依赖真实 Sandbox 的定向测试：
 
 ```bash
+go test -tags development ./cmd/runnerd -run TestRecoveryGateAllowsOnlyHealthUntilReady -count=1
 go test -tags development ./internal/server -run TestRecover -count=1
 go test ./internal/sandboxrunner -count=1
 ```
 
-恢复测试必须确认：queued 请求会清理旧 lease，creating/running 请求会重连且不停止沙箱，创建过程中未找到沙箱时会重新排队，GitHub 任务已完成时仍会进入清理流程，并且单个请求重连失败不会阻断其他请求恢复。
+恢复测试必须确认：恢复完成前只有 `/healthz` 可访问，queued 请求会清理旧 lease，creating/running 请求会重连且不停止沙箱，创建过程中未找到沙箱时会重新排队，GitHub 任务已完成时仍会进入清理流程，并且单个请求重连失败不会阻断其他请求恢复。
 
 ## 2. 配置 GitHub 鉴权
 

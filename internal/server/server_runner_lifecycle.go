@@ -698,6 +698,10 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 		},
 	})
 	if err != nil {
+		if st.Status == state.StatusRunning && errors.Is(err, sandboxrunner.ErrSandboxNotFound) {
+			s.failAndStopRunner(ctx, st.ID, "recovery", "sandbox_not_found", "runner sandbox no longer exists after restart")
+			return nil
+		}
 		if st.Status == state.StatusCreating && (!hasJob || strings.EqualFold(strings.TrimSpace(job.Status), "queued")) {
 			switch {
 			case errors.Is(err, sandboxrunner.ErrSandboxNotFound):
