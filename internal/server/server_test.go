@@ -4759,6 +4759,73 @@ func TestRecoverUsesBoundedConcurrency(t *testing.T) {
 	}
 }
 
+func TestRecoverStopsDispatchingWhenContextIsCanceled(t *testing.T) {
+	store := state.New(t.TempDir())
+	const runnerCount = maxConcurrentRecoveries + 2
+	for i := range runnerCount {
+		id := fmt.Sprintf("recover-canceled-%d", i)
+		_, st, err := store.CreateRequest(state.RunnerRequest{
+			ID:         id,
+			Source:     "test",
+			Labels:     []string{"self-hosted"},
+			RunnerName: "e2b-" + id,
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Status = state.StatusRunning
+		st.SandboxID = "sb-" + id
+		st.ProcessPID = uint32(100 + i)
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	block := make(chan struct{})
+	started := make(chan string, runnerCount)
+	fake := &fakeSandbox{recoverBlock: block, recoverStarted: started}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- srv.Recover(ctx)
+	}()
+	for range maxConcurrentRecoveries {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for concurrent recovery")
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected canceled recovery, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("recovery did not stop promptly after cancellation")
+	}
+	if got := fake.recoveredCount(); got != maxConcurrentRecoveries {
+		t.Fatalf("recovered runners after cancellation = %d, want %d", got, maxConcurrentRecoveries)
+	}
+}
+
+func TestRecoverTimeoutPerRunnerSharesWholeStartupBudget(t *testing.T) {
+	srv := &Server{cfg: config.Config{RecoveryTimeout: 120 * time.Second}}
+	if got := srv.recoveryTimeoutPerRunner(context.Background(), 100, 4); got != 4800*time.Millisecond {
+		t.Fatalf("100-request timeout = %s, want 4.8s", got)
+	}
+	if got := srv.recoveryTimeoutPerRunner(context.Background(), 4, 4); got != maxSingleRecoveryTimeout {
+		t.Fatalf("single-wave timeout = %s, want %s", got, maxSingleRecoveryTimeout)
+	}
+	srv.cfg.RecoveryTimeout = 20 * time.Second
+	if got := srv.recoveryTimeoutPerRunner(context.Background(), 8, 4); got != 10*time.Second {
+		t.Fatalf("two-wave timeout = %s, want 10s", got)
+	}
+}
+
 func TestRecoverDoesNotOverwriteConcurrentStateChange(t *testing.T) {
 	store := state.New(t.TempDir())
 	_, st, err := store.CreateRequest(state.RunnerRequest{

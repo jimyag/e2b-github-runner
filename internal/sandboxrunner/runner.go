@@ -202,7 +202,7 @@ func templateBuildUsable(status qnsandbox.TemplateBuildStatus) bool {
 }
 
 func (s *E2BService) StartRunner(ctx context.Context, input StartInput) (StartResult, error) {
-	timeout := int32(input.Timeout.Seconds())
+	timeout := sandboxTimeoutSeconds(input.Timeout)
 	allowInternet := true
 	metadata := qnsandbox.Metadata{
 		"app":        "e2b-github-runner",

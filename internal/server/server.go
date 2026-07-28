@@ -41,7 +41,6 @@ type Server struct {
 	loopCtx     context.Context
 	loopCancel  context.CancelFunc
 	loopWG      sync.WaitGroup
-	metricsMu   sync.Mutex
 
 	pullTitleMu    sync.Mutex
 	pullTitleCache map[string]cachedPullTitle
@@ -237,6 +236,7 @@ func (s *Server) Recover(ctx context.Context) error {
 	}
 
 	workerCount := min(maxConcurrentRecoveries, len(active))
+	perRunnerTimeout := s.recoveryTimeoutPerRunner(ctx, len(active), workerCount)
 	jobs := make(chan state.RunnerState)
 	recoveryErrors := make(chan error, len(active))
 	var workers sync.WaitGroup
@@ -245,7 +245,10 @@ func (s *Server) Recover(ctx context.Context) error {
 		go func() {
 			defer workers.Done()
 			for st := range jobs {
-				runnerCtx, cancel := context.WithTimeout(ctx, s.singleRecoveryTimeout())
+				if ctx.Err() != nil {
+					continue
+				}
+				runnerCtx, cancel := context.WithTimeout(ctx, perRunnerTimeout)
 				err := s.recoverRunner(runnerCtx, st.ID)
 				cancel()
 				if err != nil {
@@ -254,8 +257,14 @@ func (s *Server) Recover(ctx context.Context) error {
 			}
 		}()
 	}
+dispatch:
 	for _, st := range active {
-		jobs <- st
+		select {
+		case jobs <- st:
+		case <-ctx.Done():
+			recoveryErrors <- fmt.Errorf("recovery dispatch canceled: %w", ctx.Err())
+			break dispatch
+		}
 	}
 	close(jobs)
 	workers.Wait()
@@ -268,9 +277,24 @@ func (s *Server) Recover(ctx context.Context) error {
 	return errors.Join(joined...)
 }
 
-func (s *Server) singleRecoveryTimeout() time.Duration {
-	timeout := s.cfg.RecoveryTimeout
-	if timeout <= 0 || timeout > maxSingleRecoveryTimeout {
+func (s *Server) recoveryTimeoutPerRunner(ctx context.Context, requestCount, workerCount int) time.Duration {
+	budget := s.cfg.RecoveryTimeout
+	deadline, hasDeadline := ctx.Deadline()
+	if hasDeadline {
+		remaining := time.Until(deadline)
+		if budget <= 0 || remaining < budget {
+			budget = remaining
+		}
+	}
+	if budget <= 0 {
+		if !hasDeadline {
+			return maxSingleRecoveryTimeout
+		}
+		return time.Nanosecond
+	}
+	waves := (requestCount + workerCount - 1) / workerCount
+	timeout := budget / time.Duration(waves)
+	if timeout > maxSingleRecoveryTimeout {
 		return maxSingleRecoveryTimeout
 	}
 	return timeout

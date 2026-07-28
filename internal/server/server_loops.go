@@ -94,8 +94,6 @@ func (s *Server) processQueuedRequests(ctx context.Context) {
 }
 
 func (s *Server) refreshMetrics() {
-	s.metricsMu.Lock()
-	defer s.metricsMu.Unlock()
 	profiles, err := s.store.ListProfiles()
 	if err != nil {
 		s.logger.Error("refresh metrics list profiles", "error", err)

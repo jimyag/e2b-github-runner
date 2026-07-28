@@ -655,10 +655,9 @@ func (s *Server) recoverRunner(ctx context.Context, id string) error {
 		stateVersion := st.Version
 		unlock()
 		return s.recoverActiveRunner(ctx, st, stateVersion)
-	default:
-		unlock()
-		return nil
 	}
+	unlock()
+	return nil
 }
 
 func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, stateVersion int64) error {
