@@ -46,6 +46,43 @@ describe("LandingPage", () => {
     expect(html).toContain("How it works")
   })
 
+  test("distinguishes the open-source runner from the Qiniu cloud sandbox", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandingPage),
+    )
+
+    expect(html).toContain("Open-source orchestration")
+    expect(html).toContain("Qiniu CI Runner is open source")
+    expect(html).toContain("View the source")
+    expect(html).toContain("Qiniu Sandbox is a Qiniu-provided cloud service")
+    expect(html).toContain('href="https://github.com/qiniu/ci-runner"')
+  })
+
+  test("keeps the source card content above its decorative grid", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandingPage),
+    )
+
+    expect(html).not.toContain('<article class="brand-grid')
+    expect(html).toContain(
+      'aria-hidden="true" class="brand-grid pointer-events-none absolute inset-0 opacity-40"',
+    )
+  })
+
+  test("presents product value before ownership boundaries and implementation details", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandingPage),
+    )
+
+    const productValue = html.indexOf("Capacity appears for the job")
+    const ownershipBoundary = html.indexOf("Open where you orchestrate")
+    const implementationDetails = html.indexOf("From webhook to clean slate")
+
+    expect(productValue).toBeGreaterThan(-1)
+    expect(ownershipBoundary).toBeGreaterThan(productValue)
+    expect(implementationDetails).toBeGreaterThan(ownershipBoundary)
+  })
+
   test("keeps product, documentation, and Jobs destinations explicit", () => {
     const html = renderToStaticMarkup(
       createElement(LandingPage),

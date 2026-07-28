@@ -163,7 +163,7 @@ export function LandingPage() {
             </div>
 
             <div className="mt-9 flex flex-wrap gap-x-6 gap-y-3 text-xs text-white/55 sm:text-sm">
-              {["GitHub-native workflows", "Policy-scoped access", "Automatic cleanup"].map((item) => (
+              {["Open-source orchestration", "Policy-scoped access", "Automatic cleanup"].map((item) => (
                 <span key={item} className="inline-flex items-center gap-2">
                   <Check className="h-3.5 w-3.5 text-[#27c5f5]" />
                   {item}
@@ -226,6 +226,80 @@ export function LandingPage() {
                 </div>
               </article>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section
+        aria-labelledby="open-foundation-title"
+        className="border-b border-[#dceaf1] bg-[#f8fcfe] py-16 sm:py-20"
+      >
+        <div className="mx-auto max-w-[1440px] px-5 sm:px-8 lg:px-12">
+          <div className="grid gap-6 lg:grid-cols-[0.75fr_1.25fr] lg:items-end">
+            <div>
+              <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.18em] text-[#006b91]">
+                Open source, cloud powered
+              </p>
+              <h2
+                id="open-foundation-title"
+                className="mt-4 max-w-xl text-3xl font-semibold leading-[1.06] tracking-[-0.045em] text-[#0a0d12] sm:text-4xl"
+              >
+                Open where you orchestrate. Managed where jobs run.
+              </h2>
+            </div>
+            <p className="max-w-2xl text-base leading-7 text-[#596b75] lg:justify-self-end">
+              The control plane is open for teams to inspect and extend. The execution plane runs on
+              Qiniu&apos;s managed Sandbox cloud service.
+            </p>
+          </div>
+
+          <div className="mt-10 grid overflow-hidden rounded-xl border border-[#cfe2eb] bg-[#cfe2eb] lg:grid-cols-[1.08fr_0.92fr] lg:gap-px">
+            <article className="relative overflow-hidden bg-[#07131b] p-7 text-white sm:p-10 lg:p-12">
+              <div
+                aria-hidden="true"
+                className="brand-grid pointer-events-none absolute inset-0 opacity-40"
+              />
+              <div className="relative">
+                <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#27c5f5]/35 bg-[#00aae7]/10 text-[#7ddcff]">
+                  <Github className="h-5 w-5" />
+                </div>
+                <p className="mt-10 font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[#7ddcff]">
+                  Open source
+                </p>
+                <h3 className="mt-4 text-2xl font-semibold tracking-[-0.035em] sm:text-3xl">
+                  Qiniu CI Runner is open source.
+                </h3>
+                <p className="mt-4 max-w-xl text-[15px] leading-7 text-[#b7ccd7]">
+                  The runner orchestration, policies, and GitHub integration live in a public repository—
+                  ready to inspect, deploy, and contribute to.
+                </p>
+                <a
+                  href="https://github.com/qiniu/ci-runner"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="group mt-8 inline-flex items-center gap-2 text-sm font-semibold text-[#7ddcff] transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#27c5f5]"
+                >
+                  View the source
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                </a>
+              </div>
+            </article>
+
+            <article className="bg-white p-7 sm:p-10 lg:p-12">
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#bdeaf8] bg-[#f2fcff] text-[#006b91]">
+                <Layers3 className="h-5 w-5" />
+              </div>
+              <p className="mt-10 font-mono text-[11px] font-semibold uppercase tracking-[0.16em] text-[#006b91]">
+                Qiniu cloud service
+              </p>
+              <h3 className="mt-4 text-2xl font-semibold tracking-[-0.035em] text-[#0a0d12] sm:text-3xl">
+                Qiniu Sandbox is a Qiniu-provided cloud service.
+              </h3>
+              <p className="mt-4 max-w-xl text-[15px] leading-7 text-[#596b75]">
+                It provides the managed, isolated cloud compute where workflow jobs execute. The Sandbox
+                service and its underlying capacity are operated by Qiniu.
+              </p>
+            </article>
           </div>
         </div>
       </section>
