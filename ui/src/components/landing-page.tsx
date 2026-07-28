@@ -86,11 +86,11 @@ export function LandingPage() {
 
       <header className="absolute inset-x-0 top-0 z-50 border-b border-white/10">
         <div className="mx-auto flex h-20 max-w-[1440px] items-center justify-between px-5 sm:px-8 lg:px-12">
-          <a href="/" className="group" aria-label="Qiniu Runner home">
+          <a href="/" className="group" aria-label="Qiniu CI Runner home">
             <QiniuRunnerLogo inverse />
           </a>
 
-          <nav className="hidden items-center gap-8 text-sm text-white/70 md:flex" aria-label="Primary navigation">
+          <nav className="hidden items-center gap-8 text-[15px] text-white/70 md:flex" aria-label="Primary navigation">
             <a className="transition-colors hover:text-white" href="#capabilities">
               Product
             </a>
@@ -343,6 +343,7 @@ function LandingAccessAction({
   inverted?: boolean
   compact?: boolean
 }) {
+  const label = "Get started"
   const colorClass = inverted
     ? "bg-[#07131b] text-white hover:bg-[#0d2533] focus-visible:outline-[#07131b]"
     : compact
@@ -353,10 +354,10 @@ function LandingAccessAction({
   return (
     <a
       href="/jobs"
-      aria-label={compact ? "Open Jobs" : undefined}
+      aria-label={compact ? label : undefined}
       className={`group inline-flex items-center justify-center gap-2.5 rounded-md text-sm font-semibold transition-all focus-visible:outline-2 focus-visible:outline-offset-2 ${sizeClass} ${colorClass}`}
     >
-      <span className={compact ? "hidden sm:inline" : undefined}>Open Jobs</span>
+      <span className={compact ? "hidden sm:inline" : undefined}>{label}</span>
       {compact ? <Terminal className="h-4 w-4 sm:hidden" /> : null}
       <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
     </a>

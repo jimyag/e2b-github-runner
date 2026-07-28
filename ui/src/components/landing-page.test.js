@@ -5,14 +5,33 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { LandingPage } from "./landing-page"
 
 describe("LandingPage", () => {
-  test("uses the same Qiniu Runner logo as the admin interface", () => {
+  test("uses the same Qiniu CI Runner logo as the admin interface", () => {
     const html = renderToStaticMarkup(
       createElement(LandingPage),
     )
 
     expect(html).toContain('data-brand-logo="qiniu-runner"')
-    expect(html).toContain('aria-label="Qiniu Runner home"')
+    expect(html).toContain('aria-label="Qiniu CI Runner home"')
+    expect(html).toContain(">CI Runner</span>")
     expect(html).toContain("lucide-terminal")
+  })
+
+  test("gives the shared brand mark enough presence in the primary navigation", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandingPage),
+    )
+
+    expect(html).toContain("h-[18px] w-[18px]")
+    expect(html).toContain("text-[17px]")
+    expect(html).toContain("text-[11px]")
+  })
+
+  test("keeps the primary navigation legible beside the enlarged brand mark", () => {
+    const html = renderToStaticMarkup(
+      createElement(LandingPage),
+    )
+
+    expect(html).toContain('gap-8 text-[15px] text-white/70')
   })
 
   test("presents the runner product before asking visitors to sign in", () => {
@@ -39,12 +58,12 @@ describe("LandingPage", () => {
     expect(html).toContain('aria-label="Documentation"')
   })
 
-  test("keeps the compact Jobs action accessible when its text is hidden", () => {
+  test("keeps the compact access action accessible when its text is hidden", () => {
     const html = renderToStaticMarkup(
       createElement(LandingPage),
     )
 
-    expect(html).toContain('aria-label="Open Jobs"')
+    expect(html).toContain('aria-label="Get started"')
   })
 
   test("uses top-level page landmarks and gives the skip link a focus target", () => {
@@ -82,27 +101,16 @@ describe("LandingPage", () => {
     expect(html).toContain("-translate-x-1/2")
   })
 
-  test("keeps the public landing page focused on the product when OAuth is unavailable", () => {
+  test("keeps the public CTA neutral and independent from the visitor session", () => {
     const html = renderToStaticMarkup(
       createElement(LandingPage),
     )
 
     expect(html).toContain('href="/jobs"')
-    expect(html).toContain("Open Jobs")
+    expect(html).toContain("Get started")
+    expect(html).not.toContain("Open Jobs")
     expect(html).not.toContain("Sign-in unavailable")
     expect(html).not.toContain("GitHub OAuth is required but is not configured")
     expect(html).not.toContain('href="/auth/github/login"')
-  })
-
-  test("keeps the landing page public for signed-in visitors", () => {
-    const html = renderToStaticMarkup(
-      createElement(LandingPage),
-    )
-
-    expect(html).toContain("Qiniu CI Runner")
-    expect(html).toContain('href="/jobs"')
-    expect(html).toContain("Open Jobs")
-    expect(html).not.toContain("does not have access")
-    expect(html).not.toContain("Sign out")
   })
 })

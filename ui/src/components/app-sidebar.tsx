@@ -39,8 +39,8 @@ export function AppSidebar({
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild className="data-[slot=sidebar-menu-button]:!p-1.5">
-              <a href="/" aria-label="Qiniu Runner home">
+            <SidebarMenuButton asChild size="lg" className="data-[slot=sidebar-menu-button]:!p-1.5">
+              <a href="/" aria-label="Qiniu CI Runner home">
                 <QiniuRunnerLogo />
               </a>
             </SidebarMenuButton>

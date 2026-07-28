@@ -110,7 +110,7 @@ function RouteMessagePage({
       <div className="brand-grid absolute inset-0 opacity-70" />
       <div className="absolute -right-40 -top-48 h-[560px] w-[560px] rounded-full bg-[#00aae7]/15 blur-[110px]" />
       <section className="relative mx-auto w-full max-w-lg rounded-2xl border border-[#d5e4eb] bg-white p-7 shadow-[0_30px_90px_rgba(7,49,73,0.12)] sm:p-10">
-        <a href="/" aria-label="Qiniu Runner home" className="inline-flex">
+        <a href="/" aria-label="Qiniu CI Runner home" className="inline-flex">
           <QiniuRunnerLogo />
         </a>
         {icon ? (
