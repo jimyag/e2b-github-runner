@@ -111,7 +111,7 @@ go test -tags development ./internal/server -run TestRecover -count=1
 go test ./internal/sandboxrunner -count=1
 ```
 
-The startup-gate test must verify that only `/healthz` remains available before recovery finishes. The `TestRecover*` cases must verify that at most four requests recover concurrently, the whole-startup timeout is divided fairly across worker waves, cancellation stops further dispatch, queued requests have stale leases cleared, creating/running requests reconnect without stopping their sandbox, a concurrent state version change wins over a stale reconnect result, timed-out sandboxes stop without reconnecting, missing interrupted creations are requeued, completed workflow jobs continue through cleanup, and one reconnect failure does not prevent other requests from being recovered.
+The startup-gate test must verify that only `/healthz` remains available before recovery finishes. The `TestRecover*` cases must verify that at most four requests recover concurrently, the whole-startup timeout determines the per-request worker-wave budget, an exhausted parent budget prevents dispatch, cancellation reports every skipped request, queued requests have stale leases cleared, creating/running requests reconnect without stopping their sandbox, a concurrent state version change wins over a stale reconnect result, timed-out sandboxes stop without reconnecting, missing interrupted creations are requeued, completed workflow jobs continue through cleanup, and one reconnect failure does not prevent other requests from being recovered.
 
 ## 2. Configure GitHub Auth
 

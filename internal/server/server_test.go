@@ -4804,11 +4804,48 @@ func TestRecoverStopsDispatchingWhenContextIsCanceled(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("expected canceled recovery, got %v", err)
 		}
+		for i := maxConcurrentRecoveries; i < runnerCount; i++ {
+			id := fmt.Sprintf("recover-canceled-%d", i)
+			if !strings.Contains(err.Error(), id) {
+				t.Fatalf("canceled recovery error does not identify skipped runner %s: %v", id, err)
+			}
+		}
 	case <-time.After(time.Second):
 		t.Fatal("recovery did not stop promptly after cancellation")
 	}
 	if got := fake.recoveredCount(); got != maxConcurrentRecoveries {
 		t.Fatalf("recovered runners after cancellation = %d, want %d", got, maxConcurrentRecoveries)
+	}
+}
+
+func TestRecoverSkipsDispatchWhenBudgetExpired(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-expired-budget",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-expired-budget",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-expired-budget"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if err := srv.Recover(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected expired recovery budget, got %v", err)
+	}
+	if got := fake.recoveredCount(); got != 0 {
+		t.Fatalf("recovered runners with expired budget = %d, want 0", got)
 	}
 }
 
@@ -5197,7 +5234,7 @@ func TestRecoverPreservesRunningStateWhenReconnectFails(t *testing.T) {
 	if err := store.WriteState(st); err != nil {
 		t.Fatal(err)
 	}
-	fake := &fakeSandbox{recoverErr: errors.New("temporary sandbox API failure")}
+	fake := &fakeSandbox{recoverErr: errors.New("temporary sandbox API failure: token=secret")}
 	srv := newTestServer(t, store, "http://example.test", fake)
 	srv.Close()
 	if err := srv.Recover(context.Background()); err == nil {
@@ -5212,6 +5249,13 @@ func TestRecoverPreservesRunningStateWhenReconnectFails(t *testing.T) {
 	}
 	if fake.stoppedCount() != 0 {
 		t.Fatalf("expected reconnect failure not to stop sandbox, got %d stops", fake.stoppedCount())
+	}
+	logData, err := store.ReadLog(st.ID, "control.log", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(logData), "token=secret") {
+		t.Fatalf("control log persisted upstream error details: %q", logData)
 	}
 }
 

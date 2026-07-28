@@ -663,7 +663,7 @@ func (s *Server) recoverRunner(ctx context.Context, id string) error {
 func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, stateVersion int64) error {
 	job, hasJob, err := s.workflowJobForRecovery(ctx, st)
 	if err != nil {
-		s.store.AppendLog(st.ID, "control.log", []byte("workflow job status check during recovery failed: "+err.Error()+"\n"))
+		s.store.AppendLog(st.ID, "control.log", []byte("workflow job status check during recovery failed; continuing sandbox reconnect\n"))
 		s.logger.Warn("workflow job status check during recovery failed; continuing sandbox reconnect", "id", st.ID, "error", err)
 		job = github.WorkflowJob{}
 		hasJob = false
@@ -708,14 +708,17 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 			case errors.Is(err, sandboxrunner.ErrRunnerNotFound) && result.SandboxID != "":
 				stopErr := s.stopSandboxWithTimeout(ctx, st.ID, result.SandboxID, 0)
 				if stopErr != nil && !isSandboxGone(stopErr) {
-					s.store.AppendLog(st.ID, "control.log", []byte("cleanup interrupted runner creation failed: "+stopErr.Error()+"\n"))
+					s.store.AppendLog(st.ID, "control.log", []byte("cleanup interrupted runner creation failed\n"))
 					return fmt.Errorf("stop sandbox without runner before requeue: %w", stopErr)
 				}
 				s.store.AppendLog(st.ID, "control.log", []byte("stopped sandbox without runner process after restart\n"))
 				return s.requeueInterruptedCreation(st.ID, stateVersion)
 			}
 		}
-		s.store.AppendLog(st.ID, "control.log", []byte("runner reconnect after restart failed; preserving sandbox state: "+err.Error()+"\n"))
+		// A running request must reconnect to its persisted PID. If that exact
+		// process is missing, preserve the sandbox because reconnect/list results
+		// can be transient and attaching to a replacement process is unsafe.
+		s.store.AppendLog(st.ID, "control.log", []byte("runner reconnect after restart failed; preserving sandbox state\n"))
 		return fmt.Errorf("reconnect runner: %w", err)
 	}
 

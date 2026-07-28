@@ -164,7 +164,7 @@ jobs:
 预期结果：
 
 - 启动恢复期间 `/healthz` 仍可访问，其他 HTTP 路由在恢复完成前返回 `503`。
-- 活跃请求通过有界并发恢复，不再串行等待所有更早的请求；启动恢复总超时会按 worker 波次分配，尾部请求仍能获得公平的恢复时间。
+- 活跃请求通过有界并发恢复，不再串行等待所有更早的请求；单请求超时由启动恢复总预算和 worker 波次数共同确定，父 context 的 deadline 仍是硬上限。
 - runnerd 完成启动恢复后才启动 worker loops 并处理新的排队任务。
 - 原 runner request 保持 `running`，sandbox ID 和 runner PID 不变，并记录成功重连事件。
 - GitHub Actions job 持续运行，不会重新排队或丢失 runner。

@@ -109,7 +109,7 @@ go test -tags development ./internal/server -run TestRecover -count=1
 go test ./internal/sandboxrunner -count=1
 ```
 
-启动门禁测试必须确认恢复完成前只有 `/healthz` 可访问。`TestRecover*` 用例必须确认最多恢复四个请求，启动恢复总超时会按 worker 波次公平分配，取消后停止继续投递，queued 请求会清理旧 lease，creating/running 请求会重连且不停止沙箱，并发 state version 变化优先于旧重连结果，已超时沙箱不重连而是停止，创建过程中未找到沙箱时会重新排队，GitHub 任务已完成时仍会进入清理流程，并且单个请求重连失败不会阻断其他请求恢复。
+启动门禁测试必须确认恢复完成前只有 `/healthz` 可访问。`TestRecover*` 用例必须确认最多恢复四个请求，启动恢复总超时会按 worker 波次确定单请求预算，父 context 预算耗尽时不再投递，取消会报告每个被跳过的请求，queued 请求会清理旧 lease，creating/running 请求会重连且不停止沙箱，并发 state version 变化优先于旧重连结果，已超时沙箱不重连而是停止，创建过程中未找到沙箱时会重新排队，GitHub 任务已完成时仍会进入清理流程，并且单个请求重连失败不会阻断其他请求恢复。
 
 ## 2. 配置 GitHub 鉴权
 

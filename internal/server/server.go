@@ -237,6 +237,12 @@ func (s *Server) Recover(ctx context.Context) error {
 
 	workerCount := min(maxConcurrentRecoveries, len(active))
 	perRunnerTimeout := s.recoveryTimeoutPerRunner(ctx, len(active), workerCount)
+	if perRunnerTimeout <= 0 {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("recovery budget exhausted before dispatch: %w", err)
+		}
+		return errors.New("recovery budget exhausted before dispatch")
+	}
 	jobs := make(chan state.RunnerState)
 	recoveryErrors := make(chan error, len(active))
 	var workers sync.WaitGroup
@@ -245,7 +251,8 @@ func (s *Server) Recover(ctx context.Context) error {
 		go func() {
 			defer workers.Done()
 			for st := range jobs {
-				if ctx.Err() != nil {
+				if err := ctx.Err(); err != nil {
+					recoveryErrors <- fmt.Errorf("recover runner %s skipped: %w", st.ID, err)
 					continue
 				}
 				runnerCtx, cancel := context.WithTimeout(ctx, perRunnerTimeout)
@@ -258,11 +265,13 @@ func (s *Server) Recover(ctx context.Context) error {
 		}()
 	}
 dispatch:
-	for _, st := range active {
+	for i, st := range active {
 		select {
 		case jobs <- st:
 		case <-ctx.Done():
-			recoveryErrors <- fmt.Errorf("recovery dispatch canceled: %w", ctx.Err())
+			for _, skipped := range active[i:] {
+				recoveryErrors <- fmt.Errorf("recover runner %s skipped: %w", skipped.ID, ctx.Err())
+			}
 			break dispatch
 		}
 	}
@@ -290,7 +299,7 @@ func (s *Server) recoveryTimeoutPerRunner(ctx context.Context, requestCount, wor
 		if !hasDeadline {
 			return maxSingleRecoveryTimeout
 		}
-		return time.Nanosecond
+		return 0
 	}
 	waves := (requestCount + workerCount - 1) / workerCount
 	timeout := budget / time.Duration(waves)

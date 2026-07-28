@@ -352,6 +352,9 @@ func recoveredRunnerPID(processes []qnsandbox.ProcessInfo, expectedPID uint32) (
 	if expectedPID == 0 && taggedCount == 1 {
 		return recoveredPID, true
 	}
+	// A persisted PID identifies the exact process started for this request.
+	// If it disappeared, a differently numbered tagged process is a replacement,
+	// not the runner that runnerd owned before restarting.
 	return 0, false
 }
 
