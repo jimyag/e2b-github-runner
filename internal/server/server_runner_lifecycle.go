@@ -674,7 +674,7 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 
 	timeout := s.remainingSandboxTimeout(st, time.Now().UTC())
 	if timeout <= 0 {
-		s.failAndStopRunner(ctx, st.ID, "sandbox_timeout", "timeout", "runner exceeded sandbox timeout during recovery")
+		s.failAndStopRunnerVersion(ctx, st.ID, stateVersion, "sandbox_timeout", "timeout", "runner exceeded sandbox timeout during recovery")
 		return nil
 	}
 	req, err := s.store.ReadRequest(st.ID)
@@ -701,13 +701,16 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 	if err != nil {
 		exitWatchAccepted <- false
 		if st.Status == state.StatusRunning && errors.Is(err, sandboxrunner.ErrSandboxNotFound) {
-			s.failAndStopRunner(ctx, st.ID, "recovery", "sandbox_not_found", "runner sandbox no longer exists after restart")
+			s.failAndStopRunnerVersion(ctx, st.ID, stateVersion, "recovery", "sandbox_not_found", "runner sandbox no longer exists after restart")
 			return nil
 		}
-		if st.Status == state.StatusCreating && (!hasJob || strings.EqualFold(strings.TrimSpace(job.Status), "queued")) {
+		if st.Status == state.StatusCreating {
 			switch {
-			case errors.Is(err, sandboxrunner.ErrSandboxNotFound):
+			case errors.Is(err, sandboxrunner.ErrSandboxNotFound) && (!hasJob || strings.EqualFold(strings.TrimSpace(job.Status), "queued")):
 				return s.requeueInterruptedCreation(st.ID, stateVersion)
+			case errors.Is(err, sandboxrunner.ErrSandboxNotFound) && strings.EqualFold(strings.TrimSpace(job.Status), "in_progress"):
+				s.failAndStopRunnerVersion(ctx, st.ID, stateVersion, "recovery", "sandbox_not_found", "runner sandbox no longer exists after interrupted creation")
+				return nil
 			case errors.Is(err, sandboxrunner.ErrRunnerNotFound) && result.SandboxID != "":
 				stopErr := s.stopSandboxWithTimeout(ctx, st.ID, result.SandboxID, 0)
 				if stopErr != nil && !isSandboxGone(stopErr) {
@@ -976,12 +979,19 @@ func (s *Server) stopRunner(ctx context.Context, id string, job github.WorkflowJ
 }
 
 func (s *Server) failAndStopRunner(ctx context.Context, id, stage, reason, message string) {
+	s.failAndStopRunnerVersion(ctx, id, 0, stage, reason, message)
+}
+
+func (s *Server) failAndStopRunnerVersion(ctx context.Context, id string, expectedVersion int64, stage, reason, message string) {
 	unlock := s.lockRunner(id)
 	defer unlock()
 
 	st, err := s.store.ReadState(id)
 	if err != nil {
 		s.logger.Error("read runner state for forced stop", "id", id, "error", err)
+		return
+	}
+	if expectedVersion != 0 && st.Version != expectedVersion {
 		return
 	}
 	if st.Status == state.StatusCompleted || st.Status == state.StatusFailed {

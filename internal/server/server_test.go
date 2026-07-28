@@ -5153,6 +5153,51 @@ func TestRecoverRequeuesCreatingRunnerWhenSandboxIsAbsent(t *testing.T) {
 	}
 }
 
+func TestRecoverFailsCreatingRunnerWithInProgressJobWhenSandboxIsAbsent(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/jobs/123":
+			w.Write([]byte(`{"id":123,"name":"build","status":"in_progress"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/runners":
+			w.Write([]byte(`{"runners":[]}`))
+		default:
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "recover-creating-in-progress-missing",
+		Source:             "test",
+		RepositoryFullName: "o/r",
+		JobID:              123,
+		Labels:             []string{"self-hosted"},
+		RunnerName:         "e2b-recover-creating-in-progress-missing",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusCreating
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{recoverErr: sandboxrunner.ErrSandboxNotFound}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusFailed || got.FailureStage != "recovery" || got.FailureReason != "sandbox_not_found" {
+		t.Fatalf("expected missing in-progress creation to fail, got %#v", got)
+	}
+}
+
 func TestRecoverStopsDiscoveredSandboxWithoutRunnerBeforeRequeue(t *testing.T) {
 	store := state.New(t.TempDir())
 	_, st, err := store.CreateRequest(state.RunnerRequest{
@@ -5298,6 +5343,56 @@ func TestRecoverFailsRunningRunnerWhenSandboxIsAbsent(t *testing.T) {
 	}
 	if got.Status != state.StatusFailed || got.FailureStage != "recovery" || got.FailureReason != "sandbox_not_found" {
 		t.Fatalf("expected missing running sandbox to fail during recovery, got %#v", got)
+	}
+}
+
+func TestRecoverMissingRunningSandboxDoesNotOverwriteConcurrentStateChange(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-running-missing-version-conflict",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-running-missing-version-conflict",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-running-missing-version-conflict"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	var hookErr error
+	fake := &fakeSandbox{
+		recoverErr: sandboxrunner.ErrSandboxNotFound,
+		recoverHook: func(sandboxrunner.RecoverInput) {
+			latest, err := store.ReadState(st.ID)
+			if err != nil {
+				hookErr = err
+				return
+			}
+			latest.Status = state.StatusStopping
+			hookErr = store.WriteState(latest)
+		},
+	}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if hookErr != nil {
+		t.Fatal(hookErr)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusStopping {
+		t.Fatalf("expected concurrent state change to win, got %#v", got)
+	}
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("expected stale missing-sandbox result not to stop sandbox, got %d stops", fake.stoppedCount())
 	}
 }
 
