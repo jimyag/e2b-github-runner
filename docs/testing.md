@@ -111,7 +111,7 @@ go test -tags development ./internal/server -run TestRecover -count=1
 go test ./internal/sandboxrunner -count=1
 ```
 
-The recovery cases must verify that only `/healthz` remains available before recovery finishes, queued requests have stale leases cleared, creating/running requests reconnect without stopping their sandbox, missing interrupted creations are requeued, completed workflow jobs continue through cleanup, and one reconnect failure does not prevent other requests from being recovered.
+The recovery cases must verify that only `/healthz` remains available before recovery finishes, at most four requests recover concurrently, queued requests have stale leases cleared, creating/running requests reconnect without stopping their sandbox, a concurrent state version change wins over a stale reconnect result, timed-out sandboxes stop without reconnecting, missing interrupted creations are requeued, completed workflow jobs continue through cleanup, and one reconnect failure does not prevent other requests from being recovered.
 
 ## 2. Configure GitHub Auth
 

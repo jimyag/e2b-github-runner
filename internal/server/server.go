@@ -41,6 +41,7 @@ type Server struct {
 	loopCtx     context.Context
 	loopCancel  context.CancelFunc
 	loopWG      sync.WaitGroup
+	metricsMu   sync.Mutex
 
 	pullTitleMu    sync.Mutex
 	pullTitleCache map[string]cachedPullTitle
@@ -118,6 +119,8 @@ const (
 	defaultRunnerRequestListLimit = 100
 	maxRunnerRequestListLimit     = 500
 	maxUserRunnerHistoryWindow    = 500
+	maxConcurrentRecoveries       = 4
+	maxSingleRecoveryTimeout      = 30 * time.Second
 	oauthStateCookieName          = "runnerd_oauth_state"
 	oauthReturnToCookieName       = "runnerd_oauth_return_to"
 	githubAppSetupStateCookieName = "runnerd_github_app_setup_state"
@@ -223,16 +226,54 @@ func (s *Server) Recover(ctx context.Context) error {
 		return err
 	}
 	s.logger.Info("recovering runner state", "count", len(states))
-	var recoveryErrors []error
+	active := make([]state.RunnerState, 0, len(states))
 	for _, st := range states {
-		if !isActiveStatus(st.Status) {
-			continue
-		}
-		if err := s.recoverRunner(ctx, st.ID); err != nil {
-			recoveryErrors = append(recoveryErrors, fmt.Errorf("recover runner %s: %w", st.ID, err))
+		if isActiveStatus(st.Status) {
+			active = append(active, st)
 		}
 	}
-	return errors.Join(recoveryErrors...)
+	if len(active) == 0 {
+		return nil
+	}
+
+	workerCount := min(maxConcurrentRecoveries, len(active))
+	jobs := make(chan state.RunnerState)
+	recoveryErrors := make(chan error, len(active))
+	var workers sync.WaitGroup
+	for range workerCount {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for st := range jobs {
+				runnerCtx, cancel := context.WithTimeout(ctx, s.singleRecoveryTimeout())
+				err := s.recoverRunner(runnerCtx, st.ID)
+				cancel()
+				if err != nil {
+					recoveryErrors <- fmt.Errorf("recover runner %s: %w", st.ID, err)
+				}
+			}
+		}()
+	}
+	for _, st := range active {
+		jobs <- st
+	}
+	close(jobs)
+	workers.Wait()
+	close(recoveryErrors)
+
+	var joined []error
+	for err := range recoveryErrors {
+		joined = append(joined, err)
+	}
+	return errors.Join(joined...)
+}
+
+func (s *Server) singleRecoveryTimeout() time.Duration {
+	timeout := s.cfg.RecoveryTimeout
+	if timeout <= 0 || timeout > maxSingleRecoveryTimeout {
+		return maxSingleRecoveryTimeout
+	}
+	return timeout
 }
 
 func (s *Server) routes() {

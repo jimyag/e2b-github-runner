@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -87,9 +88,15 @@ func main() {
 		MaxHeaderBytes:    1 << 20,
 	}
 	recoveryCtx, cancelRecovery := context.WithTimeout(context.Background(), cfg.RecoveryTimeout)
+	listener, err := net.Listen("tcp", cfg.HTTPAddr)
+	if err != nil {
+		cancelRecovery()
+		logger.Error("listen server", "addr", cfg.HTTPAddr, "error", err)
+		os.Exit(1)
+	}
 	serverErr := make(chan error, 1)
 	go func() {
-		serverErr <- srv.ListenAndServe()
+		serverErr <- srv.Serve(listener)
 		cancelRecovery()
 	}()
 	logger.Info("starting server", "addr", cfg.HTTPAddr, "state_backend", cfg.StateBackend, "state_database_dsn", redact.DatabaseDSN(cfg.StateDatabaseDSN.Value()))

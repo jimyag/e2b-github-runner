@@ -36,21 +36,26 @@ import (
 )
 
 type fakeSandbox struct {
-	mu             sync.Mutex
-	started        int
-	recovered      int
-	stopped        int
-	terminals      int
-	startBlock     chan struct{}
-	recoverErr     error
-	recoverErrors  map[string]error
-	recoverResult  sandboxrunner.StartResult
-	recoverInput   sandboxrunner.RecoverInput
-	stopErr        error
-	commandContext context.Context
-	repositoryURL  string
-	runnerGroup    string
-	terminal       *fakeTerminalSession
+	mu                 sync.Mutex
+	started            int
+	recovered          int
+	stopped            int
+	terminals          int
+	startBlock         chan struct{}
+	recoverBlock       chan struct{}
+	recoverStarted     chan string
+	recoverHook        func(sandboxrunner.RecoverInput)
+	recoverErr         error
+	recoverErrors      map[string]error
+	recoverResult      sandboxrunner.StartResult
+	recoverInput       sandboxrunner.RecoverInput
+	recoverInFlight    int
+	maxRecoverInFlight int
+	stopErr            error
+	commandContext     context.Context
+	repositoryURL      string
+	runnerGroup        string
+	terminal           *fakeTerminalSession
 }
 
 type blockingSandboxDefaultStore struct {
@@ -94,19 +99,44 @@ func (f *fakeSandbox) StartRunner(ctx context.Context, input sandboxrunner.Start
 
 func (f *fakeSandbox) RecoverRunner(ctx context.Context, input sandboxrunner.RecoverInput) (sandboxrunner.StartResult, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.recovered++
 	f.recoverInput = input
-	if err := f.recoverErrors[input.RequestID]; err != nil {
-		return f.recoverResult, err
+	f.recoverInFlight++
+	if f.recoverInFlight > f.maxRecoverInFlight {
+		f.maxRecoverInFlight = f.recoverInFlight
 	}
-	if f.recoverErr != nil {
-		return f.recoverResult, f.recoverErr
+	block := f.recoverBlock
+	started := f.recoverStarted
+	hook := f.recoverHook
+	result := f.recoverResult
+	err := f.recoverErrors[input.RequestID]
+	if err == nil {
+		err = f.recoverErr
 	}
-	if f.recoverResult.SandboxID != "" {
-		return f.recoverResult, nil
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.recoverInFlight--
+		f.mu.Unlock()
+	}()
+
+	if started != nil {
+		started <- input.RequestID
 	}
-	return sandboxrunner.StartResult{SandboxID: input.SandboxID, PID: input.PID}, nil
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return sandboxrunner.StartResult{}, ctx.Err()
+		}
+	}
+	if hook != nil {
+		hook(input)
+	}
+	if result.SandboxID == "" {
+		result = sandboxrunner.StartResult{SandboxID: input.SandboxID, PID: input.PID}
+	}
+	return result, err
 }
 
 func (f *fakeSandbox) StopRunner(ctx context.Context, sandboxID string, pid uint32) error {
@@ -212,6 +242,12 @@ func (f *fakeSandbox) recoveredCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.recovered
+}
+
+func (f *fakeSandbox) maxRecoveredInFlight() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.maxRecoverInFlight
 }
 
 func (f *fakeSandbox) lastRecoverInput() sandboxrunner.RecoverInput {
@@ -4663,6 +4699,146 @@ func TestRecoverReattachesActiveRunnerState(t *testing.T) {
 	}
 	if input.Timeout <= 0 || input.Timeout >= time.Hour {
 		t.Fatalf("expected remaining sandbox timeout, got %s", input.Timeout)
+	}
+}
+
+func TestRecoverUsesBoundedConcurrency(t *testing.T) {
+	store := state.New(t.TempDir())
+	const runnerCount = maxConcurrentRecoveries + 2
+	for i := range runnerCount {
+		id := fmt.Sprintf("recover-concurrent-%d", i)
+		_, st, err := store.CreateRequest(state.RunnerRequest{
+			ID:         id,
+			Source:     "test",
+			Labels:     []string{"self-hosted"},
+			RunnerName: "e2b-" + id,
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Status = state.StatusRunning
+		st.SandboxID = "sb-" + id
+		st.ProcessPID = uint32(100 + i)
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	block := make(chan struct{})
+	started := make(chan string, runnerCount)
+	fake := &fakeSandbox{recoverBlock: block, recoverStarted: started}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	done := make(chan error, 1)
+	go func() {
+		done <- srv.Recover(context.Background())
+	}()
+
+	for range maxConcurrentRecoveries {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for concurrent recovery")
+		}
+	}
+	select {
+	case id := <-started:
+		t.Fatalf("recovery exceeded concurrency limit with %s", id)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := fake.maxRecoveredInFlight(); got != maxConcurrentRecoveries {
+		t.Fatalf("max recovery concurrency = %d, want %d", got, maxConcurrentRecoveries)
+	}
+
+	close(block)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.recoveredCount(); got != runnerCount {
+		t.Fatalf("recovered runners = %d, want %d", got, runnerCount)
+	}
+}
+
+func TestRecoverDoesNotOverwriteConcurrentStateChange(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-version-conflict",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-version-conflict",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-version-conflict"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	var hookErr error
+	fake := &fakeSandbox{recoverHook: func(sandboxrunner.RecoverInput) {
+		latest, err := store.ReadState(st.ID)
+		if err != nil {
+			hookErr = err
+			return
+		}
+		latest.Status = state.StatusStopping
+		hookErr = store.WriteState(latest)
+	}}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if hookErr != nil {
+		t.Fatal(hookErr)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusStopping {
+		t.Fatalf("expected concurrent state change to win, got %#v", got)
+	}
+}
+
+func TestRecoverStopsRunnerPastSandboxTimeout(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-sandbox-timeout",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-sandbox-timeout",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-sandbox-timeout"
+	st.ProcessPID = 42
+	st.RunningAt = time.Now().UTC().Add(-2 * time.Hour)
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.cfg.SandboxTimeout = time.Hour
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusFailed || got.FailureStage != "sandbox_timeout" || got.FailureReason != "timeout" {
+		t.Fatalf("expected sandbox timeout failure, got %#v", got)
+	}
+	if fake.stoppedCount() != 1 || fake.recoveredCount() != 0 {
+		t.Fatalf("expected timed-out sandbox stop without reconnect, stopped=%d recovered=%d", fake.stoppedCount(), fake.recoveredCount())
 	}
 }
 
