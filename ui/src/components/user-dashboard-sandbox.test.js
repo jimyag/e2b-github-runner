@@ -191,4 +191,42 @@ describe("Sandbox service Settings", () => {
     expect(html).toContain("Checking organization permissions...")
     expect(html).not.toContain("Opening your account Settings...")
   })
+
+  test("does not render preferences loaded for a different Settings scope", () => {
+    const html = renderDashboard({
+      accountSettingsRoute: {
+        accountLogin: "qiniu",
+        tab: "preferences",
+      },
+      githubApp: {
+        settings_manageability: true,
+        setup_url: "/github-app/setup",
+        installations: [{
+          id: 3,
+          account_id: 1,
+          installation_id: 989,
+          account_type: "organization",
+          account_login: "qiniu",
+          manageable: true,
+          repositories: [],
+          created_at: "2026-07-29T00:00:00Z",
+          updated_at: "2026-07-29T00:00:00Z",
+        }],
+      },
+      userPreferences: {
+        sandbox: {
+          mode: "custom",
+          resolved_source: "admin_default",
+          api_url: "https://us-south-1-sandbox.qiniuapi.com",
+          api_key: { configured: true },
+          manageable: false,
+        },
+      },
+      userPreferencesScope: "github_installation:988",
+    })
+
+    expect(html).not.toContain("Organization managed")
+    expect(html).not.toContain("The organization has an effective Sandbox service")
+    expect(html).toContain("Action required")
+  })
 })

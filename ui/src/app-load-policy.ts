@@ -15,6 +15,23 @@ export type AppRouteAccess = "public" | "user" | "admin" | "not-found"
 export type AuthSessionCheckStatus = "checking" | "ready" | "error"
 export type AuthRouteViewState = "loading" | "authenticated" | "sign-in" | "error"
 
+export function createLatestUserLoadGate() {
+  let generation = 0
+  let scope = ""
+  return {
+    begin(nextScope: string) {
+      if (nextScope !== scope) {
+        generation += 1
+        scope = nextScope
+      }
+      return generation
+    },
+    isCurrent(candidate: number | undefined) {
+      return candidate === generation
+    },
+  }
+}
+
 const adminResourcesBySection: Record<AdminSection, readonly AdminDataResource[]> = {
   overview: ["runner_requests", "runner_specs", "runner_policies"],
   accounts: [],

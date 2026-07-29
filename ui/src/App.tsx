@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { AppSidebar } from "@/components/app-sidebar"
@@ -51,6 +51,7 @@ import {
   adminPollingResources,
   appRouteAccess,
   authRouteViewState,
+  createLatestUserLoadGate,
   loadOptionalUserResource,
   shouldPollAdminSection,
   shouldPollUserRoute,
@@ -173,6 +174,7 @@ function App() {
   const [syncingGitHubInstallations, setSyncingGitHubInstallations] = useState(false)
   const [userSelectedKey, setUserSelectedKey] = useState(() => userJobsGroupKeyFromLocation(window.location.pathname, window.location.search))
   const [beginGitHubReauthentication] = useState(createGitHubReauthenticationGate)
+  const userLoadGate = useRef(createLatestUserLoadGate()).current
 
   const setSection = useCallback((next: string) => {
     const section = adminSections.includes(next as AdminSection) ? (next as AdminSection) : "overview"
@@ -432,9 +434,13 @@ function App() {
   }, [hasAccess, isAdminRoute, request, section])
 
   const loadUserAll = useCallback(async (polling = false) => {
+    const loadID = userLoadGate.begin(`${authSession.login ?? ""}:${locationPath}`)
     if (!authSession.authenticated || (hasAccess && isAdminRoute)) return
     const resources = polling ? userPollingResources(locationPath) : userDataResources(locationPath)
-    if (resources.length === 0) return
+    if (resources.length === 0) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const [appData, runnerPage, onboardingData] = await Promise.all([
@@ -449,13 +455,8 @@ function App() {
           : Promise.resolve(null),
       ])
       const nextApp = appData as GitHubAppConfig | null
-      if (nextApp) setGitHubApp(nextApp)
-      if (runnerPage) {
-        setUserRunnerTotal(runnerPage.total)
-        setUserRunners((current) => polling ? mergeUserRunnerPages(runnerPage.items, current) : runnerPage.items)
-        if (runnerPage.total === 0) setUserSelectedKey("")
-      }
-      if (onboardingData) setProductTourOnboarding(onboardingData as ProductTourOnboarding)
+      let nextPreferences: UserPreferences | null = null
+      let nextPreferencesScope = ""
       if (resources.includes("preferences") && nextApp) {
         const nextRoute = parseAccountSettingsRoute(locationPath, authSession.login)
         const repositoryLogin = repositoryAccountLogin(locationPath, authSession.login)
@@ -478,10 +479,21 @@ function App() {
             )
         const preferencesPath = userPreferencesPath(installationID)
         const preferencesData = await request(preferencesPath)
-        setUserPreferences(preferencesData as UserPreferences)
-        setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
+        nextPreferences = preferencesData as UserPreferences
+        nextPreferencesScope = installationID ? `github_installation:${installationID}` : "account"
       }
+      if (!userLoadGate.isCurrent(loadID)) return
+      if (nextApp) setGitHubApp(nextApp)
+      if (runnerPage) {
+        setUserRunnerTotal(runnerPage.total)
+        setUserRunners((current) => polling ? mergeUserRunnerPages(runnerPage.items, current) : runnerPage.items)
+        if (runnerPage.total === 0) setUserSelectedKey("")
+      }
+      if (onboardingData) setProductTourOnboarding(onboardingData as ProductTourOnboarding)
+      if (nextPreferences) setUserPreferences(nextPreferences)
+      if (nextPreferencesScope) setUserPreferencesScope(nextPreferencesScope)
     } catch (error) {
+      if (!userLoadGate.isCurrent(loadID)) return
       if (requiresGitHubReauthentication(error)) {
         if (beginGitHubReauthentication()) {
           toast.message("Refreshing GitHub sign-in...")
@@ -491,9 +503,9 @@ function App() {
       }
       toast.error(error instanceof Error ? error.message : "Failed to load workspace data")
     } finally {
-      setLoading(false)
+      if (userLoadGate.isCurrent(loadID)) setLoading(false)
     }
-  }, [authSession.authenticated, authSession.login, beginGitHubReauthentication, hasAccess, isAdminRoute, locationPath, refreshGitHubOAuthLogin, request, requestUserRunnerPage])
+  }, [authSession.authenticated, authSession.login, beginGitHubReauthentication, hasAccess, isAdminRoute, locationPath, refreshGitHubOAuthLogin, request, requestUserRunnerPage, userLoadGate])
 
   const saveProductTourOnboarding = useCallback(async (state: ProductTourOnboarding) => {
     const saved = (await request("/user/onboarding/product-tour", {

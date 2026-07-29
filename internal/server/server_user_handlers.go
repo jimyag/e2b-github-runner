@@ -778,9 +778,11 @@ func (s *Server) githubInstallationAccountsManageable(
 			if !strings.EqualFold(strings.TrimSpace(owner.AccountType), "user") {
 				continue
 			}
-			manageable[i] =
-				(owner.GitHubAccountID > 0 && subject == strconv.FormatInt(owner.GitHubAccountID, 10)) ||
-					strings.EqualFold(login, strings.TrimSpace(owner.AccountLogin))
+			if owner.GitHubAccountID > 0 {
+				manageable[i] = subject == strconv.FormatInt(owner.GitHubAccountID, 10)
+			} else {
+				manageable[i] = strings.EqualFold(login, strings.TrimSpace(owner.AccountLogin))
+			}
 		}
 	}
 
@@ -810,7 +812,11 @@ func (s *Server) githubInstallationAccountsManageable(
 		}
 		_, matchesID := organizationIDs[owner.GitHubAccountID]
 		_, matchesLogin := organizationLogins[strings.ToLower(strings.TrimSpace(owner.AccountLogin))]
-		manageable[i] = (owner.GitHubAccountID > 0 && matchesID) || matchesLogin
+		if owner.GitHubAccountID > 0 {
+			manageable[i] = matchesID
+		} else {
+			manageable[i] = matchesLogin
+		}
 	}
 	return manageable, nil
 }

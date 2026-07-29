@@ -2481,6 +2481,11 @@ func TestOrganizationSandboxManagementRequiresActiveMembership(t *testing.T) {
 			wantManageable: true,
 			wantSaveStatus: http.StatusOK,
 		},
+		{
+			name:           "matching login with a different stable organization id",
+			membershipBody: `[{"state":"active","role":"member","organization":{"id":9002,"login":"octo-org"}}]`,
+			wantSaveStatus: http.StatusForbidden,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			githubAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2565,6 +2570,50 @@ func TestOrganizationSandboxManagementRequiresActiveMembership(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPersonalSandboxManagementPrefersStableGitHubAccountID(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	account, _, err := store.UpsertAccountForOAuthIdentity(state.OAuthIdentity{
+		OAuthProvider: "github",
+		OAuthSubject:  "9001",
+		OAuthLogin:    "octocat",
+	}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manageable, err := srv.githubInstallationAccountsManageable(
+		context.Background(),
+		account.ID,
+		[]state.GitHubInstallationAccount{{
+			GitHubAccountID: 9002,
+			AccountType:     "user",
+			AccountLogin:    "octocat",
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manageable[0] {
+		t.Fatal("matching login must not override a different stable GitHub account ID")
+	}
+
+	manageable, err = srv.githubInstallationAccountsManageable(
+		context.Background(),
+		account.ID,
+		[]state.GitHubInstallationAccount{{
+			AccountType:  "user",
+			AccountLogin: "octocat",
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !manageable[0] {
+		t.Fatal("legacy personal owner without a stable GitHub account ID should fall back to login")
 	}
 }
 

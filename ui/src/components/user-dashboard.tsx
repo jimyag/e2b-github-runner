@@ -184,6 +184,16 @@ export function UserDashboard({
   )
   const repositoryPreferences =
     userPreferencesScope === selectedRepositoryPreferenceScope ? userPreferences : null
+  const settingsPreferenceInstallation = settingsPreferenceInstallationID(
+    installations,
+    accountSettingsRoute.accountLogin,
+    authSession.login,
+  )
+  const selectedSettingsPreferenceScope = settingsPreferenceInstallation
+    ? `github_installation:${settingsPreferenceInstallation}`
+    : "account"
+  const settingsPreferences =
+    userPreferencesScope === selectedSettingsPreferenceScope ? userPreferences : null
   const [productTourReplayRequest, setProductTourReplayRequest] = useState(0)
   const openRepositories = useCallback(
     () => onNavigate("repositories"),
@@ -306,7 +316,7 @@ export function UserDashboard({
         />
       ) : page === "settings" ? (
         <AccountsPage
-          userPreferences={userPreferences}
+          userPreferences={settingsPreferences}
           installations={installations}
           settingsManageabilityLoaded={githubApp?.settings_manageability === true}
           route={accountSettingsRoute}

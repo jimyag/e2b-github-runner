@@ -121,4 +121,22 @@ describe("app load policy", () => {
     })
     await expect(appPolicy.loadOptionalUserResource?.(Promise.reject(new Error("onboarding unavailable")))).resolves.toBeNull()
   })
+
+  test("accepts results only from the latest user workspace load", () => {
+    const gate = appPolicy.createLatestUserLoadGate?.()
+    const accountLoad = gate?.begin("miclle:/account/preferences")
+    const organizationLoad = gate?.begin("miclle:/organizations/qiniu/preferences")
+
+    expect(gate?.isCurrent(accountLoad)).toBe(false)
+    expect(gate?.isCurrent(organizationLoad)).toBe(true)
+  })
+
+  test("keeps initial and polling loads current within the same workspace scope", () => {
+    const gate = appPolicy.createLatestUserLoadGate?.()
+    const initialLoad = gate?.begin("miclle:/jobs")
+    const pollingLoad = gate?.begin("miclle:/jobs")
+
+    expect(gate?.isCurrent(initialLoad)).toBe(true)
+    expect(gate?.isCurrent(pollingLoad)).toBe(true)
+  })
 })
