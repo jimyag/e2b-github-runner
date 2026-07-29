@@ -154,7 +154,11 @@ export function RepositoryReadinessPage({
                   {syncingGitHubInstallations ? "Syncing..." : "Sync installations"}
                 </Button>
                 <Button type="button" asChild>
-                  <a href={githubApp.install_url}>
+                  <a
+                    href={githubApp.install_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     <Github />
                     Install GitHub App
                   </a>
@@ -200,7 +204,11 @@ export function RepositoryReadinessPage({
                 <p>Install the GitHub App or sync an existing installation to get started.</p>
                 {githubApp?.install_url ? (
                   <Button type="button" size="sm" asChild>
-                    <a href={githubApp.install_url}>
+                    <a
+                      href={githubApp.install_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
                       <Github />
                       Install GitHub App
                     </a>
@@ -274,7 +282,11 @@ export function RepositoryReadinessPage({
                           : `${authorized.length} authorized · ${repositoriesWithJobs} with jobs`}
                       </div>
                       <Button type="button" variant="outline" size="sm" asChild>
-                        <a href={repositoryAccessURL}>
+                        <a
+                          href={repositoryAccessURL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
                           <Github />
                           {repositoryOnlyAccess ? "View on GitHub" : "Manage on GitHub"}
                         </a>

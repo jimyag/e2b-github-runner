@@ -21,6 +21,11 @@ type upsertGitHubInstallationRequest struct {
 	SetupState     string `json:"setup_state"`
 }
 
+type userGitHubInstallationResponse struct {
+	state.GitHubInstallation
+	Manageable bool `json:"manageable"`
+}
+
 type accountPreferencesResponse struct {
 	Sandbox accountSandboxPreference `json:"sandbox"`
 }
@@ -120,12 +125,43 @@ func (s *Server) handleUserGitHubApp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	responseInstallations := any(installations)
+	settingsManageability := r.URL.Query().Get("include") == "settings"
+	if settingsManageability {
+		owners := make([]state.GitHubInstallationAccount, 0, len(installations))
+		for _, installation := range installations {
+			owners = append(owners, state.GitHubInstallationAccount{
+				GitHubAccountID: installation.GitHubAccountID,
+				AccountType:     installation.AccountType,
+				AccountLogin:    installation.AccountLogin,
+				AccountName:     installation.AccountName,
+				AccountAvatar:   installation.AccountAvatar,
+			})
+		}
+		manageable, manageableErr := s.githubInstallationAccountsManageable(r.Context(), account.ID, owners)
+		if manageableErr != nil {
+			s.writeUserRepositoryAuthorizationError(w, manageableErr)
+			return
+		}
+		responses := make([]userGitHubInstallationResponse, 0, len(installations))
+		for i, installation := range installations {
+			responses = append(responses, userGitHubInstallationResponse{
+				GitHubInstallation: installation,
+				Manageable:         manageable[i],
+			})
+		}
+		responseInstallations = responses
+	}
+	response := map[string]any{
 		"app_slug":      strings.TrimSpace(s.cfg.GitHubAppSlug),
 		"install_url":   s.githubAppInstallURL(),
 		"setup_url":     "/github-app/setup",
-		"installations": installations,
-	})
+		"installations": responseInstallations,
+	}
+	if settingsManageability {
+		response["settings_manageability"] = true
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleUserSaveGitHubInstallation(w http.ResponseWriter, r *http.Request) {
@@ -703,42 +739,80 @@ func (s *Server) accountPreferenceScopeManageable(ctx context.Context, viewerAcc
 		}
 	}
 
-	switch strings.ToLower(strings.TrimSpace(owner.AccountType)) {
-	case "":
-		return false, nil
-	case "user":
+	manageable, err := s.githubInstallationAccountsManageable(
+		ctx,
+		viewerAccountID,
+		[]state.GitHubInstallationAccount{owner},
+	)
+	if err != nil {
+		return false, err
+	}
+	return manageable[0], nil
+}
+
+func (s *Server) githubInstallationAccountsManageable(
+	ctx context.Context,
+	viewerAccountID int64,
+	owners []state.GitHubInstallationAccount,
+) ([]bool, error) {
+	manageable := make([]bool, len(owners))
+	var needsUserIdentity bool
+	var needsOrganizationMemberships bool
+	for _, owner := range owners {
+		switch strings.ToLower(strings.TrimSpace(owner.AccountType)) {
+		case "user":
+			needsUserIdentity = true
+		case "organization":
+			needsOrganizationMemberships = true
+		}
+	}
+
+	if needsUserIdentity {
 		identity, err := s.store.GetOAuthIdentityForAccount(viewerAccountID, "github")
 		if err != nil {
-			return false, err
+			return manageable, err
 		}
-		if owner.GitHubAccountID > 0 && strings.TrimSpace(identity.OAuthSubject) == strconv.FormatInt(owner.GitHubAccountID, 10) {
-			return true, nil
-		}
-		return strings.EqualFold(strings.TrimSpace(identity.OAuthLogin), strings.TrimSpace(owner.AccountLogin)), nil
-	case "organization":
-		if s.gh == nil {
-			return false, errors.New("github client is not configured")
-		}
-		token, err := s.githubUserAccessToken(viewerAccountID)
-		if err != nil {
-			return false, err
-		}
-		memberships, err := s.gh.ListUserOrganizationMemberships(ctx, token)
-		if err != nil {
-			return false, err
-		}
-		for _, membership := range memberships {
-			if owner.GitHubAccountID > 0 && membership.OrganizationID == owner.GitHubAccountID {
-				return true, nil
+		subject := strings.TrimSpace(identity.OAuthSubject)
+		login := strings.TrimSpace(identity.OAuthLogin)
+		for i, owner := range owners {
+			if !strings.EqualFold(strings.TrimSpace(owner.AccountType), "user") {
+				continue
 			}
-			if strings.EqualFold(strings.TrimSpace(membership.OrganizationLogin), strings.TrimSpace(owner.AccountLogin)) {
-				return true, nil
-			}
+			manageable[i] =
+				(owner.GitHubAccountID > 0 && subject == strconv.FormatInt(owner.GitHubAccountID, 10)) ||
+					strings.EqualFold(login, strings.TrimSpace(owner.AccountLogin))
 		}
-		return false, nil
-	default:
-		return false, nil
 	}
+
+	if !needsOrganizationMemberships {
+		return manageable, nil
+	}
+	if s.gh == nil {
+		return manageable, errors.New("github client is not configured")
+	}
+	token, err := s.githubUserAccessToken(viewerAccountID)
+	if err != nil {
+		return manageable, err
+	}
+	memberships, err := s.gh.ListUserOrganizationMemberships(ctx, token)
+	if err != nil {
+		return manageable, err
+	}
+	organizationIDs := make(map[int64]struct{}, len(memberships))
+	organizationLogins := make(map[string]struct{}, len(memberships))
+	for _, membership := range memberships {
+		organizationIDs[membership.OrganizationID] = struct{}{}
+		organizationLogins[strings.ToLower(strings.TrimSpace(membership.OrganizationLogin))] = struct{}{}
+	}
+	for i, owner := range owners {
+		if !strings.EqualFold(strings.TrimSpace(owner.AccountType), "organization") {
+			continue
+		}
+		_, matchesID := organizationIDs[owner.GitHubAccountID]
+		_, matchesLogin := organizationLogins[strings.ToLower(strings.TrimSpace(owner.AccountLogin))]
+		manageable[i] = (owner.GitHubAccountID > 0 && matchesID) || matchesLogin
+	}
+	return manageable, nil
 }
 
 func normalizeHTTPURL(rawURL string) (string, error) {

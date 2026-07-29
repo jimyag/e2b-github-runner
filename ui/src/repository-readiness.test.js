@@ -65,6 +65,72 @@ describe("repository readiness", () => {
     ).toBe("account")
   })
 
+  test("keeps repository-only organizations out of Settings scopes", () => {
+    const installations = [
+      { id: 7, account_login: "miclle", manageable: true },
+      { id: 8, account_login: "qbox", manageable: false },
+      { id: 9, account_login: "qiniu", manageable: true },
+    ]
+
+    expect(
+      readiness.manageableSettingsInstallations?.(installations, "miclle"),
+    ).toEqual([installations[0], installations[2]])
+    expect(
+      readiness.canManageSettingsScope?.(installations, "qbox", "miclle"),
+    ).toBe(false)
+    expect(
+      readiness.canManageSettingsScope?.(installations, "qiniu", "miclle"),
+    ).toBe(true)
+    expect(
+      readiness.canManageSettingsScope?.(installations, "miclle", "miclle"),
+    ).toBe(true)
+  })
+
+  test("waits for Settings manageability before rejecting an organization route", () => {
+    const installations = [
+      { id: 7, account_login: "miclle" },
+      { id: 9, account_login: "qiniu" },
+    ]
+
+    expect(
+      readiness.settingsScopeAccessState?.(
+        installations,
+        "qiniu",
+        "miclle",
+        false,
+      ),
+    ).toBe("loading")
+    expect(
+      readiness.settingsScopeAccessState?.(
+        [{ ...installations[1], manageable: true }],
+        "qiniu",
+        "miclle",
+        true,
+      ),
+    ).toBe("manageable")
+    expect(
+      readiness.settingsScopeAccessState?.(
+        [{ ...installations[1], manageable: false }],
+        "qiniu",
+        "miclle",
+        true,
+      ),
+    ).toBe("forbidden")
+  })
+
+  test("resolves mixed-case organization Settings routes to the same installation", () => {
+    expect(
+      readiness.settingsPreferenceInstallationID?.(
+        [
+          { id: 7, account_login: "miclle" },
+          { id: 9, account_login: "qiniu" },
+        ],
+        "QINIU",
+        "miclle",
+      ),
+    ).toBe(9)
+  })
+
   test("annotates authorized repositories with local job activity", () => {
     expect(
       readiness.repositoryRows?.(

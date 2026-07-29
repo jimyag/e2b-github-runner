@@ -52,6 +52,44 @@ function renderPage(overrides = {}) {
 }
 
 describe("RepositoryReadinessPage", () => {
+  test("opens every external repository action in a new tab", () => {
+    const installURL = "https://github.com/apps/qiniu-runner/installations/new"
+    const selectedHTML = renderPage({
+      githubApp: {
+        app_slug: "qiniu-runner",
+        install_url: installURL,
+        setup_url: "/github-app/setup",
+        installations: [{
+          id: 1,
+          account_id: 1,
+          installation_id: 987,
+          account_login: "miclle",
+          account_name: "Miclle",
+          repositories: [],
+          created_at: "2026-07-29T00:00:00Z",
+          updated_at: "2026-07-29T00:00:00Z",
+        }],
+      },
+    })
+    const emptyHTML = renderPage({
+      githubApp: {
+        app_slug: "qiniu-runner",
+        install_url: installURL,
+        setup_url: "/github-app/setup",
+        installations: [],
+      },
+    })
+
+    for (const html of [selectedHTML, emptyHTML]) {
+      const externalLinks = html.match(/<a\b[^>]*href="https:\/\/[^"]+"[^>]*>/g) ?? []
+      expect(externalLinks).toHaveLength(2)
+      for (const link of externalLinks) {
+        expect(link).toContain('target="_blank"')
+        expect(link).toContain('rel="noopener noreferrer"')
+      }
+    }
+  })
+
   test("keeps a ready platform Sandbox source as compact readiness information", () => {
     const html = renderPage()
 

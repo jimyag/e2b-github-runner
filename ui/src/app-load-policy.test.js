@@ -56,6 +56,15 @@ describe("app load policy", () => {
     expect(userDataResources(path)).toEqual(expected)
   })
 
+  test.each([
+    ["/jobs", "/user/github-app"],
+    ["/repositories", "/user/github-app"],
+    ["/account/preferences", "/user/github-app?include=settings"],
+    ["/organizations/qbox/sandbox-templates", "/user/github-app?include=settings"],
+  ])("loads Settings manageability only for Settings route %s", (path, expected) => {
+    expect(appPolicy.userGitHubAppPath?.(path)).toBe(expected)
+  })
+
   test("polls only user job-list routes", () => {
     expect(shouldPollUserRoute("/")).toBe(false)
     expect(shouldPollUserRoute("/jobs")).toBe(true)

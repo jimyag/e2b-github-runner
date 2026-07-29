@@ -109,6 +109,65 @@ export function repositoryPreferenceScope(
     : "account"
 }
 
+export function manageableSettingsInstallations<
+  T extends Pick<GitHubInstallation, "account_login" | "manageable">,
+>(
+  installations: T[],
+  currentLogin: string | undefined,
+): T[] {
+  const current = currentLogin?.trim().toLowerCase()
+  return installations.filter((installation) => {
+    const login = installation.account_login?.trim().toLowerCase()
+    return Boolean(login && login === current) || installation.manageable === true
+  })
+}
+
+export function canManageSettingsScope(
+  installations: Array<Pick<GitHubInstallation, "account_login" | "manageable">>,
+  accountLogin: string | undefined,
+  currentLogin: string | undefined,
+): boolean {
+  const requested = accountLogin?.trim().toLowerCase()
+  const current = currentLogin?.trim().toLowerCase()
+  if (!requested || requested === current) return true
+  return installations.some(
+    (installation) =>
+      installation.manageable === true &&
+      installation.account_login?.trim().toLowerCase() === requested,
+  )
+}
+
+export type SettingsScopeAccessState = "loading" | "manageable" | "forbidden"
+
+export function settingsScopeAccessState(
+  installations: Array<Pick<GitHubInstallation, "account_login" | "manageable">>,
+  accountLogin: string | undefined,
+  currentLogin: string | undefined,
+  settingsManageabilityLoaded: boolean,
+): SettingsScopeAccessState {
+  const requested = accountLogin?.trim().toLowerCase()
+  const current = currentLogin?.trim().toLowerCase()
+  if (!requested || requested === current) return "manageable"
+  if (!settingsManageabilityLoaded) return "loading"
+  return canManageSettingsScope(installations, accountLogin, currentLogin)
+    ? "manageable"
+    : "forbidden"
+}
+
+export function settingsPreferenceInstallationID(
+  installations: Array<Pick<GitHubInstallation, "id" | "account_login">>,
+  accountLogin: string | undefined,
+  currentLogin: string | undefined,
+): number | undefined {
+  const requested = accountLogin?.trim().toLowerCase()
+  const current = currentLogin?.trim().toLowerCase()
+  if (!requested || requested === current) return undefined
+  return installations.find(
+    (installation) =>
+      installation.account_login?.trim().toLowerCase() === requested,
+  )?.id
+}
+
 export function repositoryRows(
   authorizedRepositories: string[],
   repositoriesWithJobs: string[],

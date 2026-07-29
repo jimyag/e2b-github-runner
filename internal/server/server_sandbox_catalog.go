@@ -39,6 +39,15 @@ func (s *Server) sandboxCatalogForUser(w http.ResponseWriter, r *http.Request) (
 		writeError(w, http.StatusBadRequest, err.Error())
 		return nil, false
 	}
+	manageable, err := s.accountPreferenceScopeManageable(r.Context(), account.ID, scope)
+	if err != nil {
+		s.writeUserRepositoryAuthorizationError(w, err)
+		return nil, false
+	}
+	if !manageable {
+		writeError(w, http.StatusForbidden, "Sandbox resources for this GitHub account are managed by its owner")
+		return nil, false
+	}
 	endpoint, ok := sandboxRegionEndpoint(r.URL.Query().Get("region"))
 	if !ok {
 		writeError(w, http.StatusBadRequest, "unsupported sandbox region")

@@ -2510,9 +2510,24 @@ func TestOrganizationSandboxManagementRequiresActiveMembership(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/user/preferences?installation_id=%d", installation.ID), nil)
+			req := httptest.NewRequest(http.MethodGet, "/user/github-app?include=settings", nil)
 			req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
 			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET GitHub App settings scopes: status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), `"settings_manageability":true`) {
+				t.Fatalf("expected resolved Settings manageability marker: body=%s", rec.Body.String())
+			}
+			manageableField := fmt.Sprintf(`"manageable":%t`, test.wantManageable)
+			if !strings.Contains(rec.Body.String(), manageableField) {
+				t.Fatalf("expected %s in GitHub App response: body=%s", manageableField, rec.Body.String())
+			}
+
+			req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/user/preferences?installation_id=%d", installation.ID), nil)
+			req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+			rec = httptest.NewRecorder()
 			srv.ServeHTTP(rec, req)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("GET organization preferences: status=%d body=%s", rec.Code, rec.Body.String())
@@ -2533,7 +2548,61 @@ func TestOrganizationSandboxManagementRequiresActiveMembership(t *testing.T) {
 			if rec.Code != test.wantSaveStatus {
 				t.Fatalf("PUT organization preferences: got=%d want=%d body=%s", rec.Code, test.wantSaveStatus, rec.Body.String())
 			}
+
+			if !test.wantManageable {
+				for _, path := range []string{"/user/sandbox/templates", "/user/sandbox/instances"} {
+					req = httptest.NewRequest(
+						http.MethodGet,
+						fmt.Sprintf("%s?installation_id=%d&region=us-south-1", path, installation.ID),
+						nil,
+					)
+					req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+					rec = httptest.NewRecorder()
+					srv.ServeHTTP(rec, req)
+					if rec.Code != http.StatusForbidden {
+						t.Fatalf("GET %s as outside collaborator: got=%d want=%d body=%s", path, rec.Code, http.StatusForbidden, rec.Body.String())
+					}
+				}
+			}
 		})
+	}
+}
+
+func TestGitHubAppSettingsManageabilityPropagatesMembershipErrors(t *testing.T) {
+	githubAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/memberships/orgs" {
+			t.Fatalf("unexpected GitHub request: %s %s", r.Method, r.URL.String())
+		}
+		http.Error(w, `{"message":"Bad credentials"}`, http.StatusUnauthorized)
+	}))
+	defer githubAPI.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, githubAPI.URL, &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "expired-user-token")
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:       account.ID,
+		InstallationID:  987,
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "octo-org",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/github-app?include=settings", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("GET GitHub App Settings scopes: got=%d want=%d body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"REAUTH_REQUIRED"`) {
+		t.Fatalf("expected GitHub reauthentication error: body=%s", rec.Body.String())
 	}
 }
 

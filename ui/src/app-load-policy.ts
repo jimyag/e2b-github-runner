@@ -47,6 +47,12 @@ export function userDataResources(path: string): UserDataResource[] {
   return []
 }
 
+export function userGitHubAppPath(path: string): string {
+  return isSandboxSettingsRoute(path)
+    ? "/user/github-app?include=settings"
+    : "/user/github-app"
+}
+
 export function shouldPollUserRoute(path: string): boolean {
   return isUserJobsRoute(path)
 }
@@ -111,6 +117,15 @@ export function isAccountSettingsRoute(path: string): boolean {
     path === "/accounts" ||
     /^\/account\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path) ||
     /^\/organizations\/[^/]+\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path)
+  )
+}
+
+function isSandboxSettingsRoute(path: string): boolean {
+  return (
+    path === "/settings" ||
+    path === "/accounts" ||
+    /^\/account\/(preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path) ||
+    /^\/organizations\/[^/]+\/(preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path)
   )
 }
 

@@ -24,8 +24,11 @@ import { AccountMenu } from "@/components/account-menu"
 import { RepositoryReadinessPage } from "@/components/repository-readiness-page"
 import { UserOnboardingTour } from "@/components/user-onboarding-tour"
 import {
+  manageableSettingsInstallations,
   repositoryPreferenceScope,
   selectRepositoryInstallation,
+  settingsPreferenceInstallationID,
+  settingsScopeAccessState,
 } from "@/repository-readiness"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -49,6 +52,7 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useSandboxTerminal } from "@/hooks/use-sandbox-terminal"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 
 type BuildGroupKind = "pull_request" | "branch" | "workflow_run" | "manual"
 type RunnerStatusSummary = "completed" | "active" | "failed"
@@ -304,6 +308,7 @@ export function UserDashboard({
         <AccountsPage
           userPreferences={userPreferences}
           installations={installations}
+          settingsManageabilityLoaded={githubApp?.settings_manageability === true}
           route={accountSettingsRoute}
           showProductTourSetup={shouldShowSandboxSetupTask(productTourOnboarding)}
           onSaveSandboxConfig={onSaveSandboxConfig}
@@ -369,6 +374,7 @@ function SyncGitHubInstallationsButton({
 function AccountsPage({
   userPreferences,
   installations,
+  settingsManageabilityLoaded,
   route,
   showProductTourSetup,
   onSaveSandboxConfig,
@@ -379,6 +385,7 @@ function AccountsPage({
 }: {
   userPreferences: UserPreferences | null
   installations: NonNullable<GitHubAppConfig["installations"]>
+  settingsManageabilityLoaded: boolean
   route: AccountSettingsRoute
   showProductTourSetup: boolean
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
@@ -387,9 +394,59 @@ function AccountsPage({
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
   request: (url: string, options?: RequestInit) => Promise<unknown>
 }) {
-  const selected = installations.find((installation) => installation.account_login === route.accountLogin)
-  const preferenceInstallationID =
-    selected && selected.account_login && selected.account_login !== currentLogin ? selected.id : undefined
+  const manageableInstallations = manageableSettingsInstallations(installations, currentLogin)
+  const normalizedCurrentLogin = currentLogin?.trim().toLowerCase()
+  const currentAccountInstallation = manageableInstallations.find(
+    (installation) =>
+      installation.account_login?.trim().toLowerCase() === normalizedCurrentLogin,
+  )
+  const settingsInstallations = currentAccountInstallation || !currentLogin
+    ? manageableInstallations
+    : [
+        {
+          id: 0,
+          account_id: 0,
+          installation_id: 0,
+          account_login: currentLogin,
+          manageable: true,
+          repositories: [],
+          created_at: "",
+          updated_at: "",
+        },
+        ...manageableInstallations,
+      ]
+  const scopeAccess = settingsScopeAccessState(
+    installations,
+    route.accountLogin,
+    currentLogin,
+    settingsManageabilityLoaded,
+  )
+  const normalizedRouteLogin = route.accountLogin?.trim().toLowerCase()
+  const selected = settingsInstallations.find(
+    (installation) =>
+      installation.account_login?.trim().toLowerCase() === normalizedRouteLogin,
+  )
+  const preferenceInstallationID = settingsPreferenceInstallationID(
+    settingsInstallations,
+    route.accountLogin,
+    currentLogin,
+  )
+
+  useEffect(() => {
+    if (scopeAccess !== "forbidden") return
+    const login = route.accountLogin?.trim()
+    toast.error(
+      login
+        ? `You do not have permission to manage ${login} Sandbox settings.`
+        : "You do not have permission to manage these Sandbox settings.",
+    )
+    onNavigateAccountSettings(currentLogin, "preferences")
+  }, [
+    currentLogin,
+    onNavigateAccountSettings,
+    route.accountLogin,
+    scopeAccess,
+  ])
 
   return (
     <>
@@ -400,7 +457,7 @@ function AccountsPage({
         <div>
           <h1 className="text-xl font-semibold">Settings</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Manage Sandbox service credentials, templates, and instances for your account and organizations.
+            Manage Sandbox service credentials, templates, and instances for your account and organizations you manage.
           </p>
         </div>
       </section>
@@ -409,8 +466,8 @@ function AccountsPage({
         <aside className="min-h-0 border-r bg-muted/20">
           <div className="flex h-full flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {installations.length ? (
-                installations.map((installation) => (
+              {settingsInstallations.length ? (
+                settingsInstallations.map((installation) => (
                   <button
                     key={installation.id}
                     type="button"
@@ -438,7 +495,23 @@ function AccountsPage({
         </aside>
 
         <section className="min-h-0 overflow-y-auto p-4 lg:p-6">
-          {selected ? (
+          {scopeAccess === "loading" ? (
+            <div
+              className="flex items-center gap-2 rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground"
+              aria-live="polite"
+            >
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Checking organization permissions...
+            </div>
+          ) : scopeAccess === "forbidden" ? (
+            <div
+              className="flex items-center gap-2 rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground"
+              aria-live="polite"
+            >
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Opening your account Settings...
+            </div>
+          ) : selected ? (
             <div className="space-y-4">
               <div className="flex items-center gap-3">
                 <AccountAvatar installation={selected} size="lg" />

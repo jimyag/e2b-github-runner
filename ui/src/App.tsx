@@ -55,6 +55,7 @@ import {
   shouldPollAdminSection,
   shouldPollUserRoute,
   userDataResources,
+  userGitHubAppPath,
   userPollingResources,
   userRunnerHistoryWindow,
   userRunnerRequestLimit,
@@ -68,6 +69,7 @@ import {
   repositoryPath,
   repositoryPreferenceScope,
   selectRepositoryInstallation,
+  settingsPreferenceInstallationID,
 } from "@/repository-readiness"
 import { productTourVersion, shouldCompleteProductTour } from "@/user-onboarding"
 import {
@@ -436,7 +438,9 @@ function App() {
     setLoading(true)
     try {
       const [appData, runnerPage, onboardingData] = await Promise.all([
-        resources.includes("github_app") ? request("/user/github-app") : Promise.resolve(null),
+        resources.includes("github_app")
+          ? request(userGitHubAppPath(locationPath))
+          : Promise.resolve(null),
         resources.includes("runner_requests")
           ? requestUserRunnerPage(userRunnerRequestLimit(locationPath, polling), 0)
           : Promise.resolve(null),
@@ -467,7 +471,11 @@ function App() {
             authSession.login?.toLowerCase()
             ? undefined
             : repositoryInstallation?.id
-          : preferenceInstallationID(nextApp, nextRoute, authSession.login)
+          : settingsPreferenceInstallationID(
+              nextApp.installations,
+              nextRoute?.accountLogin,
+              authSession.login,
+            )
         const preferencesPath = userPreferencesPath(installationID)
         const preferencesData = await request(preferencesPath)
         setUserPreferences(preferencesData as UserPreferences)
@@ -1236,17 +1244,6 @@ function defaultAccountSettingsRoute(currentLogin?: string): AccountSettingsRout
 function userPreferencesPath(installationID?: number, base = "/user/preferences") {
   if (!installationID) return base
   return `${base}?installation_id=${encodeURIComponent(String(installationID))}`
-}
-
-function preferenceInstallationID(
-  githubApp: GitHubAppConfig,
-  route: AccountSettingsRoute | null,
-  currentLogin: string | undefined
-) {
-  const accountLogin = route?.accountLogin?.trim()
-  if (!accountLogin || accountLogin === currentLogin) return undefined
-  const installation = githubApp.installations.find((item) => item.account_login === accountLogin)
-  return installation?.id
 }
 
 function isAccountSettingsPath(path: string): boolean {
