@@ -157,7 +157,7 @@ jobs:
 - Job 的 `Set up runner` log 包含 Qiniu sandbox id、runner request id 和 runner name。
 - Job 结束后，runner request 变为 `completed`。
 
-## 6. 重启恢复
+## 6. Restart Recovery
 
 在 workflow 中增加一个持续时间足够长的步骤，并在 job 运行期间重启 runnerd。只重启 runnerd 服务，不要直接停止沙箱。
 

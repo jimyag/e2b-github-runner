@@ -4916,6 +4916,13 @@ func TestRecoverDoesNotOverwriteConcurrentStateChange(t *testing.T) {
 	if got.Status != state.StatusStopping {
 		t.Fatalf("expected concurrent state change to win, got %#v", got)
 	}
+	logData, err := store.ReadLog(st.ID, "control.log", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logData), "runner reconnect result discarded after concurrent state change") {
+		t.Fatalf("expected discarded reconnect diagnostic, got %q", logData)
+	}
 }
 
 func TestRecoverStopsRunnerPastSandboxTimeout(t *testing.T) {

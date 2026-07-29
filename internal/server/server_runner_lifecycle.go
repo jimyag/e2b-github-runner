@@ -742,6 +742,14 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 		return err
 	}
 	if latest.Version != stateVersion || (latest.Status != state.StatusCreating && latest.Status != state.StatusRunning) {
+		s.logger.Warn(
+			"runner reconnect discarded after concurrent state change",
+			"id", st.ID,
+			"expected_version", stateVersion,
+			"current_version", latest.Version,
+			"current_status", latest.Status,
+		)
+		s.store.AppendLog(st.ID, "control.log", []byte("runner reconnect result discarded after concurrent state change\n"))
 		return nil
 	}
 	latest.Status = state.StatusRunning
