@@ -179,6 +179,7 @@ export type UserPreferences = {
     mode: "custom" | "inherit"
     resolved_source: "custom" | "inherited" | "admin_default" | "none"
     api_url: string
+    manageable?: boolean
     inherited?: boolean
     source_account_id?: number
     source_account_login?: string

@@ -560,6 +560,35 @@ func TestListUserInstallationsReturnsStructuredAPIError(t *testing.T) {
 	}
 }
 
+func TestListUserOrganizationMembershipsUsesOAuthToken(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/memberships/orgs" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+		if r.URL.Query().Get("state") != "active" || r.URL.Query().Get("per_page") != "100" {
+			t.Fatalf("unexpected membership query: %q", r.URL.RawQuery)
+		}
+		if r.Header.Get("Authorization") != "Bearer user-token" {
+			t.Fatalf("expected bearer user token, got %q", r.Header.Get("Authorization"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[
+			{"state":"active","role":"member","organization":{"id":9001,"login":"octo-org"}},
+			{"state":"pending","role":"member","organization":{"id":9002,"login":"pending-org"}}
+		]`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, ts.Client())
+	memberships, err := client.ListUserOrganizationMemberships(t.Context(), "user-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memberships) != 1 || memberships[0].OrganizationID != 9001 || memberships[0].OrganizationLogin != "octo-org" || memberships[0].Role != "member" {
+		t.Fatalf("unexpected active memberships: %#v", memberships)
+	}
+}
+
 func TestListUserInstallationRepositoriesUsesOAuthToken(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/user/installations/987/repositories" {

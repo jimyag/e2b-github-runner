@@ -13,7 +13,7 @@
 
 Runnerd 已经越过最初 2026-05-19 的差距清单。Runtime configuration 现在是 file-first，runner state 已 DB-backed，schema creation 主要由 GORM model tags 驱动，retry/lease/audit 字段已经存在，GitHub App auth 可以动态解析 installations，ordinary-user UI 覆盖 job/repository/account setup flows，admin console 覆盖包括带审计 account-role 修改在内的核心管理流程，diagnostics 暴露 pprof/expvar state，文档化的本地 workflow 包含 `task dev`。
 
-剩余工作不再是基础架构补课，而是产品和运维 hardening：是否保留 token/basic auth 作为本地兼容模式，Activity repositories 是否应在 jobs 被观察到前包含 policy-configured repositories，多少 config management 应进入 admin console，以及在把服务视为 production-ready 前持续执行并维护 canonical deployment smoke checklist。
+剩余工作不再是基础架构补课，而是产品和运维 hardening：是否保留 token/basic auth 作为本地兼容模式，多少 config management 应进入 admin console，以及在把服务视为 production-ready 前持续执行并维护 canonical deployment smoke checklist。
 
 ## 当前基线
 
@@ -25,7 +25,7 @@ Runnerd 已经越过最初 2026-05-19 的差距清单。Runtime configuration �
 - Worker processing 使用 DB claim/lease semantics 和 retry scheduling，而不是只依赖 in-memory queue ownership。
 - Qiniu sandbox、GitHub、rate-limit、timeout 和 temporary network transient failures 会被分类为 retry 或 queue deferral。确定性的 auth/config/template failures 会立即失败。
 - Admin routes 通过 `/admin/accounts` 和 `/admin/api/accounts` 暴露账户列表与带审计的角色控制，同时提供 runner request management、retry/stop/log access、runner specs、runner groups、repository policies、match tests、audit events 和 diagnostics。Account 管理仅包含角色控制；系统拒绝修改自身角色，以及可能导致没有管理员的变更。
-- Ordinary-user routes 暴露 `/` 的 PR/job dashboard、`/github/pulls/{owner}/{repo}/{number}/jobs` 这类 stable GitHub-context job-group routes、`/repositories` 的 local activity repositories、`/account/repositories` 的 GitHub App account setup、`/account/preferences` 和 `/organizations/{login}/preferences` 的 account 或 organization Sandbox service Preferences，以及 `/account/sandbox-templates`、`/account/sandbox-instances` 和对应 organization routes 的 scoped Sandbox resource catalogs。
+- Ordinary-user routes 暴露 `/` 的 PR/job dashboard、`/github/pulls/{owner}/{repo}/{number}/jobs` 这类 stable GitHub-context job-group routes，以及 `/repositories` 的统一 repository/Sandbox readiness。`/account/repositories` 和 `/organizations/{login}/repositories` 保留为指向同一页面的 scoped compatibility links；Sandbox Service、Templates 和 Instances 继续位于账户或组织设置路由。
 - Admin console 通过 `/admin/sandbox_service` 和 role-gated `/admin/api/sandbox-service-default` endpoints 管理全局 fallback，包括 all/selected repository-owner audience controls；provider catalogs 仍属于 ordinary-user resources。
 - 登录用户目录 API 通过 `/user/sandbox/templates` 提供区域过滤模板，并通过 `/user/sandbox/instances` 提供区域和模板过滤的 runner instances。接口从选中的 account 或 installation scope 解析加密凭据，不会暴露 provider secrets。
 - `ui/` 中的 React UI 会从 `internal/server/ui/*` 嵌入生产构建；development builds 通过 `internal/server/ui_assets_development.go` 代理到 Vite。
@@ -38,9 +38,9 @@ Runnerd 已经越过最初 2026-05-19 的差距清单。Runtime configuration �
 
 Token 和 basic auth 仍与 GitHub App auth 并存。它们对本地验证或 legacy credentials 有用，但也意味着产品还不是 GitHub-App-only。需要决定这些模式是 intentional compatibility paths，还是应在 production hardening 前移除。
 
-### 2. Ordinary-User Repository Scope
+### 2. Ordinary-User Repository Readiness
 
-Ordinary-user UI 现在已经路由到 `/admin/*` 之外。Activity repositories 当前来自 runnerd-observed jobs，而 authorized repositories 可以从 GitHub App installations 按需加载。需要决定 Activity repositories view 是否也应在 jobs 被观察到前包含 repository-policy configured repositories。
+Ordinary-user UI 现在已经路由到 `/admin/*` 之外。`/repositories` 会列出用户与 GitHub App 授权交集内的全部 repositories，用本地 job activity 标注运行记录但不会隐藏尚未运行的 repositories，并显示所选账户或组织的有效 Sandbox service 来源。不存在有效来源时，可管理的 scope 会链接到对应账户或组织 Preferences 页面；credentials 只在 Settings 中编辑。
 
 ### 3. Config Management
 
@@ -63,10 +63,9 @@ DB lease model 已经存在，但在记录 multi-instance support 前，仍需�
 1. 所有触及 backend/UI boundaries 的分支保持 `task dev`、`task build`、`task lint` 和 `task test` 绿色。
 2. 使用真实 GitHub App、一个 repository 和一个 Qiniu sandbox template 运行并维护 deployment smoke checklist。
 3. 决定是否保留 token/basic auth modes。
-4. 决定 Activity repositories 是否应在 jobs 被观察到前包含 policy-configured repositories。
-5. 只有在 config operations model 清晰后，再添加 effective-config diagnostics view。
-6. 用并发 runnerd 进程压测 DB lease behavior，再宣传 multi-instance support。
-7. 修改 state records 或 GORM migration tags 时，保留 old-schema upgrade coverage。
+4. 只有在 config operations model 清晰后，再添加 effective-config diagnostics view。
+5. 用并发 runnerd 进程压测 DB lease behavior，再宣传 multi-instance support。
+6. 修改 state records 或 GORM migration tags 时，保留 old-schema upgrade coverage。
 
 ## 验证说明
 

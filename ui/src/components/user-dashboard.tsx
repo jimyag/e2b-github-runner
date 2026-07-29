@@ -8,7 +8,6 @@ import {
   KeyRound,
   Loader2,
   Play,
-  Pencil,
   RefreshCw,
   ShieldCheck,
   SquareTerminal,
@@ -22,7 +21,12 @@ import { logNames } from "@/admin-types"
 import { formatRunnerDuration, formatTime } from "@/admin-format"
 import { userRunnerHistoryWindow } from "@/app-load-policy"
 import { AccountMenu } from "@/components/account-menu"
+import { RepositoryReadinessPage } from "@/components/repository-readiness-page"
 import { UserOnboardingTour } from "@/components/user-onboarding-tour"
+import {
+  repositoryPreferenceScope,
+  selectRepositoryInstallation,
+} from "@/repository-readiness"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -86,25 +90,23 @@ function findSandboxRegionByAPIURL(value: string) {
   return sandboxRegions.find((region) => normalizeSandboxAPIURL(region.apiURL) === normalized)
 }
 
-function resolveSandboxRegionAPIURL(value: string) {
-  const matchedRegion = findSandboxRegionByAPIURL(value)
-  return matchedRegion?.apiURL ?? value
-}
-
 export function UserDashboard({
   authSession,
   githubApp,
   locationPath,
   productTourOnboarding,
   userPreferences,
+  userPreferencesScope,
   runners,
   runnerTotal,
   loadingRunnerHistory,
   selectedKey,
   selectedJobID,
   page,
+  selectedRepositoryAccountLogin,
   accountSettingsRoute,
   authorizedRepositories,
+  repositoryErrors,
   loadingRepositoriesFor,
   syncingGitHubInstallations,
   onLoadAuthorizedRepositories,
@@ -114,6 +116,7 @@ export function UserDashboard({
   onSaveSandboxConfig,
   onDeleteSandboxAPIKey,
   onNavigate,
+  onNavigateRepositoryAccount,
   onNavigateAccountSettings,
   onOpenJob,
   onLoadJobGroup,
@@ -127,14 +130,17 @@ export function UserDashboard({
   locationPath: string
   productTourOnboarding: ProductTourOnboarding | null
   userPreferences: UserPreferences | null
+  userPreferencesScope: string
   runners: RunnerState[]
   runnerTotal: number
   loadingRunnerHistory: boolean
   selectedKey: string
   selectedJobID: string
   page: UserPage
+  selectedRepositoryAccountLogin: string | null
   accountSettingsRoute: AccountSettingsRoute
   authorizedRepositories: Record<number, string[]>
+  repositoryErrors: Record<number, string>
   loadingRepositoriesFor: number | null
   syncingGitHubInstallations: boolean
   onLoadAuthorizedRepositories: (id: number) => void
@@ -144,6 +150,7 @@ export function UserDashboard({
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
   onNavigate: (page: UserPage) => void
+  onNavigateRepositoryAccount: (accountLogin: string | undefined) => void
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
   onOpenJob: (id: string) => void
   onLoadJobGroup: (key: string) => Promise<unknown>
@@ -162,10 +169,21 @@ export function UserDashboard({
   )
   const canSyncGitHubInstallations = Boolean(githubApp?.install_url || githubApp?.app_slug)
   const hasInstallations = installations.length > 0
+  const repositoryInstallation = selectRepositoryInstallation(
+    installations,
+    selectedRepositoryAccountLogin,
+    authSession.login,
+  )
+  const selectedRepositoryPreferenceScope = repositoryPreferenceScope(
+    repositoryInstallation,
+    authSession.login,
+  )
+  const repositoryPreferences =
+    userPreferencesScope === selectedRepositoryPreferenceScope ? userPreferences : null
   const [productTourReplayRequest, setProductTourReplayRequest] = useState(0)
-  const openAccountPreferences = useCallback(
-    () => onNavigateAccountSettings(undefined, "preferences"),
-    [onNavigateAccountSettings],
+  const openRepositories = useCallback(
+    () => onNavigate("repositories"),
+    [onNavigate],
   )
   const navItemClass = (active: boolean) =>
     cn(
@@ -200,7 +218,7 @@ export function UserDashboard({
         key={productTourReplayRequest}
         locationPath={locationPath}
         onboarding={productTourOnboarding}
-        onNavigateAccountPreferences={openAccountPreferences}
+        onNavigateRepositories={openRepositories}
         onStatusChange={onSaveProductTourOnboarding}
         replay={productTourReplayRequest > 0}
       />
@@ -268,23 +286,25 @@ export function UserDashboard({
       </nav>
 
       {page === "repositories" ? (
-        <ActivityRepositoriesPage
-          installations={installations}
-          canSyncGitHubInstallations={canSyncGitHubInstallations}
-          syncingGitHubInstallations={syncingGitHubInstallations}
-          onSyncGitHubInstallations={onSyncGitHubInstallations}
-        />
-      ) : page === "settings" ? (
-        <AccountsPage
-          githubApp={githubApp}
-          userPreferences={userPreferences}
-          installations={installations}
+        <RepositoryReadinessPage
+          githubApp={githubApp ? { ...githubApp, installations } : null}
+          currentLogin={authSession.login}
+          selectedAccountLogin={selectedRepositoryAccountLogin}
+          preferences={repositoryPreferences}
+          preferencesLoading={userPreferencesScope !== selectedRepositoryPreferenceScope}
           authorizedRepositories={authorizedRepositories}
+          repositoryErrors={repositoryErrors}
           loadingRepositoriesFor={loadingRepositoriesFor}
-          route={accountSettingsRoute}
           syncingGitHubInstallations={syncingGitHubInstallations}
           onLoadAuthorizedRepositories={onLoadAuthorizedRepositories}
           onSyncGitHubInstallations={onSyncGitHubInstallations}
+          onSelectAccount={onNavigateRepositoryAccount}
+        />
+      ) : page === "settings" ? (
+        <AccountsPage
+          userPreferences={userPreferences}
+          installations={installations}
+          route={accountSettingsRoute}
           showProductTourSetup={shouldShowSandboxSetupTask(productTourOnboarding)}
           onSaveSandboxConfig={onSaveSandboxConfig}
           onDeleteSandboxAPIKey={onDeleteSandboxAPIKey}
@@ -312,127 +332,6 @@ export function UserDashboard({
         />
       )}
     </main>
-  )
-}
-
-function ActivityRepositoriesPage({
-  installations,
-  canSyncGitHubInstallations,
-  syncingGitHubInstallations,
-  onSyncGitHubInstallations,
-}: {
-  installations: NonNullable<GitHubAppConfig["installations"]>
-  canSyncGitHubInstallations: boolean
-  syncingGitHubInstallations: boolean
-  onSyncGitHubInstallations: () => void
-}) {
-  const [selectedID, setSelectedID] = useState<number | null>(null)
-  const selected = installations.find((installation) => installation.id === selectedID) || installations[0]
-
-  return (
-    <>
-      <section className="border-b bg-muted/35 px-4 py-4 lg:px-6">
-        <div>
-          <h1 className="text-xl font-semibold">Repositories</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Local repositories appear here after runnerd observes jobs from them.
-          </p>
-        </div>
-      </section>
-
-      <div className="grid min-h-0 flex-1 lg:grid-cols-[320px_minmax(0,1fr)]">
-        <aside className="min-h-0 border-r bg-muted/20">
-          <div className="flex h-full flex-col">
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {installations.length ? (
-                installations.map((installation) => (
-                  <button
-                    key={installation.id}
-                    type="button"
-                    className={cn(
-                      "flex h-14 w-full items-center gap-3 border-b px-4 text-left transition-colors hover:bg-accent",
-                      selected?.id === installation.id ? "bg-accent" : ""
-                    )}
-                    onClick={() => setSelectedID(installation.id)}
-                  >
-                    <AccountAvatar installation={installation} size="sm" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-semibold">{installation.account_login || "GitHub App"}</div>
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <div className="p-4 text-sm text-muted-foreground">
-                  Sync existing GitHub App accounts, then trigger a workflow job to show active repositories here.
-                </div>
-              )}
-            </div>
-          </div>
-        </aside>
-
-        <section className="min-h-0 overflow-y-auto p-4 lg:p-6">
-          {selected ? (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3">
-                <AccountAvatar installation={selected} size="lg" />
-                <div className="min-w-0">
-                  <h2 className="truncate text-2xl font-semibold">{accountDisplayName(selected)}</h2>
-                  <div className="truncate text-sm text-muted-foreground">{selected.account_login || "GitHub"}</div>
-                </div>
-              </div>
-
-              <Card className="rounded-lg">
-                <CardHeader className="gap-3 pb-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <CardTitle className="text-base">Active repositories</CardTitle>
-                      <CardDescription>Local repositories with observed runner jobs.</CardDescription>
-                    </div>
-                    <Badge variant="secondary">{selected.repositories.length} repositories</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  {selected.repositories.length ? (
-                    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                      {selected.repositories.map((repository) => (
-                        <div key={repository} className="rounded-md border bg-muted/25 px-3 py-2">
-                          <div className="truncate text-sm font-medium">{repository}</div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
-                      No repositories have runner jobs for this account yet.
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          ) : (
-            <div className="rounded-lg border bg-muted/30 p-6">
-              <div className="flex flex-wrap items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <h2 className="text-base font-semibold">Sync existing GitHub App accounts</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {canSyncGitHubInstallations
-                      ? "Use this if the GitHub App is already installed but this runnerd instance has no local account record yet."
-                      : "Set up GitHub App auth before syncing local account records."}
-                  </p>
-                </div>
-                {canSyncGitHubInstallations ? (
-                  <SyncGitHubInstallationsButton
-                    isSyncing={syncingGitHubInstallations}
-                    label="Sync accounts"
-                    loadingLabel="Syncing..."
-                    onSync={onSyncGitHubInstallations}
-                  />
-                ) : null}
-              </div>
-            </div>
-          )}
-        </section>
-      </div>
-    </>
   )
 }
 
@@ -468,15 +367,9 @@ function SyncGitHubInstallationsButton({
 }
 
 function AccountsPage({
-  githubApp,
   userPreferences,
   installations,
-  authorizedRepositories,
-  loadingRepositoriesFor,
   route,
-  syncingGitHubInstallations,
-  onLoadAuthorizedRepositories,
-  onSyncGitHubInstallations,
   showProductTourSetup,
   onSaveSandboxConfig,
   onDeleteSandboxAPIKey,
@@ -484,15 +377,9 @@ function AccountsPage({
   onNavigateAccountSettings,
   request,
 }: {
-  githubApp: GitHubAppConfig | null
   userPreferences: UserPreferences | null
   installations: NonNullable<GitHubAppConfig["installations"]>
-  authorizedRepositories: Record<number, string[]>
-  loadingRepositoriesFor: number | null
   route: AccountSettingsRoute
-  syncingGitHubInstallations: boolean
-  onLoadAuthorizedRepositories: (id: number) => void
-  onSyncGitHubInstallations: () => void
   showProductTourSetup: boolean
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
@@ -500,24 +387,9 @@ function AccountsPage({
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
   request: (url: string, options?: RequestInit) => Promise<unknown>
 }) {
-  const [filter, setFilter] = useState("")
   const selected = installations.find((installation) => installation.account_login === route.accountLogin)
-  const authorized = selected ? authorizedRepositories[selected.id] : undefined
   const preferenceInstallationID =
     selected && selected.account_login && selected.account_login !== currentLogin ? selected.id : undefined
-  const filteredRepositories = useMemo(() => {
-    const query = filter.trim().toLowerCase()
-    const repositories = authorized || []
-    if (!query) return repositories
-    return repositories.filter((repository) => repository.toLowerCase().includes(query))
-  }, [authorized, filter])
-
-  useEffect(() => {
-    if (!selected) return
-    if (!authorizedRepositories[selected.id]) {
-      onLoadAuthorizedRepositories(selected.id)
-    }
-  }, [authorizedRepositories, onLoadAuthorizedRepositories, selected])
 
   return (
     <>
@@ -525,34 +397,11 @@ function AccountsPage({
         className="border-b bg-muted/35 px-4 py-4 lg:px-6"
         data-onboarding="settings-tabs"
       >
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold">Settings</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Configure repository access and runner preferences for GitHub users and organizations.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {githubApp?.install_url ? (
-              <>
-                <SyncGitHubInstallationsButton
-                  isSyncing={syncingGitHubInstallations}
-                  label="Sync existing installations"
-                  loadingLabel="Syncing installations..."
-                  onSync={onSyncGitHubInstallations}
-                  variant="outline"
-                />
-                <Button type="button" asChild>
-                  <a href={githubApp.install_url}>
-                    <Github className="h-4 w-4" />
-                    Install GitHub App
-                  </a>
-                </Button>
-              </>
-            ) : (
-              <Badge variant="outline">Set github.app.slug to enable the install link</Badge>
-            )}
-          </div>
+        <div>
+          <h1 className="text-xl font-semibold">Settings</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Manage Sandbox service credentials, templates, and instances for your account and organizations.
+          </p>
         </div>
       </section>
 
@@ -571,8 +420,6 @@ function AccountsPage({
                     )}
                     onClick={() => {
                       onNavigateAccountSettings(installation.account_login, route.tab)
-                      setFilter("")
-                      if (!authorizedRepositories[installation.id]) onLoadAuthorizedRepositories(installation.id)
                     }}
                   >
                     <AccountAvatar installation={installation} size="sm" />
@@ -608,16 +455,10 @@ function AccountsPage({
               >
                 <TabsList className="h-auto w-full justify-start rounded-none border-b bg-transparent p-0">
                   <TabsTrigger
-                    value="repositories"
-                    className="mr-8 h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
-                  >
-                    Repositories
-                  </TabsTrigger>
-                  <TabsTrigger
                     value="preferences"
                     className="h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
                   >
-                    Preferences
+                    Sandbox Service
                   </TabsTrigger>
                   <TabsTrigger
                     value="sandbox-templates"
@@ -632,55 +473,6 @@ function AccountsPage({
                     Sandbox Instances
                   </TabsTrigger>
                 </TabsList>
-
-                <TabsContent value="repositories">
-                  <Card className="rounded-lg">
-                    <CardHeader className="gap-3 pb-3">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <CardTitle className="text-base">Authorized repositories</CardTitle>
-                          <CardDescription>Repositories currently authorized for this GitHub App installation.</CardDescription>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="secondary">
-                            {authorized ? `${authorized.length} repositories` : "Not loaded"}
-                          </Badge>
-                          <Button type="button" variant="outline" size="sm" asChild>
-                            <a href={`https://github.com/settings/installations/${selected.installation_id}`}>
-                              <Github className="h-4 w-4" />
-                              Manage on GitHub
-                            </a>
-                          </Button>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <input
-                        className="h-9 w-full rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        placeholder="Filter GitHub repositories"
-                        value={filter}
-                        onChange={(event) => setFilter(event.target.value)}
-                      />
-                      {loadingRepositoriesFor === selected.id ? (
-                        <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
-                          Loading repositories from GitHub...
-                        </div>
-                      ) : filteredRepositories.length ? (
-                        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                          {filteredRepositories.map((repository) => (
-                            <div key={repository} className="rounded-md border bg-muted/25 px-3 py-2">
-                              <div className="truncate text-sm font-medium">{repository}</div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="rounded-md border bg-muted/25 px-3 py-2 text-sm text-muted-foreground">
-                          {authorized ? "No repositories match the current filter." : "Select this account to load repositories."}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </TabsContent>
 
                 <TabsContent value="preferences">
                   <SandboxAPIKeyCard
@@ -741,21 +533,14 @@ function AccountsPage({
               <div className="rounded-lg border bg-muted/30 p-6">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div className="min-w-0">
-                    <h2 className="text-base font-semibold">No local GitHub App accounts</h2>
+                    <h2 className="text-base font-semibold">Repository setup moved</h2>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {githubApp
-                        ? "Sync existing GitHub App installations to create the local account links for this runnerd instance."
-                        : "Set up GitHub App auth before syncing local account records."}
+                      Manage GitHub App access and Runner readiness from Repositories.
                     </p>
                   </div>
-                  {githubApp?.install_url || githubApp?.app_slug ? (
-                    <SyncGitHubInstallationsButton
-                      isSyncing={syncingGitHubInstallations}
-                      label="Sync existing installations"
-                      loadingLabel="Syncing installations..."
-                      onSync={onSyncGitHubInstallations}
-                    />
-                  ) : null}
+                  <Button type="button" asChild>
+                    <a href="/repositories">Open Repositories</a>
+                  </Button>
                 </div>
               </div>
             )
@@ -782,7 +567,6 @@ function SandboxAPIKeyCard({
   const [apiURL, setAPIURL] = useState("")
   const [apiKey, setAPIKey] = useState("")
   const [credentialMode, setCredentialMode] = useState<"custom" | "inherit">("custom")
-  const [customAPIURLOpen, setCustomAPIURLOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState(false)
@@ -795,17 +579,17 @@ function SandboxAPIKeyCard({
   const sourceAccountLogin = preferences?.sandbox?.source_account_login?.trim()
   const sourceAvailable = Boolean(preferences?.sandbox?.source_available)
   const usingAdminDefault = preferences?.sandbox?.resolved_source === "admin_default"
+  const effectiveReady = Boolean(
+    preferences && preferences.sandbox.resolved_source !== "none",
+  )
   const updatedAt = preferences?.sandbox?.api_key?.updated_at
   const savedAPIURL = preferences?.sandbox?.api_url ?? ""
-  const canUseSavedAPIURL = !customAPIURLOpen && !(allowInheritance && preferences?.sandbox?.inherited && credentialMode === "custom")
-  const effectiveAPIURL = apiURL || (canUseSavedAPIURL ? savedAPIURL : "")
+  const effectiveAPIURL = apiURL
   const selectedRegion = findSandboxRegionByAPIURL(effectiveAPIURL)
-  const showsCustomAPIURL = customAPIURLOpen || (Boolean(effectiveAPIURL.trim()) && !selectedRegion)
+  const organizationManaged = preferences?.sandbox?.manageable === false
 
   useEffect(() => {
-    const resolvedAPIURL = resolveSandboxRegionAPIURL(savedAPIURL)
-    setAPIURL(resolvedAPIURL)
-    setCustomAPIURLOpen(Boolean(savedAPIURL.trim()) && !findSandboxRegionByAPIURL(resolvedAPIURL))
+    setAPIURL(findSandboxRegionByAPIURL(savedAPIURL)?.apiURL ?? "")
   }, [savedAPIURL])
 
   useEffect(() => {
@@ -877,8 +661,36 @@ function SandboxAPIKeyCard({
     }
   }
 
+  if (organizationManaged) {
+    return (
+      <Card className="rounded-lg" data-onboarding="sandbox-service-form">
+        <CardHeader className="gap-3 pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <KeyRound className="h-4 w-4 shrink-0" />
+                <span>Sandbox service</span>
+              </CardTitle>
+              <CardDescription className="mt-1">
+                Sandbox service is managed by this organization. Repository access does not grant configuration permission.
+              </CardDescription>
+            </div>
+            <Badge variant="outline">Organization managed</Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">
+            {effectiveReady
+              ? "The organization has an effective Sandbox service. No action is required from you."
+              : "No Sandbox service is available yet. An organization member must configure it."}
+          </p>
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
-    <Card className="rounded-lg" data-onboarding="sandbox-service">
+    <Card className="rounded-lg" data-onboarding="sandbox-service-form">
       <form onSubmit={submit}>
         <CardHeader className="gap-3 pb-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -888,14 +700,16 @@ function SandboxAPIKeyCard({
                 <span>Sandbox service</span>
               </CardTitle>
               <CardDescription className="mt-1">
-                Configure the account Sandbox service endpoint and encrypted API Key.
+                Choose the account Sandbox service region and configure its encrypted API Key.
               </CardDescription>
             </div>
-            <Badge variant={configured ? "success" : "outline"}>{configured ? "Configured" : "Not configured"}</Badge>
+            <Badge variant={effectiveReady ? "success" : "warning"}>
+              {effectiveReady ? "Ready" : "Action required"}
+            </Badge>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {showOnboardingSetup ? (
+          {showOnboardingSetup && !effectiveReady ? (
             <div className="flex flex-col gap-3 rounded-lg border border-primary/25 bg-primary/[0.04] p-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
@@ -903,9 +717,7 @@ function SandboxAPIKeyCard({
                   <span className="text-sm font-semibold">Connect your Sandbox service</span>
                 </div>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                  {usingAdminDefault
-                    ? "The platform default is available now. Save your own API Key to make this account's Sandbox access independent."
-                    : "Choose the nearest region, paste your Sandbox API Key, and save it. The key is encrypted before it is stored."}
+                  Choose the nearest region, paste your Sandbox API Key, and save it. The key is encrypted before it is stored.
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
@@ -969,7 +781,6 @@ function SandboxAPIKeyCard({
                 onValueChange={(regionID) => {
                   const region = sandboxRegions.find((region) => region.id === regionID)
                   setAPIURL(region?.apiURL ?? "")
-                  setCustomAPIURLOpen(false)
                 }}
                 disabled={saving || deleting || credentialMode === "inherit"}
               >
@@ -989,29 +800,6 @@ function SandboxAPIKeyCard({
                   ))}
                 </SelectContent>
               </Select>
-              {!showsCustomAPIURL && credentialMode === "custom" ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setAPIURL("")
-                    setCustomAPIURLOpen(true)
-                  }}
-                  disabled={saving || deleting}
-                >
-                  <Pencil className="h-4 w-4" />
-                  Custom endpoint
-                </Button>
-              ) : null}
-              {showsCustomAPIURL && credentialMode === "custom" ? (
-                <Input
-                  value={apiURL}
-                  onChange={(event) => setAPIURL(event.target.value)}
-                  placeholder="https://sandbox.example.test"
-                  disabled={saving || deleting}
-                  autoComplete="off"
-                />
-              ) : null}
             </div>
 
             <div className="grid min-w-0 gap-2">

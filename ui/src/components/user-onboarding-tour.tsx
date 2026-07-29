@@ -22,13 +22,13 @@ type ProductTourStepID = (typeof productTourSteps)[number]["id"]
 export function UserOnboardingTour({
   locationPath,
   onboarding,
-  onNavigateAccountPreferences,
+  onNavigateRepositories,
   onStatusChange,
   replay,
 }: {
   locationPath: string
   onboarding: ProductTourOnboarding | null
-  onNavigateAccountPreferences: () => void
+  onNavigateRepositories: () => void
   onStatusChange: (state: ProductTourOnboarding) => Promise<void>
   replay: boolean
 }) {
@@ -48,7 +48,7 @@ export function UserOnboardingTour({
         },
         repositories: {
           title: "Repositories",
-          content: "See which repositories are available through the GitHub App installations connected to this account.",
+          content: "Connect GitHub repositories and see whether each account or organization has the Sandbox service needed to run.",
           placement: "bottom",
         },
         "account-menu": {
@@ -57,19 +57,19 @@ export function UserOnboardingTour({
           placement: "bottom-end",
         },
         settings: {
-          title: "Settings",
-          content: "Settings separates repository access, preferences, Sandbox templates, and running Sandbox instances by account or organization.",
+          title: "Runner readiness",
+          content: "Repository access and Sandbox service status are checked together for the selected account or organization.",
           placement: "bottom-start",
           before: async () => {
-            onNavigateAccountPreferences()
+            onNavigateRepositories()
             await waitForNextPaint()
           },
         },
         "sandbox-service": {
-          title: "Add your Sandbox API Key",
+          title: "Sandbox readiness",
           content: (
             <span>
-              Choose a region, get an API Key from the{" "}
+              Ready accounts need no action. If setup is required, use Configure Sandbox to open Settings, then choose a region and get an API Key from the{" "}
               <a
                 href="https://portal.qiniu.com/developer/user/api-key"
                 target="_blank"
@@ -79,7 +79,7 @@ export function UserOnboardingTour({
                 Qiniu portal
                 <ExternalLink className="ml-1 inline h-3.5 w-3.5" />
               </a>
-              , and save it here. The setup task stays visible until your account key is saved successfully.
+              .
             </span>
           ),
           placement: "top-start",
@@ -92,7 +92,7 @@ export function UserOnboardingTour({
         target: visibleOnboardingTarget(definition.target),
       }))
     },
-    [onNavigateAccountPreferences],
+    [onNavigateRepositories],
   )
   const { controls, Tour } = useJoyride({
     continuous: true,

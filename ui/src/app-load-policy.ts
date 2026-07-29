@@ -42,7 +42,7 @@ export function adminPollingResources(section: AdminSection): AdminDataResource[
 
 export function userDataResources(path: string): UserDataResource[] {
   if (isUserJobsRoute(path)) return ["github_app", "runner_requests", "onboarding"]
-  if (path === "/repositories") return ["github_app", "onboarding"]
+  if (path === "/repositories") return ["github_app", "preferences", "onboarding"]
   if (isAccountSettingsRoute(path)) return ["github_app", "preferences", "onboarding"]
   return []
 }

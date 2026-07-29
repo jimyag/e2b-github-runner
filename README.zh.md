@@ -71,7 +71,7 @@ cp runnerd.yaml.example runnerd.yaml
 ```
 
 5. 打开 `http://<host>:25500/`。公开产品首页提供当前 GitHub 文档入口，以及指向 `/jobs` 受保护的 Jobs 控制台入口。用户首次登录访问 `/jobs` 时，会看到介绍 Jobs、Repositories、Settings 和 Sandbox 设置的六步引导；之后可从账户菜单重播。
-6. 按照 **Settings → Preferences** 中持续显示的设置任务，保存当前账户自己的 **Sandbox Service** API Key（也可使用 `/admin/sandbox_service` 中符合条件的管理员级兜底）。
+6. 打开 **Repositories** 查看账户或组织的 **Runner readiness**。有效来源只显示状态，不提供配置控件；缺少 Sandbox 且用户可管理该 scope 时，通过 **Configure Sandbox** 进入精确的账户或组织 Settings 页面。Outside collaborator 只能看到只读提示，并联系该组织的 active member 完成配置。
 7. 在**管理控制台**中创建 **Runner Spec**，设置有意义的 label（如 `ubuntu-24-04`），填写 `template_id`，并启用 `default_available`。
 8. 配置 GitHub webhook → `POST http://<host>:25500/webhooks/github`。
 9. 在 workflow 中使用 `runs-on: [self-hosted, <your-runner-label>]`。
@@ -172,7 +172,7 @@ Runner spec、runner group 和 repository policy 通过管理 API 和控制台�
 
 - **Repository Policy**：为特定仓库授权访问默认之外的额外 spec。
 
-每个 spec 的 `template_id` 应指向包含 GitHub runner 镜像的 Qiniu Sandbox 模板。创建沙箱时会使用仓库 owner 的 Sandbox service Preferences 检查模板访问权限。
+每个 spec 的 `template_id` 应指向包含 GitHub runner 镜像的 Qiniu Sandbox 模板。创建沙箱时会使用 **Repositories → Runner readiness** 中显示的仓库 owner 有效 Sandbox service 检查模板访问权限。
 
 ## 管理控制台
 
@@ -196,7 +196,7 @@ Runner request 列表默认返回最新 100 行，单页最多 500 行，并且�
 | `github registration token: status 404`              | 设置了 `runner_group` 但仓库属于个人账号 | 清空 runner spec 中的 `runner_group`，改用仓库级注册                               |
 | 日志中出现 `invalid signature`                       | Webhook secret 不匹配                    | 确保 `github.webhook_secret` 与 GitHub App/仓库 webhook 设置中的 secret 一致       |
 | `runner start deferred ... at capacity`              | 全局或 spec 并发上限已满                 | 等待运行中的 job 完成，或调大 `max_concurrent_runners` / spec 的 `max_concurrency` |
-| 沙箱创建失败                                         | 未配置 Sandbox 服务凭据                  | 在账户/组织 Preferences 或 `/admin/sandbox_service` 管理面板中配置 API 凭据        |
+| 沙箱创建失败                                         | 仓库 owner 没有有效的 Sandbox service    | 打开 **Repositories**，选择账户或组织并完成 **Runner readiness**；管理员也可在 `/admin/sandbox_service` 配置适用的兜底 |
 
 更多本地调试步骤请参阅 [docs/zh/testing.md](docs/zh/testing.md)。
 

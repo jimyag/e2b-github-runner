@@ -30,6 +30,7 @@ type accountSandboxPreference struct {
 	ResolvedSource         string                         `json:"resolved_source"`
 	APIURL                 string                         `json:"api_url"`
 	APIKey                 accountSandboxAPIKeyPreference `json:"api_key"`
+	Manageable             bool                           `json:"manageable"`
 	Inherited              bool                           `json:"inherited"`
 	SourceAccountID        int64                          `json:"source_account_id,omitempty"`
 	SourceAccountLogin     string                         `json:"source_account_login,omitempty"`
@@ -102,7 +103,7 @@ func (s *Server) handleGitHubAppSetupRedirect(w http.ResponseWriter, r *http.Req
 			values.Set("setup_error", "invalid_state")
 		}
 	}
-	target := "/account/repositories"
+	target := "/repositories"
 	if encoded := values.Encode(); encoded != "" {
 		target += "?" + encoded
 	}
@@ -332,6 +333,11 @@ func (s *Server) handleUserPreferences(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	response.Sandbox.Manageable, err = s.accountPreferenceScopeManageable(r.Context(), account.ID, scope)
+	if err != nil {
+		s.writeUserRepositoryAuthorizationError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -343,6 +349,15 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 	scope, err := s.accountPreferenceScopeFromRequest(account.ID, r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	manageable, err := s.accountPreferenceScopeManageable(r.Context(), account.ID, scope)
+	if err != nil {
+		s.writeUserRepositoryAuthorizationError(w, err)
+		return
+	}
+	if !manageable {
+		writeError(w, http.StatusForbidden, "Sandbox service for this GitHub account is managed by its owner")
 		return
 	}
 	var input upsertSandboxConfigRequest
@@ -380,6 +395,11 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 		apiURL, err := normalizeHTTPURL(input.APIURL)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		apiURL, supported := supportedSandboxRegionEndpoint(apiURL)
+		if !supported {
+			writeError(w, http.StatusBadRequest, "unsupported sandbox region")
 			return
 		}
 		_, currentKeyErr := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeSandboxAPIKey)
@@ -445,6 +465,7 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	response.Sandbox.Manageable = true
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -458,6 +479,15 @@ func (s *Server) handleUserDeleteSandboxAPIKey(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	manageable, err := s.accountPreferenceScopeManageable(r.Context(), account.ID, scope)
+	if err != nil {
+		s.writeUserRepositoryAuthorizationError(w, err)
+		return
+	}
+	if !manageable {
+		writeError(w, http.StatusForbidden, "Sandbox service for this GitHub account is managed by its owner")
+		return
+	}
 	if err := s.store.DeleteAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeSandboxAPIKey); err != nil && !errors.Is(err, state.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -468,6 +498,7 @@ func (s *Server) handleUserDeleteSandboxAPIKey(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	response.Sandbox.Manageable = true
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -640,6 +671,74 @@ func (s *Server) accountPreferenceScopeFromRequest(accountID int64, r *http.Requ
 		return accountPreferenceScope{}, errors.New("github installation not found")
 	}
 	return accountPreferenceScope{Type: state.AccountScopeTypeGitHubInstall, ID: installation.InstallationID}, nil
+}
+
+func (s *Server) accountPreferenceScopeManageable(ctx context.Context, viewerAccountID int64, scope accountPreferenceScope) (bool, error) {
+	switch scope.Type {
+	case state.AccountScopeTypeAccount:
+		return scope.ID == viewerAccountID, nil
+	case state.AccountScopeTypeGitHubInstall:
+	default:
+		return false, nil
+	}
+
+	owner, err := s.store.GitHubInstallationAccountForInstallation(scope.ID)
+	if err != nil {
+		if !errors.Is(err, state.ErrNotFound) {
+			return false, err
+		}
+		installations, listErr := s.store.ListGitHubInstallations(viewerAccountID)
+		if listErr != nil {
+			return false, listErr
+		}
+		for _, installation := range installations {
+			if installation.InstallationID == scope.ID {
+				owner = state.GitHubInstallationAccount{
+					GitHubAccountID: installation.GitHubAccountID,
+					AccountType:     installation.AccountType,
+					AccountLogin:    installation.AccountLogin,
+				}
+				break
+			}
+		}
+	}
+
+	switch strings.ToLower(strings.TrimSpace(owner.AccountType)) {
+	case "":
+		return false, nil
+	case "user":
+		identity, err := s.store.GetOAuthIdentityForAccount(viewerAccountID, "github")
+		if err != nil {
+			return false, err
+		}
+		if owner.GitHubAccountID > 0 && strings.TrimSpace(identity.OAuthSubject) == strconv.FormatInt(owner.GitHubAccountID, 10) {
+			return true, nil
+		}
+		return strings.EqualFold(strings.TrimSpace(identity.OAuthLogin), strings.TrimSpace(owner.AccountLogin)), nil
+	case "organization":
+		if s.gh == nil {
+			return false, errors.New("github client is not configured")
+		}
+		token, err := s.githubUserAccessToken(viewerAccountID)
+		if err != nil {
+			return false, err
+		}
+		memberships, err := s.gh.ListUserOrganizationMemberships(ctx, token)
+		if err != nil {
+			return false, err
+		}
+		for _, membership := range memberships {
+			if owner.GitHubAccountID > 0 && membership.OrganizationID == owner.GitHubAccountID {
+				return true, nil
+			}
+			if strings.EqualFold(strings.TrimSpace(membership.OrganizationLogin), strings.TrimSpace(owner.AccountLogin)) {
+				return true, nil
+			}
+		}
+		return false, nil
+	default:
+		return false, nil
+	}
 }
 
 func normalizeHTTPURL(rawURL string) (string, error) {

@@ -112,6 +112,13 @@ type RegistrationToken struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
+type OrganizationMembership struct {
+	OrganizationID    int64
+	OrganizationLogin string
+	State             string
+	Role              string
+}
+
 type Runner struct {
 	ID     int64  `json:"id"`
 	Name   string `json:"name"`
@@ -409,6 +416,67 @@ func (c *Client) ListUserInstallations(ctx context.Context, token string) ([]Ins
 		nextURL = nextLink(resp.Header.Get("Link"))
 	}
 	return installations, nil
+}
+
+func (c *Client) ListUserOrganizationMemberships(ctx context.Context, token string) ([]OrganizationMembership, error) {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, fmt.Errorf("github oauth token is required")
+	}
+	nextURL := fmt.Sprintf("%s/user/memberships/orgs?state=active&per_page=100", c.baseURL)
+	var memberships []OrganizationMembership
+	for nextURL != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, nextURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		setGitHubHeaders(req)
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := c.userHTTP.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read github user organization memberships response: %w", readErr)
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, &apiError{
+				Operation:          "github user organization memberships",
+				StatusCode:         resp.StatusCode,
+				Body:               strings.TrimSpace(string(body)),
+				RetryAfter:         resp.Header.Get("Retry-After"),
+				RateLimitRemaining: resp.Header.Get("X-RateLimit-Remaining"),
+			}
+		}
+		var out []struct {
+			State        string `json:"state"`
+			Role         string `json:"role"`
+			Organization struct {
+				ID    int64  `json:"id"`
+				Login string `json:"login"`
+			} `json:"organization"`
+		}
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, err
+		}
+		for _, item := range out {
+			state := strings.ToLower(strings.TrimSpace(item.State))
+			login := strings.TrimSpace(item.Organization.Login)
+			if state != "active" || item.Organization.ID <= 0 || login == "" {
+				continue
+			}
+			memberships = append(memberships, OrganizationMembership{
+				OrganizationID:    item.Organization.ID,
+				OrganizationLogin: login,
+				State:             state,
+				Role:              strings.ToLower(strings.TrimSpace(item.Role)),
+			})
+		}
+		nextURL = nextLink(resp.Header.Get("Link"))
+	}
+	return memberships, nil
 }
 
 func normalizeGitHubAccountType(value string) string {

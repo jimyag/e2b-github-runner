@@ -56,7 +56,7 @@ export function AccountMenu({
         <DropdownMenuLabel className="truncate">{login}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <a href="/account/repositories">
+          <a href="/account/preferences">
             <Settings className="h-4 w-4" />
             Settings
           </a>

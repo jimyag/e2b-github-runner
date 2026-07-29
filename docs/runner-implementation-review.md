@@ -13,7 +13,7 @@ Scope:
 
 Runnerd has moved past the original 2026-05-19 gap list. Runtime configuration is now file-first, runner state is DB-backed, schema creation is mostly driven by GORM model tags, retry/lease/audit fields exist, GitHub App auth can resolve installations dynamically, the ordinary-user UI covers job/repository/account setup flows, the admin console covers the core management workflow including audited account-role changes, diagnostics expose pprof/expvar state, and the documented local workflow includes `task dev`.
 
-The remaining work is no longer a basic architecture catch-up. The next decisions are product and operations hardening: whether to keep token/basic auth as local compatibility modes, whether Activity repositories should include policy-configured repositories before jobs are observed, how much config management belongs in the admin console, and consistently executing and maintaining the canonical deployment smoke checklist before treating the service as production-ready.
+The remaining work is no longer a basic architecture catch-up. The next decisions are product and operations hardening: whether to keep token/basic auth as local compatibility modes, how much config management belongs in the admin console, and consistently executing and maintaining the canonical deployment smoke checklist before treating the service as production-ready.
 
 ## Current Baseline
 
@@ -25,7 +25,7 @@ The remaining work is no longer a basic architecture catch-up. The next decision
 - Worker processing uses DB claim/lease semantics and retry scheduling instead of only in-memory queue ownership.
 - Transient Qiniu sandbox, GitHub, rate-limit, timeout, and temporary network failures are classified for retry or queue deferral. Deterministic auth/config/template failures fail immediately.
 - Admin routes expose the account list and audited role controls at `/admin/accounts` and `/admin/api/accounts`, runner request management, retry/stop/log access, runner specs, runner groups, repository policies, match tests, audit events, and diagnostics. Account administration is role-only; self-role changes and changes that could leave no administrator are rejected.
-- Ordinary-user routes expose the PR/job dashboard at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, local activity repositories at `/repositories`, GitHub App account setup at `/account/repositories`, account or organization Sandbox service Preferences at `/account/preferences` and `/organizations/{login}/preferences`, and scoped Sandbox resource catalogs at `/account/sandbox-templates`, `/account/sandbox-instances`, and their organization equivalents.
+- Ordinary-user routes expose the PR/job dashboard at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, and unified repository/Sandbox readiness at `/repositories`. `/account/repositories` and `/organizations/{login}/repositories` remain scoped compatibility links to that page. Sandbox Service, Templates, and Instances remain available under account or organization settings routes.
 - The admin console exposes `/admin/sandbox_service` and role-gated `/admin/api/sandbox-service-default` endpoints for the global fallback, including all/selected repository-owner audience controls; provider catalogs remain ordinary-user resources.
 - Authenticated catalog APIs expose region-filtered templates and region/template-filtered runner instances through `/user/sandbox/templates` and `/user/sandbox/instances`. They resolve encrypted credentials from the selected account or installation scope and do not expose provider secrets.
 - The React UI in `ui/` is embedded for production from `internal/server/ui/*`; development builds proxy UI assets to Vite through `internal/server/ui_assets_development.go`.
@@ -38,9 +38,9 @@ The remaining work is no longer a basic architecture catch-up. The next decision
 
 Token and basic auth are still supported alongside GitHub App auth. That is useful for local verification or legacy credentials, but it means the product is not GitHub-App-only. Decide whether these modes are intentional compatibility paths or should be removed before production hardening.
 
-### 2. Ordinary-User Repository Scope
+### 2. Ordinary-User Repository Readiness
 
-The ordinary-user UI is now routed outside `/admin/*`. Activity repositories currently come from runnerd-observed jobs, while authorized repositories can be loaded on demand from GitHub App installations. Decide whether the Activity repositories view should also include repository-policy configured repositories before any jobs have been observed.
+The ordinary-user UI is now routed outside `/admin/*`. `/repositories` lists every repository in the user/GitHub App authorization intersection, annotates local job activity without hiding repositories that have not run, and shows the effective Sandbox service source for the selected account or organization. When no effective source exists, a manageable scope links to its account or organization Preferences page; credentials are edited only in Settings.
 
 ### 3. Config Management
 
@@ -63,10 +63,9 @@ The current migration path intentionally avoids a full handwritten migration his
 1. Keep `task dev`, `task build`, `task lint`, and `task test` green on every branch that touches backend/UI boundaries.
 2. Run and maintain the deployment smoke checklist using a real GitHub App, one repository, and one Qiniu sandbox template.
 3. Decide whether token/basic auth remain supported modes.
-4. Decide whether Activity repositories should include policy-configured repositories before jobs are observed.
-5. Add an effective-config diagnostics view only after the desired config operations model is clear.
-6. Stress DB lease behavior with concurrent runnerd processes before advertising multi-instance support.
-7. Preserve old-schema upgrade coverage whenever state records or GORM migration tags change.
+4. Add an effective-config diagnostics view only after the desired config operations model is clear.
+5. Stress DB lease behavior with concurrent runnerd processes before advertising multi-instance support.
+6. Preserve old-schema upgrade coverage whenever state records or GORM migration tags change.
 
 ## Verification Notes
 

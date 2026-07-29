@@ -20,7 +20,7 @@ runnerd 是单个 Go 服务：接收 GitHub `workflow_job` webhooks，根据 rep
 - DB claim/lease processing，带 retry metadata（`retry_count`、`next_retry_at`、`lease_owner`、`lease_expires_at`）。
 - GitHub App auth 支持可选 dynamic installation resolution，同时保留 token 和 basic auth compatibility modes。
 - GitHub App OAuth 用于普通用户和管理员登录，本地 roles 决定管理权限，session 使用 signed HttpOnly cookie。
-- Ordinary-user UI 支持 PR/job views、local activity repositories、GitHub App installations、authorized repositories、account 或 organization scoped Sandbox service Preferences，以及 scoped Sandbox template 和 runner-instance catalogs。
+- Ordinary-user UI 支持 PR/job views、统一的 repository access 与有效 Sandbox service readiness 页面、account 或 organization scoped Sandbox service settings，以及 scoped Sandbox template 和 runner-instance catalogs。
 - Admin API 和 UI 支持账户列表与带审计的角色控制、runner requests、specs、groups、policies、全局 Sandbox service fallback、retry/stop actions、match tests、audit history 和 diagnostics。
 - Production UI assets 从 `ui/` 构建到 `internal/server/ui/`；development assets 代理到 Vite。
 - 通过 `github.com/jimmicro/pprof`、`/diagnostics/pprof`、`/diagnostics/vars` 和 expvar metrics 提供 diagnostics。
@@ -278,7 +278,7 @@ Admin UI 应展示 diagnostics summaries，而不是把 raw pprof 直接暴露�
 ## 剩余设计决策
 
 - 决定 GitHub token 和 basic auth 是继续作为 supported compatibility modes，还是为 production 移除。
-- 决定 ordinary-user Activity repositories 是否应在 runnerd 观察到 jobs 前包含 policy-configured repositories。
+- 保持 `/repositories` 作为 canonical readiness surface：展示用户与 GitHub App 的 authorized repository intersection、标注本地 job activity，并把缺失且可管理的 Sandbox 来源链接到对应 scoped Preferences editor。
 - 只有当 operators 需要 UI-based runtime config inspection 时，才添加 effective-config 或 config-validation workflow。
 - 在记录 multi-instance support 前，用两个 runnerd 进程共享同一个 database 验证 lease behavior。
 - 决定 expvar 是否足够，或是否需要 Prometheus/export adapter。
