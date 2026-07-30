@@ -125,11 +125,14 @@ Suggested setup:
    - Click `Install App`
    - Choose the target owner
    - Choose the repositories to authorize
+   - If `Members: Read-only` was added to an existing App, each installation owner must approve the permission update before organization Settings become manageable
 7. Record:
    - App ID
    - App slug, the short name in the App URL such as `https://github.com/apps/<slug>`
    - Installation ID, optional; when omitted, runnerd resolves it dynamically by repository
    - private key file path
+
+After an installation owner approves `Members: Read-only`, reload `/account/preferences`. An organization where the signed-in user has an active membership should appear in the Settings scope list and open `/organizations/{login}/preferences`. Repository-only collaborators can still see authorized repositories under `/repositories`, but the organization must remain absent from Settings. If an eligible organization is still missing after approval, sign out and complete GitHub OAuth again before retrying.
 
 Put the values into `runnerd.yaml`:
 
