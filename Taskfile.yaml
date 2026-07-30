@@ -53,6 +53,14 @@ tasks:
       - bun run lint
       - bun run build
 
+  ui-production-smoke:
+    desc: Run the production UI bundle in headless Chromium
+    dir: ui
+    cmds:
+      - bun install --frozen-lockfile
+      - bunx playwright install chromium
+      - bun run test:production
+
   lint:
     desc: Run staticcheck, formatting checks, goimports checks, and go vet
     deps:

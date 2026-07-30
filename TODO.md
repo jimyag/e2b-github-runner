@@ -9,6 +9,7 @@ This file tracks active project work. Completed behavior should move into `READM
 - Add an effective-config diagnostics view or config validation workflow if operators need to inspect runtime config from the UI.
 - Verify DB lease behavior with two runnerd processes sharing the same database before documenting multi-instance support.
 - Decide whether expvar diagnostics need a Prometheus/export adapter or histogram-style latency views for deployment observability.
+- After the `ui-production-smoke` check has reported on `main`, enable it as a required status check in branch protection; the repository currently has no required status checks.
 - Keep old-schema upgrade coverage whenever state records or GORM tags change; the current migration path is a narrow legacy compatibility pass followed by `AutoMigrate`, with additive-only handling for existing SQLite `runner_requests`, not a full handwritten migration history.
 
 ## Maintenance

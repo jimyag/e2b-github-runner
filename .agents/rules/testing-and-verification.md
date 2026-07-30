@@ -58,6 +58,9 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
 - For focused UI unit tests, run `cd ui && bun run test`.
 - For UI source changes, run `task ui-lint` or `task build` depending on scope.
 - Use `task build` when verifying production embedded UI behavior.
+- Run `task ui-production-smoke` after changing UI dependencies, Vite/Rollup configuration, manual chunking, or production asset loading. The smoke must execute the built bundle in Chromium and fail on page errors, console errors, failed script/style requests, an empty root, or a missing public landing-page heading.
+- Use `RUNNERD_UI_SMOKE_PORT=<free-port> task ui-production-smoke` when port `4173` is occupied. Use `RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host> task ui-production-smoke` for a post-deploy browser canary.
+- Keep Rollup `CIRCULAR_CHUNK` and `CYCLIC_CROSS_CHUNK_REEXPORT` warnings fatal. Do not suppress or broadly allowlist them when changing manual chunk rules.
 - Use the real ordinary-user entries `/`, `/repositories`, `/account/repositories`, `/account/preferences`, `/account/sandbox-templates`, and `/account/sandbox-instances` when changing user UI. Also exercise the corresponding `/organizations/{login}/...` route when scope resolution changes.
 - Use the real admin entries `/admin/`, `/admin/accounts`, and `/admin/sandbox_service`; do not assume the `ui/` tree is all admin-only.
 - For account-role changes, verify global statistics, linked identity/avatar fallback, search, role filters, pagination, self-role protection, immediate authorization changes, and `account.role.update` audit events. Backend tests must also cover atomic audit rollback and concurrent demotions preserving at least one administrator.
@@ -80,6 +83,7 @@ Keep `SMEE_TARGET` aligned with the runnerd port when testing webhook forwarding
 
 - Dockerfile-only validation: `task docker-check`.
 - Local binary and embedded UI: `task build`.
+- Production UI bundle execution: `task ui-production-smoke`.
 - GoReleaser config: `task release-check`.
 - Snapshot release behavior: `task release-snapshot`.
 - Template changes may require the relevant `template-*` or `qbox-kodo-*` task.
