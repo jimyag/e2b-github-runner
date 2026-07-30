@@ -94,6 +94,9 @@ func (s *Server) processQueuedRequests(ctx context.Context) {
 }
 
 func (s *Server) refreshMetrics() {
+	if s.recoveryMetricsDeferred.Load() > 0 {
+		return
+	}
 	profiles, err := s.store.ListProfiles()
 	if err != nil {
 		s.logger.Error("refresh metrics list profiles", "error", err)

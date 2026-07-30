@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/qiniu/ci-runner/internal/config"
@@ -40,6 +42,8 @@ type Server struct {
 	loopCtx     context.Context
 	loopCancel  context.CancelFunc
 	loopWG      sync.WaitGroup
+
+	recoveryMetricsDeferred atomic.Int32
 
 	pullTitleMu    sync.Mutex
 	pullTitleCache map[string]cachedPullTitle
@@ -117,6 +121,8 @@ const (
 	defaultRunnerRequestListLimit = 100
 	maxRunnerRequestListLimit     = 500
 	maxUserRunnerHistoryWindow    = 500
+	maxConcurrentRecoveries       = 4
+	maxSingleRecoveryTimeout      = 30 * time.Second
 	oauthStateCookieName          = "runnerd_oauth_state"
 	oauthReturnToCookieName       = "runnerd_oauth_return_to"
 	githubAppSetupStateCookieName = "runnerd_github_app_setup_state"
@@ -217,20 +223,114 @@ func (s *Server) Start() {
 }
 
 func (s *Server) Recover(ctx context.Context) error {
+	s.recoveryMetricsDeferred.Add(1)
+	defer func() {
+		if s.recoveryMetricsDeferred.Add(-1) == 0 {
+			s.refreshMetrics()
+		}
+	}()
+
 	states, err := s.store.ListActiveStates()
 	if err != nil {
 		return err
 	}
 	s.logger.Info("recovering runner state", "count", len(states))
+	active := make([]state.RunnerState, 0, len(states))
 	for _, st := range states {
-		if !isActiveStatus(st.Status) {
-			continue
-		}
-		if err := s.recoverRunner(ctx, st.ID); err != nil {
-			return err
+		if isActiveStatus(st.Status) {
+			active = append(active, st)
 		}
 	}
-	return nil
+	if len(active) == 0 {
+		return nil
+	}
+
+	workerCount := min(maxConcurrentRecoveries, len(active))
+	if _, ok := s.recoveryTimeoutPerRunner(ctx, len(active), workerCount); !ok {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("recovery budget exhausted before dispatch: %w", err)
+		}
+		return errors.New("recovery budget exhausted before dispatch")
+	}
+	type recoveryJob struct {
+		state             state.RunnerState
+		remainingRequests int
+	}
+	jobs := make(chan recoveryJob)
+	recoveryErrors := make(chan error, len(active))
+	var workers sync.WaitGroup
+	for range workerCount {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for job := range jobs {
+				if err := ctx.Err(); err != nil {
+					recoveryErrors <- fmt.Errorf("recover runner %s skipped: %w", job.state.ID, err)
+					continue
+				}
+				perRunnerTimeout, ok := s.recoveryTimeoutPerRunner(ctx, job.remainingRequests, workerCount)
+				if !ok {
+					recoveryErrors <- fmt.Errorf("recover runner %s skipped: recovery budget exhausted", job.state.ID)
+					continue
+				}
+				runnerCtx, cancel := context.WithTimeout(ctx, perRunnerTimeout)
+				err := s.recoverRunner(runnerCtx, job.state.ID)
+				cancel()
+				if err != nil {
+					recoveryErrors <- fmt.Errorf("recover runner %s: %w", job.state.ID, err)
+				}
+			}
+		}()
+	}
+dispatch:
+	for i, st := range active {
+		select {
+		case jobs <- recoveryJob{state: st, remainingRequests: len(active) - i}:
+		case <-ctx.Done():
+			for _, skipped := range active[i:] {
+				recoveryErrors <- fmt.Errorf("recover runner %s skipped: %w", skipped.ID, ctx.Err())
+			}
+			break dispatch
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	close(recoveryErrors)
+
+	var joined []error
+	for err := range recoveryErrors {
+		joined = append(joined, err)
+	}
+	return errors.Join(joined...)
+}
+
+func (s *Server) recoveryTimeoutPerRunner(ctx context.Context, requestCount, workerCount int) (time.Duration, bool) {
+	if requestCount <= 0 || workerCount <= 0 {
+		return 0, false
+	}
+	budget := s.cfg.RecoveryTimeout
+	deadline, hasDeadline := ctx.Deadline()
+	if hasDeadline {
+		remaining := time.Until(deadline)
+		if budget <= 0 || remaining < budget {
+			budget = remaining
+		}
+	}
+	if budget <= 0 {
+		if !hasDeadline {
+			return maxSingleRecoveryTimeout, true
+		}
+		return 0, false
+	}
+	waves := (requestCount + workerCount - 1) / workerCount
+	timeout := budget / time.Duration(waves)
+	if timeout <= 0 {
+		return 0, false
+	}
+	if timeout > maxSingleRecoveryTimeout {
+		return maxSingleRecoveryTimeout, true
+	}
+	return timeout, true
 }
 
 func (s *Server) routes() {

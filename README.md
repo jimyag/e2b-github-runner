@@ -26,7 +26,7 @@ The Qiniu CI Runner control plane is open source. Qiniu Sandbox, where workflow 
 - **Concurrency control** — global `max_concurrent_runners` and per-spec `max_concurrency` with queue-based backpressure
 - **Built-in web UI** — admin console for runner specs, groups, policies, accounts, and diagnostics; ordinary-user console for job groups, logs, and sandbox management
 - **Config obfuscation** — sensitive values can be hidden from casual config inspection
-- **Retry & recovery** — transient failures are retried with backoff; capacity signals defer without dropping requests
+- **Retry & recovery** — transient failures are retried with backoff; queued work and active remote runners are recovered after a service restart
 
 ## How It Works
 

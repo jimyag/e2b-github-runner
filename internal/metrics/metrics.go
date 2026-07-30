@@ -3,6 +3,7 @@ package metrics
 import (
 	"expvar"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/qiniu/ci-runner/internal/state"
@@ -41,6 +42,7 @@ var (
 	workflowRunCount     = expvar.NewMap("github_workflow_job_run_duration_count")
 	runnerRequestsTotal  = expvar.NewMap("e2b_runner_requests_total")
 	lastReconcileUnix    = expvar.NewInt("e2b_runner_last_reconcile_unix")
+	refreshMu            sync.Mutex
 )
 
 func Refresh(profiles []state.RunnerProfile, states []state.RunnerState) {
@@ -81,6 +83,8 @@ func Refresh(profiles []state.RunnerProfile, states []state.RunnerState) {
 			leases[st.LeaseOwner]++
 		}
 	}
+	refreshMu.Lock()
+	defer refreshMu.Unlock()
 	profileCurrent.Init()
 	profileBusy.Init()
 	profileIdle.Init()

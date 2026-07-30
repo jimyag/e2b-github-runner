@@ -36,16 +36,27 @@ import (
 )
 
 type fakeSandbox struct {
-	mu             sync.Mutex
-	started        int
-	stopped        int
-	terminals      int
-	startBlock     chan struct{}
-	stopErr        error
-	commandContext context.Context
-	repositoryURL  string
-	runnerGroup    string
-	terminal       *fakeTerminalSession
+	mu                 sync.Mutex
+	started            int
+	recovered          int
+	stopped            int
+	terminals          int
+	startBlock         chan struct{}
+	recoverBlock       chan struct{}
+	recoverStarted     chan string
+	recoverHook        func(sandboxrunner.RecoverInput)
+	recoverContextHook func(context.Context, sandboxrunner.RecoverInput)
+	recoverErr         error
+	recoverErrors      map[string]error
+	recoverResult      sandboxrunner.StartResult
+	recoverInput       sandboxrunner.RecoverInput
+	recoverInFlight    int
+	maxRecoverInFlight int
+	stopErr            error
+	commandContext     context.Context
+	repositoryURL      string
+	runnerGroup        string
+	terminal           *fakeTerminalSession
 }
 
 type blockingSandboxDefaultStore struct {
@@ -85,6 +96,52 @@ func (f *fakeSandbox) StartRunner(ctx context.Context, input sandboxrunner.Start
 	}
 	input.OnStdout([]byte("started\n"))
 	return sandboxrunner.StartResult{SandboxID: "sb-" + input.RequestID, PID: 42}, nil
+}
+
+func (f *fakeSandbox) RecoverRunner(ctx context.Context, input sandboxrunner.RecoverInput) (sandboxrunner.StartResult, error) {
+	f.mu.Lock()
+	f.recovered++
+	f.recoverInput = input
+	f.recoverInFlight++
+	if f.recoverInFlight > f.maxRecoverInFlight {
+		f.maxRecoverInFlight = f.recoverInFlight
+	}
+	block := f.recoverBlock
+	started := f.recoverStarted
+	hook := f.recoverHook
+	contextHook := f.recoverContextHook
+	result := f.recoverResult
+	err := f.recoverErrors[input.RequestID]
+	if err == nil {
+		err = f.recoverErr
+	}
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.recoverInFlight--
+		f.mu.Unlock()
+	}()
+
+	if started != nil {
+		started <- input.RequestID
+	}
+	if contextHook != nil {
+		contextHook(ctx, input)
+	}
+	if block != nil {
+		select {
+		case <-block:
+		case <-ctx.Done():
+			return sandboxrunner.StartResult{}, ctx.Err()
+		}
+	}
+	if hook != nil {
+		hook(input)
+	}
+	if result.SandboxID == "" {
+		result = sandboxrunner.StartResult{SandboxID: input.SandboxID, PID: input.PID}
+	}
+	return result, err
 }
 
 func (f *fakeSandbox) StopRunner(ctx context.Context, sandboxID string, pid uint32) error {
@@ -184,6 +241,24 @@ func (f *fakeSandbox) stoppedCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.stopped
+}
+
+func (f *fakeSandbox) recoveredCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.recovered
+}
+
+func (f *fakeSandbox) maxRecoveredInFlight() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.maxRecoverInFlight
+}
+
+func (f *fakeSandbox) lastRecoverInput() sandboxrunner.RecoverInput {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.recoverInput
 }
 
 func (f *fakeSandbox) lastCommandContext() context.Context {
@@ -4874,7 +4949,7 @@ func TestStopDuringCreateCleansStartedSandbox(t *testing.T) {
 	}
 }
 
-func TestRecoverStopsActiveRunnerState(t *testing.T) {
+func TestRecoverReattachesActiveRunnerState(t *testing.T) {
 	store := state.New(t.TempDir())
 	_, st, err := store.CreateRequest(state.RunnerRequest{
 		ID:         "recover-1",
@@ -4888,11 +4963,13 @@ func TestRecoverStopsActiveRunnerState(t *testing.T) {
 	st.Status = state.StatusRunning
 	st.SandboxID = "sb-recover-1"
 	st.ProcessPID = 42
+	st.RunningAt = time.Now().UTC().Add(-5 * time.Minute)
 	if err := store.WriteState(st); err != nil {
 		t.Fatal(err)
 	}
 	fake := &fakeSandbox{}
 	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
 	if err := srv.Recover(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -4900,18 +4977,853 @@ func TestRecoverStopsActiveRunnerState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != state.StatusFailed {
-		t.Fatalf("expected recovered state to be failed, got %s", got.Status)
+	if got.Status != state.StatusRunning {
+		t.Fatalf("expected recovered state to remain running, got %s", got.Status)
 	}
-	if got.FailureStage != "recovery" || got.FailureReason != "interrupted_runner" {
-		t.Fatalf("unexpected recovery failure metadata: %#v", got)
+	if got.SandboxID != "sb-recover-1" || got.ProcessPID != 42 {
+		t.Fatalf("unexpected recovered runner identity: %#v", got)
 	}
-	if fake.stoppedCount() != 1 {
-		t.Fatalf("expected recovery to stop sandbox once, got %d", fake.stoppedCount())
+	if fake.recoveredCount() != 1 {
+		t.Fatalf("expected recovery to reconnect sandbox once, got %d", fake.recoveredCount())
+	}
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("expected recovery to preserve sandbox, got %d stops", fake.stoppedCount())
+	}
+	input := fake.lastRecoverInput()
+	if input.SandboxID != "sb-recover-1" || input.PID != 42 {
+		t.Fatalf("unexpected recover input: %#v", input)
+	}
+	if input.Timeout <= 0 || input.Timeout >= time.Hour {
+		t.Fatalf("expected remaining sandbox timeout, got %s", input.Timeout)
 	}
 }
 
-func TestRecoverSchedulesRetryWhenGitHubRunnerBusy(t *testing.T) {
+func TestRecoverUsesBoundedConcurrency(t *testing.T) {
+	store := state.New(t.TempDir())
+	const runnerCount = maxConcurrentRecoveries + 2
+	for i := range runnerCount {
+		id := fmt.Sprintf("recover-concurrent-%d", i)
+		_, st, err := store.CreateRequest(state.RunnerRequest{
+			ID:         id,
+			Source:     "test",
+			Labels:     []string{"self-hosted"},
+			RunnerName: "e2b-" + id,
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Status = state.StatusRunning
+		st.SandboxID = "sb-" + id
+		st.ProcessPID = uint32(100 + i)
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	block := make(chan struct{})
+	started := make(chan string, runnerCount)
+	fake := &fakeSandbox{recoverBlock: block, recoverStarted: started}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	done := make(chan error, 1)
+	go func() {
+		done <- srv.Recover(context.Background())
+	}()
+
+	for range maxConcurrentRecoveries {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for concurrent recovery")
+		}
+	}
+	select {
+	case id := <-started:
+		t.Fatalf("recovery exceeded concurrency limit with %s", id)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := fake.maxRecoveredInFlight(); got != maxConcurrentRecoveries {
+		t.Fatalf("max recovery concurrency = %d, want %d", got, maxConcurrentRecoveries)
+	}
+
+	close(block)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.recoveredCount(); got != runnerCount {
+		t.Fatalf("recovered runners = %d, want %d", got, runnerCount)
+	}
+}
+
+func TestRecoverStopsDispatchingWhenContextIsCanceled(t *testing.T) {
+	store := state.New(t.TempDir())
+	const runnerCount = maxConcurrentRecoveries + 2
+	for i := range runnerCount {
+		id := fmt.Sprintf("recover-canceled-%d", i)
+		_, st, err := store.CreateRequest(state.RunnerRequest{
+			ID:         id,
+			Source:     "test",
+			Labels:     []string{"self-hosted"},
+			RunnerName: "e2b-" + id,
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Status = state.StatusRunning
+		st.SandboxID = "sb-" + id
+		st.ProcessPID = uint32(100 + i)
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	block := make(chan struct{})
+	started := make(chan string, runnerCount)
+	fake := &fakeSandbox{recoverBlock: block, recoverStarted: started}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- srv.Recover(ctx)
+	}()
+	for range maxConcurrentRecoveries {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for concurrent recovery")
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected canceled recovery, got %v", err)
+		}
+		for i := maxConcurrentRecoveries; i < runnerCount; i++ {
+			id := fmt.Sprintf("recover-canceled-%d", i)
+			if !strings.Contains(err.Error(), id) {
+				t.Fatalf("canceled recovery error does not identify skipped runner %s: %v", id, err)
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("recovery did not stop promptly after cancellation")
+	}
+	if got := fake.recoveredCount(); got != maxConcurrentRecoveries {
+		t.Fatalf("recovered runners after cancellation = %d, want %d", got, maxConcurrentRecoveries)
+	}
+}
+
+func TestRecoverSkipsDispatchWhenBudgetExpired(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-expired-budget",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-expired-budget",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-expired-budget"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if err := srv.Recover(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected expired recovery budget, got %v", err)
+	}
+	if got := fake.recoveredCount(); got != 0 {
+		t.Fatalf("recovered runners with expired budget = %d, want 0", got)
+	}
+}
+
+func TestRecoverTimeoutPerRunnerSharesWholeStartupBudget(t *testing.T) {
+	srv := &Server{cfg: config.Config{RecoveryTimeout: 120 * time.Second}}
+	if got, ok := srv.recoveryTimeoutPerRunner(context.Background(), 100, 4); !ok || got != 4800*time.Millisecond {
+		t.Fatalf("100-request timeout = %s, want 4.8s", got)
+	}
+	if got, ok := srv.recoveryTimeoutPerRunner(context.Background(), 4, 4); !ok || got != maxSingleRecoveryTimeout {
+		t.Fatalf("single-wave timeout = %s, want %s", got, maxSingleRecoveryTimeout)
+	}
+	srv.cfg.RecoveryTimeout = 20 * time.Second
+	if got, ok := srv.recoveryTimeoutPerRunner(context.Background(), 8, 4); !ok || got != 10*time.Second {
+		t.Fatalf("two-wave timeout = %s, want 10s", got)
+	}
+	expiredCtx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if got, ok := srv.recoveryTimeoutPerRunner(expiredCtx, 1, 1); ok || got != 0 {
+		t.Fatalf("expired timeout = %s, ok = %t, want no budget", got, ok)
+	}
+}
+
+func TestRemainingSandboxTimeoutClampsFutureStartTime(t *testing.T) {
+	srv := &Server{cfg: config.Config{SandboxTimeout: time.Hour}}
+	now := time.Now().UTC()
+	st := state.RunnerState{RunningAt: now.Add(5 * time.Minute)}
+	if got := srv.remainingSandboxTimeout(st, now); got != time.Hour {
+		t.Fatalf("future-start timeout = %s, want %s", got, time.Hour)
+	}
+	st.RunningAt = now.Add(-10 * time.Minute)
+	if got := srv.remainingSandboxTimeout(st, now); got != 50*time.Minute {
+		t.Fatalf("elapsed timeout = %s, want 50m", got)
+	}
+}
+
+func TestRecoverRedistributesRemainingBudget(t *testing.T) {
+	store := state.New(t.TempDir())
+	const runnerCount = maxConcurrentRecoveries * 2
+	for i := range runnerCount {
+		id := fmt.Sprintf("recover-budget-%d", i)
+		_, st, err := store.CreateRequest(state.RunnerRequest{
+			ID:         id,
+			Source:     "test",
+			Labels:     []string{"self-hosted"},
+			RunnerName: "e2b-" + id,
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Status = state.StatusRunning
+		st.SandboxID = "sb-" + id
+		st.ProcessPID = uint32(100 + i)
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var mu sync.Mutex
+	var timeouts []time.Duration
+	fake := &fakeSandbox{recoverContextHook: func(ctx context.Context, _ sandboxrunner.RecoverInput) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Error("recovery context has no deadline")
+			return
+		}
+		mu.Lock()
+		timeouts = append(timeouts, time.Until(deadline))
+		mu.Unlock()
+	}}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	srv.cfg.RecoveryTimeout = 20 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := srv.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(timeouts) != runnerCount {
+		t.Fatalf("recovery timeouts = %d, want %d", len(timeouts), runnerCount)
+	}
+	minTimeout, maxTimeout := timeouts[0], timeouts[0]
+	for _, timeout := range timeouts[1:] {
+		minTimeout = min(minTimeout, timeout)
+		maxTimeout = max(maxTimeout, timeout)
+	}
+	if maxTimeout-minTimeout < 5*time.Second {
+		t.Fatalf("remaining budget was not redistributed: min=%s max=%s", minTimeout, maxTimeout)
+	}
+}
+
+func TestRecoverDoesNotOverwriteConcurrentStateChange(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-version-conflict",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-version-conflict",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-version-conflict"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	exitDone := make(chan struct{})
+	var hookErr error
+	fake := &fakeSandbox{recoverHook: func(input sandboxrunner.RecoverInput) {
+		latest, err := store.ReadState(st.ID)
+		if err != nil {
+			hookErr = err
+			return
+		}
+		latest.Status = state.StatusStopping
+		hookErr = store.WriteState(latest)
+		go func() {
+			input.OnExit(sandboxrunner.ExitResult{ExitCode: 1}, errors.New("discarded watcher exit"))
+			close(exitDone)
+		}()
+	}}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if hookErr != nil {
+		t.Fatal(hookErr)
+	}
+	select {
+	case <-exitDone:
+	case <-time.After(time.Second):
+		t.Fatal("discarded recovery exit watcher was not released")
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusStopping {
+		t.Fatalf("expected concurrent state change to win, got %#v", got)
+	}
+	logData, err := store.ReadLog(st.ID, "control.log", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logData), "runner reconnect result discarded after concurrent state change") {
+		t.Fatalf("expected discarded reconnect diagnostic, got %q", logData)
+	}
+}
+
+func TestRecoverStopsRunnerPastSandboxTimeout(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-sandbox-timeout",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-sandbox-timeout",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-sandbox-timeout"
+	st.ProcessPID = 42
+	st.RunningAt = time.Now().UTC().Add(-2 * time.Hour)
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.cfg.SandboxTimeout = time.Hour
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusFailed || got.FailureStage != "sandbox_timeout" || got.FailureReason != "timeout" {
+		t.Fatalf("expected sandbox timeout failure, got %#v", got)
+	}
+	if fake.stoppedCount() != 1 || fake.recoveredCount() != 0 {
+		t.Fatalf("expected timed-out sandbox stop without reconnect, stopped=%d recovered=%d", fake.stoppedCount(), fake.recoveredCount())
+	}
+}
+
+func TestRecoverReattachesRunnerWhenWorkflowJobLookupFails(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/jobs/123" {
+			http.Error(w, `{"message":"temporary failure"}`, http.StatusInternalServerError)
+			return
+		}
+		t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "recover-after-github-error",
+		Source:             "test",
+		RepositoryFullName: "o/r",
+		JobID:              123,
+		Labels:             []string{"self-hosted"},
+		RunnerName:         "e2b-recover-after-github-error",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-after-github-error"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusRunning || fake.recoveredCount() != 1 || fake.stoppedCount() != 0 {
+		t.Fatalf("expected sandbox reconnect after github lookup failure, state=%#v recovered=%d stopped=%d", got, fake.recoveredCount(), fake.stoppedCount())
+	}
+}
+
+func TestRecoverCleansUpCompletedWorkflowJob(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/jobs/123":
+			w.Write([]byte(`{"id":123,"name":"build","status":"completed","conclusion":"success"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/runners":
+			w.Write([]byte(`{"runners":[]}`))
+		default:
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "recover-completed-job",
+		Source:             "test",
+		RepositoryFullName: "o/r",
+		JobID:              123,
+		Labels:             []string{"self-hosted"},
+		RunnerName:         "e2b-recover-completed-job",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-completed-job"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusCompleted {
+		t.Fatalf("expected completed workflow job cleanup, got %#v", got)
+	}
+	if fake.recoveredCount() != 0 || fake.stoppedCount() != 1 {
+		t.Fatalf("expected completed workflow job to stop without reconnect, recovered=%d stopped=%d", fake.recoveredCount(), fake.stoppedCount())
+	}
+}
+
+func TestRecoverRequeuesQueuedRunner(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-queued",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-queued",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.LeaseOwner = "old-worker"
+	st.LeaseExpiresAt = time.Now().UTC().Add(time.Minute)
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState("recover-queued")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusQueued || got.LeaseOwner != "" || !got.LeaseExpiresAt.IsZero() {
+		t.Fatalf("expected queued request with cleared lease, got %#v", got)
+	}
+	if fake.recoveredCount() != 0 || fake.stoppedCount() != 0 {
+		t.Fatalf("queued recovery touched sandbox: recovered=%d stopped=%d", fake.recoveredCount(), fake.stoppedCount())
+	}
+}
+
+func TestRecoverPromotesCreatingRunner(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-creating",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-creating",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusCreating
+	st.CreatingAt = time.Now().UTC().Add(-time.Minute)
+	st.LeaseOwner = "old-worker"
+	st.LeaseExpiresAt = time.Now().UTC().Add(time.Minute)
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{recoverResult: sandboxrunner.StartResult{SandboxID: "sb-discovered", PID: 77}}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState("recover-creating")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusRunning || got.SandboxID != "sb-discovered" || got.ProcessPID != 77 {
+		t.Fatalf("expected discovered runner to be restored, got %#v", got)
+	}
+	if got.LeaseOwner != "" || !got.LeaseExpiresAt.IsZero() {
+		t.Fatalf("expected recovered runner lease cleared, got %#v", got)
+	}
+}
+
+func TestRecoverRequeuesCreatingRunnerWhenSandboxIsAbsent(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-creating-missing",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-creating-missing",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusCreating
+	st.LeaseOwner = "old-worker"
+	st.LeaseExpiresAt = time.Now().UTC().Add(time.Minute)
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{recoverErr: sandboxrunner.ErrSandboxNotFound}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusQueued || got.LeaseOwner != "" || !got.LeaseExpiresAt.IsZero() {
+		t.Fatalf("expected missing creation to be requeued, got %#v", got)
+	}
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("expected missing creation not to stop a sandbox, got %d stops", fake.stoppedCount())
+	}
+}
+
+func TestRecoverFailsCreatingRunnerWithInProgressJobWhenSandboxIsAbsent(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/jobs/123":
+			w.Write([]byte(`{"id":123,"name":"build","status":"in_progress"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/runners":
+			w.Write([]byte(`{"runners":[]}`))
+		default:
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "recover-creating-in-progress-missing",
+		Source:             "test",
+		RepositoryFullName: "o/r",
+		JobID:              123,
+		Labels:             []string{"self-hosted"},
+		RunnerName:         "e2b-recover-creating-in-progress-missing",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusCreating
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{recoverErr: sandboxrunner.ErrSandboxNotFound}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusFailed || got.FailureStage != "recovery" || got.FailureReason != "sandbox_not_found" {
+		t.Fatalf("expected missing in-progress creation to fail, got %#v", got)
+	}
+}
+
+func TestRecoverStopsDiscoveredSandboxWithoutRunnerBeforeRequeue(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-creating-without-runner",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-creating-without-runner",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusCreating
+	st.CreatingAt = time.Now().UTC().Add(-time.Minute)
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{
+		recoverResult: sandboxrunner.StartResult{SandboxID: "sb-without-runner"},
+		recoverErr:    sandboxrunner.ErrRunnerNotFound,
+	}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusQueued || got.SandboxID != "" || got.ProcessPID != 0 {
+		t.Fatalf("expected interrupted creation to be requeued, got %#v", got)
+	}
+	if fake.stoppedCount() != 1 {
+		t.Fatalf("expected discovered sandbox to be stopped before requeue, got %d stops", fake.stoppedCount())
+	}
+}
+
+func TestRecoverDoesNotRequeueRunnerWhenDiscoveredSandboxCleanupFails(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-creating-cleanup-error",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-creating-cleanup-error",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusCreating
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{
+		recoverResult: sandboxrunner.StartResult{SandboxID: "sb-cleanup-error"},
+		recoverErr:    sandboxrunner.ErrRunnerNotFound,
+		stopErr:       errors.New("temporary sandbox cleanup failure"),
+	}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err == nil {
+		t.Fatal("expected sandbox cleanup error")
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusCreating {
+		t.Fatalf("expected failed cleanup to preserve creating state, got %#v", got)
+	}
+	if fake.stoppedCount() != 1 {
+		t.Fatalf("expected one sandbox cleanup attempt, got %d", fake.stoppedCount())
+	}
+}
+
+func TestRecoverPreservesRunningStateWhenReconnectFails(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-running-error",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-running-error",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-running-error"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{recoverErr: errors.New("temporary sandbox API failure: token=secret")}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err == nil {
+		t.Fatal("expected reconnect error")
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusRunning || got.SandboxID != st.SandboxID || got.ProcessPID != st.ProcessPID {
+		t.Fatalf("expected reconnect failure to preserve running state, got %#v", got)
+	}
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("expected reconnect failure not to stop sandbox, got %d stops", fake.stoppedCount())
+	}
+	logData, err := store.ReadLog(st.ID, "control.log", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(logData), "token=secret") {
+		t.Fatalf("control log persisted upstream error details: %q", logData)
+	}
+}
+
+func TestRecoverFailsRunningRunnerWhenSandboxIsAbsent(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-running-missing",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-running-missing",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-running-missing"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{recoverErr: sandboxrunner.ErrSandboxNotFound}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusFailed || got.FailureStage != "recovery" || got.FailureReason != "sandbox_not_found" {
+		t.Fatalf("expected missing running sandbox to fail during recovery, got %#v", got)
+	}
+}
+
+func TestRecoverMissingRunningSandboxDoesNotOverwriteConcurrentStateChange(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-running-missing-version-conflict",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-running-missing-version-conflict",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-recover-running-missing-version-conflict"
+	st.ProcessPID = 42
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+	var hookErr error
+	fake := &fakeSandbox{
+		recoverErr: sandboxrunner.ErrSandboxNotFound,
+		recoverHook: func(sandboxrunner.RecoverInput) {
+			latest, err := store.ReadState(st.ID)
+			if err != nil {
+				hookErr = err
+				return
+			}
+			latest.Status = state.StatusStopping
+			hookErr = store.WriteState(latest)
+		},
+	}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if hookErr != nil {
+		t.Fatal(hookErr)
+	}
+	got, err := store.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusStopping {
+		t.Fatalf("expected concurrent state change to win, got %#v", got)
+	}
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("expected stale missing-sandbox result not to stop sandbox, got %d stops", fake.stoppedCount())
+	}
+}
+
+func TestRecoverContinuesAfterOneRunnerFails(t *testing.T) {
+	store := state.New(t.TempDir())
+	_, queued, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-queued-after-error",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-queued-after-error",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queued.LeaseOwner = "old-worker"
+	queued.LeaseExpiresAt = time.Now().UTC().Add(time.Minute)
+	if err := store.WriteState(queued); err != nil {
+		t.Fatal(err)
+	}
+	_, running, err := store.CreateRequest(state.RunnerRequest{
+		ID:         "recover-error",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-recover-error",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running.Status = state.StatusRunning
+	running.SandboxID = "sb-recover-error"
+	running.ProcessPID = 42
+	if err := store.WriteState(running); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeSandbox{recoverErrors: map[string]error{
+		running.ID: errors.New("temporary sandbox API failure"),
+	}}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err == nil {
+		t.Fatal("expected aggregated recovery error")
+	}
+	got, err := store.ReadState(queued.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusQueued || got.LeaseOwner != "" || !got.LeaseExpiresAt.IsZero() {
+		t.Fatalf("expected later queued request to be recovered, got %#v", got)
+	}
+}
+
+func TestRecoverContinuesStoppingRunnerCleanup(t *testing.T) {
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -4938,7 +5850,7 @@ func TestRecoverSchedulesRetryWhenGitHubRunnerBusy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Status = state.StatusRunning
+	st.Status = state.StatusStopping
 	st.SandboxID = "sb-recover-busy"
 	st.ProcessPID = 42
 	if err := store.WriteState(st); err != nil {

@@ -6,7 +6,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -31,6 +33,15 @@ type StartInput struct {
 type StartResult struct {
 	SandboxID string
 	PID       uint32
+}
+
+type RecoverInput struct {
+	RequestID      string
+	SandboxID      string
+	PID            uint32
+	Timeout        time.Duration
+	CommandContext context.Context
+	OnExit         func(ExitResult, error)
 }
 
 type PtySize struct {
@@ -84,6 +95,7 @@ type TerminalSession interface {
 type Service interface {
 	ValidateTemplate(ctx context.Context, templateID string) error
 	StartRunner(ctx context.Context, input StartInput) (StartResult, error)
+	RecoverRunner(ctx context.Context, input RecoverInput) (StartResult, error)
 	StopRunner(ctx context.Context, sandboxID string, pid uint32) error
 	StartTerminal(ctx context.Context, sandboxID string, size PtySize, onData func([]byte)) (TerminalSession, error)
 }
@@ -92,6 +104,8 @@ var (
 	ErrTemplateRequired = errors.New("template_id is required")
 	ErrTemplateNotFound = errors.New("template not found")
 	ErrTemplateNotReady = errors.New("template is not ready")
+	ErrSandboxNotFound  = errors.New("sandbox not found")
+	ErrRunnerNotFound   = errors.New("runner process not found")
 )
 
 type E2BService struct {
@@ -188,7 +202,7 @@ func templateBuildUsable(status qnsandbox.TemplateBuildStatus) bool {
 }
 
 func (s *E2BService) StartRunner(ctx context.Context, input StartInput) (StartResult, error) {
-	timeout := int32(input.Timeout.Seconds())
+	timeout := sandboxTimeoutSeconds(input.Timeout)
 	allowInternet := true
 	metadata := qnsandbox.Metadata{
 		"app":        "e2b-github-runner",
@@ -244,6 +258,123 @@ func (s *E2BService) StartRunner(ctx context.Context, input StartInput) (StartRe
 		}()
 	}
 	return StartResult{SandboxID: sb.ID(), PID: pid}, nil
+}
+
+func (s *E2BService) RecoverRunner(ctx context.Context, input RecoverInput) (StartResult, error) {
+	sandboxID := strings.TrimSpace(input.SandboxID)
+	if sandboxID == "" {
+		var err error
+		sandboxID, err = s.findRunnerSandbox(ctx, input.RequestID)
+		if err != nil {
+			return StartResult{}, err
+		}
+	}
+
+	sb, err := s.client.Connect(ctx, sandboxID, qnsandbox.ConnectParams{
+		Timeout: sandboxTimeoutSeconds(input.Timeout),
+	})
+	if err != nil {
+		if isSandboxNotFound(err) {
+			return StartResult{}, fmt.Errorf("%w: %s", ErrSandboxNotFound, sandboxID)
+		}
+		return StartResult{}, fmt.Errorf("connect sandbox %s: %w", sandboxID, err)
+	}
+	processes, err := sb.Commands().List(ctx)
+	if err != nil {
+		return StartResult{}, fmt.Errorf("list sandbox %s processes: %w", sandboxID, err)
+	}
+	pid, ok := recoveredRunnerPID(processes, input.PID)
+	if !ok {
+		return StartResult{SandboxID: sandboxID}, fmt.Errorf("%w in sandbox %s", ErrRunnerNotFound, sandboxID)
+	}
+
+	commandCtx := input.CommandContext
+	if commandCtx == nil {
+		commandCtx = context.Background()
+	}
+	handle, err := sb.Commands().Connect(commandCtx, pid)
+	if err != nil {
+		return StartResult{}, fmt.Errorf("connect runner process %d in sandbox %s: %w", pid, sandboxID, err)
+	}
+	if input.OnExit != nil {
+		go func() {
+			result, err := handle.Wait()
+			if result == nil {
+				input.OnExit(ExitResult{}, err)
+				return
+			}
+			input.OnExit(ExitResult{
+				ExitCode: result.ExitCode,
+				Stdout:   result.Stdout,
+				Stderr:   result.Stderr,
+				Error:    result.Error,
+			}, err)
+		}()
+	}
+	return StartResult{SandboxID: sandboxID, PID: pid}, nil
+}
+
+func (s *E2BService) findRunnerSandbox(ctx context.Context, requestID string) (string, error) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return "", ErrSandboxNotFound
+	}
+	metadata := url.Values{
+		"app":        {"e2b-github-runner"},
+		"request_id": {requestID},
+	}.Encode()
+	items, err := s.client.List(ctx, &qnsandbox.ListParams{Metadata: &metadata})
+	if err != nil {
+		return "", fmt.Errorf("find runner sandbox for request %s: %w", requestID, err)
+	}
+	if len(items) == 0 {
+		return "", fmt.Errorf("%w for request %s", ErrSandboxNotFound, requestID)
+	}
+	if len(items) > 1 {
+		return "", fmt.Errorf("multiple sandboxes found for request %s", requestID)
+	}
+	return items[0].SandboxID, nil
+}
+
+func recoveredRunnerPID(processes []qnsandbox.ProcessInfo, expectedPID uint32) (uint32, bool) {
+	var recoveredPID uint32
+	taggedCount := 0
+	for _, process := range processes {
+		if process.Tag == nil || *process.Tag != "github-runner" {
+			continue
+		}
+		if expectedPID != 0 {
+			if process.PID == expectedPID {
+				return process.PID, true
+			}
+			continue
+		}
+		taggedCount++
+		recoveredPID = process.PID
+	}
+	if expectedPID == 0 && taggedCount == 1 {
+		return recoveredPID, true
+	}
+	// A persisted PID identifies the exact process started for this request.
+	// If it disappeared, a differently numbered tagged process is a replacement,
+	// not the runner that runnerd owned before restarting.
+	return 0, false
+}
+
+func sandboxTimeoutSeconds(timeout time.Duration) int32 {
+	seconds := math.Ceil(timeout.Seconds())
+	if seconds < 1 {
+		return 1
+	}
+	if seconds > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(seconds)
+}
+
+func isSandboxNotFound(err error) bool {
+	var apiErr *qnsandbox.APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
 }
 
 func (s *E2BService) StopRunner(ctx context.Context, sandboxID string, pid uint32) error {

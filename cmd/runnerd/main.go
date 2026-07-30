@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	_ "github.com/jimmicro/pprof"
@@ -75,28 +77,55 @@ func main() {
 		os.Exit(1)
 	}
 	handler := server.New(cfg, store, gh, nil, logger)
-	go func() {
-		recoveryCtx, cancel := context.WithTimeout(context.Background(), cfg.RecoveryTimeout)
-		defer cancel()
-		if err := handler.Recover(recoveryCtx); err != nil {
-			logger.Error("recover runner state", "error", err)
-		}
-		handler.Start()
-	}()
+	gate := &recoveryGate{next: handler}
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           handler,
+		Handler:           gate,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       cfg.HTTPReadTimeout,
 		WriteTimeout:      cfg.HTTPWriteTimeout,
 		IdleTimeout:       cfg.HTTPIdleTimeout,
 		MaxHeaderBytes:    1 << 20,
 	}
+	recoveryCtx, cancelRecovery := context.WithTimeout(context.Background(), cfg.RecoveryTimeout)
+	listener, err := net.Listen("tcp", cfg.HTTPAddr)
+	if err != nil {
+		cancelRecovery()
+		logger.Error("listen server", "addr", cfg.HTTPAddr, "error", err)
+		os.Exit(1)
+	}
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- srv.Serve(listener)
+		// A premature Serve return makes recovery useless; abort it so the
+		// startup path can surface the server error without waiting for timeout.
+		cancelRecovery()
+	}()
 	logger.Info("starting server", "addr", cfg.HTTPAddr, "state_backend", cfg.StateBackend, "state_database_dsn", redact.DatabaseDSN(cfg.StateDatabaseDSN.Value()))
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := handler.Recover(recoveryCtx); err != nil {
+		logger.Error("recover runner state", "error", err)
+	}
+	cancelRecovery()
+	handler.Start()
+	gate.ready.Store(true)
+	if err := <-serverErr; err != nil && err != http.ErrServerClosed {
 		logger.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+type recoveryGate struct {
+	next  http.Handler
+	ready atomic.Bool
+}
+
+func (g *recoveryGate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !g.ready.Load() && r.URL.Path != "/healthz" {
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "runnerd is recovering", http.StatusServiceUnavailable)
+		return
+	}
+	g.next.ServeHTTP(w, r)
 }
 
 func runObfuscateConfigValue(input io.Reader, output, errorOutput io.Writer) bool {
