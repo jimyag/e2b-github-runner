@@ -797,7 +797,8 @@ func (s *Server) remainingSandboxTimeout(st state.RunnerState, now time.Time) ti
 	if startedAt.IsZero() {
 		return s.cfg.SandboxTimeout
 	}
-	return s.cfg.SandboxTimeout - now.Sub(startedAt)
+	remaining := s.cfg.SandboxTimeout - now.Sub(startedAt)
+	return min(remaining, s.cfg.SandboxTimeout)
 }
 
 func (s *Server) requeueInterruptedCreation(id string, stateVersion int64) error {

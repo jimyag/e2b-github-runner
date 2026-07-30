@@ -323,10 +323,10 @@ func (s *Server) recoveryTimeoutPerRunner(ctx context.Context, requestCount, wor
 		return 0, false
 	}
 	waves := (requestCount + workerCount - 1) / workerCount
-	if budget < time.Duration(waves) {
+	timeout := budget / time.Duration(waves)
+	if timeout <= 0 {
 		return 0, false
 	}
-	timeout := budget / time.Duration(waves)
 	if timeout > maxSingleRecoveryTimeout {
 		return maxSingleRecoveryTimeout, true
 	}

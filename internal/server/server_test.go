@@ -4873,6 +4873,19 @@ func TestRecoverTimeoutPerRunnerSharesWholeStartupBudget(t *testing.T) {
 	}
 }
 
+func TestRemainingSandboxTimeoutClampsFutureStartTime(t *testing.T) {
+	srv := &Server{cfg: config.Config{SandboxTimeout: time.Hour}}
+	now := time.Now().UTC()
+	st := state.RunnerState{RunningAt: now.Add(5 * time.Minute)}
+	if got := srv.remainingSandboxTimeout(st, now); got != time.Hour {
+		t.Fatalf("future-start timeout = %s, want %s", got, time.Hour)
+	}
+	st.RunningAt = now.Add(-10 * time.Minute)
+	if got := srv.remainingSandboxTimeout(st, now); got != 50*time.Minute {
+		t.Fatalf("elapsed timeout = %s, want 50m", got)
+	}
+}
+
 func TestRecoverRedistributesRemainingBudget(t *testing.T) {
 	store := state.New(t.TempDir())
 	const runnerCount = maxConcurrentRecoveries * 2
