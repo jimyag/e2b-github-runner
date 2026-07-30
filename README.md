@@ -124,6 +124,7 @@ Supported fields: `database.dsn`, `auth.session_secret`, `auth.encryption_key`, 
 | Repository | Administration | Read & write | Repository-level runner registration (when spec has no `runner_group`) |
 | Repository | Metadata | Read-only | Identify repositories and owners |
 | Repository | Pull requests | Read-only | Show PR titles in job groups |
+| Organization | Members | Read-only | Verify active organization membership for organization Settings and scoped Sandbox management |
 | Organization | Self-hosted runners | Read & write | Organization-level runner registration (when spec sets `runner_group`) |
 
 Set `github.app.slug` to show an "Install GitHub App" link in the user UI. Use `github.allowed_repositories` (patterns like `owner/repo` or `owner/*`) to restrict which repositories can use this runnerd instance.

@@ -133,11 +133,14 @@ go test ./internal/sandboxrunner -count=1
    - 点 `Install App`
    - 选择目标 owner
    - 选择要授权的仓库
+   - 如果给已有 App 新增了 `Members: Read-only`，每个 installation owner 都必须先批准权限更新，组织 Settings 才会变为可管理
 7. 记录这些值：
    - App ID
    - App slug（App URL 里的短名称，例如 `https://github.com/apps/<slug>`）
    - Installation ID（可选；不配置时 runnerd 会按仓库动态解析）
    - private key 文件路径
+
+Installation owner 批准 `Members: Read-only` 后，重新加载 `/account/preferences`。当前登录用户具有 active membership 的组织应出现在 Settings scope 列表中，并能打开 `/organizations/{login}/preferences`。仅有 repository 权限的 outside collaborator 仍可在 `/repositories` 看到已授权仓库，但对应组织必须继续从 Settings 隐藏。如果批准后符合条件的组织仍未出现，先退出登录，再重新完成 GitHub OAuth 后重试。
 
 对应填入 `runnerd.yaml`：
 

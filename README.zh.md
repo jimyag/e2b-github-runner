@@ -124,6 +124,7 @@ unset secret_value
 | Repository   | Administration      | Read & write | 仓库级 runner 注册（spec 未设置 `runner_group` 时）              |
 | Repository   | Metadata            | Read-only    | 识别仓库及其所属账户                                             |
 | Repository   | Pull requests       | Read-only    | 在 job 分组中显示 PR 标题                                        |
+| Organization | Members             | Read-only    | 验证有效组织成员关系，以开放组织 Settings 和 scoped Sandbox 管理 |
 | Organization | Self-hosted runners | Read & write | 组织级 runner 注册（spec 设置了 `runner_group` 时）              |
 
 设置 `github.app.slug` 可在用户 UI 中显示"安装 GitHub App"链接。使用 `github.allowed_repositories`（支持 `owner/repo` 或 `owner/*` 模式）限制哪些仓库可以使用此 runnerd 实例。
