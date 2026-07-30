@@ -301,6 +301,30 @@ For focused UI unit tests, run:
 cd ui && bun run test
 ```
 
+After changing UI dependencies, Vite/Rollup configuration, manual chunking, or
+production asset loading, execute the built bundle in Chromium:
+
+```bash
+task ui-production-smoke
+```
+
+The task installs the matching Chromium runtime, builds `internal/server/ui/`,
+starts Vite preview on port `4173`, and opens `/` with Playwright. It fails when
+the page raises a JavaScript error, logs a console error, cannot load a script or
+stylesheet, leaves `#root` empty, or does not render the public landing-page
+heading. If port `4173` is occupied, set
+`RUNNERD_UI_SMOKE_PORT=<free-port>`. The local preview does not start `runnerd`,
+so Playwright fulfills only `/auth/session` with a signed-out response. Set
+`RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host>` to test a deployed origin
+with its real auth endpoint. This production smoke is a dedicated GitHub Actions
+job because a successful Vite build does not prove that generated chunks execute
+in a browser.
+
+The Vite build also promotes Rollup `CIRCULAR_CHUNK` and
+`CYCLIC_CROSS_CHUNK_REEXPORT` warnings to errors. Do not suppress or broadly
+allowlist these warnings: they indicate that manual chunking can produce a
+browser-unsafe module execution order.
+
 `task test` rebuilds the UI, runs the same Bun suite, and then runs Go tests with race detection and coverage. The Bun suite covers helpers and server-rendered component output; use a real browser to verify navigation, dialogs, avatar loading/fallback, and access transitions after a role change. For onboarding changes, also verify the automatic `/jobs` start, all six targets, the transition to `/account/preferences`, the persistent setup task after the overlay closes, explicit skip persistence, and replay without a state change.
 
 Create a default runner spec first:

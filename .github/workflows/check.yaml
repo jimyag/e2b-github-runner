@@ -121,6 +121,26 @@ jobs:
       - run: cd ui && bun install --frozen-lockfile && bun run build && bun run test
       - run: GORACE=atexit_sleep_ms=0 go test -v -trimpath -failfast -race -cover -coverprofile=coverage.txt ./cmd/... ./internal/...
 
+  ui-production-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - uses: oven-sh/setup-bun@v2
+      - run: cd ui && bun install --frozen-lockfile
+      - run: cd ui && bunx playwright install --with-deps chromium
+      - name: Run production UI smoke
+        run: cd ui && bun run test:production
+      - name: Upload production UI smoke artifacts
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ui-production-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
   build:
     runs-on: ubuntu-latest
     steps:

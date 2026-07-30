@@ -299,6 +299,28 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
 cd ui && bun run test
 ```
 
+修改 UI 依赖、Vite/Rollup 配置、manual chunk 或生产静态资源加载逻辑后，要在
+Chromium 中执行构建产物：
+
+```bash
+task ui-production-smoke
+```
+
+该任务会安装匹配的 Chromium runtime，构建 `internal/server/ui/`，在 `4173`
+端口启动 Vite preview，并通过 Playwright 打开 `/`。如果页面出现 JavaScript
+异常、console error、script/stylesheet 加载失败、`#root` 为空，或没有渲染公开
+首页 heading，任务都会失败。端口 `4173` 被占用时可设置
+`RUNNERD_UI_SMOKE_PORT=<free-port>`。本地 preview 不会启动 `runnerd`，因此
+Playwright 只会为 `/auth/session` 返回未登录会话。设置
+`RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host>` 后，会针对部署环境的真实
+auth endpoint 执行 canary。该 production smoke 在 GitHub Actions 中是独立
+job，因为 Vite 构建成功并不能证明生成的 chunks 可以在浏览器中执行。
+
+Vite 构建还会把 Rollup 的 `CIRCULAR_CHUNK` 和
+`CYCLIC_CROSS_CHUNK_REEXPORT` warning 提升为 error。不要隐藏或宽泛
+allowlist 这两类 warning；它们表示 manual chunk 可能生成浏览器不安全的模块
+执行顺序。
+
 `task test` 会重新构建 UI、运行同一套 Bun tests，然后执行带 race detection 和 coverage 的 Go tests。Bun suite 覆盖 helper 和 server-rendered component output；导航、dialog、头像加载/回退，以及角色变更后的权限切换仍需在真实浏览器中验证。修改 onboarding 时还要验证：`/jobs` 自动启动、六个目标、跳转到 `/account/preferences`、遮罩关闭后持续显示设置任务、显式跳过的持久化，以及重播不修改状态。
 
 先创建一个默认 runner spec：

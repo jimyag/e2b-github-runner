@@ -42,6 +42,17 @@ Expected result:
 - Large JavaScript and CSS responses return `Content-Encoding: gzip` when the request accepts gzip, plus `Vary: Accept-Encoding`.
 - Unversioned static files use a short browser cache instead of the immutable policy.
 
+Run the production browser canary from a checkout with UI dependencies installed:
+
+```bash
+RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host> task ui-production-smoke
+```
+
+Expected result: Chromium renders the public landing-page heading without page
+errors, console errors, failed script/style requests, or an empty React root.
+Unlike the HTTP checks above, this executes the deployed JavaScript chunks and
+must pass before the deployment is marked ready or receives full traffic.
+
 Log in through the admin console:
 
 ```text

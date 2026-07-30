@@ -216,6 +216,7 @@ docker run --rm -p 25500:25500 \
 task deps          # Install Go dependencies
 task ui-deps       # Install UI dependencies
 task build         # Build runnerd with embedded production UI
+task ui-production-smoke # Execute the production UI bundle in Chromium
 task dev           # Start local dev (runnerd + Vite + smee)
 task lint          # Run linters
 task test          # Rebuild UI + run all tests (Go with race detection + Bun UI tests)
@@ -223,7 +224,9 @@ task docker-check  # Verify Docker build
 task release-check # Verify release build
 ```
 
-For focused UI tests: `cd ui && bun run test`.
+For focused UI tests, run `cd ui && bun run test`. Use `task ui-production-smoke`
+after changing UI dependencies, Vite/Rollup configuration, or production asset
+loading.
 
 ### Sandbox Templates
 

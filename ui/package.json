@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "bun test",
+    "test:production": "playwright test --config playwright.production.config.ts",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -46,6 +47,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.61.0",
     "@tailwindcss/vite": "^4.2.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.4.0",

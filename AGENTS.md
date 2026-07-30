@@ -25,6 +25,7 @@ Use this guide for future Codex or agent work in this repository.
 ```bash
 task deps
 task ui-deps
+task ui-production-smoke
 task dev
 task smee
 task lint
@@ -41,6 +42,8 @@ Use `task smee` for standalone GitHub webhook forwarding. It reads `.smee-url` a
 Use `task build` when verifying production embedded UI behavior because it rebuilds `internal/server/ui/` before compiling `bin/runnerd`.
 
 Use `cd ui && bun run test` for focused UI tests. `task test` rebuilds the UI, runs the Bun UI tests, and then runs Go tests with race detection and coverage.
+
+Use `task ui-production-smoke` after changing UI dependencies, Vite/Rollup configuration, manual chunking, or production asset loading. It builds the production bundle, starts Vite preview on `RUNNERD_UI_SMOKE_PORT` (default `4173`), opens `/` in headless Chromium, and fails on browser errors, console errors, failed script/style requests, an empty root, or a missing landing-page heading. Because the local preview does not start `runnerd`, it fulfills only `/auth/session` with a signed-out response. Set `RUNNERD_UI_SMOKE_BASE_URL` to run the same browser canary against an already deployed origin; deployed canaries must use the real auth endpoint.
 
 When changing state records, GORM tags, indexes, or migration helpers, run `go test ./internal/state -count=1` first. Old sqlite schema upgrade tests are intentional compatibility coverage; do not remove them just because fresh database creation passes. When a production export is available, run `RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v`.
 

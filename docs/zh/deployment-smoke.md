@@ -42,6 +42,17 @@ curl -sS --compressed -D - -o /dev/null https://<runnerd-host>/assets/<current-h
 - 请求接受 gzip 时，大型 JavaScript 和 CSS 响应返回 `Content-Encoding: gzip`，同时包含 `Vary: Accept-Encoding`。
 - 未版本化的静态文件使用短期浏览器缓存，而不是 immutable 策略。
 
+在已安装 UI 依赖的 checkout 中运行生产浏览器 canary：
+
+```bash
+RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host> task ui-production-smoke
+```
+
+预期结果：Chromium 能渲染公开首页 heading，并且没有 page error、console
+error、script/stylesheet 加载失败或空的 React root。与前面的 HTTP 检查不同，
+该步骤会实际执行已部署的 JavaScript chunks；通过后才能把部署标记为 ready
+或承载全部流量。
+
 通过 admin console 登录：
 
 ```text

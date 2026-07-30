@@ -217,6 +217,7 @@ docker run --rm -p 25500:25500 \
 task deps          # 安装 Go 依赖
 task ui-deps       # 安装 UI 依赖
 task build         # 构建 runnerd（内嵌生产 UI）
+task ui-production-smoke # 在 Chromium 中执行生产 UI bundle
 task dev           # 启动本地开发环境（runnerd + Vite + smee）
 task lint          # 运行代码检查
 task test          # 重建 UI + 运行全部测试（Go race detection + Bun UI tests）
@@ -224,7 +225,8 @@ task docker-check  # 验证 Docker 构建
 task release-check # 验证发布构建
 ```
 
-单独运行 UI 测试：`cd ui && bun run test`。
+单独运行 UI 测试时使用 `cd ui && bun run test`。修改 UI 依赖、Vite/Rollup 配置或
+生产静态资源加载逻辑后，还要运行 `task ui-production-smoke`。
 
 ### 沙箱模板
 

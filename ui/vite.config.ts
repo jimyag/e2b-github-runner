@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react-swc"
 import { defineConfig } from "vite"
 import tailwindcss from "@tailwindcss/vite"
 
+const fatalRollupWarnings = new Set(["CIRCULAR_CHUNK", "CYCLIC_CROSS_CHUNK_REEXPORT"])
+
 export default defineConfig({
   base: "/",
   plugins: [react(), tailwindcss()],
@@ -30,6 +32,13 @@ export default defineConfig({
     emptyOutDir: true,
     modulePreload: false,
     rollupOptions: {
+      onLog(level, log, handler) {
+        if (log.code && fatalRollupWarnings.has(log.code)) {
+          handler("error", log)
+          return
+        }
+        handler(level, log)
+      },
       output: {
         manualChunks(id) {
           if (
