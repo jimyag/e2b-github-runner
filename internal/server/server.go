@@ -246,30 +246,38 @@ func (s *Server) Recover(ctx context.Context) error {
 	}
 
 	workerCount := min(maxConcurrentRecoveries, len(active))
-	perRunnerTimeout := s.recoveryTimeoutPerRunner(ctx, len(active), workerCount)
-	if perRunnerTimeout <= 0 {
+	if _, ok := s.recoveryTimeoutPerRunner(ctx, len(active), workerCount); !ok {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("recovery budget exhausted before dispatch: %w", err)
 		}
 		return errors.New("recovery budget exhausted before dispatch")
 	}
-	jobs := make(chan state.RunnerState)
+	type recoveryJob struct {
+		state             state.RunnerState
+		remainingRequests int
+	}
+	jobs := make(chan recoveryJob)
 	recoveryErrors := make(chan error, len(active))
 	var workers sync.WaitGroup
 	for range workerCount {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			for st := range jobs {
+			for job := range jobs {
 				if err := ctx.Err(); err != nil {
-					recoveryErrors <- fmt.Errorf("recover runner %s skipped: %w", st.ID, err)
+					recoveryErrors <- fmt.Errorf("recover runner %s skipped: %w", job.state.ID, err)
+					continue
+				}
+				perRunnerTimeout, ok := s.recoveryTimeoutPerRunner(ctx, job.remainingRequests, workerCount)
+				if !ok {
+					recoveryErrors <- fmt.Errorf("recover runner %s skipped: recovery budget exhausted", job.state.ID)
 					continue
 				}
 				runnerCtx, cancel := context.WithTimeout(ctx, perRunnerTimeout)
-				err := s.recoverRunner(runnerCtx, st.ID)
+				err := s.recoverRunner(runnerCtx, job.state.ID)
 				cancel()
 				if err != nil {
-					recoveryErrors <- fmt.Errorf("recover runner %s: %w", st.ID, err)
+					recoveryErrors <- fmt.Errorf("recover runner %s: %w", job.state.ID, err)
 				}
 			}
 		}()
@@ -277,7 +285,7 @@ func (s *Server) Recover(ctx context.Context) error {
 dispatch:
 	for i, st := range active {
 		select {
-		case jobs <- st:
+		case jobs <- recoveryJob{state: st, remainingRequests: len(active) - i}:
 		case <-ctx.Done():
 			for _, skipped := range active[i:] {
 				recoveryErrors <- fmt.Errorf("recover runner %s skipped: %w", skipped.ID, ctx.Err())
@@ -296,7 +304,10 @@ dispatch:
 	return errors.Join(joined...)
 }
 
-func (s *Server) recoveryTimeoutPerRunner(ctx context.Context, requestCount, workerCount int) time.Duration {
+func (s *Server) recoveryTimeoutPerRunner(ctx context.Context, requestCount, workerCount int) (time.Duration, bool) {
+	if requestCount <= 0 || workerCount <= 0 {
+		return 0, false
+	}
 	budget := s.cfg.RecoveryTimeout
 	deadline, hasDeadline := ctx.Deadline()
 	if hasDeadline {
@@ -307,17 +318,19 @@ func (s *Server) recoveryTimeoutPerRunner(ctx context.Context, requestCount, wor
 	}
 	if budget <= 0 {
 		if !hasDeadline {
-			return maxSingleRecoveryTimeout
+			return maxSingleRecoveryTimeout, true
 		}
-		// Zero explicitly tells Recover not to create workers or dispatch jobs.
-		return 0
+		return 0, false
 	}
 	waves := (requestCount + workerCount - 1) / workerCount
+	if budget < time.Duration(waves) {
+		return 0, false
+	}
 	timeout := budget / time.Duration(waves)
 	if timeout > maxSingleRecoveryTimeout {
-		return maxSingleRecoveryTimeout
+		return maxSingleRecoveryTimeout, true
 	}
-	return timeout
+	return timeout, true
 }
 
 func (s *Server) routes() {

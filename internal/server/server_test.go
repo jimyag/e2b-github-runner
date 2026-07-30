@@ -45,6 +45,7 @@ type fakeSandbox struct {
 	recoverBlock       chan struct{}
 	recoverStarted     chan string
 	recoverHook        func(sandboxrunner.RecoverInput)
+	recoverContextHook func(context.Context, sandboxrunner.RecoverInput)
 	recoverErr         error
 	recoverErrors      map[string]error
 	recoverResult      sandboxrunner.StartResult
@@ -108,6 +109,7 @@ func (f *fakeSandbox) RecoverRunner(ctx context.Context, input sandboxrunner.Rec
 	block := f.recoverBlock
 	started := f.recoverStarted
 	hook := f.recoverHook
+	contextHook := f.recoverContextHook
 	result := f.recoverResult
 	err := f.recoverErrors[input.RequestID]
 	if err == nil {
@@ -122,6 +124,9 @@ func (f *fakeSandbox) RecoverRunner(ctx context.Context, input sandboxrunner.Rec
 
 	if started != nil {
 		started <- input.RequestID
+	}
+	if contextHook != nil {
+		contextHook(ctx, input)
 	}
 	if block != nil {
 		select {
@@ -4851,15 +4856,78 @@ func TestRecoverSkipsDispatchWhenBudgetExpired(t *testing.T) {
 
 func TestRecoverTimeoutPerRunnerSharesWholeStartupBudget(t *testing.T) {
 	srv := &Server{cfg: config.Config{RecoveryTimeout: 120 * time.Second}}
-	if got := srv.recoveryTimeoutPerRunner(context.Background(), 100, 4); got != 4800*time.Millisecond {
+	if got, ok := srv.recoveryTimeoutPerRunner(context.Background(), 100, 4); !ok || got != 4800*time.Millisecond {
 		t.Fatalf("100-request timeout = %s, want 4.8s", got)
 	}
-	if got := srv.recoveryTimeoutPerRunner(context.Background(), 4, 4); got != maxSingleRecoveryTimeout {
+	if got, ok := srv.recoveryTimeoutPerRunner(context.Background(), 4, 4); !ok || got != maxSingleRecoveryTimeout {
 		t.Fatalf("single-wave timeout = %s, want %s", got, maxSingleRecoveryTimeout)
 	}
 	srv.cfg.RecoveryTimeout = 20 * time.Second
-	if got := srv.recoveryTimeoutPerRunner(context.Background(), 8, 4); got != 10*time.Second {
+	if got, ok := srv.recoveryTimeoutPerRunner(context.Background(), 8, 4); !ok || got != 10*time.Second {
 		t.Fatalf("two-wave timeout = %s, want 10s", got)
+	}
+	expiredCtx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if got, ok := srv.recoveryTimeoutPerRunner(expiredCtx, 1, 1); ok || got != 0 {
+		t.Fatalf("expired timeout = %s, ok = %t, want no budget", got, ok)
+	}
+}
+
+func TestRecoverRedistributesRemainingBudget(t *testing.T) {
+	store := state.New(t.TempDir())
+	const runnerCount = maxConcurrentRecoveries * 2
+	for i := range runnerCount {
+		id := fmt.Sprintf("recover-budget-%d", i)
+		_, st, err := store.CreateRequest(state.RunnerRequest{
+			ID:         id,
+			Source:     "test",
+			Labels:     []string{"self-hosted"},
+			RunnerName: "e2b-" + id,
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Status = state.StatusRunning
+		st.SandboxID = "sb-" + id
+		st.ProcessPID = uint32(100 + i)
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var mu sync.Mutex
+	var timeouts []time.Duration
+	fake := &fakeSandbox{recoverContextHook: func(ctx context.Context, _ sandboxrunner.RecoverInput) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Error("recovery context has no deadline")
+			return
+		}
+		mu.Lock()
+		timeouts = append(timeouts, time.Until(deadline))
+		mu.Unlock()
+	}}
+	srv := newTestServer(t, store, "http://example.test", fake)
+	srv.Close()
+	srv.cfg.RecoveryTimeout = 20 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := srv.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(timeouts) != runnerCount {
+		t.Fatalf("recovery timeouts = %d, want %d", len(timeouts), runnerCount)
+	}
+	minTimeout, maxTimeout := timeouts[0], timeouts[0]
+	for _, timeout := range timeouts[1:] {
+		minTimeout = min(minTimeout, timeout)
+		maxTimeout = max(maxTimeout, timeout)
+	}
+	if maxTimeout-minTimeout < 5*time.Second {
+		t.Fatalf("remaining budget was not redistributed: min=%s max=%s", minTimeout, maxTimeout)
 	}
 }
 

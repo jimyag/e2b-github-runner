@@ -343,8 +343,11 @@ func recoveredRunnerPID(processes []qnsandbox.ProcessInfo, expectedPID uint32) (
 		if process.Tag == nil || *process.Tag != "github-runner" {
 			continue
 		}
-		if expectedPID != 0 && process.PID == expectedPID {
-			return process.PID, true
+		if expectedPID != 0 {
+			if process.PID == expectedPID {
+				return process.PID, true
+			}
+			continue
 		}
 		taggedCount++
 		recoveredPID = process.PID
