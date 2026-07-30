@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test"
 
+import { getLocalAuthSessionRoute } from "./production-smoke-support"
+
 const postRenderObservationMs = 1_000
 
 test("boots the public landing page from the production bundle", async ({ page }) => {
@@ -28,6 +30,13 @@ test("boots the public landing page from the production bundle", async ({ page }
       failedAssets.push(`${response.status()} ${response.url()}`)
     }
   })
+
+  const authSessionRoute = getLocalAuthSessionRoute(process.env.RUNNERD_UI_SMOKE_BASE_URL)
+  if (authSessionRoute) {
+    await page.route(authSessionRoute.pattern, async (route) => {
+      await route.fulfill({ json: authSessionRoute.json })
+    })
+  }
 
   const response = await page.goto("/", { waitUntil: "networkidle" })
 

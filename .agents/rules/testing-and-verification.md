@@ -59,7 +59,7 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
 - For UI source changes, run `task ui-lint` or `task build` depending on scope.
 - Use `task build` when verifying production embedded UI behavior.
 - Run `task ui-production-smoke` after changing UI dependencies, Vite/Rollup configuration, manual chunking, or production asset loading. The smoke must execute the built bundle in Chromium and fail on page errors, console errors, failed script/style requests, an empty root, or a missing public landing-page heading.
-- Use `RUNNERD_UI_SMOKE_PORT=<free-port> task ui-production-smoke` when port `4173` is occupied. Use `RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host> task ui-production-smoke` for a post-deploy browser canary.
+- Use `RUNNERD_UI_SMOKE_PORT=<free-port> task ui-production-smoke` when port `4173` is occupied. The local preview supplies only a signed-out `/auth/session` fixture because it does not start `runnerd`. Use `RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host> task ui-production-smoke` for a post-deploy browser canary; deployed canaries must not replace the real auth endpoint.
 - Keep Rollup `CIRCULAR_CHUNK` and `CYCLIC_CROSS_CHUNK_REEXPORT` warnings fatal. Do not suppress or broadly allowlist them when changing manual chunk rules.
 - Use the real ordinary-user entries `/`, `/repositories`, `/account/repositories`, `/account/preferences`, `/account/sandbox-templates`, and `/account/sandbox-instances` when changing user UI. Also exercise the corresponding `/organizations/{login}/...` route when scope resolution changes.
 - Use the real admin entries `/admin/`, `/admin/accounts`, and `/admin/sandbox_service`; do not assume the `ui/` tree is all admin-only.

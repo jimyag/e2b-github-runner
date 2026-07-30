@@ -313,9 +313,12 @@ starts Vite preview on port `4173`, and opens `/` with Playwright. It fails when
 the page raises a JavaScript error, logs a console error, cannot load a script or
 stylesheet, leaves `#root` empty, or does not render the public landing-page
 heading. If port `4173` is occupied, set
-`RUNNERD_UI_SMOKE_PORT=<free-port>`. This production smoke is a dedicated
-GitHub Actions job because a successful Vite build does not prove that generated
-chunks execute in a browser.
+`RUNNERD_UI_SMOKE_PORT=<free-port>`. The local preview does not start `runnerd`,
+so Playwright fulfills only `/auth/session` with a signed-out response. Set
+`RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host>` to test a deployed origin
+with its real auth endpoint. This production smoke is a dedicated GitHub Actions
+job because a successful Vite build does not prove that generated chunks execute
+in a browser.
 
 The Vite build also promotes Rollup `CIRCULAR_CHUNK` and
 `CYCLIC_CROSS_CHUNK_REEXPORT` warnings to errors. Do not suppress or broadly

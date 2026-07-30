@@ -310,9 +310,11 @@ task ui-production-smoke
 端口启动 Vite preview，并通过 Playwright 打开 `/`。如果页面出现 JavaScript
 异常、console error、script/stylesheet 加载失败、`#root` 为空，或没有渲染公开
 首页 heading，任务都会失败。端口 `4173` 被占用时可设置
-`RUNNERD_UI_SMOKE_PORT=<free-port>`。该 production smoke 在 GitHub Actions
-中是独立 job，因为 Vite 构建成功并不能证明生成的 chunks 可以在
-浏览器中执行。
+`RUNNERD_UI_SMOKE_PORT=<free-port>`。本地 preview 不会启动 `runnerd`，因此
+Playwright 只会为 `/auth/session` 返回未登录会话。设置
+`RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host>` 后，会针对部署环境的真实
+auth endpoint 执行 canary。该 production smoke 在 GitHub Actions 中是独立
+job，因为 Vite 构建成功并不能证明生成的 chunks 可以在浏览器中执行。
 
 Vite 构建还会把 Rollup 的 `CIRCULAR_CHUNK` 和
 `CYCLIC_CROSS_CHUNK_REEXPORT` warning 提升为 error。不要隐藏或宽泛
