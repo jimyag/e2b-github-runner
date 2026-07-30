@@ -71,7 +71,7 @@ cp runnerd.yaml.example runnerd.yaml
 ```
 
 5. Open `http://<host>:25500/`. The public product landing page links to the current GitHub documentation and the protected Jobs console at `/jobs`. On the first authenticated visit to `/jobs`, a six-step product tour introduces Jobs, Repositories, Settings, and Sandbox setup; it can be replayed from the account menu.
-6. Follow the persistent setup task in **Settings → Preferences** to save the account's own **Sandbox Service** API Key (or use an eligible admin fallback from `/admin/sandbox_service`).
+6. Open **Repositories** to review **Runner readiness** for the account or organization. Ready sources are shown without configuration controls. If Sandbox setup is missing and you can manage that scope, use **Configure Sandbox** to open the exact account or organization Settings page. Settings lists only your account and organizations where you are an active member; outside collaborators receive a read-only readiness prompt and cannot browse that organization's Sandbox catalogs.
 7. In the **Admin Console**, create a **Runner Spec** with a meaningful label (e.g. `ubuntu-24-04`), set its `template_id`, and enable `default_available`.
 8. Configure a GitHub webhook → `POST http://<host>:25500/webhooks/github`.
 9. Use `runs-on: [self-hosted, <your-runner-label>]` in your workflow.
@@ -171,7 +171,7 @@ Runner specs, runner groups, and repository policies are managed through the adm
 > **⚠️ Personal accounts:** `runner_group` requires the organization-level GitHub API. If the repository belongs to a personal account (not an organization), leave `runner_group` **empty** — otherwise runner registration will fail with a 404 error.
 - **Repository Policy**: grants a specific repository access to additional specs beyond the defaults.
 
-Each spec's `template_id` should point to a Qiniu Sandbox template containing the GitHub runner image. Template access is checked against the repository owner's Sandbox service Preferences at sandbox creation time.
+Each spec's `template_id` should point to a Qiniu Sandbox template containing the GitHub runner image. Template access is checked against the repository owner's effective Sandbox service shown under **Repositories → Runner readiness** at sandbox creation time.
 
 ## Admin Console
 
@@ -195,7 +195,7 @@ Runner request lists return the newest 100 rows by default and cap pages at 500.
 | `github registration token: status 404` | `runner_group` is set but the repo owner is a personal account | Clear `runner_group` in the runner spec to use repository-level registration |
 | `invalid signature` in logs | Webhook secret mismatch | Ensure `github.webhook_secret` matches the secret in GitHub App/repo webhook settings |
 | `runner start deferred ... at capacity` | Global or per-spec concurrency limit reached | Wait for running jobs to finish, or increase `max_concurrent_runners` / spec `max_concurrency` |
-| Sandbox creation fails | Sandbox service credentials not configured | Configure API credentials in account/org Preferences or admin fallback at `/admin/sandbox_service` |
+| Sandbox creation fails | Repository owner has no effective Sandbox service | Open **Repositories**, select the account or organization, and complete **Runner readiness**; admins may also configure an eligible fallback at `/admin/sandbox_service` |
 
 For detailed local debugging steps, see [docs/testing.md](docs/testing.md#8-troubleshooting-order).
 

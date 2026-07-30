@@ -471,7 +471,7 @@ func TestUserGitHubAppConfigurationAndRunnerList(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("unexpected setup status: %d body=%s", rec.Code, rec.Body.String())
 	}
-	if rec.Header().Get("Location") != "/account/repositories?installation_id=987&setup_action=install&state="+url.QueryEscape(setupState) {
+	if rec.Header().Get("Location") != "/repositories?installation_id=987&setup_action=install&state="+url.QueryEscape(setupState) {
 		t.Fatalf("unexpected setup redirect: %q", rec.Header().Get("Location"))
 	}
 
@@ -2313,7 +2313,7 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 		t.Fatalf("expected sandbox api key to start unconfigured: %#v", preferences)
 	}
 
-	req = httptest.NewRequest(http.MethodPut, "/user/preferences/sandbox", strings.NewReader(`{"api_url":" https://sandbox.example.test ","api_key":"sandbox-secret-key"}`))
+	req = httptest.NewRequest(http.MethodPut, "/user/preferences/sandbox", strings.NewReader(`{"api_url":" https://us-south-1-sandbox.qiniuapi.com/ ","api_key":"sandbox-secret-key"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
 	rec = httptest.NewRecorder()
@@ -2327,7 +2327,7 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.Mode != "custom" || preferences.Sandbox.APIURL != "https://sandbox.example.test" || !preferences.Sandbox.APIKey.Configured || preferences.Sandbox.APIKey.UpdatedAt == "" {
+	if preferences.Sandbox.Mode != "custom" || preferences.Sandbox.APIURL != "https://us-south-1-sandbox.qiniuapi.com" || !preferences.Sandbox.APIKey.Configured || preferences.Sandbox.APIKey.UpdatedAt == "" {
 		t.Fatalf("expected configured sandbox response: %#v", preferences)
 	}
 
@@ -2338,7 +2338,8 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	installation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
 		AccountID:      account.ID,
 		InstallationID: 987,
-		AccountLogin:   "gitwikitree",
+		AccountType:    "user",
+		AccountLogin:   "hubot",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2347,7 +2348,7 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.ValueJSON != `{"api_url":"https://sandbox.example.test"}` {
+	if config.ValueJSON != `{"api_url":"https://us-south-1-sandbox.qiniuapi.com"}` {
 		t.Fatalf("unexpected sandbox preference value: %q", config.ValueJSON)
 	}
 	saved, err := store.GetAccountSecret(state.AccountScopeTypeAccount, account.ID, state.AccountSecretTypeSandboxAPIKey)
@@ -2379,7 +2380,7 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 		t.Fatalf("expected org sandbox preferences to start unconfigured: %#v", preferences)
 	}
 
-	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", installation.ID), strings.NewReader(`{"api_url":"https://org-sandbox.example.test","api_key":"org-sandbox-secret-key"}`))
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", installation.ID), strings.NewReader(`{"api_url":"https://cn-yangzhou-1-sandbox.qiniuapi.com","api_key":"org-sandbox-secret-key"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
 	rec = httptest.NewRecorder()
@@ -2410,14 +2411,14 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.Mode != "inherit" || !preferences.Sandbox.Inherited || preferences.Sandbox.APIURL != "https://sandbox.example.test" || !preferences.Sandbox.APIKey.Configured {
+	if preferences.Sandbox.Mode != "inherit" || !preferences.Sandbox.Inherited || preferences.Sandbox.APIURL != "https://us-south-1-sandbox.qiniuapi.com" || !preferences.Sandbox.APIKey.Configured {
 		t.Fatalf("expected saved org sandbox preferences to inherit account preferences: %#v", preferences)
 	}
 	if _, err := store.GetAccountSecret(state.AccountScopeTypeGitHubInstall, installation.InstallationID, state.AccountSecretTypeSandboxAPIKey); err != state.ErrNotFound {
 		t.Fatalf("expected inherited org sandbox preference to delete scoped api key, got %v", err)
 	}
 
-	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", installation.ID), strings.NewReader(`{"api_url":"https://org-sandbox-updated.example.test"}`))
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", installation.ID), strings.NewReader(`{"api_url":"https://us-south-1-sandbox.qiniuapi.com"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
 	rec = httptest.NewRecorder()
@@ -2426,7 +2427,7 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 		t.Fatalf("expected org custom save without new key to fail after inherit cleared scoped key, status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodPut, "/user/preferences/sandbox", strings.NewReader(`{"api_url":"https://sandbox-updated.example.test"}`))
+	req = httptest.NewRequest(http.MethodPut, "/user/preferences/sandbox", strings.NewReader(`{"api_url":"https://cn-yangzhou-1-sandbox.qiniuapi.com"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
 	rec = httptest.NewRecorder()
@@ -2440,7 +2441,7 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.Mode != "custom" || preferences.Sandbox.APIURL != "https://sandbox-updated.example.test" || !preferences.Sandbox.APIKey.Configured {
+	if preferences.Sandbox.Mode != "custom" || preferences.Sandbox.APIURL != "https://cn-yangzhou-1-sandbox.qiniuapi.com" || !preferences.Sandbox.APIKey.Configured {
 		t.Fatalf("expected updated url with existing api key: %#v", preferences)
 	}
 
@@ -2457,14 +2458,274 @@ func TestUserSandboxAPIKeyPreferencesAreEncrypted(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.Mode != "custom" || preferences.Sandbox.APIURL != "https://sandbox-updated.example.test" || preferences.Sandbox.APIKey.Configured {
+	if preferences.Sandbox.Mode != "custom" || preferences.Sandbox.APIURL != "https://cn-yangzhou-1-sandbox.qiniuapi.com" || preferences.Sandbox.APIKey.Configured {
 		t.Fatalf("expected delete to preserve sandbox api url and clear key: %#v", preferences)
 	}
 }
 
-func TestUserSandboxInheritanceRequiresExplicitSourceReplacement(t *testing.T) {
+func TestOrganizationSandboxManagementRequiresActiveMembership(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		membershipBody string
+		wantManageable bool
+		wantSaveStatus int
+	}{
+		{
+			name:           "outside collaborator",
+			membershipBody: `[]`,
+			wantSaveStatus: http.StatusForbidden,
+		},
+		{
+			name:           "organization member",
+			membershipBody: `[{"state":"active","role":"member","organization":{"id":9001,"login":"octo-org"}}]`,
+			wantManageable: true,
+			wantSaveStatus: http.StatusOK,
+		},
+		{
+			name:           "matching login with a different stable organization id",
+			membershipBody: `[{"state":"active","role":"member","organization":{"id":9002,"login":"octo-org"}}]`,
+			wantSaveStatus: http.StatusForbidden,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			githubAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/user/memberships/orgs" {
+					t.Fatalf("unexpected GitHub request: %s %s", r.Method, r.URL.String())
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Write([]byte(test.membershipBody))
+			}))
+			defer githubAPI.Close()
+
+			store := state.New(t.TempDir())
+			srv := newTestServer(t, store, githubAPI.URL, &fakeSandbox{})
+			account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+			if err != nil {
+				t.Fatal(err)
+			}
+			saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "user-token")
+			installation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+				AccountID:       account.ID,
+				InstallationID:  987,
+				GitHubAccountID: 9001,
+				AccountType:     "organization",
+				AccountLogin:    "octo-org",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/user/github-app?include=settings", nil)
+			req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET GitHub App settings scopes: status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), `"settings_manageability":true`) {
+				t.Fatalf("expected resolved Settings manageability marker: body=%s", rec.Body.String())
+			}
+			manageableField := fmt.Sprintf(`"manageable":%t`, test.wantManageable)
+			if !strings.Contains(rec.Body.String(), manageableField) {
+				t.Fatalf("expected %s in GitHub App response: body=%s", manageableField, rec.Body.String())
+			}
+
+			req = httptest.NewRequest(http.MethodGet, fmt.Sprintf("/user/preferences?installation_id=%d", installation.ID), nil)
+			req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+			rec = httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET organization preferences: status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), `"manageable":true`) != test.wantManageable {
+				t.Fatalf("unexpected manageable state: body=%s", rec.Body.String())
+			}
+
+			req = httptest.NewRequest(
+				http.MethodPut,
+				fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", installation.ID),
+				strings.NewReader(`{"api_url":"https://us-south-1-sandbox.qiniuapi.com","api_key":"org-key"}`),
+			)
+			req.Header.Set("Content-Type", "application/json")
+			req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+			rec = httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			if rec.Code != test.wantSaveStatus {
+				t.Fatalf("PUT organization preferences: got=%d want=%d body=%s", rec.Code, test.wantSaveStatus, rec.Body.String())
+			}
+
+			if !test.wantManageable {
+				for _, path := range []string{"/user/sandbox/templates", "/user/sandbox/instances"} {
+					req = httptest.NewRequest(
+						http.MethodGet,
+						fmt.Sprintf("%s?installation_id=%d&region=us-south-1", path, installation.ID),
+						nil,
+					)
+					req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+					rec = httptest.NewRecorder()
+					srv.ServeHTTP(rec, req)
+					if rec.Code != http.StatusForbidden {
+						t.Fatalf("GET %s as outside collaborator: got=%d want=%d body=%s", path, rec.Code, http.StatusForbidden, rec.Body.String())
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestPersonalSandboxManagementPrefersStableGitHubAccountID(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "", &fakeSandbox{})
+	account, _, err := store.UpsertAccountForOAuthIdentity(state.OAuthIdentity{
+		OAuthProvider: "github",
+		OAuthSubject:  "9001",
+		OAuthLogin:    "octocat",
+	}, "user")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	manageable, err := srv.githubInstallationAccountsManageable(
+		context.Background(),
+		account.ID,
+		[]state.GitHubInstallationAccount{{
+			GitHubAccountID: 9002,
+			AccountType:     "user",
+			AccountLogin:    "octocat",
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manageable[0] {
+		t.Fatal("matching login must not override a different stable GitHub account ID")
+	}
+
+	manageable, err = srv.githubInstallationAccountsManageable(
+		context.Background(),
+		account.ID,
+		[]state.GitHubInstallationAccount{{
+			AccountType:  "user",
+			AccountLogin: "octocat",
+		}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !manageable[0] {
+		t.Fatal("legacy personal owner without a stable GitHub account ID should fall back to login")
+	}
+}
+
+func TestGitHubAppSettingsManageabilityPropagatesMembershipErrors(t *testing.T) {
+	githubAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/memberships/orgs" {
+			t.Fatalf("unexpected GitHub request: %s %s", r.Method, r.URL.String())
+		}
+		http.Error(w, `{"message":"Bad credentials"}`, http.StatusUnauthorized)
+	}))
+	defer githubAPI.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, githubAPI.URL, &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saveTestGitHubOAuthToken(t, store, account.ID, srv.cfg.AuthEncryptionKey.Value(), "expired-user-token")
+	if _, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:       account.ID,
+		InstallationID:  987,
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "octo-org",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/github-app?include=settings", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("GET GitHub App Settings scopes: got=%d want=%d body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"code":"REAUTH_REQUIRED"`) {
+		t.Fatalf("expected GitHub reauthentication error: body=%s", rec.Body.String())
+	}
+}
+
+func TestOrganizationSandboxManagementFailsClosedWithoutOwnerMetadata(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	installation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:      account.ID,
+		InstallationID: 987,
+		AccountLogin:   "legacy-org",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/user/preferences?installation_id=%d", installation.ID), nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET legacy organization preferences: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), `"manageable":true`) {
+		t.Fatalf("legacy organization scope must fail closed: body=%s", rec.Body.String())
+	}
+
+	req = httptest.NewRequest(
+		http.MethodPut,
+		fmt.Sprintf("/user/preferences/sandbox?installation_id=%d", installation.ID),
+		strings.NewReader(`{"api_url":"https://us-south-1-sandbox.qiniuapi.com","api_key":"org-key"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("PUT legacy organization preferences: got=%d want=%d body=%s", rec.Code, http.StatusForbidden, rec.Body.String())
+	}
+}
+
+func TestUserSandboxPreferencesRejectUnsupportedEndpoint(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/user/preferences/sandbox",
+		strings.NewReader(`{"api_url":"https://sandbox.example.test","api_key":"sandbox-key"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "unsupported sandbox region") {
+		t.Fatalf("unsupported Sandbox endpoint: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUserSandboxInheritanceRequiresExplicitSourceReplacement(t *testing.T) {
+	githubAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/memberships/orgs" {
+			t.Fatalf("unexpected GitHub request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[{"state":"active","role":"member","organization":{"id":9001,"login":"example-org"}}]`))
+	}))
+	defer githubAPI.Close()
+
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, githubAPI.URL, &fakeSandbox{})
 	if _, _, err := store.UpsertAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "alice-id", OAuthLogin: "alice"}, "user"); err != nil {
 		t.Fatal(err)
 	}
@@ -2499,8 +2760,8 @@ func TestUserSandboxInheritanceRequiresExplicitSourceReplacement(t *testing.T) {
 		}
 	}
 
-	saveAccountDefault("alice-id", "alice", "https://alice-sandbox.example.test", "alice-key")
-	saveAccountDefault("bob-id", "bob", "https://bob-sandbox.example.test", "bob-key")
+	saveAccountDefault("alice-id", "alice", "https://us-south-1-sandbox.qiniuapi.com", "alice-key")
+	saveAccountDefault("bob-id", "bob", "https://cn-yangzhou-1-sandbox.qiniuapi.com", "bob-key")
 	alice, _, err := store.GetAccountByOAuthIdentity("github", "alice-id")
 	if err != nil {
 		t.Fatal(err)
@@ -2509,11 +2770,25 @@ func TestUserSandboxInheritanceRequiresExplicitSourceReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	aliceInstallation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{AccountID: alice.ID, InstallationID: 987, AccountLogin: "example-org"})
+	saveTestGitHubOAuthToken(t, store, alice.ID, srv.cfg.AuthEncryptionKey.Value(), "alice-token")
+	saveTestGitHubOAuthToken(t, store, bob.ID, srv.cfg.AuthEncryptionKey.Value(), "bob-token")
+	aliceInstallation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:       alice.ID,
+		InstallationID:  987,
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "example-org",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bobInstallation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{AccountID: bob.ID, InstallationID: 987, AccountLogin: "example-org"})
+	bobInstallation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:       bob.ID,
+		InstallationID:  987,
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "example-org",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2538,7 +2813,7 @@ func TestUserSandboxInheritanceRequiresExplicitSourceReplacement(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.SourceAccountID != alice.ID || preferences.Sandbox.SourceAccountLogin != "alice" || preferences.Sandbox.SourceIsCurrentAccount || !preferences.Sandbox.SourceAvailable || preferences.Sandbox.APIURL != "https://alice-sandbox.example.test" {
+	if preferences.Sandbox.SourceAccountID != alice.ID || preferences.Sandbox.SourceAccountLogin != "alice" || preferences.Sandbox.SourceIsCurrentAccount || !preferences.Sandbox.SourceAvailable || preferences.Sandbox.APIURL != "https://us-south-1-sandbox.qiniuapi.com" {
 		t.Fatalf("expected bob to see alice as the inherited source: %#v", preferences)
 	}
 
@@ -2584,14 +2859,23 @@ func TestUserSandboxInheritanceRequiresExplicitSourceReplacement(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &preferences); err != nil {
 		t.Fatal(err)
 	}
-	if preferences.Sandbox.SourceAccountID != bob.ID || preferences.Sandbox.SourceAccountLogin != "bob" || !preferences.Sandbox.SourceIsCurrentAccount || !preferences.Sandbox.SourceAvailable || preferences.Sandbox.APIURL != "https://bob-sandbox.example.test" {
+	if preferences.Sandbox.SourceAccountID != bob.ID || preferences.Sandbox.SourceAccountLogin != "bob" || !preferences.Sandbox.SourceIsCurrentAccount || !preferences.Sandbox.SourceAvailable || preferences.Sandbox.APIURL != "https://cn-yangzhou-1-sandbox.qiniuapi.com" {
 		t.Fatalf("expected explicit replacement to use bob as source: %#v", preferences)
 	}
 }
 
 func TestUserSandboxInheritanceRejectsUnconfiguredSourceAccount(t *testing.T) {
+	githubAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/user/memberships/orgs" {
+			t.Fatalf("unexpected GitHub request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[{"state":"active","role":"member","organization":{"id":9001,"login":"example-org"}}]`))
+	}))
+	defer githubAPI.Close()
+
 	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "", &fakeSandbox{})
+	srv := newTestServer(t, store, githubAPI.URL, &fakeSandbox{})
 	if _, _, err := store.UpsertAccountForOAuthIdentity(state.OAuthIdentity{OAuthProvider: "github", OAuthSubject: "alice-id", OAuthLogin: "alice"}, "user"); err != nil {
 		t.Fatal(err)
 	}
@@ -2607,7 +2891,14 @@ func TestUserSandboxInheritanceRejectsUnconfiguredSourceAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	installation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{AccountID: alice.ID, InstallationID: 987, AccountLogin: "example-org"})
+	saveTestGitHubOAuthToken(t, store, alice.ID, srv.cfg.AuthEncryptionKey.Value(), "alice-token")
+	installation, err := store.UpsertGitHubInstallation(state.GitHubInstallation{
+		AccountID:       alice.ID,
+		InstallationID:  987,
+		GitHubAccountID: 9001,
+		AccountType:     "organization",
+		AccountLogin:    "example-org",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3365,7 +3656,7 @@ func TestUserPreferencesReportsAdminDefaultWithoutLeakingMetadata(t *testing.T) 
 		t.Fatalf("preferences leaked admin default metadata: %s", rec.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodPut, "/user/preferences/sandbox", strings.NewReader(`{"api_url":"https://user-sandbox.example.test","api_key":"user-key"}`))
+	req = httptest.NewRequest(http.MethodPut, "/user/preferences/sandbox", strings.NewReader(`{"api_url":"https://us-south-1-sandbox.qiniuapi.com","api_key":"user-key"}`))
 	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)

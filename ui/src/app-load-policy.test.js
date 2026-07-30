@@ -45,13 +45,24 @@ describe("app load policy", () => {
     ["/github/runs/octo/repo/34/jobs", ["github_app", "runner_requests", "onboarding"]],
     ["/github/branches/octo/repo/deadbeef/jobs", ["github_app", "runner_requests", "onboarding"]],
     ["/jobs/manual/octo/repo/manual-1", ["github_app", "runner_requests", "onboarding"]],
-    ["/repositories", ["github_app", "onboarding"]],
+    ["/repositories", ["github_app", "preferences", "onboarding"]],
+    ["/account/repositories", ["github_app", "preferences", "onboarding"]],
+    ["/organizations/octo/repositories", ["github_app", "preferences", "onboarding"]],
     ["/account/preferences", ["github_app", "preferences", "onboarding"]],
     ["/organizations/octo/sandbox-templates", ["github_app", "preferences", "onboarding"]],
     ["/jobs/job-1", []],
     ["/admin/", []],
   ])("loads only data used by user route %s", (path, expected) => {
     expect(userDataResources(path)).toEqual(expected)
+  })
+
+  test.each([
+    ["/jobs", "/user/github-app"],
+    ["/repositories", "/user/github-app"],
+    ["/account/preferences", "/user/github-app?include=settings"],
+    ["/organizations/qbox/sandbox-templates", "/user/github-app?include=settings"],
+  ])("loads Settings manageability only for Settings route %s", (path, expected) => {
+    expect(appPolicy.userGitHubAppPath?.(path)).toBe(expected)
   })
 
   test("polls only user job-list routes", () => {
@@ -109,5 +120,23 @@ describe("app load policy", () => {
       status: "pending",
     })
     await expect(appPolicy.loadOptionalUserResource?.(Promise.reject(new Error("onboarding unavailable")))).resolves.toBeNull()
+  })
+
+  test("accepts results only from the latest user workspace load", () => {
+    const gate = appPolicy.createLatestUserLoadGate?.()
+    const accountLoad = gate?.begin("miclle:/account/preferences")
+    const organizationLoad = gate?.begin("miclle:/organizations/qiniu/preferences")
+
+    expect(gate?.isCurrent(accountLoad)).toBe(false)
+    expect(gate?.isCurrent(organizationLoad)).toBe(true)
+  })
+
+  test("keeps initial and polling loads current within the same workspace scope", () => {
+    const gate = appPolicy.createLatestUserLoadGate?.()
+    const initialLoad = gate?.begin("miclle:/jobs")
+    const pollingLoad = gate?.begin("miclle:/jobs")
+
+    expect(gate?.isCurrent(initialLoad)).toBe(true)
+    expect(gate?.isCurrent(pollingLoad)).toBe(true)
   })
 })

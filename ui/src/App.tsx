@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { AppSidebar } from "@/components/app-sidebar"
@@ -51,10 +51,12 @@ import {
   adminPollingResources,
   appRouteAccess,
   authRouteViewState,
+  createLatestUserLoadGate,
   loadOptionalUserResource,
   shouldPollAdminSection,
   shouldPollUserRoute,
   userDataResources,
+  userGitHubAppPath,
   userPollingResources,
   userRunnerHistoryWindow,
   userRunnerRequestLimit,
@@ -63,6 +65,13 @@ import {
   type AuthSessionCheckStatus,
 } from "@/app-load-policy"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
+import {
+  repositoryAccountLogin,
+  repositoryPath,
+  repositoryPreferenceScope,
+  selectRepositoryInstallation,
+  settingsPreferenceInstallationID,
+} from "@/repository-readiness"
 import { productTourVersion, shouldCompleteProductTour } from "@/user-onboarding"
 import {
   createGitHubReauthenticationGate,
@@ -160,10 +169,12 @@ function App() {
   const [userPreferencesScope, setUserPreferencesScope] = useState("")
   const [productTourOnboarding, setProductTourOnboarding] = useState<ProductTourOnboarding | null>(null)
   const [authorizedRepositories, setAuthorizedRepositories] = useState<Record<number, string[]>>({})
+  const [repositoryErrors, setRepositoryErrors] = useState<Record<number, string>>({})
   const [loadingRepositoriesFor, setLoadingRepositoriesFor] = useState<number | null>(null)
   const [syncingGitHubInstallations, setSyncingGitHubInstallations] = useState(false)
   const [userSelectedKey, setUserSelectedKey] = useState(() => userJobsGroupKeyFromLocation(window.location.pathname, window.location.search))
   const [beginGitHubReauthentication] = useState(createGitHubReauthenticationGate)
+  const userLoadGate = useRef(createLatestUserLoadGate()).current
 
   const setSection = useCallback((next: string) => {
     const section = adminSections.includes(next as AdminSection) ? (next as AdminSection) : "overview"
@@ -176,13 +187,25 @@ function App() {
   }, [])
 
   const setUserPage = useCallback((next: "home" | "repositories" | "settings") => {
-    const nextPath = next === "settings" ? "/account/repositories" : next === "repositories" ? "/repositories" : userJobsPath(userSelectedKey)
+    const nextPath = next === "settings" ? "/account/preferences" : next === "repositories" ? "/repositories" : userJobsPath(userSelectedKey)
     if (window.location.pathname + window.location.search !== nextPath) {
       window.history.pushState(null, "", nextPath)
     }
     setLocationPath(window.location.pathname)
     setLocationSearch(window.location.search)
   }, [userSelectedKey])
+
+  const setRepositoryAccount = useCallback(
+    (accountLogin: string | undefined) => {
+      const nextPath = repositoryPath(accountLogin, authSession.login)
+      if (window.location.pathname + window.location.search !== nextPath) {
+        window.history.pushState(null, "", nextPath)
+      }
+      setLocationPath(window.location.pathname)
+      setLocationSearch(window.location.search)
+    },
+    [authSession.login],
+  )
 
   const openProductTourStart = useCallback(() => {
     setUserSelectedKey("")
@@ -258,7 +281,21 @@ function App() {
   const accountSettingsRoute = parseAccountSettingsRoute(locationPath, authSession.login)
   const accountSettingsLogin = accountSettingsRoute?.accountLogin
   const accountSettingsTab = accountSettingsRoute?.tab
-  const userPage = accountSettingsRoute ? "settings" : locationPath === "/repositories" ? "repositories" : "home"
+  const selectedRepositoryAccountLogin = repositoryAccountLogin(locationPath, authSession.login)
+  const selectedRepositoryInstallation = selectRepositoryInstallation(
+    githubApp?.installations ?? [],
+    selectedRepositoryAccountLogin,
+    authSession.login,
+  )
+  const selectedRepositoryPreferenceScope = repositoryPreferenceScope(
+    selectedRepositoryInstallation,
+    authSession.login,
+  )
+  const userPage = selectedRepositoryAccountLogin
+    ? "repositories"
+    : accountSettingsRoute
+      ? "settings"
+      : "home"
 
   const metrics = useMemo<Metric[]>(() => {
     const count = (status: RunnerStatus) => runners.filter((runner) => runner.status === status).length
@@ -397,13 +434,19 @@ function App() {
   }, [hasAccess, isAdminRoute, request, section])
 
   const loadUserAll = useCallback(async (polling = false) => {
+    const loadID = userLoadGate.begin(`${authSession.login ?? ""}:${locationPath}`)
     if (!authSession.authenticated || (hasAccess && isAdminRoute)) return
     const resources = polling ? userPollingResources(locationPath) : userDataResources(locationPath)
-    if (resources.length === 0) return
+    if (resources.length === 0) {
+      setLoading(false)
+      return
+    }
     setLoading(true)
     try {
       const [appData, runnerPage, onboardingData] = await Promise.all([
-        resources.includes("github_app") ? request("/user/github-app") : Promise.resolve(null),
+        resources.includes("github_app")
+          ? request(userGitHubAppPath(locationPath))
+          : Promise.resolve(null),
         resources.includes("runner_requests")
           ? requestUserRunnerPage(userRunnerRequestLimit(locationPath, polling), 0)
           : Promise.resolve(null),
@@ -412,6 +455,34 @@ function App() {
           : Promise.resolve(null),
       ])
       const nextApp = appData as GitHubAppConfig | null
+      let nextPreferences: UserPreferences | null = null
+      let nextPreferencesScope = ""
+      if (resources.includes("preferences") && nextApp) {
+        const nextRoute = parseAccountSettingsRoute(locationPath, authSession.login)
+        const repositoryLogin = repositoryAccountLogin(locationPath, authSession.login)
+        const repositoryInstallation = repositoryLogin
+          ? selectRepositoryInstallation(
+              nextApp.installations,
+              repositoryLogin,
+              authSession.login,
+            )
+          : undefined
+        const installationID = repositoryLogin
+          ? repositoryInstallation?.account_login?.toLowerCase() ===
+            authSession.login?.toLowerCase()
+            ? undefined
+            : repositoryInstallation?.id
+          : settingsPreferenceInstallationID(
+              nextApp.installations,
+              nextRoute?.accountLogin,
+              authSession.login,
+            )
+        const preferencesPath = userPreferencesPath(installationID)
+        const preferencesData = await request(preferencesPath)
+        nextPreferences = preferencesData as UserPreferences
+        nextPreferencesScope = installationID ? `github_installation:${installationID}` : "account"
+      }
+      if (!userLoadGate.isCurrent(loadID)) return
       if (nextApp) setGitHubApp(nextApp)
       if (runnerPage) {
         setUserRunnerTotal(runnerPage.total)
@@ -419,15 +490,10 @@ function App() {
         if (runnerPage.total === 0) setUserSelectedKey("")
       }
       if (onboardingData) setProductTourOnboarding(onboardingData as ProductTourOnboarding)
-      if (resources.includes("preferences") && nextApp) {
-        const nextRoute = parseAccountSettingsRoute(locationPath, authSession.login)
-        const installationID = preferenceInstallationID(nextApp, nextRoute, authSession.login)
-        const preferencesPath = userPreferencesPath(installationID)
-        const preferencesData = await request(preferencesPath)
-        setUserPreferences(preferencesData as UserPreferences)
-        setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
-      }
+      if (nextPreferences) setUserPreferences(nextPreferences)
+      if (nextPreferencesScope) setUserPreferencesScope(nextPreferencesScope)
     } catch (error) {
+      if (!userLoadGate.isCurrent(loadID)) return
       if (requiresGitHubReauthentication(error)) {
         if (beginGitHubReauthentication()) {
           toast.message("Refreshing GitHub sign-in...")
@@ -437,9 +503,9 @@ function App() {
       }
       toast.error(error instanceof Error ? error.message : "Failed to load workspace data")
     } finally {
-      setLoading(false)
+      if (userLoadGate.isCurrent(loadID)) setLoading(false)
     }
-  }, [authSession.authenticated, authSession.login, beginGitHubReauthentication, hasAccess, isAdminRoute, locationPath, refreshGitHubOAuthLogin, request, requestUserRunnerPage])
+  }, [authSession.authenticated, authSession.login, beginGitHubReauthentication, hasAccess, isAdminRoute, locationPath, refreshGitHubOAuthLogin, request, requestUserRunnerPage, userLoadGate])
 
   const saveProductTourOnboarding = useCallback(async (state: ProductTourOnboarding) => {
     const saved = (await request("/user/onboarding/product-tour", {
@@ -472,7 +538,11 @@ function App() {
   }, [authSession.authenticated, beginGitHubReauthentication, loadingUserRunnerHistory, refreshGitHubOAuthLogin, requestUserRunnerPage])
 
   const syncGitHubAppSetupFromURL = useCallback(async () => {
-    if (!authSession.authenticated || (hasAccess && isAdminRoute) || !isAccountSettingsPath(locationPath)) return
+    if (
+      !authSession.authenticated ||
+      (hasAccess && isAdminRoute) ||
+      (!isAccountSettingsPath(locationPath) && locationPath !== "/repositories")
+    ) return
     const params = new URLSearchParams(window.location.search)
     const installationID = Number(params.get("installation_id") || "")
     if (!Number.isSafeInteger(installationID) || installationID <= 0) return
@@ -485,7 +555,7 @@ function App() {
         body: JSON.stringify({ installation_id: installationID, setup_state: setupState }),
       })) as GitHubInstallation
       toast.success("GitHub App account synced")
-      const nextPath = accountSettingsPathForInstallation(installation, authSession.login, "repositories")
+      const nextPath = repositoryPath(installation.account_login, authSession.login)
       window.history.replaceState(null, "", nextPath)
       setLocationPath(window.location.pathname)
       setLocationSearch(window.location.search)
@@ -498,6 +568,12 @@ function App() {
   }, [authSession.authenticated, authSession.login, hasAccess, isAdminRoute, loadUserAll, locationPath, request])
 
   const loadAuthorizedRepositories = useCallback(async (id: number) => {
+    setRepositoryErrors((current) => {
+      if (!(id in current)) return current
+      const next = { ...current }
+      delete next[id]
+      return next
+    })
     setLoadingRepositoriesFor(id)
     try {
       const data = (await request(
@@ -505,7 +581,9 @@ function App() {
       )) as AuthorizedRepositories
       setAuthorizedRepositories((current) => ({ ...current, [id]: data.repositories || [] }))
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load GitHub repositories")
+      const message = error instanceof Error ? error.message : "Failed to load GitHub repositories"
+      setRepositoryErrors((current) => ({ ...current, [id]: message }))
+      toast.error(message)
     } finally {
       setLoadingRepositoriesFor(null)
     }
@@ -628,9 +706,9 @@ function App() {
 
   useEffect(() => {
     if (locationPath !== "/accounts" && locationPath !== "/settings") return
-    const nextPath = `/account/repositories${window.location.search}`
+    const nextPath = `/account/preferences${window.location.search}`
     window.history.replaceState(null, "", nextPath)
-    setLocationPath("/account/repositories")
+    setLocationPath("/account/preferences")
     setLocationSearch(window.location.search)
   }, [locationPath])
 
@@ -672,10 +750,16 @@ function App() {
   }, [authSession.authenticated, hasAccess, isAdminRoute, loadUserAll, locationPath])
 
   useEffect(() => {
+    const showsRepositoryReadiness = Boolean(
+      selectedRepositoryAccountLogin &&
+      userPreferencesScope === selectedRepositoryPreferenceScope,
+    )
+    const showsCurrentAccountSettings =
+      accountSettingsTab === "preferences" &&
+      accountSettingsLogin === authSession.login &&
+      userPreferencesScope === "account"
     if (
-      accountSettingsTab !== "preferences" ||
-      accountSettingsLogin !== authSession.login ||
-      userPreferencesScope !== "account" ||
+      (!showsRepositoryReadiness && !showsCurrentAccountSettings) ||
       !shouldCompleteProductTour(productTourOnboarding, userPreferences)
     ) {
       return
@@ -697,6 +781,8 @@ function App() {
     authSession.login,
     productTourOnboarding,
     saveProductTourOnboarding,
+    selectedRepositoryAccountLogin,
+    selectedRepositoryPreferenceScope,
     userPreferences,
     userPreferencesScope,
   ])
@@ -738,6 +824,7 @@ function App() {
     setUserRunnerTotal(0)
     setGitHubApp(null)
     setAuthorizedRepositories({})
+    setRepositoryErrors({})
     setLoadingRepositoriesFor(null)
     setUserSelectedKey("")
     setSelectedID("")
@@ -930,14 +1017,17 @@ function App() {
           locationPath={locationPath}
           productTourOnboarding={productTourOnboarding}
           userPreferences={userPreferences}
+          userPreferencesScope={userPreferencesScope}
           runners={userRunners}
           runnerTotal={userRunnerTotal}
           loadingRunnerHistory={loadingUserRunnerHistory}
           selectedKey={userSelectedKey}
           selectedJobID={userSelectedJobID}
           page={userPage}
+          selectedRepositoryAccountLogin={selectedRepositoryAccountLogin}
           accountSettingsRoute={accountSettingsRoute || defaultAccountSettingsRoute(authSession.login)}
           authorizedRepositories={authorizedRepositories}
+          repositoryErrors={repositoryErrors}
           loadingRepositoriesFor={loadingRepositoriesFor}
           syncingGitHubInstallations={syncingGitHubInstallations}
           onLoadAuthorizedRepositories={(id) => void loadAuthorizedRepositories(id)}
@@ -947,6 +1037,7 @@ function App() {
           onSaveSandboxConfig={saveSandboxConfig}
           onDeleteSandboxAPIKey={deleteSandboxAPIKey}
           onNavigate={setUserPage}
+          onNavigateRepositoryAccount={setRepositoryAccount}
           onNavigateAccountSettings={setAccountSettingsRoute}
           onOpenJob={openUserJob}
           onLoadJobGroup={loadUserJobGroup}
@@ -1159,23 +1250,12 @@ function UserJobRedirect({
 }
 
 function defaultAccountSettingsRoute(currentLogin?: string): AccountSettingsRoute {
-  return { accountLogin: currentLogin, tab: "repositories" }
+  return { accountLogin: currentLogin, tab: "preferences" }
 }
 
 function userPreferencesPath(installationID?: number, base = "/user/preferences") {
   if (!installationID) return base
   return `${base}?installation_id=${encodeURIComponent(String(installationID))}`
-}
-
-function preferenceInstallationID(
-  githubApp: GitHubAppConfig,
-  route: AccountSettingsRoute | null,
-  currentLogin: string | undefined
-) {
-  const accountLogin = route?.accountLogin?.trim()
-  if (!accountLogin || accountLogin === currentLogin) return undefined
-  const installation = githubApp.installations.find((item) => item.account_login === accountLogin)
-  return installation?.id
 }
 
 function isAccountSettingsPath(path: string): boolean {
@@ -1368,14 +1448,6 @@ function decodeRepositoryPath(ownerSegment: string, repoSegment: string) {
   const repo = safeDecodePathSegment(repoSegment)
   if (!owner || !repo) return "unknown/repository"
   return `${owner}/${repo}`
-}
-
-function accountSettingsPathForInstallation(
-  installation: Pick<GitHubInstallation, "account_login">,
-  currentLogin: string | undefined,
-  tab: AccountSettingsTab
-): string {
-  return accountSettingsPath(installation.account_login, currentLogin, tab)
 }
 
 function accountSettingsPath(

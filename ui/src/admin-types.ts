@@ -162,6 +162,7 @@ export type GitHubInstallation = {
   account_login?: string
   account_name?: string
   account_avatar?: string
+  manageable?: boolean
   repositories: string[]
   created_at: string
   updated_at: string
@@ -171,6 +172,7 @@ export type GitHubAppConfig = {
   app_slug?: string
   install_url?: string
   setup_url: string
+  settings_manageability?: boolean
   installations: GitHubInstallation[]
 }
 
@@ -179,6 +181,7 @@ export type UserPreferences = {
     mode: "custom" | "inherit"
     resolved_source: "custom" | "inherited" | "admin_default" | "none"
     api_url: string
+    manageable?: boolean
     inherited?: boolean
     source_account_id?: number
     source_account_login?: string

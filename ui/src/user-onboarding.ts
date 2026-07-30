@@ -7,8 +7,8 @@ export const productTourSteps = [
   { id: "jobs", route: "/jobs", target: "jobs-nav" },
   { id: "repositories", route: "/jobs", target: "repositories-nav" },
   { id: "account-menu", route: "/jobs", target: "account-menu" },
-  { id: "settings", route: "/account/preferences", target: "settings-tabs" },
-  { id: "sandbox-service", route: "/account/preferences", target: "sandbox-service" },
+  { id: "settings", route: "/repositories", target: "repository-readiness" },
+  { id: "sandbox-service", route: "/repositories", target: "sandbox-service" },
 ] as const
 
 export function shouldStartProductTour(
@@ -21,11 +21,7 @@ export function shouldStartProductTour(
 }
 
 export function sandboxSetupCompletesProductTour(preferences: UserPreferences | null): boolean {
-  return Boolean(
-    preferences?.sandbox.api_key.configured &&
-      preferences.sandbox.resolved_source === "custom" &&
-      !preferences.sandbox.inherited,
-  )
+  return Boolean(preferences && preferences.sandbox.resolved_source !== "none")
 }
 
 export function productTourStateAfterEnd(

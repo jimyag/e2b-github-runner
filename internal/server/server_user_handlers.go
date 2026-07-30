@@ -21,6 +21,11 @@ type upsertGitHubInstallationRequest struct {
 	SetupState     string `json:"setup_state"`
 }
 
+type userGitHubInstallationResponse struct {
+	state.GitHubInstallation
+	Manageable bool `json:"manageable"`
+}
+
 type accountPreferencesResponse struct {
 	Sandbox accountSandboxPreference `json:"sandbox"`
 }
@@ -30,6 +35,7 @@ type accountSandboxPreference struct {
 	ResolvedSource         string                         `json:"resolved_source"`
 	APIURL                 string                         `json:"api_url"`
 	APIKey                 accountSandboxAPIKeyPreference `json:"api_key"`
+	Manageable             bool                           `json:"manageable"`
 	Inherited              bool                           `json:"inherited"`
 	SourceAccountID        int64                          `json:"source_account_id,omitempty"`
 	SourceAccountLogin     string                         `json:"source_account_login,omitempty"`
@@ -102,7 +108,7 @@ func (s *Server) handleGitHubAppSetupRedirect(w http.ResponseWriter, r *http.Req
 			values.Set("setup_error", "invalid_state")
 		}
 	}
-	target := "/account/repositories"
+	target := "/repositories"
 	if encoded := values.Encode(); encoded != "" {
 		target += "?" + encoded
 	}
@@ -119,12 +125,43 @@ func (s *Server) handleUserGitHubApp(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	responseInstallations := any(installations)
+	settingsManageability := r.URL.Query().Get("include") == "settings"
+	if settingsManageability {
+		owners := make([]state.GitHubInstallationAccount, 0, len(installations))
+		for _, installation := range installations {
+			owners = append(owners, state.GitHubInstallationAccount{
+				GitHubAccountID: installation.GitHubAccountID,
+				AccountType:     installation.AccountType,
+				AccountLogin:    installation.AccountLogin,
+				AccountName:     installation.AccountName,
+				AccountAvatar:   installation.AccountAvatar,
+			})
+		}
+		manageable, manageableErr := s.githubInstallationAccountsManageable(r.Context(), account.ID, owners)
+		if manageableErr != nil {
+			s.writeUserRepositoryAuthorizationError(w, manageableErr)
+			return
+		}
+		responses := make([]userGitHubInstallationResponse, 0, len(installations))
+		for i, installation := range installations {
+			responses = append(responses, userGitHubInstallationResponse{
+				GitHubInstallation: installation,
+				Manageable:         manageable[i],
+			})
+		}
+		responseInstallations = responses
+	}
+	response := map[string]any{
 		"app_slug":      strings.TrimSpace(s.cfg.GitHubAppSlug),
 		"install_url":   s.githubAppInstallURL(),
 		"setup_url":     "/github-app/setup",
-		"installations": installations,
-	})
+		"installations": responseInstallations,
+	}
+	if settingsManageability {
+		response["settings_manageability"] = true
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) handleUserSaveGitHubInstallation(w http.ResponseWriter, r *http.Request) {
@@ -332,6 +369,11 @@ func (s *Server) handleUserPreferences(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	response.Sandbox.Manageable, err = s.accountPreferenceScopeManageable(r.Context(), account.ID, scope)
+	if err != nil {
+		s.writeUserRepositoryAuthorizationError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -343,6 +385,15 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 	scope, err := s.accountPreferenceScopeFromRequest(account.ID, r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	manageable, err := s.accountPreferenceScopeManageable(r.Context(), account.ID, scope)
+	if err != nil {
+		s.writeUserRepositoryAuthorizationError(w, err)
+		return
+	}
+	if !manageable {
+		writeError(w, http.StatusForbidden, "Sandbox service for this GitHub account is managed by its owner")
 		return
 	}
 	var input upsertSandboxConfigRequest
@@ -380,6 +431,11 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 		apiURL, err := normalizeHTTPURL(input.APIURL)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		apiURL, supported := supportedSandboxRegionEndpoint(apiURL)
+		if !supported {
+			writeError(w, http.StatusBadRequest, "unsupported sandbox region")
 			return
 		}
 		_, currentKeyErr := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeSandboxAPIKey)
@@ -445,6 +501,7 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	response.Sandbox.Manageable = true
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -458,6 +515,15 @@ func (s *Server) handleUserDeleteSandboxAPIKey(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	manageable, err := s.accountPreferenceScopeManageable(r.Context(), account.ID, scope)
+	if err != nil {
+		s.writeUserRepositoryAuthorizationError(w, err)
+		return
+	}
+	if !manageable {
+		writeError(w, http.StatusForbidden, "Sandbox service for this GitHub account is managed by its owner")
+		return
+	}
 	if err := s.store.DeleteAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeSandboxAPIKey); err != nil && !errors.Is(err, state.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -468,6 +534,7 @@ func (s *Server) handleUserDeleteSandboxAPIKey(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	response.Sandbox.Manageable = true
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -640,6 +707,118 @@ func (s *Server) accountPreferenceScopeFromRequest(accountID int64, r *http.Requ
 		return accountPreferenceScope{}, errors.New("github installation not found")
 	}
 	return accountPreferenceScope{Type: state.AccountScopeTypeGitHubInstall, ID: installation.InstallationID}, nil
+}
+
+func (s *Server) accountPreferenceScopeManageable(ctx context.Context, viewerAccountID int64, scope accountPreferenceScope) (bool, error) {
+	switch scope.Type {
+	case state.AccountScopeTypeAccount:
+		return scope.ID == viewerAccountID, nil
+	case state.AccountScopeTypeGitHubInstall:
+	default:
+		return false, nil
+	}
+
+	owner, err := s.store.GitHubInstallationAccountForInstallation(scope.ID)
+	if err != nil {
+		if !errors.Is(err, state.ErrNotFound) {
+			return false, err
+		}
+		installations, listErr := s.store.ListGitHubInstallations(viewerAccountID)
+		if listErr != nil {
+			return false, listErr
+		}
+		for _, installation := range installations {
+			if installation.InstallationID == scope.ID {
+				owner = state.GitHubInstallationAccount{
+					GitHubAccountID: installation.GitHubAccountID,
+					AccountType:     installation.AccountType,
+					AccountLogin:    installation.AccountLogin,
+				}
+				break
+			}
+		}
+	}
+
+	manageable, err := s.githubInstallationAccountsManageable(
+		ctx,
+		viewerAccountID,
+		[]state.GitHubInstallationAccount{owner},
+	)
+	if err != nil {
+		return false, err
+	}
+	return manageable[0], nil
+}
+
+func (s *Server) githubInstallationAccountsManageable(
+	ctx context.Context,
+	viewerAccountID int64,
+	owners []state.GitHubInstallationAccount,
+) ([]bool, error) {
+	manageable := make([]bool, len(owners))
+	var needsUserIdentity bool
+	var needsOrganizationMemberships bool
+	for _, owner := range owners {
+		switch strings.ToLower(strings.TrimSpace(owner.AccountType)) {
+		case "user":
+			needsUserIdentity = true
+		case "organization":
+			needsOrganizationMemberships = true
+		}
+	}
+
+	if needsUserIdentity {
+		identity, err := s.store.GetOAuthIdentityForAccount(viewerAccountID, "github")
+		if err != nil {
+			return manageable, err
+		}
+		subject := strings.TrimSpace(identity.OAuthSubject)
+		login := strings.TrimSpace(identity.OAuthLogin)
+		for i, owner := range owners {
+			if !strings.EqualFold(strings.TrimSpace(owner.AccountType), "user") {
+				continue
+			}
+			if owner.GitHubAccountID > 0 {
+				manageable[i] = subject == strconv.FormatInt(owner.GitHubAccountID, 10)
+			} else {
+				manageable[i] = strings.EqualFold(login, strings.TrimSpace(owner.AccountLogin))
+			}
+		}
+	}
+
+	if !needsOrganizationMemberships {
+		return manageable, nil
+	}
+	if s.gh == nil {
+		return manageable, errors.New("github client is not configured")
+	}
+	token, err := s.githubUserAccessToken(viewerAccountID)
+	if err != nil {
+		return manageable, err
+	}
+	memberships, err := s.gh.ListUserOrganizationMemberships(ctx, token)
+	if err != nil {
+		return manageable, err
+	}
+	organizationIDs := make(map[int64]struct{}, len(memberships))
+	organizationLogins := make(map[string]struct{}, len(memberships))
+	for _, membership := range memberships {
+		organizationIDs[membership.OrganizationID] = struct{}{}
+		organizationLogins[strings.ToLower(strings.TrimSpace(membership.OrganizationLogin))] = struct{}{}
+	}
+	for i, owner := range owners {
+		if !strings.EqualFold(strings.TrimSpace(owner.AccountType), "organization") {
+			continue
+		}
+		_, matchesID := organizationIDs[owner.GitHubAccountID]
+		_, matchesLogin := organizationLogins[strings.ToLower(strings.TrimSpace(owner.AccountLogin))]
+		if owner.GitHubAccountID > 0 {
+			manageable[i] = matchesID
+		} else {
+			manageable[i] = matchesLogin
+		}
+	}
+	return manageable, nil
 }
 
 func normalizeHTTPURL(rawURL string) (string, error) {

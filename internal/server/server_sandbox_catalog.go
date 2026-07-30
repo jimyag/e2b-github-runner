@@ -18,6 +18,17 @@ func sandboxRegionEndpoint(region string) (string, bool) {
 	}
 }
 
+func supportedSandboxRegionEndpoint(rawURL string) (string, bool) {
+	normalized := strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	for _, region := range []string{"cn-yangzhou-1", "us-south-1"} {
+		endpoint, _ := sandboxRegionEndpoint(region)
+		if normalized == endpoint {
+			return endpoint, true
+		}
+	}
+	return "", false
+}
+
 func (s *Server) sandboxCatalogForUser(w http.ResponseWriter, r *http.Request) (sandboxrunner.Catalog, bool) {
 	_, account, ok := s.requireUserSession(w, r)
 	if !ok {
@@ -26,6 +37,15 @@ func (s *Server) sandboxCatalogForUser(w http.ResponseWriter, r *http.Request) (
 	scope, err := s.accountPreferenceScopeFromRequest(account.ID, r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
+	manageable, err := s.accountPreferenceScopeManageable(r.Context(), account.ID, scope)
+	if err != nil {
+		s.writeUserRepositoryAuthorizationError(w, err)
+		return nil, false
+	}
+	if !manageable {
+		writeError(w, http.StatusForbidden, "Sandbox resources for this GitHub account are managed by its owner")
 		return nil, false
 	}
 	endpoint, ok := sandboxRegionEndpoint(r.URL.Query().Get("region"))

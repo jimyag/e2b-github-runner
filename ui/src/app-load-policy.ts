@@ -15,6 +15,23 @@ export type AppRouteAccess = "public" | "user" | "admin" | "not-found"
 export type AuthSessionCheckStatus = "checking" | "ready" | "error"
 export type AuthRouteViewState = "loading" | "authenticated" | "sign-in" | "error"
 
+export function createLatestUserLoadGate() {
+  let generation = 0
+  let scope = ""
+  return {
+    begin(nextScope: string) {
+      if (nextScope !== scope) {
+        generation += 1
+        scope = nextScope
+      }
+      return generation
+    },
+    isCurrent(candidate: number | undefined) {
+      return candidate === generation
+    },
+  }
+}
+
 const adminResourcesBySection: Record<AdminSection, readonly AdminDataResource[]> = {
   overview: ["runner_requests", "runner_specs", "runner_policies"],
   accounts: [],
@@ -42,9 +59,15 @@ export function adminPollingResources(section: AdminSection): AdminDataResource[
 
 export function userDataResources(path: string): UserDataResource[] {
   if (isUserJobsRoute(path)) return ["github_app", "runner_requests", "onboarding"]
-  if (path === "/repositories") return ["github_app", "onboarding"]
+  if (path === "/repositories") return ["github_app", "preferences", "onboarding"]
   if (isAccountSettingsRoute(path)) return ["github_app", "preferences", "onboarding"]
   return []
+}
+
+export function userGitHubAppPath(path: string): string {
+  return isSandboxSettingsRoute(path)
+    ? "/user/github-app?include=settings"
+    : "/user/github-app"
 }
 
 export function shouldPollUserRoute(path: string): boolean {
@@ -111,6 +134,15 @@ export function isAccountSettingsRoute(path: string): boolean {
     path === "/accounts" ||
     /^\/account\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path) ||
     /^\/organizations\/[^/]+\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path)
+  )
+}
+
+function isSandboxSettingsRoute(path: string): boolean {
+  return (
+    path === "/settings" ||
+    path === "/accounts" ||
+    /^\/account\/(preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path) ||
+    /^\/organizations\/[^/]+\/(preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path)
   )
 }
 

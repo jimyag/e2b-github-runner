@@ -95,18 +95,18 @@ describe("product tour onboarding", () => {
     ).toBe(false)
   })
 
-  test("describes the cross-route path from Jobs to Sandbox service settings", () => {
+  test("describes the path from Jobs to repository readiness", () => {
     expect(productTourSteps.map(({ id, route, target }) => ({ id, route, target }))).toEqual([
       { id: "welcome", route: "/jobs", target: "product-shell" },
       { id: "jobs", route: "/jobs", target: "jobs-nav" },
       { id: "repositories", route: "/jobs", target: "repositories-nav" },
       { id: "account-menu", route: "/jobs", target: "account-menu" },
-      { id: "settings", route: "/account/preferences", target: "settings-tabs" },
-      { id: "sandbox-service", route: "/account/preferences", target: "sandbox-service" },
+      { id: "settings", route: "/repositories", target: "repository-readiness" },
+      { id: "sandbox-service", route: "/repositories", target: "sandbox-service" },
     ])
   })
 
-  test("completes only after this account has saved its own Sandbox API Key", () => {
+  test("completes when the account has any effective Sandbox service source", () => {
     expect(
       sandboxSetupCompletesProductTour({
         sandbox: {
@@ -122,6 +122,27 @@ describe("product tour onboarding", () => {
         sandbox: {
           mode: "custom",
           resolved_source: "admin_default",
+          api_url: "",
+          api_key: { configured: false },
+        },
+      }),
+    ).toBe(true)
+    expect(
+      sandboxSetupCompletesProductTour({
+        sandbox: {
+          mode: "inherit",
+          resolved_source: "inherited",
+          api_url: "",
+          inherited: true,
+          api_key: { configured: false },
+        },
+      }),
+    ).toBe(true)
+    expect(
+      sandboxSetupCompletesProductTour({
+        sandbox: {
+          mode: "custom",
+          resolved_source: "none",
           api_url: "",
           api_key: { configured: false },
         },
