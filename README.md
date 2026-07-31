@@ -7,6 +7,8 @@
 <p align="center">
   <a href="./README.zh.md">中文</a> ·
   <a href="#quick-start">Quick Start</a> ·
+  <a href="https://app-6a6b0d723d3a24e095531129.app.qiniucc.com/">Deploy to Qiniu LAS</a> ·
+  <a href="https://github.com/qiniu/ci-runner/issues/59">Deployment Guide</a> ·
   <a href="#documentation">Documentation</a> ·
   <a href="#license">License</a> ·
   <a href="#community--contributing">Community &amp; Contributing</a>
