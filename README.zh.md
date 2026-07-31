@@ -7,7 +7,7 @@
 <p align="center">
   <a href="./README.md">English</a> ·
   <a href="#快速开始">快速开始</a> ·
-  <a href="https://app-6a6b0d723d3a24e095531129.app.qiniucc.com/">七牛云一键部署</a> ·
+  <a href="https://app-6a6b0d723d3a24e095531129.app.qiniucc.com/">一键部署到七牛云 LAS</a> ·
   <a href="https://github.com/qiniu/ci-runner/issues/59">部署使用指南</a> ·
   <a href="#文档">文档</a> ·
   <a href="#许可证">许可证</a> ·
