@@ -1625,7 +1625,7 @@ func TestVersionedTemplateBuildMakesSystemctlShimVisibleToSudoAndCleansIt(t *tes
 	}
 }
 
-func TestVersionedTemplateSystemctlShimBoundsAndVerifiesSysVServices(t *testing.T) {
+func TestVersionedTemplateSystemctlShimClosesDescriptorsBoundsAndVerifiesServices(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
 		"ubuntu-slim",
@@ -1649,21 +1649,23 @@ func TestVersionedTemplateSystemctlShimBoundsAndVerifiesSysVServices(t *testing.
 			for _, required := range []string{
 				`action=${1:-}`,
 				`unit=${unit%.service}`,
+				`run_isolated() {`,
+				`subprocess.run(sys.argv[1:], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, timeout=30)`,
 				`case "$unit:$action" in`,
 				`apache2:start|apache2:stop|apache2:restart)`,
-				`exec /usr/sbin/apachectl "$action" </dev/null >/dev/null 2>&1`,
+				`run_isolated /usr/sbin/apachectl "$action"`,
 				`apache2:is-active)`,
 				`test -s /run/apache2/apache2.pid && kill -0 "$(cat /run/apache2/apache2.pid)" 2>/dev/null`,
 				`nginx:start)`,
-				`exec /usr/sbin/nginx </dev/null >/dev/null 2>&1`,
+				`run_isolated /usr/sbin/nginx`,
 				`nginx:stop)`,
-				`exec /usr/sbin/nginx -s quit </dev/null >/dev/null 2>&1`,
+				`run_isolated /usr/sbin/nginx -s quit`,
 				`nginx:is-active)`,
 				`test -s /run/nginx.pid && kill -0 "$(cat /run/nginx.pid)" 2>/dev/null`,
 				`if [ -x "/etc/init.d/$unit" ]; then`,
 				`service_status() {`,
-				`/usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" status </dev/null >/dev/null 2>&1`,
-				`/usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" "$action" </dev/null >/dev/null 2>&1`,
+				`run_isolated /usr/sbin/service "$unit" status`,
+				`run_isolated /usr/sbin/service "$unit" "$action"`,
 				`service_result=$?`,
 				`if service_status; then`,
 				`[ "$action" = stop ] && exit "$service_result"`,

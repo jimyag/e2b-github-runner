@@ -160,25 +160,42 @@ if [ "$action" = is-active ] && [ "${1:-}" = --quiet ]; then
 fi
 unit=${1:-}
 unit=${unit%.service}
+run_isolated() {
+  /usr/bin/python3 - "$@" <<'PYTHON'
+import subprocess
+import sys
+
+try:
+    result = subprocess.run(sys.argv[1:], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, timeout=30)
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+sys.exit(result.returncode)
+PYTHON
+}
 case "$unit:$action" in
   apache2:start|apache2:stop|apache2:restart)
-    exec /usr/sbin/apachectl "$action" </dev/null >/dev/null 2>&1
+    run_isolated /usr/sbin/apachectl "$action"
+    exit $?
     ;;
   apache2:is-active)
     test -s /run/apache2/apache2.pid && kill -0 "$(cat /run/apache2/apache2.pid)" 2>/dev/null
     exit $?
     ;;
   nginx:start)
-    exec /usr/sbin/nginx </dev/null >/dev/null 2>&1
+    run_isolated /usr/sbin/nginx
+    exit $?
     ;;
   nginx:stop)
-    exec /usr/sbin/nginx -s quit </dev/null >/dev/null 2>&1
+    run_isolated /usr/sbin/nginx -s quit
+    exit $?
     ;;
   nginx:restart)
     if test -s /run/nginx.pid && kill -0 "$(cat /run/nginx.pid)" 2>/dev/null; then
-      exec /usr/sbin/nginx -s reload </dev/null >/dev/null 2>&1
+      run_isolated /usr/sbin/nginx -s reload
+      exit $?
     fi
-    exec /usr/sbin/nginx </dev/null >/dev/null 2>&1
+    run_isolated /usr/sbin/nginx
+    exit $?
     ;;
   nginx:is-active)
     test -s /run/nginx.pid && kill -0 "$(cat /run/nginx.pid)" 2>/dev/null
@@ -190,12 +207,12 @@ esac
 # Isolate their file descriptors so a daemon cannot keep Pester's capture pipe
 # open after the service command exits or is killed.
 service_status() {
-  /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" status </dev/null >/dev/null 2>&1
+  run_isolated /usr/sbin/service "$unit" status
 }
 case "$action" in
   start|stop|restart)
     if [ -x "/etc/init.d/$unit" ]; then
-      /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" "$action" </dev/null >/dev/null 2>&1
+      run_isolated /usr/sbin/service "$unit" "$action"
       service_result=$?
       if [ "$service_result" -eq 0 ]; then
         exit 0
