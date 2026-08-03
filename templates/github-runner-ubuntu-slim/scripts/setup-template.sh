@@ -269,7 +269,6 @@ install_ninja_from_checked_archive() {
 run_upstream_installer() {
   local installer_path="$1"
   local installer_name="${installer_path##*/}"
-  local max_attempts=1
   case "$installer_name" in
     install-aws-tools.sh)
       install_aws_tools_from_checked_archives
@@ -291,7 +290,10 @@ run_upstream_installer() {
       install_github_cli_from_checked_package
       return
       ;;
-    install-google-cloud-cli.sh) max_attempts=3 ;;
+    install-google-cloud-cli.sh)
+      install_google_cloud_cli_from_archive
+      return
+      ;;
     install-nvm.sh)
       install_nvm_from_archive
       return
@@ -310,24 +312,8 @@ run_upstream_installer() {
       ;;
   esac
 
-  local attempt
-  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
-    if bash "$installer_path"; then
-      if [ "$installer_name" = install-google-cloud-cli.sh ] && ! command -v gcloud >/dev/null 2>&1; then
-        echo "upstream Google Cloud installer returned success without gcloud" >&2
-      else
-        return 0
-      fi
-    fi
-    if [ "$attempt" -lt "$max_attempts" ]; then
-      echo "upstream installer failed; retrying $installer_name ($attempt/$max_attempts)" >&2
-      sleep 10
-    fi
-  done
-  if [ "$installer_name" = install-google-cloud-cli.sh ]; then
-    echo "upstream installer failed after $max_attempts attempts; using checked Google Cloud CLI archive" >&2
-    install_google_cloud_cli_from_archive
-    return
+  if bash "$installer_path"; then
+    return 0
   fi
   if [ "$installer_name" = install-azure-cli.sh ]; then
     echo "upstream Azure CLI installer unavailable; using checked Microsoft package" >&2
@@ -338,7 +324,7 @@ run_upstream_installer() {
     echo "upstream Docker CLI installer unavailable; deferring to sandbox-aware installer" >&2
     return 0
   fi
-  echo "upstream installer failed after $max_attempts attempts: $installer_name" >&2
+  echo "upstream installer failed: $installer_name" >&2
   return 1
 }
 

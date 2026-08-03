@@ -74,13 +74,15 @@ the installed CLI version directly.
 
 AWS CLI, the AWS Session Manager plugin, AWS SAM CLI, GitHub CLI, yq, zstd,
 and Ninja use the versions recorded by each image's pinned compatibility
-report. Their official versioned artifacts and SHA-256 digests are pinned in
-the Dockerfiles, and setup verifies the installed versions before continuing.
-These compatibility-critical tools do not resolve GitHub `latest` releases or
-the AWS `latest` download path at build time. Exact GitHub release assets are
-downloaded without first querying the anonymous GitHub release API, avoiding
-both rate-limit failures and silent version drift between the compatibility
-manifest and the built template.
+report. Google Cloud CLI uses the common version pinned by these template
+Dockerfiles. Their official versioned artifacts and SHA-256 digests are pinned
+in the Dockerfiles, and setup verifies the installed commands or versions
+before continuing. These compatibility-critical tools do not resolve GitHub
+`latest` releases, the AWS `latest` download path, or a floating Google Cloud
+APT package at build time. Exact GitHub release assets are downloaded without
+first querying the anonymous GitHub release API, avoiding both rate-limit
+failures and silent version drift between the compatibility manifest and the
+built template.
 
 The curl compatibility wrapper remains available to unmodified upstream
 installers that resolve a fixed release through the GitHub API. It caches
@@ -97,11 +99,10 @@ All four templates install NVM 0.40.6 from the checksum-pinned official tag
 archive instead of cloning the repository during the build. The resulting
 profile setup and system-Node default match the pinned upstream installer.
 
-Google Cloud CLI installation first follows the pinned upstream
-`actions/runner-images` APT path. If that repository remains unavailable after
-bounded retries, the build falls back to Google's official versioned x86_64
-archive. The fallback version and SHA-256 digest are pinned in each Dockerfile,
-and the resulting `gcloud` command is verified before the build continues.
+Google Cloud CLI is installed from Google's official versioned x86_64 archive.
+The common version and SHA-256 digest are pinned in each Dockerfile, avoiding
+different APT repository results between build regions, and the resulting
+`gcloud` command is verified before the build continues.
 
 The versioned image build keeps the upstream Podman, Buildah, and Skopeo CLI
 checks. BuildKit cannot create the nested namespace needed by the upstream

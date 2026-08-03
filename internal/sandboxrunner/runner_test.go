@@ -2968,7 +2968,7 @@ func TestVersionedTemplateBuildUsesDiskBoundedToolset(t *testing.T) {
 	}
 }
 
-func TestRunnerTemplateRetriesGoogleCloudInstaller(t *testing.T) {
+func TestRunnerTemplatePinsGoogleCloudCLIArchive(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
 		"ubuntu-slim",
@@ -2993,7 +2993,7 @@ func TestRunnerTemplateRetriesGoogleCloudInstaller(t *testing.T) {
 				"ARG GOOGLE_CLOUD_CLI_ARCHIVE_SHA256=",
 			} {
 				if !strings.Contains(dockerfile, required) {
-					t.Fatalf("template must pin the Google Cloud CLI archive fallback; missing %q", required)
+					t.Fatalf("template must pin the Google Cloud CLI archive; missing %q", required)
 				}
 			}
 
@@ -3015,14 +3015,23 @@ func TestRunnerTemplateRetriesGoogleCloudInstaller(t *testing.T) {
 				"install_google_cloud_cli_from_archive() {",
 				`google-cloud-cli-${GOOGLE_CLOUD_CLI_VERSION}-linux-x86_64.tar.gz`,
 				`"$GOOGLE_CLOUD_CLI_ARCHIVE_SHA256"`,
-				`install_google_cloud_cli_from_archive`,
 				"run_upstream_installer() {",
-				`install-google-cloud-cli.sh) max_attempts=3 ;;`,
-				`if [ "$installer_name" = install-google-cloud-cli.sh ] && ! command -v gcloud >/dev/null 2>&1; then`,
+				"install-google-cloud-cli.sh)",
+				"install_google_cloud_cli_from_archive",
+				"return",
 				`run_upstream_installer "$upstream_build/$installer"`,
 			} {
 				if !strings.Contains(script, required) {
-					t.Fatalf("template must retry the Google Cloud installer as a bounded unit; missing %q", required)
+					t.Fatalf("template must install the pinned Google Cloud CLI archive; missing %q", required)
+				}
+			}
+			for _, forbidden := range []string{
+				`install-google-cloud-cli.sh) max_attempts=3 ;;`,
+				`upstream installer returned success without gcloud`,
+				`using checked Google Cloud CLI archive`,
+			} {
+				if strings.Contains(script, forbidden) {
+					t.Fatalf("template must not resolve Google Cloud CLI through a floating APT install; found %q", forbidden)
 				}
 			}
 			if strings.Contains(script, `bash "$upstream_build/$installer"`) {
