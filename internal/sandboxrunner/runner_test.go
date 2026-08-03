@@ -1438,6 +1438,51 @@ printf '%s\n' "$*" >"$WGET_TEST_LOG"
 	}
 }
 
+func TestUbuntu2204TemplateUsesCurlRetriesForAptFastRawFiles(t *testing.T) {
+	root := repositoryRoot(t)
+	fixture := t.TempDir()
+	curlLog := filepath.Join(fixture, "curl.log")
+	fakeCurl := filepath.Join(fixture, "curl")
+	writeExecutable(t, fakeCurl, `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >"$CURL_TEST_LOG"
+`)
+	wrapper := filepath.Join(
+		root,
+		"templates",
+		"github-runner-ubuntu-22.04",
+		"scripts",
+		"wget",
+	)
+	output, err := runCommand(t, wrapper, []string{
+		"https://raw.githubusercontent.com/ilikenwf/apt-fast/master/apt-fast",
+		"-O",
+		"/usr/local/bin/apt-fast",
+	},
+		"RUNNER_TEMPLATE_CURL_BIN="+fakeCurl,
+		"CURL_TEST_LOG="+curlLog,
+	)
+	if err != nil {
+		t.Fatalf("apt-fast curl fallback failed: %v\n%s", err, output)
+	}
+	logBytes, err := os.ReadFile(curlLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation := string(logBytes)
+	for _, option := range []string{
+		"--http1.1",
+		"--retry 8",
+		"--retry-all-errors",
+		"--output /usr/local/bin/apt-fast",
+		"https://raw.githubusercontent.com/ilikenwf/apt-fast/master/apt-fast",
+	} {
+		if !strings.Contains(invocation, option) {
+			t.Fatalf("apt-fast curl fallback missing %q: %s", option, invocation)
+		}
+	}
+}
+
 func TestRunnerTemplateDockerfilesUseQshellCompatibleRunInstructions(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{

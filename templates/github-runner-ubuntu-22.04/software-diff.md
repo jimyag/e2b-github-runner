@@ -22,6 +22,12 @@ session and waits for the loopback HTTP port before continuing. This preserves
 the upstream start/config/stop assertion without depending on systemd or
 allowing a daemon or controller process to retain the Sandbox build session.
 
+The upstream Ubuntu 22.04 apt setup downloads the two apt-fast files from
+`raw.githubusercontent.com` with GNU wget. Because wget does not retry every
+TLS negotiation failure observed by the Yangzhou builder, the template's wget
+shim routes only those two unchanged URLs through bounded curl retries. TLS
+verification remains enabled.
+
 The upstream Podman, Buildah, and Skopeo CLI assertions remain build gates.
 Only the namespace-dependent `podman networking` assertion is skipped in the
 staged Pester copy because BuildKit cannot create its nested namespace; the
