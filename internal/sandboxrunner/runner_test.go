@@ -1436,6 +1436,50 @@ func TestVersionedTemplatesInstallNetcatProviderBeforeAptCommon(t *testing.T) {
 	}
 }
 
+func TestCompatibilityGeneratorVerifiesConcreteNetcatProvider(t *testing.T) {
+	root := repositoryRoot(t)
+	const verification = `dpkg-query -W -f='${Status}' 'netcat-openbsd' | grep -qx 'install ok installed' && command -v netcat >/dev/null`
+
+	generatorBytes, err := os.ReadFile(filepath.Join(root, "scripts", "generate-runner-image-compatibility.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(generatorBytes), verification) {
+		t.Fatal("compatibility generator must verify the concrete netcat provider and command")
+	}
+
+	manifestBytes, err := os.ReadFile(filepath.Join(root, "templates", "runner-images-compatibility.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Images map[string]struct {
+			Entries []struct {
+				UpstreamName string `json:"upstream_name"`
+				Verification string `json:"verification"`
+			} `json:"entries"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, image := range []string{"ubuntu-24.04", "ubuntu-26.04"} {
+		found := false
+		for _, entry := range manifest.Images[image].Entries {
+			if entry.UpstreamName != "netcat" {
+				continue
+			}
+			found = true
+			if entry.Verification != verification {
+				t.Fatalf("%s netcat verification = %q", image, entry.Verification)
+			}
+		}
+		if !found {
+			t.Fatalf("%s has no netcat compatibility entry", image)
+		}
+	}
+}
+
 func TestVersionedTemplateBuildDefersOnlyPodmanNetworkingToRuntimeConformance(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{

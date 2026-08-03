@@ -4710,7 +4710,7 @@
           "upstream_name": "netcat",
           "upstream_value": "1.226-1ubuntu2",
           "status": "provided",
-          "verification": "dpkg-query -W -f='${Status}' 'netcat' | grep -qx 'install ok installed'"
+          "verification": "dpkg-query -W -f='${Status}' 'netcat-openbsd' | grep -qx 'install ok installed' && command -v netcat >/dev/null"
         },
         {
           "category": "Installed apt packages",
@@ -6358,7 +6358,7 @@
           "upstream_name": "netcat",
           "upstream_value": "1.234-1",
           "status": "provided",
-          "verification": "dpkg-query -W -f='${Status}' 'netcat' | grep -qx 'install ok installed'"
+          "verification": "dpkg-query -W -f='${Status}' 'netcat-openbsd' | grep -qx 'install ok installed' && command -v netcat >/dev/null"
         },
         {
           "category": "Installed apt packages",

@@ -193,6 +193,12 @@ function verificationFor(imageKey, item) {
     if (name === "upx") {
       return "command -v upx >/dev/null";
     }
+    if (
+      name === "netcat" &&
+      (imageKey === "ubuntu-24.04" || imageKey === "ubuntu-26.04")
+    ) {
+      return "dpkg-query -W -f='${Status}' 'netcat-openbsd' | grep -qx 'install ok installed' && command -v netcat >/dev/null";
+    }
     return (
       "dpkg-query -W -f='${Status}' " +
       `${shellQuote(name)} | grep -qx 'install ok installed'`
