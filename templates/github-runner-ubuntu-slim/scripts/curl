@@ -8,17 +8,54 @@ transport_options=(
   --retry-all-errors
   --retry-delay 2
 )
+github_api_request=false
+validate_github_api_json=true
 for argument in "$@"; do
   case "$argument" in
     https://api.github.com/*)
-      if [ -n "${GITHUB_TOKEN:-}" ]; then
-        exec "$real_curl" \
-          "${transport_options[@]}" \
-          --header "Authorization: Bearer ${GITHUB_TOKEN}" \
-          "$@"
-      fi
-      break
-    ;;
+      github_api_request=true
+      ;;
+    -o | --output | --output=* | -O | --remote-name | -w | --write-out | --write-out=* | -I | --head | -i | --include)
+      validate_github_api_json=false
+      ;;
   esac
 done
-exec "$real_curl" "${transport_options[@]}" "$@"
+
+run_curl() {
+  if [ "$github_api_request" = true ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+    "$real_curl" "${transport_options[@]}" --header "Authorization: Bearer ${GITHUB_TOKEN}" "$@"
+    return
+  fi
+  "$real_curl" "${transport_options[@]}" "$@"
+}
+
+if [ "$github_api_request" = true ] && [ "$validate_github_api_json" = true ]; then
+  command -v jq >/dev/null 2>&1 || {
+    echo "jq is required to validate GitHub API responses" >&2
+    exit 69
+  }
+  response_file="$(mktemp)"
+  cleanup() {
+    rm -f "$response_file"
+  }
+  trap cleanup EXIT
+  attempts="${RUNNER_TEMPLATE_GITHUB_API_ATTEMPTS:-5}"
+  retry_delay="${RUNNER_TEMPLATE_GITHUB_API_RETRY_DELAY:-2}"
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if run_curl "$@" >"$response_file" &&
+      jq -e . "$response_file" >/dev/null 2>&1; then
+      cat "$response_file"
+      exit 0
+    fi
+    if [ "$attempt" -lt "$attempts" ]; then
+      echo "GitHub API returned an incomplete response; retrying (${attempt}/${attempts})" >&2
+      if [ "$retry_delay" != 0 ]; then
+        sleep "$retry_delay"
+      fi
+    fi
+  done
+  echo "GitHub API did not return valid JSON after ${attempts} attempts" >&2
+  exit 22
+fi
+
+run_curl "$@"

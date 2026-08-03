@@ -1265,6 +1265,9 @@ func TestTemplateCurlAddsAuthenticationOnlyForGitHubAPI(t *testing.T) {
 			writeExecutable(t, fakeCurl, `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"$CURL_TEST_LOG"
+if [[ "$*" == *"https://api.github.com/"* ]]; then
+  printf '[]\n'
+fi
 `)
 			wrapper := filepath.Join(
 				root,
@@ -1317,6 +1320,71 @@ printf '%s\n' "$*" >>"$CURL_TEST_LOG"
 						)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestTemplateCurlRetriesTruncatedGitHubAPIResponses(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			fixture := t.TempDir()
+			curlLog := filepath.Join(fixture, "curl.log")
+			attemptFile := filepath.Join(fixture, "attempt")
+			fakeCurl := filepath.Join(fixture, "curl")
+			writeExecutable(t, fakeCurl, `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$CURL_TEST_LOG"
+attempt=0
+if [ -f "$CURL_TEST_ATTEMPT" ]; then
+  attempt="$(cat "$CURL_TEST_ATTEMPT")"
+fi
+attempt=$((attempt + 1))
+printf '%s\n' "$attempt" >"$CURL_TEST_ATTEMPT"
+if [ "$attempt" -eq 1 ]; then
+  printf '{"truncated":'
+else
+  printf '[{"tag_name":"v1.2.3"}]\n'
+fi
+`)
+			wrapper := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"curl",
+			)
+			output, err := runCommand(t, wrapper, []string{
+				"-fsSL",
+				"https://api.github.com/repos/actions/runner/releases",
+			},
+				"RUNNER_TEMPLATE_CURL_BIN="+fakeCurl,
+				"RUNNER_TEMPLATE_GITHUB_API_RETRY_DELAY=0",
+				"CURL_TEST_LOG="+curlLog,
+				"CURL_TEST_ATTEMPT="+attemptFile,
+			)
+			if err != nil {
+				t.Fatalf("curl wrapper failed: %v\n%s", err, output)
+			}
+			outputLines := strings.Split(strings.TrimSpace(string(output)), "\n")
+			if got := outputLines[len(outputLines)-1]; got != `[{"tag_name":"v1.2.3"}]` {
+				t.Fatalf("curl wrapper output = %q", strings.TrimSpace(string(output)))
+			}
+			if !strings.Contains(string(output), "GitHub API returned an incomplete response") {
+				t.Fatalf("curl wrapper did not report the invalid response retry: %q", output)
+			}
+			logBytes, err := os.ReadFile(curlLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(strings.Split(strings.TrimSpace(string(logBytes)), "\n")); got != 2 {
+				t.Fatalf("curl invocation count = %d, want 2\n%s", got, logBytes)
 			}
 		})
 	}
