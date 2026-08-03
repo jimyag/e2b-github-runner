@@ -11,12 +11,77 @@ transport_options=(
   --retry-all-errors
   --retry-delay 2
 )
+
+fetch_github_release_json() {
+  local url="$1"
+  local attempts="${RUNNER_TEMPLATE_GITHUB_API_ATTEMPTS:-5}"
+  local retry_delay="${RUNNER_TEMPLATE_GITHUB_API_RETRY_DELAY:-2}"
+  local attempt
+  local response
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    local request_succeeded=false
+    if [ -n "${GITHUB_TOKEN:-}" ]; then
+      if response="$("$real_curl" "${transport_options[@]}" --fail --silent --show-error --location \
+        --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+        --header "Accept: application/vnd.github+json" \
+        --header "X-GitHub-Api-Version: 2022-11-28" \
+        "$url")"; then
+        request_succeeded=true
+      fi
+    elif response="$("$real_curl" "${transport_options[@]}" --fail --silent --show-error --location \
+      --header "Accept: application/vnd.github+json" \
+      --header "X-GitHub-Api-Version: 2022-11-28" \
+      "$url")"; then
+      request_succeeded=true
+    fi
+    if [ "$request_succeeded" = true ] &&
+      jq -e . <<<"$response" >/dev/null 2>&1; then
+      printf '%s\n' "$response"
+      return
+    fi
+    if [ "$attempt" -lt "$attempts" ]; then
+      echo "GitHub release API returned an incomplete response; retrying (${attempt}/${attempts})" >&2
+      if [ "$retry_delay" != 0 ]; then
+        sleep "$retry_delay"
+      fi
+    fi
+  done
+  return 1
+}
+
+resolve_github_release_asset_api_url() {
+  local browser_url="$1"
+  if [[ ! "$browser_url" =~ ^https://github.com/([^/]+)/([^/]+)/releases/download/([^/]+)/([^/?#]+)$ ]]; then
+    return 1
+  fi
+  command -v jq >/dev/null 2>&1 || return 1
+  local owner="${BASH_REMATCH[1]}"
+  local repository="${BASH_REMATCH[2]}"
+  local tag="${BASH_REMATCH[3]}"
+  local asset_name="${BASH_REMATCH[4]}"
+  local release_json
+  release_json="$(fetch_github_release_json \
+    "https://api.github.com/repos/${owner}/${repository}/releases/tags/${tag}")" || return 1
+  jq -er --arg asset_name "$asset_name" \
+    '.assets[] | select(.name == $asset_name) | .url' <<<"$release_json" |
+    head -n 1
+}
+
 github_api_request=false
+github_release_asset_request=false
 validate_github_api_json=true
-for argument in "$@"; do
+rewritten_arguments=("$@")
+for index in "${!rewritten_arguments[@]}"; do
+  argument="${rewritten_arguments[$index]}"
   case "$argument" in
     https://api.github.com/*)
       github_api_request=true
+      ;;
+    https://github.com/*/*/releases/download/*/*)
+      if asset_api_url="$(resolve_github_release_asset_api_url "$argument")"; then
+        rewritten_arguments[$index]="$asset_api_url"
+        github_release_asset_request=true
+      fi
       ;;
     -o | --output | --output=* | -O | --remote-name | -w | --write-out | --write-out=* | -I | --head | -i | --include)
       validate_github_api_json=false
@@ -25,7 +90,8 @@ for argument in "$@"; do
 done
 
 run_curl() {
-  if [ "$github_api_request" = true ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+  if { [ "$github_api_request" = true ] || [ "$github_release_asset_request" = true ]; } &&
+    [ -n "${GITHUB_TOKEN:-}" ]; then
     "$real_curl" "${transport_options[@]}" --header "Authorization: Bearer ${GITHUB_TOKEN}" "$@"
     return
   fi
@@ -61,4 +127,11 @@ if [ "$github_api_request" = true ] && [ "$validate_github_api_json" = true ]; t
   exit 22
 fi
 
-run_curl "$@"
+if [ "$github_release_asset_request" = true ]; then
+  run_curl \
+    --header "Accept: application/octet-stream" \
+    --header "X-GitHub-Api-Version: 2022-11-28" \
+    "${rewritten_arguments[@]}"
+else
+  run_curl "$@"
+fi

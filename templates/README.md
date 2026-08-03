@@ -66,6 +66,11 @@ package instead of resolving and downloading a floating GitHub release asset.
 The package checksum is pinned in each Dockerfile, and the upstream Bicep
 Pester assertion still runs after installation.
 
+Other GitHub release assets selected by the pinned upstream installers are
+resolved through GitHub's release API and downloaded through the corresponding
+official asset API URL. This avoids a separate browser-download handshake while
+retaining the upstream version selection and checksum validation.
+
 Google Cloud CLI installation first follows the pinned upstream
 `actions/runner-images` APT path. If that repository remains unavailable after
 bounded retries, the build falls back to Google's official versioned x86_64

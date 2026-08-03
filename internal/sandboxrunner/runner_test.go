@@ -1600,6 +1600,71 @@ fi
 	}
 }
 
+func TestTemplateCurlDownloadsGitHubReleaseAssetsThroughAPI(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			fixture := t.TempDir()
+			curlLog := filepath.Join(fixture, "curl.log")
+			fakeCurl := filepath.Join(fixture, "curl")
+			writeExecutable(t, fakeCurl, `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$CURL_TEST_LOG"
+if [[ "$*" == *"/repos/aws/aws-sam-cli/releases/tags/v1.165.0"* ]]; then
+  printf '%s\n' '{"assets":[{"name":"aws-sam-cli-linux-x86_64.zip","url":"https://api.github.com/repos/aws/aws-sam-cli/releases/assets/497055647"}]}'
+fi
+`)
+			wrapper := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"curl",
+			)
+			output, err := runCommand(t, wrapper, []string{
+				"-fsSL",
+				"https://github.com/aws/aws-sam-cli/releases/download/v1.165.0/aws-sam-cli-linux-x86_64.zip",
+				"-o",
+				filepath.Join(fixture, "sam.zip"),
+			},
+				"RUNNER_TEMPLATE_CURL_BIN="+fakeCurl,
+				"CURL_TEST_LOG="+curlLog,
+			)
+			if err != nil {
+				t.Fatalf("curl wrapper failed: %v\n%s", err, output)
+			}
+			logBytes, err := os.ReadFile(curlLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+			if len(lines) != 2 {
+				t.Fatalf("curl invocation count = %d, want 2\n%s", len(lines), logBytes)
+			}
+			if !strings.Contains(lines[0], "/releases/tags/v1.165.0") {
+				t.Fatalf("release metadata request missing: %s", lines[0])
+			}
+			for _, required := range []string{
+				"https://api.github.com/repos/aws/aws-sam-cli/releases/assets/497055647",
+				"Accept: application/octet-stream",
+				"X-GitHub-Api-Version: 2022-11-28",
+			} {
+				if !strings.Contains(lines[1], required) {
+					t.Fatalf("release asset request missing %q: %s", required, lines[1])
+				}
+			}
+			if strings.Contains(lines[1], "https://github.com/aws/aws-sam-cli/releases/download/") {
+				t.Fatalf("release asset request still uses the browser download endpoint: %s", lines[1])
+			}
+		})
+	}
+}
+
 func TestUbuntu2204TemplateWgetBoundsStalledTransfers(t *testing.T) {
 	root := repositoryRoot(t)
 	fixture := t.TempDir()
