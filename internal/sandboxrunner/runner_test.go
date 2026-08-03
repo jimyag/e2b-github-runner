@@ -1698,7 +1698,9 @@ func TestPublicTemplatesInstallPinnedAzureDevOpsExtensionAfterAzureCLI(t *testin
 			for _, required := range []string{
 				"install_azure_devops_extension",
 				"https://azcliprod.blob.core.windows.net/cli-extensions/azure_devops-",
-				`test "$(AZURE_EXTENSION_DIR=/opt/az/azcliextensions az extension show --name azure-devops --query version -o tsv)" = "$AZURE_DEVOPS_EXTENSION_VERSION"`,
+				"export AZURE_EXTENSION_DIR=/opt/az/azcliextensions",
+				`set_etc_environment_variable "AZURE_EXTENSION_DIR" "$AZURE_EXTENSION_DIR"`,
+				`test "$(az extension show --name azure-devops --query version -o tsv)" = "$AZURE_DEVOPS_EXTENSION_VERSION"`,
 			} {
 				if !strings.Contains(script, required) {
 					t.Fatalf("setup must install the pinned Azure DevOps extension with %q", required)

@@ -43,13 +43,16 @@ APT_PREFERENCE
 
 install_azure_devops_extension() {
   local wheel="/tmp/azure_devops-${AZURE_DEVOPS_EXTENSION_VERSION}-py2.py3-none-any.whl"
+  source "$HELPER_SCRIPTS/etc-environment.sh"
+  export AZURE_EXTENSION_DIR=/opt/az/azcliextensions
+  set_etc_environment_variable "AZURE_EXTENSION_DIR" "$AZURE_EXTENSION_DIR"
   download_checked \
     "https://azcliprod.blob.core.windows.net/cli-extensions/azure_devops-${AZURE_DEVOPS_EXTENSION_VERSION}-py2.py3-none-any.whl" \
     "$wheel" \
     "$AZURE_DEVOPS_EXTENSION_SHA256"
-  AZURE_EXTENSION_DIR=/opt/az/azcliextensions az extension add --yes --source "$wheel"
+  az extension add --yes --source "$wheel"
   rm -f "$wheel"
-  test "$(AZURE_EXTENSION_DIR=/opt/az/azcliextensions az extension show --name azure-devops --query version -o tsv)" = "$AZURE_DEVOPS_EXTENSION_VERSION"
+  test "$(az extension show --name azure-devops --query version -o tsv)" = "$AZURE_DEVOPS_EXTENSION_VERSION"
 }
 
 configure_reliable_apt_sources() {
