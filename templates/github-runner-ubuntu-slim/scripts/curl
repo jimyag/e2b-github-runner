@@ -59,9 +59,22 @@ resolve_github_release_asset_api_url() {
   local repository="${BASH_REMATCH[2]}"
   local tag="${BASH_REMATCH[3]}"
   local asset_name="${BASH_REMATCH[4]}"
+  local cache_root="${RUNNER_TEMPLATE_GITHUB_RELEASE_CACHE:-/tmp/qiniu-github-release-cache}"
+  local cache_name="${owner}_${repository}_${tag}"
+  cache_name="${cache_name//[^A-Za-z0-9._-]/_}"
+  local cache_file="${cache_root}/${cache_name}.json"
   local release_json
-  release_json="$(fetch_github_release_json \
-    "https://api.github.com/repos/${owner}/${repository}/releases/tags/${tag}")" || return 1
+  if [ -f "$cache_file" ] && jq -e . "$cache_file" >/dev/null 2>&1; then
+    release_json="$(<"$cache_file")"
+  else
+    release_json="$(fetch_github_release_json \
+      "https://api.github.com/repos/${owner}/${repository}/releases/tags/${tag}")" || return 1
+    install -d -m 0755 "$cache_root"
+    local cache_tmp
+    cache_tmp="$(mktemp "${cache_file}.XXXXXX")"
+    printf '%s\n' "$release_json" >"$cache_tmp"
+    mv "$cache_tmp" "$cache_file"
+  fi
   jq -er --arg asset_name "$asset_name" \
     '.assets[] | select(.name == $asset_name) | .url' <<<"$release_json" |
     head -n 1

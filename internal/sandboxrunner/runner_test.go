@@ -1626,25 +1626,30 @@ fi
 				"scripts",
 				"curl",
 			)
-			output, err := runCommand(t, wrapper, []string{
+			args := []string{
 				"-fsSL",
 				"https://github.com/aws/aws-sam-cli/releases/download/v1.165.0/aws-sam-cli-linux-x86_64.zip",
 				"-o",
 				filepath.Join(fixture, "sam.zip"),
-			},
-				"RUNNER_TEMPLATE_CURL_BIN="+fakeCurl,
-				"CURL_TEST_LOG="+curlLog,
-			)
-			if err != nil {
-				t.Fatalf("curl wrapper failed: %v\n%s", err, output)
+			}
+			env := []string{
+				"RUNNER_TEMPLATE_CURL_BIN=" + fakeCurl,
+				"RUNNER_TEMPLATE_GITHUB_RELEASE_CACHE=" + filepath.Join(fixture, "release-cache"),
+				"CURL_TEST_LOG=" + curlLog,
+			}
+			for attempt := 1; attempt <= 2; attempt++ {
+				output, err := runCommand(t, wrapper, args, env...)
+				if err != nil {
+					t.Fatalf("curl wrapper attempt %d failed: %v\n%s", attempt, err, output)
+				}
 			}
 			logBytes, err := os.ReadFile(curlLog)
 			if err != nil {
 				t.Fatal(err)
 			}
 			lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
-			if len(lines) != 2 {
-				t.Fatalf("curl invocation count = %d, want 2\n%s", len(lines), logBytes)
+			if len(lines) != 3 {
+				t.Fatalf("curl invocation count = %d, want 3 (one cached metadata lookup and two downloads)\n%s", len(lines), logBytes)
 			}
 			if !strings.Contains(lines[0], "/releases/tags/v1.165.0") {
 				t.Fatalf("release metadata request missing: %s", lines[0])
@@ -1660,6 +1665,9 @@ fi
 			}
 			if strings.Contains(lines[1], "https://github.com/aws/aws-sam-cli/releases/download/") {
 				t.Fatalf("release asset request still uses the browser download endpoint: %s", lines[1])
+			}
+			if !strings.Contains(lines[2], "https://api.github.com/repos/aws/aws-sam-cli/releases/assets/497055647") {
+				t.Fatalf("cached release asset request did not use the asset API: %s", lines[2])
 			}
 		})
 	}
