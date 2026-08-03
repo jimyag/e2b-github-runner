@@ -1499,27 +1499,27 @@ func TestVersionedTemplateBuildStagesPinnedUpstreamTests(t *testing.T) {
 			script := string(scriptBytes)
 			stage := `cp -a "$HELPER_SCRIPTS/../tests" /imagegeneration/tests`
 			helperStage := `cp -a "$HELPER_SCRIPTS" /imagegeneration/helpers`
-			powershellModules := `pwsh -File "$upstream_build/Install-PowerShellModules.ps1"`
+			validationStart := `for installer in \`
 			cleanup := `find /imagegeneration -mindepth 1 -delete`
 			stageIndex := strings.Index(script, stage)
 			helperStageIndex := strings.Index(script, helperStage)
-			powershellIndex := strings.Index(script, powershellModules)
+			validationIndex := strings.LastIndex(script, validationStart)
 			cleanupIndex := strings.Index(script, cleanup)
-			if stageIndex < 0 || helperStageIndex < 0 || powershellIndex < 0 || cleanupIndex < 0 {
+			if stageIndex < 0 || helperStageIndex < 0 || validationIndex < 0 || cleanupIndex < 0 {
 				t.Fatalf(
-					"setup must stage and clean pinned upstream Pester tests and helpers: tests=%d helpers=%d powershell=%d cleanup=%d",
+					"setup must stage and clean pinned upstream Pester tests and helpers: tests=%d helpers=%d validation=%d cleanup=%d",
 					stageIndex,
 					helperStageIndex,
-					powershellIndex,
+					validationIndex,
 					cleanupIndex,
 				)
 			}
-			if stageIndex > powershellIndex || helperStageIndex > powershellIndex || cleanupIndex < powershellIndex {
+			if stageIndex > validationIndex || helperStageIndex > validationIndex || cleanupIndex < validationIndex {
 				t.Fatalf(
-					"upstream tests and helpers must exist for PowerShell validation and be removed afterward: tests=%d helpers=%d powershell=%d cleanup=%d",
+					"upstream tests and helpers must exist for installer validation and be removed afterward: tests=%d helpers=%d validation=%d cleanup=%d",
 					stageIndex,
 					helperStageIndex,
-					powershellIndex,
+					validationIndex,
 					cleanupIndex,
 				)
 			}
@@ -1781,6 +1781,48 @@ func TestCompatibilityGeneratorRequiresPodmanNetworkLifecycle(t *testing.T) {
 	}
 }
 
+func TestCompatibilityManifestDocumentsSandboxDiskBoundary(t *testing.T) {
+	root := repositoryRoot(t)
+	manifestBytes, err := os.ReadFile(filepath.Join(root, "templates", "runner-images-compatibility.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Images map[string]struct {
+			Entries []struct {
+				UpstreamName string `json:"upstream_name"`
+				Status       string `json:"status"`
+				Reason       string `json:"reason"`
+			} `json:"entries"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, image := range []string{"ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04"} {
+		entries := map[string]struct {
+			status string
+			reason string
+		}{}
+		for _, entry := range manifest.Images[image].Entries {
+			entries[entry.UpstreamName] = struct {
+				status string
+				reason string
+			}{entry.Status, entry.Reason}
+		}
+		for _, provided := range []string{"PowerShell", "apache2", "Buildah", "Podman", "Skopeo", "Ninja"} {
+			entry, ok := entries[provided]
+			if !ok || entry.status != "provided" {
+				t.Fatalf("%s must provide %s, got %#v", image, provided, entry)
+			}
+		}
+		dotnet, ok := entries[".NET Core SDK"]
+		if !ok || dotnet.status != "excluded" || !strings.Contains(dotnet.reason, "22,222 MiB") {
+			t.Fatalf("%s must explain the disk-bounded .NET exclusion, got %#v", image, dotnet)
+		}
+	}
+}
+
 func TestVersionedTemplateBuildMakesSystemctlShimVisibleToSudoAndCleansIt(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
@@ -1930,9 +1972,6 @@ func TestVersionedTemplateBuildStopsValidatedServicesBetweenInstallers(t *testin
 			installerRun := `bash "$upstream_build/$installer"`
 			serviceCleanup := `case "$installer" in
       install-apache.sh) stop_validated_service apache2 ;;
-      install-mysql.sh) stop_validated_service mysql ;;
-      install-nginx.sh) stop_validated_service nginx ;;
-      install-postgresql.sh) stop_validated_service postgresql ;;
     esac`
 			installerRunIndex := strings.Index(script, installerRun)
 			serviceCleanupIndex := strings.Index(script, serviceCleanup)
@@ -1988,16 +2027,16 @@ func TestVersionedTemplateBuildReloadsPersistedEnvironmentBeforePipxPackages(t *
 				t.Fatal(err)
 			}
 			script := string(scriptBytes)
-			configureToolset := `pwsh -File "$upstream_build/Configure-Toolset.ps1"`
+			configureEnvironment := `bash "$upstream_build/configure-environment.sh"`
 			reloadEnvironment := `. "$HELPER_SCRIPTS/etc-environment.sh"
   reload_etc_environment`
 			installPipx := `bash "$upstream_build/install-pipx-packages.sh"`
-			configureIndex := strings.Index(script, configureToolset)
+			configureIndex := strings.Index(script, configureEnvironment)
 			reloadIndex := strings.Index(script, reloadEnvironment)
 			pipxIndex := strings.Index(script, installPipx)
 			if configureIndex < 0 || reloadIndex < 0 || pipxIndex < 0 {
 				t.Fatalf(
-					"versioned build must reload persisted PIPX_HOME, PIPX_BIN_DIR, and PATH before pipx packages: configure=%d reload=%d pipx=%d",
+					"versioned build must reload persisted environment before pipx packages: configure=%d reload=%d pipx=%d",
 					configureIndex,
 					reloadIndex,
 					pipxIndex,
@@ -2005,11 +2044,77 @@ func TestVersionedTemplateBuildReloadsPersistedEnvironmentBeforePipxPackages(t *
 			}
 			if configureIndex > reloadIndex || reloadIndex > pipxIndex {
 				t.Fatalf(
-					"persisted environment reload must follow toolset configuration and precede pipx packages: configure=%d reload=%d pipx=%d",
+					"persisted environment reload must follow environment configuration and precede pipx packages: configure=%d reload=%d pipx=%d",
 					configureIndex,
 					reloadIndex,
 					pipxIndex,
 				)
+			}
+		})
+	}
+}
+
+func TestVersionedTemplateBuildUsesDiskBoundedToolset(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			start := strings.Index(script, "else\n  . /etc/os-release")
+			if start < 0 {
+				t.Fatal("cannot find versioned installer branch")
+			}
+			end := strings.Index(script[start:], "\nfi\n\ninstall_docker_for_sandbox")
+			if end < 0 {
+				t.Fatalf("cannot isolate versioned installer branch: start=%d end=%d", start, end)
+			}
+			versioned := script[start : start+end]
+			for _, required := range []string{
+				"install-actions-cache.sh",
+				"install-apt-common.sh",
+				"install-azure-cli.sh",
+				"install-apache.sh",
+				"install-aws-tools.sh",
+				"install-container-tools.sh",
+				"install-git.sh",
+				"install-github-cli.sh",
+				"install-google-cloud-cli.sh",
+				"install-nodejs.sh",
+				"install-python.sh",
+				"install-yq.sh",
+				"install-ninja.sh",
+			} {
+				if !strings.Contains(versioned, required) {
+					t.Fatalf("disk-bounded versioned toolset must retain %q", required)
+				}
+			}
+			for _, excluded := range []string{
+				"install-dotnetcore-sdk.sh",
+				"install-android-sdk.sh",
+				"install-codeql-bundle.sh",
+				"install-homebrew.sh",
+				"Install-PowerShellModules.ps1",
+				"Install-PowerShellAzModules.ps1",
+				"Install-Toolset.ps1",
+				"Configure-Toolset.ps1",
+			} {
+				if strings.Contains(versioned, excluded) {
+					t.Fatalf("disk-bounded versioned toolset must not install %q", excluded)
+				}
 			}
 		})
 	}

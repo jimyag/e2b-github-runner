@@ -32,14 +32,23 @@ Compatibility is independently verified across these dimensions:
   preinstalled runner under `/opt/actions-runner`;
 - image identification variables, `RUNNER_TOOL_CACHE`,
   `AGENT_TOOLSDIRECTORY`, and upstream environment variables;
-- the `/opt/hostedtoolcache` layout and the complete pinned upstream software
-  inventory;
-- Docker daemon/socket behavior, disabled-by-default database and web services,
-  outbound HTTPS, runner registration, job execution, and cleanup.
+- the `/opt/hostedtoolcache` layout and every item in the pinned upstream
+  software inventory, either as a guaranteed item or an explained exclusion;
+- Docker daemon/socket behavior, Apache direct-process behavior, outbound
+  HTTPS, runner registration, job execution, and cleanup.
 
 The contract has no compatibility percentage. Every upstream item is either
 `provided` with an executable verification command or `excluded` with a
 specific Qiniu Sandbox limitation.
+
+The current public-template build allocation exposes a 22,222-MiB root disk.
+The complete GitHub-hosted runner image exceeds that allocation. The three
+versioned templates therefore guarantee the pinned Ubuntu Slim-compatible
+core on the requested Ubuntu release, plus Apache, Podman, Buildah, Skopeo,
+Ninja, and the Qiniu runner contract. Full-image-only tools remain in the
+manifest as `excluded`; they are not guaranteed to be preinstalled and should
+be installed in the workflow or included in a custom template. `excluded`
+describes the support contract, not a promise that the executable is absent.
 
 The versioned image build keeps the upstream Podman, Buildah, and Skopeo CLI
 checks. BuildKit cannot create the nested namespace needed by the upstream

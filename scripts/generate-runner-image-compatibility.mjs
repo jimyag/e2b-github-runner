@@ -254,8 +254,29 @@ function verificationFor(imageKey, item) {
   return command;
 }
 
-function compatibilityEntry(imageKey, parsed) {
-  const excluded = parsed.upstream_name === "Kernel Version";
+const versionedExtras = new Set([
+  "Ansible",
+  "Buildah",
+  "Docker Compose",
+  "Docker Server",
+  "Ninja",
+  "Podman",
+  "Skopeo",
+  "apache2",
+  "yamllint",
+]);
+
+function entryKey(entry) {
+  return `${entry.category}\0${entry.upstream_name}`;
+}
+
+function compatibilityEntry(imageKey, parsed, slimEntryKeys) {
+  const kernelExcluded = parsed.upstream_name === "Kernel Version";
+  const fullInventoryExcluded =
+    imageKey !== "ubuntu-slim" &&
+    !slimEntryKeys.has(entryKey(parsed)) &&
+    !versionedExtras.has(parsed.upstream_name);
+  const excluded = kernelExcluded || fullInventoryExcluded;
   return {
     category: parsed.category,
     kind: parsed.kind,
@@ -265,8 +286,9 @@ function compatibilityEntry(imageKey, parsed) {
     verification: verificationFor(imageKey, parsed),
     ...(excluded
       ? {
-          reason:
-            "Qiniu Sandbox containers share the Sandbox host kernel; an image template cannot install or select the pinned Azure host kernel build.",
+          reason: kernelExcluded
+            ? "Qiniu Sandbox containers share the Sandbox host kernel; an image template cannot install or select the pinned Azure host kernel build."
+            : "The current Qiniu Sandbox public-template build allocation exposes a 22,222 MiB root disk, and the full GitHub-hosted runner inventory exceeds that limit. This public template guarantees the pinned Ubuntu Slim-compatible core on the requested OS release plus documented extensions; this full-image-only item is not guaranteed and should be installed at job time or included in a custom template.",
         }
       : {}),
   };
@@ -356,7 +378,7 @@ function contractEntries(imageKey) {
 }
 
 try {
-  const images = {};
+  const parsedByImage = {};
   for (const imageKey of [
     "ubuntu-slim",
     "ubuntu-22.04",
@@ -388,11 +410,30 @@ try {
         const [category, upstream_name, upstream_value, kind] = line.split("\t");
         return { category, upstream_name, upstream_value, kind };
       });
+    parsedByImage[imageKey] = {
+      reportPath,
+      entries: parsed,
+    };
+  }
+
+  const slimEntryKeys = new Set(
+    parsedByImage["ubuntu-slim"].entries.map(entryKey),
+  );
+  const images = {};
+  for (const imageKey of [
+    "ubuntu-slim",
+    "ubuntu-22.04",
+    "ubuntu-24.04",
+    "ubuntu-26.04",
+  ]) {
+    const { reportPath, entries } = parsedByImage[imageKey];
     images[imageKey] = {
       report_path: reportPath,
       template_directory: `templates/github-runner-${imageKey}`,
       entries: [
-        ...parsed.map((entry) => compatibilityEntry(imageKey, entry)),
+        ...entries.map((entry) =>
+          compatibilityEntry(imageKey, entry, slimEntryKeys),
+        ),
         ...contractEntries(imageKey),
       ],
     };

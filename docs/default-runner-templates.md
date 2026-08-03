@@ -59,6 +59,23 @@ workflow disables managed-default selection from the workflow side. Custom
 specs remain available with operator-defined required labels and explicit
 template IDs.
 
+## Software compatibility
+
+These templates track the pinned `actions/runner-images` reports item by item,
+but they are not byte-for-byte GitHub-hosted runner images. The current Qiniu
+Sandbox public-template build allocation exposes a 22,222-MiB root disk, while
+the complete GitHub-hosted runner inventory requires more space. The three
+versioned templates guarantee the Ubuntu Slim-compatible core on the requested
+Ubuntu release, plus Apache, Podman, Buildah, Skopeo, Ninja, Docker support,
+the preinstalled Actions runner, and the runner filesystem contract.
+
+[`templates/runner-images-compatibility.json`](../templates/runner-images-compatibility.json)
+is the executable item-level contract. `provided` means release conformance
+must verify the item. `excluded` means the public template does not guarantee
+it; install the tool in the workflow or build a custom Sandbox template when
+it is required. An excluded executable might be present through an OS package
+dependency, but workflows must not rely on it.
+
 ## Requirements
 
 - `qiniu/qshell` 2.19.10 or newer;

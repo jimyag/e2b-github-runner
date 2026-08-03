@@ -103,9 +103,6 @@ for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
   if grep -Fq 'Acquire::https::Verify-Peer=false' "$directory/scripts/setup-template.sh"; then
     fail "$image_key setup must not disable apt HTTPS peer verification"
   fi
-  grep -Fq 'MONO_ENV_OPTIONS=--interp bash "$upstream_build/$installer"' \
-    "$directory/scripts/setup-template.sh" ||
-    fail "$image_key must run the legacy Mono installer in interpreter mode for amd64 emulation"
   if [ "$image_key" != ubuntu-22.04 ]; then
     grep -Fq 'ensure_upstream_apt_source_layout' \
       "$directory/scripts/setup-template.sh" ||
@@ -115,6 +112,30 @@ for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
       fail "$image_key must provide the deb822 path expected by upstream setup"
   fi
   if [ "$image_key" != ubuntu-slim ]; then
+    for required_installer in \
+      install-actions-cache.sh \
+      install-apt-common.sh \
+      install-apache.sh \
+      install-container-tools.sh \
+      install-github-cli.sh \
+      install-nodejs.sh \
+      install-python.sh; do
+      grep -Fq "$required_installer" "$directory/scripts/setup-template.sh" ||
+        fail "$image_key disk-bounded toolset is missing $required_installer"
+    done
+    for full_only_installer in \
+      install-dotnetcore-sdk.sh \
+      install-android-sdk.sh \
+      install-codeql-bundle.sh \
+      install-homebrew.sh \
+      Install-PowerShellModules.ps1 \
+      Install-PowerShellAzModules.ps1 \
+      Install-Toolset.ps1 \
+      Configure-Toolset.ps1; do
+      if grep -Fq "$full_only_installer" "$directory/scripts/setup-template.sh"; then
+        fail "$image_key disk-bounded toolset must not install $full_only_installer"
+      fi
+    done
     grep -Fq 'start_new_session=True' \
       "$directory/scripts/setup-template.sh" ||
       fail "$image_key must detach service startup from the Sandbox build session"
@@ -122,18 +143,6 @@ for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
       "$directory/scripts/setup-template.sh" ||
       fail "$image_key must confirm detached Apache startup before Pester continues"
   fi
-  if [ "$image_key" = ubuntu-22.04 ]; then
-    grep -Fq 'dotnet tool install Microsoft.SqlPackage' \
-      "$directory/scripts/setup-template.sh" ||
-      fail "$image_key must install SqlPackage through the official NuGet tool feed"
-    grep -Fq -- '--version "$SQLPACKAGE_DOTNET_TOOL_VERSION"' \
-      "$directory/scripts/setup-template.sh" ||
-      fail "$image_key must pin the SqlPackage NuGet tool version"
-    grep -Fq 'bash "$HELPER_SCRIPTS/invoke-tests.sh" "Tools" "SqlPackage"' \
-      "$directory/scripts/setup-template.sh" ||
-      fail "$image_key must run the pinned upstream SqlPackage test"
-  fi
-
   build_target="$(expected_build_target "$image_key")"
   grep -Fq "task $build_target" "$directory/README.md" ||
     fail "$image_key README must use the exact task $build_target build command"

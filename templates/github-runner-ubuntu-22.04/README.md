@@ -2,8 +2,9 @@
 
 This 8-vCPU, 8192-MiB Linux x86_64 template uses the pinned
 Canonical-published Ubuntu 22.04 OCI index in Amazon ECR Public and the
-complete x64 toolset/install chain from
+disk-bounded Ubuntu Slim-compatible core from
 `actions/runner-images@e986db797519f06a2e5e53701a715cfa4c1545e8`.
+Apache and the Podman/Buildah/Skopeo container tools are explicit extensions.
 It follows upstream Ubuntu 22.04 deprecation.
 
 The image supplies the `runner` account, `/home/runner/work`,

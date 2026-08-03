@@ -419,8 +419,6 @@ WAAGENT
   bash "$upstream_build/configure-environment.sh"
   bash "$upstream_build/install-apt-vital.sh"
   install_pinned_powershell
-  pwsh -File "$upstream_build/Install-PowerShellModules.ps1"
-  pwsh -File "$upstream_build/Install-PowerShellAzModules.ps1"
 
   for installer in \
     install-actions-cache.sh \
@@ -431,91 +429,26 @@ WAAGENT
     install-bicep.sh \
     install-apache.sh \
     install-aws-tools.sh \
-    install-clang.sh \
-    install-swift.sh \
-    install-cmake.sh \
-    install-codeql-bundle.sh \
-    install-awf.sh \
     install-container-tools.sh \
-    install-dotnetcore-sdk.sh \
-    install-microsoft-edge.sh \
-    install-gcc-compilers.sh \
-    install-firefox.sh \
-    install-gfortran.sh \
     install-git.sh \
     install-git-lfs.sh \
     install-github-cli.sh \
-    install-google-chrome.sh \
     install-google-cloud-cli.sh \
-    install-haskell.sh \
-    install-java-tools.sh \
-    install-kubernetes-tools.sh \
-    install-miniconda.sh \
-    install-kotlin.sh \
-    install-mysql.sh \
-    install-nginx.sh \
     install-nvm.sh \
     install-nodejs.sh \
-    install-copilot-cli.sh \
-    install-bazel.sh \
-    install-php.sh \
-    install-postgresql.sh \
-    install-pulumi.sh \
-    install-ruby.sh \
-    install-rust.sh \
-    install-julia.sh \
-    install-selenium.sh \
-    install-packer.sh \
-    install-vcpkg.sh \
     configure-dpkg.sh \
     install-yq.sh \
-    install-android-sdk.sh \
-    install-pypy.sh \
     install-python.sh \
     install-zstd.sh \
     install-ninja.sh; do
     bash "$upstream_build/$installer"
     case "$installer" in
       install-apache.sh) stop_validated_service apache2 ;;
-      install-mysql.sh) stop_validated_service mysql ;;
-      install-nginx.sh) stop_validated_service nginx ;;
-      install-postgresql.sh) stop_validated_service postgresql ;;
     esac
   done
-
-  if [ "$VERSION_ID" = 22.04 ]; then
-    for installer in \
-      install-aliyun-cli.sh \
-      install-heroku.sh \
-      install-leiningen.sh \
-      install-mssql-tools.sh \
-      install-oc-cli.sh \
-      install-oras-cli.sh \
-      install-rlang.sh \
-      install-mono.sh \
-      install-sbt.sh \
-      install-sqlpackage.sh \
-      install-terraform.sh; do
-      if [ "$installer" = install-mono.sh ]; then
-        # Mono 6.12 JIT aborts when an amd64 image is built through arm64
-        # emulation. Scope interpreter mode to installation-time validation;
-        # the completed amd64 image retains the native JIT default.
-        MONO_ENV_OPTIONS=--interp bash "$upstream_build/$installer"
-      else
-        bash "$upstream_build/$installer"
-      fi
-    done
-  fi
-
-  pwsh -File "$upstream_build/Install-Toolset.ps1"
-  pwsh -File "$upstream_build/Configure-Toolset.ps1"
   . "$HELPER_SCRIPTS/etc-environment.sh"
   reload_etc_environment
   bash "$upstream_build/install-pipx-packages.sh"
-  sudo -H -u runner \
-    HELPER_SCRIPTS="$HELPER_SCRIPTS" \
-    INSTALLER_SCRIPT_FOLDER="$INSTALLER_SCRIPT_FOLDER" \
-    bash "$upstream_build/install-homebrew.sh"
 fi
 
 install_docker_for_sandbox

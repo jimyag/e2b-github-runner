@@ -57,6 +57,21 @@ Admin 中禁用单个 managed spec；从 workflow 中移除 `qiniu` 则会从 wo
 侧阻止 managed-default selection。自定义 spec 仍可使用 operator 定义的
 required labels 和显式 template ID。
 
+## 软件兼容性
+
+这些模板会逐项跟踪固定版本的 `actions/runner-images` 软件报告，但并非与 GitHub
+托管 Runner 镜像逐字节一致。当前 Qiniu Sandbox 公共模板构建配额提供
+22,222 MiB 根磁盘，而完整 GitHub 托管 Runner 软件清单需要更大空间。因此，3 个
+版本化模板保证在对应 Ubuntu 版本上提供与 Ubuntu Slim 兼容的核心工具，并额外
+提供 Apache、Podman、Buildah、Skopeo、Ninja、Docker 支持、预装 Actions
+Runner 和 Runner 文件系统契约。
+
+[`templates/runner-images-compatibility.json`](../../templates/runner-images-compatibility.json)
+是可执行的逐项契约。`provided` 表示发布 conformance 必须验证该项目；`excluded`
+表示公共模板不保证该项目，需要时应在 workflow 中安装，或构建自定义 Sandbox
+模板。某个 `excluded` 可执行文件可能因操作系统包依赖而碰巧存在，但 workflow
+不得依赖这一点。
+
 ## 环境要求
 
 - `qiniu/qshell` 2.19.10 或更高版本；
