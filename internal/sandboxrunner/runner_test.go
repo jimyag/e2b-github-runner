@@ -1689,14 +1689,12 @@ func TestVersionedTemplateSystemctlShimClosesDescriptorsBoundsAndVerifiesService
 				t.Fatal(err)
 			}
 			script := string(scriptBytes)
-			for _, required := range []string{
+			requiredFragments := []string{
 				`action=${1:-}`,
 				`unit=${unit%.service}`,
 				`run_isolated() {`,
 				`subprocess.run(sys.argv[1:], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True, timeout=30)`,
 				`case "$unit:$action" in`,
-				`apache2:start|apache2:stop|apache2:restart)`,
-				`run_isolated /usr/sbin/apachectl "$action"`,
 				`apache2:is-active)`,
 				`test -s /run/apache2/apache2.pid && kill -0 "$(cat /run/apache2/apache2.pid)" 2>/dev/null`,
 				`nginx:start)`,
@@ -1713,7 +1711,25 @@ func TestVersionedTemplateSystemctlShimClosesDescriptorsBoundsAndVerifiesService
 				`if service_status; then`,
 				`[ "$action" = stop ] && exit "$service_result"`,
 				`[ "$action" = stop ] && exit 0`,
-			} {
+			}
+			if image == "ubuntu-slim" {
+				requiredFragments = append(requiredFragments,
+					`apache2:start|apache2:stop|apache2:restart)`,
+					`run_isolated /usr/sbin/apachectl "$action"`,
+				)
+			} else {
+				requiredFragments = append(requiredFragments,
+					`run_detached_until_pid_state() {`,
+					`subprocess.Popen(`,
+					`start_new_session=True`,
+					`start_apache() {`,
+					`stop_apache() {`,
+					`apache2:start)`,
+					`apache2:stop)`,
+					`apache2:restart)`,
+				)
+			}
+			for _, required := range requiredFragments {
 				if !strings.Contains(script, required) {
 					t.Fatalf("systemctl shim must isolate, bound, and verify available SysV services; missing %q", required)
 				}
