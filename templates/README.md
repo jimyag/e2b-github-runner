@@ -63,8 +63,10 @@ Pester assertion for that extension.
 
 All four templates install Bicep 0.45.15 from Microsoft's signed NuGet
 package instead of resolving and downloading a floating GitHub release asset.
-The package checksum is pinned in each Dockerfile, and the upstream Bicep
-Pester assertion still runs after installation.
+The package checksum is pinned in each Dockerfile. The three versioned
+templates run the upstream Bicep Pester assertion after installation; the Slim
+template, whose pinned upstream tree has no Pester invocation helper, verifies
+the installed CLI version directly.
 
 Other GitHub release assets selected by the pinned upstream installers are
 resolved through GitHub's release API and downloaded through the corresponding
@@ -74,7 +76,8 @@ retaining the upstream version selection and checksum validation.
 Git LFS comes from the configured Ubuntu archive instead of adding the
 packagecloud repository. This keeps the package on the OS-supported channel,
 avoids another build-time repository key, and retains the upstream Git LFS
-Pester assertion.
+Pester assertion on the three versioned templates. The Slim template verifies
+the installed Git LFS CLI directly.
 
 Google Cloud CLI installation first follows the pinned upstream
 `actions/runner-images` APT path. If that repository remains unavailable after
