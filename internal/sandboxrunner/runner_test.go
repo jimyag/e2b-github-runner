@@ -2714,6 +2714,41 @@ func TestRunnerTemplatePinsBicepNuGetPackage(t *testing.T) {
 	}
 }
 
+func TestRunnerTemplateInstallsGitLFSFromUbuntuArchive(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptBytes, err := os.ReadFile(filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, required := range []string{
+				"install_git_lfs_from_ubuntu() {",
+				"apt-get install -y --no-install-recommends git-lfs",
+				`invoke_tests "Tools" "Git-lfs"`,
+				`install-git-lfs.sh)`,
+				`install_git_lfs_from_ubuntu`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("template must install Git LFS from the configured Ubuntu archive; missing %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestRunnerTemplateBuildUsesBoundedHTTPSAptSources(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{

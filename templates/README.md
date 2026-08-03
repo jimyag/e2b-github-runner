@@ -71,6 +71,11 @@ resolved through GitHub's release API and downloaded through the corresponding
 official asset API URL. This avoids a separate browser-download handshake while
 retaining the upstream version selection and checksum validation.
 
+Git LFS comes from the configured Ubuntu archive instead of adding the
+packagecloud repository. This keeps the package on the OS-supported channel,
+avoids another build-time repository key, and retains the upstream Git LFS
+Pester assertion.
+
 Google Cloud CLI installation first follows the pinned upstream
 `actions/runner-images` APT path. If that repository remains unavailable after
 bounded retries, the build falls back to Google's official versioned x86_64

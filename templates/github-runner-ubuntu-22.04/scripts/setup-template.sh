@@ -44,6 +44,13 @@ install_bicep_from_nuget() {
   invoke_tests "Tools" "Bicep"
 }
 
+install_git_lfs_from_ubuntu() {
+  apt-get update
+  apt-get install -y --no-install-recommends git-lfs
+  git lfs version
+  invoke_tests "Tools" "Git-lfs"
+}
+
 install_google_cloud_cli_from_archive() {
   local archive_name="google-cloud-cli-${GOOGLE_CLOUD_CLI_VERSION}-linux-x86_64.tar.gz"
   local archive_path="/tmp/${archive_name}"
@@ -73,6 +80,10 @@ run_upstream_installer() {
   case "$installer_name" in
     install-bicep.sh)
       install_bicep_from_nuget
+      return
+      ;;
+    install-git-lfs.sh)
+      install_git_lfs_from_ubuntu
       return
       ;;
     install-google-cloud-cli.sh) max_attempts=3 ;;
