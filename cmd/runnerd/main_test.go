@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/qiniu/ci-runner/internal/config"
+	"github.com/qiniu/ci-runner/internal/runnercatalog"
 	"github.com/qiniu/ci-runner/internal/state"
 	"gopkg.in/yaml.v3"
 )
@@ -40,6 +44,81 @@ func TestRecoveryGateAllowsOnlyHealthUntilReady(t *testing.T) {
 	if ready.Code != http.StatusNoContent {
 		t.Fatalf("ready status = %d, want %d", ready.Code, http.StatusNoContent)
 	}
+}
+
+type startupStoreStub struct {
+	ensureErr    error
+	reconcileErr error
+	conflicts    []state.ManagedProfileConflict
+	calls        []string
+	profiles     []state.RunnerProfile
+}
+
+func (s *startupStoreStub) Ensure() error {
+	s.calls = append(s.calls, "ensure")
+	return s.ensureErr
+}
+
+func (s *startupStoreStub) ReconcileManagedProfiles(profiles []state.RunnerProfile) ([]state.ManagedProfileConflict, error) {
+	s.calls = append(s.calls, "reconcile")
+	s.profiles = profiles
+	return s.conflicts, s.reconcileErr
+}
+
+func TestInitializeStateStoreReconcilesDefaultsAfterEnsureAndWarnsOnCollisions(t *testing.T) {
+	store := &startupStoreStub{
+		conflicts: []state.ManagedProfileConflict{
+			{Name: "qiniu-ubuntu-24.04", ExistingManagedBy: ""},
+			{Name: "qiniu-ubuntu-latest", ExistingManagedBy: "another/catalog"},
+		},
+	}
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+
+	if err := initializeStateStore(store, logger); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(store.calls, []string{"ensure", "reconcile"}) {
+		t.Fatalf("calls = %#v, want Ensure before reconciliation", store.calls)
+	}
+	if !reflect.DeepEqual(store.profiles, runnercatalog.DefaultProfiles()) {
+		t.Fatalf("reconciled profiles = %#v, want product defaults", store.profiles)
+	}
+	for _, want := range []string{
+		`"level":"WARN"`,
+		`"name":"qiniu-ubuntu-24.04"`,
+		`"existing_managed_by":""`,
+		`"name":"qiniu-ubuntu-latest"`,
+		`"existing_managed_by":"another/catalog"`,
+	} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("logs = %q, missing %q", logs.String(), want)
+		}
+	}
+}
+
+func TestInitializeStateStoreReturnsDatabaseErrors(t *testing.T) {
+	t.Run("ensure", func(t *testing.T) {
+		store := &startupStoreStub{ensureErr: errors.New("open database")}
+		err := initializeStateStore(store, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+		if err == nil || !strings.Contains(err.Error(), "ensure state store") {
+			t.Fatalf("error = %v, want ensure state store failure", err)
+		}
+		if !reflect.DeepEqual(store.calls, []string{"ensure"}) {
+			t.Fatalf("calls = %#v, reconciliation must not run after Ensure failure", store.calls)
+		}
+	})
+
+	t.Run("reconcile", func(t *testing.T) {
+		store := &startupStoreStub{reconcileErr: errors.New("write database")}
+		err := initializeStateStore(store, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+		if err == nil || !strings.Contains(err.Error(), "reconcile managed runner specs") {
+			t.Fatalf("error = %v, want reconciliation failure", err)
+		}
+		if !reflect.DeepEqual(store.calls, []string{"ensure", "reconcile"}) {
+			t.Fatalf("calls = %#v", store.calls)
+		}
+	})
 }
 
 func TestWriteObfuscatedConfigValueReadsSecretFromStdin(t *testing.T) {

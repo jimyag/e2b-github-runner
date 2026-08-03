@@ -8,6 +8,68 @@ import { type AdminSection, type RunnerGroup, type RunnerPolicy, type RunnerSpec
 
 type RequestFn = (url: string, options?: RequestInit) => Promise<unknown>
 
+export async function submitRunnerSpecChanges({
+  request,
+  runnerGroups,
+  editingRunnerSpec,
+  runnerSpecForm,
+  parseLabels,
+}: {
+  request: RequestFn
+  runnerGroups: RunnerGroup[]
+  editingRunnerSpec: RunnerSpec | null
+  runnerSpecForm: RunnerSpecFormState
+  parseLabels: (value: string) => string[]
+}) {
+  const name = editingRunnerSpec?.name || runnerSpecForm.name.trim()
+  const managed = Boolean(editingRunnerSpec?.managed_by?.trim())
+  const payload = managed
+    ? {
+        max_concurrency: Number(runnerSpecForm.max_concurrency) || 0,
+        min_idle: Number(runnerSpecForm.min_idle) || 0,
+        enabled: runnerSpecForm.enabled,
+      }
+    : {
+        ...(editingRunnerSpec ? {} : { name }),
+        labels: parseLabels(runnerSpecForm.labels),
+        required_labels: parseLabels(runnerSpecForm.required_labels),
+        template_id: runnerSpecForm.template_id.trim(),
+        runner_group: runnerSpecForm.runner_group.trim(),
+        max_concurrency: Number(runnerSpecForm.max_concurrency) || 0,
+        min_idle: Number(runnerSpecForm.min_idle) || 0,
+        priority: Number(runnerSpecForm.priority) || 0,
+        enabled: runnerSpecForm.enabled,
+        default_available: runnerSpecForm.default_available,
+      }
+  await request(editingRunnerSpec ? `/runner_specs/${encodeURIComponent(name)}` : "/runner_specs", {
+    method: editingRunnerSpec ? "PATCH" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+
+  if (managed) return name
+
+  for (const group of runnerGroups) {
+    const shouldContain = runnerSpecForm.group_names.includes(group.name)
+    const currentSpecs = new Set(group.spec_names)
+    if (shouldContain === currentSpecs.has(name)) {
+      continue
+    }
+    if (shouldContain) currentSpecs.add(name)
+    else currentSpecs.delete(name)
+    await request(`/runner_groups/${encodeURIComponent(group.name)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        spec_names: Array.from(currentSpecs).sort(),
+        enabled: group.enabled,
+      }),
+    })
+  }
+
+  return name
+}
+
 export function useRunnerCatalog({
   runnerSpecs,
   runnerGroups,
@@ -26,11 +88,13 @@ export function useRunnerCatalog({
   parseLabels: (value: string) => string[]
 }) {
   const [runnerSpecOpen, setRunnerSpecOpen] = useState(false)
+  const [editingRunnerSpec, setEditingRunnerSpec] = useState<RunnerSpec | null>(null)
   const [runnerGroupOpen, setRunnerGroupOpen] = useState(false)
   const [runnerPolicyOpen, setRunnerPolicyOpen] = useState(false)
   const [runnerSpecForm, setRunnerSpecForm] = useState<RunnerSpecFormState>({
     name: "",
     labels: "self-hosted,e2b",
+    required_labels: "",
     template_id: "",
     runner_group: "",
     group_names: [],
@@ -64,9 +128,11 @@ export function useRunnerCatalog({
   )
 
   const resetRunnerSpecForm = () => {
+    setEditingRunnerSpec(null)
     setRunnerSpecForm({
       name: "",
       labels: "self-hosted,e2b",
+      required_labels: "",
       template_id: "",
       runner_group: "",
       group_names: [],
@@ -113,43 +179,14 @@ export function useRunnerCatalog({
   const saveRunnerSpec = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     try {
-      const payload = {
-        name: runnerSpecForm.name.trim(),
-        labels: parseLabels(runnerSpecForm.labels),
-        template_id: runnerSpecForm.template_id.trim(),
-        runner_group: runnerSpecForm.runner_group.trim(),
-        max_concurrency: Number(runnerSpecForm.max_concurrency) || 0,
-        min_idle: Number(runnerSpecForm.min_idle) || 0,
-        priority: Number(runnerSpecForm.priority) || 0,
-        enabled: runnerSpecForm.enabled,
-        default_available: runnerSpecForm.default_available,
-      }
-      const isUpdate = runnerSpecs.some((runnerSpec) => runnerSpec.name === payload.name)
-      const url = isUpdate ? `/runner_specs/${encodeURIComponent(payload.name)}` : "/runner_specs"
-      const method = isUpdate ? "PATCH" : "POST"
-      await request(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+      const name = await submitRunnerSpecChanges({
+        request,
+        runnerGroups,
+        editingRunnerSpec,
+        runnerSpecForm,
+        parseLabels,
       })
-      for (const group of runnerGroups) {
-        const shouldContain = runnerSpecForm.group_names.includes(group.name)
-        const currentSpecs = new Set(group.spec_names)
-        if (shouldContain === currentSpecs.has(payload.name)) {
-          continue
-        }
-        if (shouldContain) currentSpecs.add(payload.name)
-        else currentSpecs.delete(payload.name)
-        await request(`/runner_groups/${encodeURIComponent(group.name)}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            spec_names: Array.from(currentSpecs).sort(),
-            enabled: group.enabled,
-          }),
-        })
-      }
-      toast.success(`Runner spec ${payload.name} saved`)
+      toast.success(`Runner spec ${name} saved`)
       setRunnerSpecOpen(false)
       await loadAll()
     } catch (error) {
@@ -159,9 +196,11 @@ export function useRunnerCatalog({
 
   const loadRunnerSpecIntoForm = (runnerSpec: RunnerSpec) => {
     setSection("runner_specs")
+    setEditingRunnerSpec(runnerSpec)
     setRunnerSpecForm({
       name: runnerSpec.name,
       labels: runnerSpec.labels.join(","),
+      required_labels: runnerSpec.required_labels.join(","),
       template_id: runnerSpec.template_id,
       runner_group: runnerSpec.runner_group || "",
       group_names: runnerGroups
@@ -301,6 +340,7 @@ export function useRunnerCatalog({
 
   return {
     runnerSpecOpen,
+    editingRunnerSpec,
     runnerGroupOpen,
     runnerPolicyOpen,
     runnerSpecForm,

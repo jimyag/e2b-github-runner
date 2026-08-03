@@ -63,11 +63,19 @@ Sandbox service API URL and API Key are not configured in `runnerd.yaml`. After 
 
 The first-use product tour stores only a version, status, and `tour_seen` marker in the existing account-scoped `account_preferences` table under `onboarding/product-tour`; it never stores the Sandbox API Key. A missing or outdated version is returned as `pending` with `tour_seen=false`. Finishing the overlay writes `pending` with `tour_seen=true`, so it does not auto-start again while required setup remains visible. `completed` is written when the signed-in account resolves any effective Sandbox source: custom, inherited, or an eligible admin default. An explicit first-run skip writes `skipped` to dismiss the overlay without hiding required setup. Replaying the tour from the account menu does not reset or replace the persisted state.
 
-Runner spec, runner group, and repository policy are not `runnerd.yaml` fields. Create them from the admin page or admin API after the service starts. Use meaningful spec names such as `ubuntu-24-04`; set `template_id` to the matching Qiniu sandbox template ID. Template access is checked when runnerd starts a sandbox with the account or organization Sandbox service config.
+Runner spec, runner group, and repository policy are not `runnerd.yaml` fields.
+At startup, runnerd reconciles five managed Qiniu Ubuntu specs. It owns their
+labels, required labels, stable public template names, priority, and default
+availability while preserving operator-controlled `enabled`,
+`max_concurrency`, and `min_idle`. Custom specs remain admin API/UI data: give
+them an explicit `template_id`, advertised labels, and optional required
+labels. Custom template access is intentionally not validated at save time.
+It is checked when runnerd starts a sandbox with the account or organization
+Sandbox service config.
 
 `database.backend` supports `sqlite`, `postgres`, and `mysql`. Prefer sqlite for local development. Before documenting shared-database multi-instance deployment as supported, verify lease behavior with two runnerd processes sharing the same database.
 
-The state schema is mainly defined by GORM tags in `internal/state/records.go`. On startup, an existing SQLite `runner_requests` table is migrated additively by creating missing model columns and indexes; it is deliberately excluded from generic SQLite `AutoMigrate` table recreation because historical ALTER-added columns must remain intact. Admin newest-first lists depend on `idx_runner_requests_queued_id` over `(queued_at DESC, id ASC)`. Repository-authorized lists query each installation separately through `idx_runner_requests_github_installation_queued_id` over `(github_installation_id, queued_at DESC, id ASC)`, then merge the bounded results. Creating either missing index does not rewrite rows, but benchmark startup I/O and lock time on a disposable production-sized copy. A future non-additive `runner_requests` change requires a narrow explicit migration and a preserved-data regression fixture. Other tables run through a narrow legacy compatibility pass for older columns, obsolete OAuth constraints, and incompatible legacy scope tables, then run GORM `AutoMigrate`. Legacy `account_preferences` and `account_secrets` tables without `scope_type`/`scope_id` are dropped and recreated rather than data-migrated. Reconfigure their saved Sandbox Preferences and API keys after that upgrade; stored GitHub OAuth tokens are also cleared, so affected users must sign in with GitHub again before syncing installations. When changing state records, indexes, or migration helpers, run at least:
+The state schema is mainly defined by GORM tags in `internal/state/records.go`. On startup, existing SQLite `runner_requests` and `runner_profiles` tables are migrated additively by creating every missing model column and index; they are deliberately excluded from generic SQLite `AutoMigrate` table recreation. This keeps historical ALTER-added runner-request values and preserves legacy runner-profile rows and custom indexes while adding managed-catalog fields. Admin newest-first lists depend on `idx_runner_requests_queued_id` over `(queued_at DESC, id ASC)`. Repository-authorized lists query each installation separately through `idx_runner_requests_github_installation_queued_id` over `(github_installation_id, queued_at DESC, id ASC)`, then merge the bounded results. Creating a missing index does not rewrite rows, but benchmark startup I/O and lock time on a disposable production-sized copy. A future non-additive change to either additive-only table requires a narrow explicit migration and a preserved-data regression fixture. Other tables run through a narrow legacy compatibility pass for older columns, obsolete OAuth constraints, and incompatible legacy scope tables, then run GORM `AutoMigrate`. Legacy `account_preferences` and `account_secrets` tables without `scope_type`/`scope_id` are dropped and recreated rather than data-migrated. Reconfigure their saved Sandbox Preferences and API keys after that upgrade; stored GitHub OAuth tokens are also cleared, so affected users must sign in with GitHub again before syncing installations. When changing state records, indexes, or migration helpers, run at least:
 
 ```bash
 go test ./internal/state -count=1
@@ -340,13 +348,25 @@ browser-unsafe module execution order.
 
 `task test` rebuilds the UI, runs the same Bun suite, and then runs Go tests with race detection and coverage. The Bun suite covers helpers and server-rendered component output; use a real browser to verify navigation, dialogs, avatar loading/fallback, and access transitions after a role change. For onboarding changes, also verify the automatic `/jobs` start, all six targets, the transition to `/account/preferences`, the persistent setup task after the overlay closes, explicit skip persistence, and replay without a state change.
 
-Create a default runner spec first:
+Confirm the reconciled managed specs:
+
+```bash
+curl -fsS -b "$COOKIE_JAR" \
+  http://127.0.0.1:25500/runner_specs |
+  jq '.[] | select(.managed_by == "qiniu/ci-runner") |
+      {name, required_labels, default_template_name, enabled}'
+```
+
+The result should contain exactly `qiniu-ubuntu-slim`,
+`qiniu-ubuntu-22.04`, `qiniu-ubuntu-24.04`, `qiniu-ubuntu-26.04`, and
+`qiniu-ubuntu-latest`. Create a custom spec separately when testing the
+backward-compatible explicit-template path:
 
 ```bash
 curl -fsS -X POST http://127.0.0.1:25500/runner_specs \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"name":"ubuntu-24-04","labels":["self-hosted","e2b"],"template_id":"<template id>","max_concurrency":100,"enabled":true,"default_available":true}' | jq
+  -d '{"name":"custom-ubuntu","labels":["self-hosted","custom-ubuntu"],"required_labels":["custom-ubuntu"],"template_id":"<template id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
 ```
 
 Manually create a runner:
@@ -355,7 +375,7 @@ Manually create a runner:
 curl -fsS -X POST http://127.0.0.1:25500/runner_requests \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"id":"manual-001","repository_full_name":"<owner>/<repo>","runner_spec_name":"ubuntu-24-04"}' | jq
+  -d '{"id":"manual-001","repository_full_name":"<owner>/<repo>","runner_spec_name":"qiniu-ubuntu-24.04"}' | jq
 ```
 
 Check state:
@@ -467,14 +487,14 @@ After saving, GitHub sends a ping. The service handles `workflow_job.queued` / `
 Add this to the target repository:
 
 ```yaml
-name: e2b-runner-smoke
+name: qiniu-runner-smoke
 
 on:
   workflow_dispatch:
 
 jobs:
   smoke:
-    runs-on: [self-hosted, e2b]
+    runs-on: [qiniu, ubuntu-24.04]
     steps:
       - name: Print runner info
         run: |
@@ -488,7 +508,7 @@ After triggering `workflow_dispatch`, the expected flow is:
 1. GitHub creates a `workflow_job.queued` webhook.
 2. This service verifies the signature and writes a `queued` runner request into the state database.
 3. The service creates a sandbox, obtains a GitHub registration token, and starts an ephemeral runner inside the sandbox.
-4. The GitHub job is picked up by the `self-hosted,e2b` runner.
+4. The GitHub job is picked up by the managed `qiniu,ubuntu-24.04` runner.
 5. After the runner process exits, the service cleans up the sandbox.
 
 If `Workflow runs` events are also configured, `workflow_run.requested` / `workflow_run.in_progress` are only compensating signals. runnerd queries queued jobs in the run and creates runner requests for matching jobs that have not already been enqueued through `workflow_job`. This compensating action does not immediately make the GitHub Actions UI show the job as running. The UI remains queued / waiting for runner until the ephemeral runner inside the sandbox registers successfully and GitHub assigns it to that job.
@@ -518,7 +538,12 @@ Common issues:
 
 - `invalid signature`: GitHub webhook secret and `github.webhook_secret` do not match.
 - `runner start deferred because global concurrency is at capacity` or `runner start deferred because profile is at capacity`: the request remains queued until global or per-spec capacity is available.
-- GitHub job stays queued: workflow `runs-on` labels must include `self-hosted` and `e2b`, and must match runner spec labels.
+- GitHub job stays queued: a managed default requires both `qiniu` and the
+  exact OS label. `[ubuntu-24.04]`, `[qiniu]`, and unsupported extra labels do
+  not match. For a custom spec, use its advertised and required labels.
+- `template_resolution` admission failure: confirm the repository owner's
+  scoped Sandbox endpoint exposes exactly one public default template with the
+  managed stable name in `ready` or `uploaded` state.
 - sandbox creation fails: confirm the account/organization Preferences or enabled admin default has a complete Sandbox service config matching the template and local environment; the Runner detail shows which source was selected.
 - registration token fails: check the [GitHub App permission table](../README.md#required-permissions). Specs without `runner_group` require repository `Administration`; specs with `runner_group` require organization `Self-hosted runners`.
 

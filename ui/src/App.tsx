@@ -643,6 +643,7 @@ function App() {
 
   const {
     runnerSpecOpen,
+    editingRunnerSpec,
     runnerGroupOpen,
     runnerPolicyOpen,
     runnerSpecForm,
@@ -1134,6 +1135,7 @@ function App() {
               runnerSpecs={runnerSpecs}
               runnerGroups={runnerGroups}
               runnerSpecOpen={runnerSpecOpen}
+              editingRunnerSpec={editingRunnerSpec}
               runnerSpecForm={runnerSpecForm}
               onRefresh={() => void loadAll()}
               onResetRunnerSpecForm={resetRunnerSpecForm}

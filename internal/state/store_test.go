@@ -27,6 +27,429 @@ func closeTestDB(t *testing.T, db *gorm.DB) {
 	}
 }
 
+func managedProfileForReconciliation(name string, revision int) RunnerProfile {
+	return RunnerProfile{
+		Name:                name,
+		Labels:              []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-24.04"},
+		RequiredLabels:      []string{"qiniu", "ubuntu-24.04"},
+		DefaultTemplateName: "github-runner-ubuntu-24-04",
+		MaxConcurrency:      10,
+		Priority:            100,
+		Enabled:             true,
+		DefaultAvailable:    true,
+		ManagedBy:           "qiniu/ci-runner",
+		CatalogRevision:     revision,
+	}
+}
+
+type profileReadMutation struct {
+	fired bool
+	err   error
+}
+
+func mutateProfileAfterReconciliationRead(
+	t *testing.T,
+	store *DBStore,
+	profileName string,
+	updates map[string]any,
+) *profileReadMutation {
+	t.Helper()
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackName := "test:mutate-profile-after-reconciliation-read:" + profileName
+	mutation := &profileReadMutation{}
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove(callbackName)
+	})
+	if err := db.Callback().Query().After("gorm:query").Register(callbackName, func(query *gorm.DB) {
+		if mutation.fired {
+			return
+		}
+		record, ok := query.Statement.Dest.(*runnerProfileRecord)
+		if !ok || record.Name != profileName {
+			return
+		}
+		mutation.fired = true
+		result := query.Session(&gorm.Session{NewDB: true}).
+			Model(&runnerProfileRecord{}).
+			Where("name = ?", profileName).
+			Updates(updates)
+		mutation.err = result.Error
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return mutation
+}
+
+func TestReconcileManagedProfilesCreatesMissingProfile(t *testing.T) {
+	store := New(t.TempDir())
+	want := managedProfileForReconciliation("qiniu-ubuntu-24.04", 1)
+
+	conflicts, err := store.ReconcileManagedProfiles([]RunnerProfile{want})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("conflicts = %#v, want none", conflicts)
+	}
+	got, err := store.GetProfile(want.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want.CreatedAt = got.CreatedAt
+	want.UpdatedAt = got.UpdatedAt
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("created profile = %#v, want %#v", got, want)
+	}
+}
+
+func TestReconcileManagedProfilesUpdatesCatalogFieldsAndPreservesOperatorFields(t *testing.T) {
+	store := New(t.TempDir())
+	createdAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	existing := managedProfileForReconciliation("qiniu-ubuntu-24.04", 1)
+	existing.Labels = []string{"old"}
+	existing.RequiredLabels = []string{"old"}
+	existing.TemplateID = "old-region-specific-id"
+	existing.DefaultTemplateName = "old-template-name"
+	existing.RunnerGroup = "old-group"
+	existing.MaxConcurrency = 37
+	existing.MinIdle = 4
+	existing.Priority = 12
+	existing.Enabled = false
+	existing.DefaultAvailable = false
+	existing.CreatedAt = createdAt
+	if _, err := store.UpsertProfile(existing); err != nil {
+		t.Fatal(err)
+	}
+
+	catalog := managedProfileForReconciliation(existing.Name, 2)
+	conflicts, err := store.ReconcileManagedProfiles([]RunnerProfile{catalog})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("conflicts = %#v, want none", conflicts)
+	}
+	got, err := store.GetProfile(existing.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Labels, catalog.Labels) ||
+		!reflect.DeepEqual(got.RequiredLabels, catalog.RequiredLabels) ||
+		got.TemplateID != catalog.TemplateID ||
+		got.DefaultTemplateName != catalog.DefaultTemplateName ||
+		got.RunnerGroup != catalog.RunnerGroup ||
+		got.Priority != catalog.Priority ||
+		got.DefaultAvailable != catalog.DefaultAvailable ||
+		got.ManagedBy != catalog.ManagedBy ||
+		got.CatalogRevision != catalog.CatalogRevision {
+		t.Fatalf("catalog-controlled fields were not updated: %#v", got)
+	}
+	if got.Enabled != existing.Enabled ||
+		got.MaxConcurrency != existing.MaxConcurrency ||
+		got.MinIdle != existing.MinIdle ||
+		!got.CreatedAt.Equal(createdAt) {
+		t.Fatalf("operator-controlled or creation fields changed: %#v", got)
+	}
+}
+
+func TestReconcileManagedProfilesDoesNotDowngradeHigherRevision(t *testing.T) {
+	store := New(t.TempDir())
+	existing := managedProfileForReconciliation("qiniu-ubuntu-24.04", 7)
+	existing.Labels = []string{"higher"}
+	existing.RequiredLabels = []string{"higher"}
+	existing.TemplateID = "higher-template-id"
+	existing.DefaultTemplateName = "higher-template-name"
+	existing.RunnerGroup = "higher-group"
+	existing.MaxConcurrency = 47
+	existing.MinIdle = 6
+	existing.Priority = 700
+	existing.Enabled = false
+	existing.DefaultAvailable = false
+	existing.CreatedAt = time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	if _, err := store.UpsertProfile(existing); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.GetProfile(existing.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conflicts, err := store.ReconcileManagedProfiles([]RunnerProfile{
+		managedProfileForReconciliation(existing.Name, 2),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("conflicts = %#v, want none", conflicts)
+	}
+	after, err := store.GetProfile(existing.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("higher revision was changed:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestReconcileManagedProfilesAtomicUpdateRejectsStaleRevision(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	existing := managedProfileForReconciliation("qiniu-ubuntu-24.04", 1)
+	if _, err := store.UpsertProfile(existing); err != nil {
+		t.Fatal(err)
+	}
+	beforeRace, err := store.GetProfile(existing.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raceUpdatedAt := beforeRace.UpdatedAt.Add(time.Minute)
+	mutation := mutateProfileAfterReconciliationRead(t, store, existing.Name, map[string]any{
+		"labels_json":           `["higher-race"]`,
+		"required_labels_json":  `["higher-race"]`,
+		"template_id":           "higher-race-template-id",
+		"default_template_name": "higher-race-template-name",
+		"runner_group":          "higher-race-group",
+		"max_concurrency":       57,
+		"min_idle":              7,
+		"priority":              800,
+		"enabled":               false,
+		"default_available":     false,
+		"managed_by":            "qiniu/ci-runner",
+		"catalog_revision":      8,
+		"updated_at":            raceUpdatedAt,
+	})
+
+	conflicts, err := store.ReconcileManagedProfiles([]RunnerProfile{
+		managedProfileForReconciliation(existing.Name, 2),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutation.err != nil {
+		t.Fatalf("inject stale-read mutation: %v", mutation.err)
+	}
+	if !mutation.fired {
+		t.Fatal("stale-read mutation did not run")
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("conflicts = %#v, want higher revision no-op", conflicts)
+	}
+	got, err := store.GetProfile(existing.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := RunnerProfile{
+		Name:                existing.Name,
+		Labels:              []string{"higher-race"},
+		RequiredLabels:      []string{"higher-race"},
+		TemplateID:          "higher-race-template-id",
+		DefaultTemplateName: "higher-race-template-name",
+		RunnerGroup:         "higher-race-group",
+		MaxConcurrency:      57,
+		MinIdle:             7,
+		Priority:            800,
+		Enabled:             false,
+		DefaultAvailable:    false,
+		ManagedBy:           "qiniu/ci-runner",
+		CatalogRevision:     8,
+		CreatedAt:           beforeRace.CreatedAt,
+		UpdatedAt:           raceUpdatedAt,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("stale lower-revision write changed raced row:\ngot:  %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestReconcileManagedProfilesAtomicUpdateRejectsStaleOwner(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	existing := managedProfileForReconciliation("qiniu-ubuntu-24.04", 1)
+	if _, err := store.UpsertProfile(existing); err != nil {
+		t.Fatal(err)
+	}
+	beforeRace, err := store.GetProfile(existing.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raceUpdatedAt := beforeRace.UpdatedAt.Add(time.Minute)
+	mutation := mutateProfileAfterReconciliationRead(t, store, existing.Name, map[string]any{
+		"labels_json":           `["other-owner"]`,
+		"required_labels_json":  `["other-owner"]`,
+		"template_id":           "other-owner-template-id",
+		"default_template_name": "other-owner-template-name",
+		"runner_group":          "other-owner-group",
+		"max_concurrency":       67,
+		"min_idle":              8,
+		"priority":              900,
+		"enabled":               false,
+		"default_available":     false,
+		"managed_by":            "another/catalog",
+		"catalog_revision":      9,
+		"updated_at":            raceUpdatedAt,
+	})
+
+	conflicts, err := store.ReconcileManagedProfiles([]RunnerProfile{
+		managedProfileForReconciliation(existing.Name, 2),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutation.err != nil {
+		t.Fatalf("inject stale-read mutation: %v", mutation.err)
+	}
+	if !mutation.fired {
+		t.Fatal("stale-read mutation did not run")
+	}
+	wantConflicts := []ManagedProfileConflict{{
+		Name:              existing.Name,
+		ExistingManagedBy: "another/catalog",
+	}}
+	if !reflect.DeepEqual(conflicts, wantConflicts) {
+		t.Fatalf("conflicts = %#v, want %#v", conflicts, wantConflicts)
+	}
+	got, err := store.GetProfile(existing.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := RunnerProfile{
+		Name:                existing.Name,
+		Labels:              []string{"other-owner"},
+		RequiredLabels:      []string{"other-owner"},
+		TemplateID:          "other-owner-template-id",
+		DefaultTemplateName: "other-owner-template-name",
+		RunnerGroup:         "other-owner-group",
+		MaxConcurrency:      67,
+		MinIdle:             8,
+		Priority:            900,
+		Enabled:             false,
+		DefaultAvailable:    false,
+		ManagedBy:           "another/catalog",
+		CatalogRevision:     9,
+		CreatedAt:           beforeRace.CreatedAt,
+		UpdatedAt:           raceUpdatedAt,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("stale owner write changed raced row:\ngot:  %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestReconcileManagedProfilesReportsCollisionAndContinues(t *testing.T) {
+	store := New(t.TempDir())
+	custom := RunnerProfile{
+		Name:             "qiniu-ubuntu-24.04",
+		Labels:           []string{"custom"},
+		RequiredLabels:   []string{},
+		TemplateID:       "custom-template",
+		MaxConcurrency:   2,
+		Enabled:          true,
+		DefaultAvailable: true,
+	}
+	if _, err := store.UpsertProfile(custom); err != nil {
+		t.Fatal(err)
+	}
+	missing := managedProfileForReconciliation("qiniu-ubuntu-22.04", 1)
+
+	conflicts, err := store.ReconcileManagedProfiles([]RunnerProfile{
+		managedProfileForReconciliation(custom.Name, 1),
+		missing,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantConflicts := []ManagedProfileConflict{{
+		Name:              custom.Name,
+		ExistingManagedBy: "",
+	}}
+	if !reflect.DeepEqual(conflicts, wantConflicts) {
+		t.Fatalf("conflicts = %#v, want %#v", conflicts, wantConflicts)
+	}
+	gotCustom, err := store.GetProfile(custom.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	custom.CreatedAt = gotCustom.CreatedAt
+	custom.UpdatedAt = gotCustom.UpdatedAt
+	if !reflect.DeepEqual(gotCustom, custom) {
+		t.Fatalf("custom collision row changed: %#v", gotCustom)
+	}
+	if _, err := store.GetProfile(missing.Name); err != nil {
+		t.Fatalf("non-conflicting managed profile was not reconciled: %v", err)
+	}
+}
+
+func TestReconcileManagedProfilesReportsOtherManagerCollision(t *testing.T) {
+	store := New(t.TempDir())
+	existing := managedProfileForReconciliation("qiniu-ubuntu-24.04", 1)
+	existing.ManagedBy = "another/catalog"
+	if _, err := store.UpsertProfile(existing); err != nil {
+		t.Fatal(err)
+	}
+
+	conflicts, err := store.ReconcileManagedProfiles([]RunnerProfile{
+		managedProfileForReconciliation(existing.Name, 2),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []ManagedProfileConflict{{
+		Name:              existing.Name,
+		ExistingManagedBy: "another/catalog",
+	}}
+	if !reflect.DeepEqual(conflicts, want) {
+		t.Fatalf("conflicts = %#v, want %#v", conflicts, want)
+	}
+	got, err := store.GetProfile(existing.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ManagedBy != existing.ManagedBy || got.CatalogRevision != existing.CatalogRevision {
+		t.Fatalf("other manager row changed: %#v", got)
+	}
+}
+
+func TestReconcileManagedProfilesIsIdempotent(t *testing.T) {
+	store := New(t.TempDir())
+	profile := managedProfileForReconciliation("qiniu-ubuntu-24.04", 1)
+	if _, err := store.ReconcileManagedProfiles([]RunnerProfile{profile}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.GetProfile(profile.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conflicts, err := store.ReconcileManagedProfiles([]RunnerProfile{profile})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("conflicts = %#v, want none", conflicts)
+	}
+	after, err := store.GetProfile(profile.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("idempotent reconciliation changed profile:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestReconcileManagedProfilesRollsBackAllChangesOnError(t *testing.T) {
+	store := New(t.TempDir())
+	valid := managedProfileForReconciliation("qiniu-ubuntu-24.04", 1)
+	invalid := managedProfileForReconciliation("qiniu-ubuntu-invalid", 1)
+	invalid.RequiredLabels = []string{"missing"}
+
+	if _, err := store.ReconcileManagedProfiles([]RunnerProfile{valid, invalid}); err == nil {
+		t.Fatal("expected invalid managed profile to fail reconciliation")
+	}
+	if _, err := store.GetProfile(valid.Name); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("first profile survived failed transaction: %v", err)
+	}
+}
+
 func TestSQLiteStoreUsesWALAndBusyTimeout(t *testing.T) {
 	store := NewWithOptions(Options{
 		Backend:        BackendSQLite,
@@ -1073,7 +1496,7 @@ func TestMigrateDoesNotHandleLegacyUsers(t *testing.T) {
 	}
 }
 
-func TestMigrateBackfillsLegacyRunnerProfileDefaultAvailable(t *testing.T) {
+func TestMigratePreservesLegacyRunnerProfileAndAddsManagedCatalogColumns(t *testing.T) {
 	dir := t.TempDir()
 	databaseURL := dir + "/runnerd.db"
 	store := NewWithOptions(Options{
@@ -1100,8 +1523,12 @@ func TestMigrateBackfillsLegacyRunnerProfileDefaultAvailable(t *testing.T) {
 	);`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec(`INSERT INTO runner_profiles (name, labels_json, template_id, runner_group, max_concurrency, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		"default", `["self-hosted"]`, "base", "default", 1, true, now, now).Error; err != nil {
+	if err := db.Exec(`INSERT INTO runner_profiles (name, labels_json, template_id, runner_group, max_concurrency, min_idle, priority, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"default", `["self-hosted"]`, "base", "default", 1, 3, 17, true, now, now).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE INDEX idx_runner_profiles_legacy_capacity
+		ON runner_profiles (priority, min_idle)`).Error; err != nil {
 		t.Fatal(err)
 	}
 	closeTestDB(t, db)
@@ -1115,8 +1542,142 @@ func TestMigrateBackfillsLegacyRunnerProfileDefaultAvailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if profile.Name != "default" ||
+		!reflect.DeepEqual(profile.Labels, []string{"self-hosted"}) ||
+		profile.TemplateID != "base" ||
+		profile.RunnerGroup != "default" ||
+		profile.MaxConcurrency != 1 ||
+		profile.MinIdle != 3 ||
+		profile.Priority != 17 ||
+		!profile.Enabled ||
+		!profile.CreatedAt.Equal(now) ||
+		!profile.UpdatedAt.Equal(now) {
+		t.Fatalf("legacy runner profile fields changed during migration: %#v", profile)
+	}
 	if !profile.DefaultAvailable {
 		t.Fatal("expected legacy runner profile to default to globally available")
+	}
+
+	if profile.RequiredLabels == nil || len(profile.RequiredLabels) != 0 {
+		t.Fatalf("legacy profile RequiredLabels = %#v, want non-nil empty slice", profile.RequiredLabels)
+	}
+	if profile.DefaultTemplateName != "" || profile.ManagedBy != "" || profile.CatalogRevision != 0 {
+		t.Fatalf("unexpected legacy managed catalog fields: %#v", profile)
+	}
+
+	db, err = migrated.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacyIndexSQL string
+	if err := db.Raw(`SELECT sql FROM sqlite_master
+		WHERE type = 'index' AND tbl_name = 'runner_profiles' AND name = 'idx_runner_profiles_legacy_capacity'`).
+		Scan(&legacyIndexSQL).Error; err != nil {
+		t.Fatal(err)
+	}
+	if legacyIndexSQL == "" {
+		t.Fatal("legacy runner_profiles index was lost during migration; table must not be rebuilt")
+	}
+	var stored struct {
+		RequiredLabelsJSON  *string `gorm:"column:required_labels_json"`
+		DefaultTemplateName string  `gorm:"column:default_template_name"`
+		ManagedBy           string  `gorm:"column:managed_by"`
+		CatalogRevision     int     `gorm:"column:catalog_revision"`
+	}
+	if err := db.Raw(`SELECT required_labels_json, default_template_name, managed_by, catalog_revision
+		FROM runner_profiles WHERE name = ?`, "default").Scan(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.RequiredLabelsJSON != nil {
+		t.Fatalf("legacy required_labels_json = %q, want NULL after migration", *stored.RequiredLabelsJSON)
+	}
+	if stored.DefaultTemplateName != "" || stored.ManagedBy != "" || stored.CatalogRevision != 0 {
+		t.Fatalf("unexpected legacy managed catalog values after migration: %#v", stored)
+	}
+
+	profile.TemplateID = "base-updated"
+	updated, err := migrated.UpsertProfile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "default" ||
+		!reflect.DeepEqual(updated.Labels, []string{"self-hosted"}) ||
+		updated.TemplateID != "base-updated" ||
+		updated.RunnerGroup != "default" ||
+		updated.MaxConcurrency != 1 ||
+		updated.MinIdle != 3 ||
+		updated.Priority != 17 ||
+		!updated.Enabled ||
+		!updated.DefaultAvailable ||
+		!updated.CreatedAt.Equal(now) {
+		t.Fatalf("legacy runner profile fields changed during update: %#v", updated)
+	}
+	if err := db.Raw(`SELECT required_labels_json, default_template_name, managed_by, catalog_revision
+		FROM runner_profiles WHERE name = ?`, "default").Scan(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.RequiredLabelsJSON == nil || *stored.RequiredLabelsJSON != "[]" {
+		t.Fatalf("updated required_labels_json = %#v, want non-NULL []", stored.RequiredLabelsJSON)
+	}
+}
+
+func TestMigrateExistingSQLiteRunnerProfileAddsAllModelColumns(t *testing.T) {
+	dir := t.TempDir()
+	databaseURL := dir + "/runnerd.db"
+	store := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: false,
+	}).(*DBStore)
+	db, err := store.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Exec(`CREATE TABLE runner_profiles (
+		name TEXT PRIMARY KEY,
+		labels_json TEXT NOT NULL,
+		template_id TEXT NOT NULL,
+		max_concurrency INTEGER NOT NULL,
+		priority INTEGER NOT NULL DEFAULT 0,
+		enabled BOOLEAN NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL
+	);`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO runner_profiles (
+		name, labels_json, template_id, max_concurrency, priority, enabled, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"minimal", `["self-hosted"]`, "base", 1, 17, true, now, now).Error; err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	migrated := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    databaseURL,
+		MigrateOnStart: true,
+	}).(*DBStore)
+	db, err = migrated.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"RunnerGroup", "MinIdle"} {
+		if !db.Migrator().HasColumn(&runnerProfileRecord{}, field) {
+			t.Fatalf("runner_profiles missing model column %s after migration", field)
+		}
+	}
+	profile, err := migrated.GetProfile("minimal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Name != "minimal" ||
+		profile.TemplateID != "base" ||
+		profile.MinIdle != 0 ||
+		profile.RunnerGroup != "" ||
+		!profile.DefaultAvailable {
+		t.Fatalf("migrated minimal runner profile = %#v", profile)
 	}
 }
 

@@ -13,7 +13,10 @@ Use this checklist before treating a runnerd deployment as ready for real GitHub
 - A GitHub App OAuth callback URL pointing at `/auth/github/callback` on the runnerd origin.
 - A GitHub App webhook or repository webhook delivering `workflow_job` events to `POST /webhooks/github`.
 - Sandbox service API URL and API key configured in the target account/organization Preferences page, or an enabled admin fallback at `/admin/sandbox_service`.
-- At least one Qiniu sandbox template that contains `/opt/actions-runner/config.sh` and `/opt/actions-runner/run.sh`.
+- All four public Qiniu templates built, published, catalog-checked, and
+  smoke-tested in both supported regions according to
+  [Public Runner Templates](default-runner-templates.md). Do not deploy the
+  enabled managed defaults before this gate passes.
 - An admin account bootstrapped by running `runnerd --bootstrap-admin github:<github-user-id>` (sets the admin and exits; run before starting the service).
 
 Do not use real secrets in this document or commit deployment-local files such as `runnerd.local.yaml`, `.smee-url`, sqlite databases, private keys, or cookie jars.
@@ -119,27 +122,53 @@ Before creating runner specs, verify Sandbox credential precedence:
 - Removing an audience entry blocks new fallback resolution without changing an already-snapshotted runner request.
 - Disabling the admin default makes an otherwise unconfigured account fail with `sandbox service not configured`.
 
-Create or confirm a runner spec:
+On startup, confirm runnerd reconciles exactly five managed specs without a
+custom-name conflict:
 
 ```bash
-curl -fsS -X POST https://<runnerd-host>/runner_specs \
-  -b "$COOKIE_JAR" \
-  -H 'content-type: application/json' \
-  -d '{"name":"ubuntu-24-04","labels":["self-hosted","e2b"],"template_id":"<template-id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
+curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/runner_specs |
+  jq '[.[] | select(.managed_by == "qiniu/ci-runner") |
+      {name, required_labels, default_template_name, enabled}]'
 ```
 
-If the spec should be restricted, set `default_available: false` and create a runner policy or runner group for the target repository.
+Expected names are `qiniu-ubuntu-slim`, `qiniu-ubuntu-22.04`,
+`qiniu-ubuntu-24.04`, `qiniu-ubuntu-26.04`, and `qiniu-ubuntu-latest`.
+Confirm startup logs contain no managed-profile name collision. In each
+configured Sandbox region, run `task template-defaults-check` and retain the
+four IDs; runnerd must resolve the same stable name through that scoped
+endpoint rather than persist one region's ID.
 
-Run a match test:
+Run positive and negative match tests:
 
 ```bash
 curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"repository_full_name":"<owner>/<repo>","labels":["self-hosted","e2b"]}' | jq
+  -d '{"repository_full_name":"<owner>/<repo>","labels":["qiniu","ubuntu-24.04"]}' | jq
+
+curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
+  -b "$COOKIE_JAR" \
+  -H 'content-type: application/json' \
+  -d '{"repository_full_name":"<owner>/<repo>","labels":["ubuntu-24.04"]}' | jq
+
+curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
+  -b "$COOKIE_JAR" \
+  -H 'content-type: application/json' \
+  -d '{"repository_full_name":"<owner>/<repo>","labels":["qiniu"]}' | jq
 ```
 
-Expected result: the response includes the intended runner spec.
+Expected result: only the first request selects `qiniu-ubuntu-24.04`.
+
+Create one custom regression spec with an explicit template ID and operator
+labels. Confirm saving it does not contact Sandbox, running it uses the stored
+ID, and it can still be edited and deleted:
+
+```bash
+curl -fsS -X POST https://<runnerd-host>/runner_specs \
+  -b "$COOKIE_JAR" \
+  -H 'content-type: application/json' \
+  -d '{"name":"deployment-custom","labels":["self-hosted","deployment-custom"],"required_labels":["deployment-custom"],"template_id":"<private-template-id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
+```
 
 ## 4. Webhook Delivery
 
@@ -154,7 +183,7 @@ Expected result:
 
 ## 5. Workflow Pickup
 
-Use a minimal workflow:
+Trigger one job for every logical managed label:
 
 ```yaml
 name: runnerd-smoke
@@ -163,8 +192,24 @@ on:
   workflow_dispatch:
 
 jobs:
-  smoke:
-    runs-on: [self-hosted, e2b]
+  slim:
+    runs-on: [qiniu, ubuntu-slim]
+    steps:
+      - run: uname -a
+  ubuntu_22:
+    runs-on: [qiniu, ubuntu-22.04]
+    steps:
+      - run: uname -a
+  ubuntu_24:
+    runs-on: [qiniu, ubuntu-24.04]
+    steps:
+      - run: uname -a
+  ubuntu_26_preview:
+    runs-on: [qiniu, ubuntu-26.04]
+    steps:
+      - run: uname -a
+  latest:
+    runs-on: [qiniu, ubuntu-latest]
     steps:
       - run: |
           uname -a
@@ -177,7 +222,11 @@ Trigger it manually.
 Expected result:
 
 - A runner request appears as `queued`, then `creating`, then `running`.
-- The GitHub Actions job leaves the queued state and runs on an `e2b-*` runner.
+- All five GitHub Actions jobs leave the queued state and run on ephemeral
+  managed runners. The two 24.04 logical labels resolve the 24.04 physical
+  template through the scoped region catalog.
+- Each job starts the requested OS; the 26.04 job is recorded as preview
+  acceptance.
 - The job's `Set up runner` log includes the Qiniu sandbox id, runner request id, and runner name.
 - After the job finishes, the runner request becomes `completed`.
 
@@ -206,16 +255,25 @@ After the workflow completes, verify:
 
 ## 8. Failure Drill
 
-Run one controlled failure while the deployment is still under observation:
+Run controlled routing and operator-control checks while the deployment is
+still under observation:
 
-- Use labels that do not match any runner spec, or
-- temporarily disable the matched runner spec, or
-- lower the spec concurrency and trigger two jobs.
+- Trigger `[ubuntu-24.04]` and `[qiniu]`; both must remain unmatched.
+- Disable `qiniu-ubuntu-24.04` in Admin, restart runnerd, and confirm it remains
+  disabled. Re-enable it and confirm scheduling resumes.
+- Lower a managed spec's concurrency and trigger two jobs.
+- Run the `deployment-custom` spec, confirm its explicit template ID is used,
+  then delete it and confirm managed-spec delete still returns conflict.
 
 Expected result depends on the scenario:
 
 - unmatched labels or disabled specs are recorded as admission failures;
+- reconciliation preserves the operator-controlled disabled state across
+  restart;
 - concurrency pressure leaves later requests queued rather than dropped;
 - retryable placement or rate-limit failures populate `next_retry_at` and remain eligible for later processing.
+
+If routing or template health regresses, disable all five managed specs first.
+Do not delete public templates or custom specs during rollback.
 
 Record any deployment-specific notes outside the repository if they include private hosts, account names, channel URLs, secrets, or cookie data.

@@ -75,9 +75,10 @@ type manualCreateRequest struct {
 	Labels             []string `json:"labels"`
 }
 
-type upsertProfileRequest struct {
+type createProfileRequest struct {
 	Name             string   `json:"name"`
 	Labels           []string `json:"labels"`
+	RequiredLabels   []string `json:"required_labels"`
 	TemplateID       string   `json:"template_id"`
 	RunnerGroup      string   `json:"runner_group"`
 	MaxConcurrency   int      `json:"max_concurrency"`
@@ -86,6 +87,20 @@ type upsertProfileRequest struct {
 	Enabled          *bool    `json:"enabled"`
 	DefaultAvailable *bool    `json:"default_available"`
 }
+
+type patchProfileRequest struct {
+	Labels           *[]string `json:"labels"`
+	RequiredLabels   *[]string `json:"required_labels"`
+	TemplateID       *string   `json:"template_id"`
+	RunnerGroup      *string   `json:"runner_group"`
+	MaxConcurrency   *int      `json:"max_concurrency"`
+	MinIdle          *int      `json:"min_idle"`
+	Priority         *int      `json:"priority"`
+	Enabled          *bool     `json:"enabled"`
+	DefaultAvailable *bool     `json:"default_available"`
+}
+
+const managedRunnerSpecErrorCode = "managed_runner_spec"
 
 type upsertRepositoryPolicyRequest struct {
 	RepositoryFullName string `json:"repository_full_name"`

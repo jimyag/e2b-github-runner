@@ -57,7 +57,11 @@ export type RunnerJobGroup = {
 export type RunnerSpec = {
   name: string
   labels: string[]
+  required_labels: string[]
   template_id: string
+  default_template_name?: string
+  managed_by?: string
+  catalog_revision?: number
   runner_group?: string
   max_concurrency: number
   min_idle: number

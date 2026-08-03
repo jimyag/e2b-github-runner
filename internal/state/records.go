@@ -66,17 +66,21 @@ type runnerEventRecord struct {
 func (runnerEventRecord) TableName() string { return "runner_events" }
 
 type runnerProfileRecord struct {
-	Name             string    `gorm:"column:name;primaryKey"`
-	LabelsJSON       string    `gorm:"column:labels_json;not null"`
-	TemplateID       string    `gorm:"column:template_id;not null"`
-	RunnerGroup      string    `gorm:"column:runner_group"`
-	MaxConcurrency   int       `gorm:"column:max_concurrency;not null"`
-	MinIdle          int       `gorm:"column:min_idle;not null;default:0"`
-	Priority         int       `gorm:"column:priority;not null;default:0"`
-	Enabled          bool      `gorm:"column:enabled;not null"`
-	DefaultAvailable bool      `gorm:"column:default_available;not null"`
-	CreatedAt        time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt        time.Time `gorm:"column:updated_at;not null"`
+	Name                string    `gorm:"column:name;primaryKey"`
+	LabelsJSON          string    `gorm:"column:labels_json;not null"`
+	RequiredLabelsJSON  *string   `gorm:"column:required_labels_json"`
+	TemplateID          string    `gorm:"column:template_id;not null"`
+	DefaultTemplateName string    `gorm:"column:default_template_name"`
+	RunnerGroup         string    `gorm:"column:runner_group"`
+	MaxConcurrency      int       `gorm:"column:max_concurrency;not null"`
+	MinIdle             int       `gorm:"column:min_idle;not null;default:0"`
+	Priority            int       `gorm:"column:priority;not null;default:0"`
+	Enabled             bool      `gorm:"column:enabled;not null"`
+	DefaultAvailable    bool      `gorm:"column:default_available;not null"`
+	ManagedBy           string    `gorm:"column:managed_by"`
+	CatalogRevision     int       `gorm:"column:catalog_revision;not null;default:0"`
+	CreatedAt           time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt           time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (runnerProfileRecord) TableName() string { return "runner_profiles" }

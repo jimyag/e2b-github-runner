@@ -16,7 +16,7 @@ This file tracks active project work. Completed behavior should move into `READM
   close the issue.
 - Decide production credential ownership, approval, and rotation before adding
   a manual `workflow_dispatch` that publishes public Sandbox templates.
-- Keep old-schema upgrade coverage whenever state records or GORM tags change; the current migration path is a narrow legacy compatibility pass followed by `AutoMigrate`, with additive-only handling for existing SQLite `runner_requests`, not a full handwritten migration history.
+- Keep old-schema upgrade coverage whenever state records or GORM tags change; the current migration path is a narrow legacy compatibility pass followed by `AutoMigrate`, with additive-only handling for existing SQLite `runner_requests` and `runner_profiles`, not a full handwritten migration history.
 
 ## Maintenance
 

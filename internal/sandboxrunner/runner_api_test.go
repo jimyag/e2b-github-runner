@@ -181,3 +181,39 @@ func TestNewE2BService_EmptyAPIKey(t *testing.T) {
 		t.Fatal("expected non-nil service")
 	}
 }
+
+func TestE2BServiceListDefaultTemplates(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("expected GET request, got %s", r.Method)
+		}
+		if r.URL.Path != "/default-templates" {
+			t.Fatalf("request path = %q, want %q", r.URL.Path, "/default-templates")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"templateID":"tpl-public-runner","names":["github-runner-ubuntu-24-04"],"buildStatus":"ready","cpuCount":2,"memoryMB":4096,"diskSizeMB":20480,"public":true,"spawnCount":3,"updatedAt":"2024-01-01T00:00:00Z"}]`))
+	}))
+	defer ts.Close()
+
+	svc := newTestService(t, ts)
+	items, err := svc.ListDefaultTemplates(context.Background())
+	if err != nil {
+		t.Fatalf("ListDefaultTemplates: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one template, got %d", len(items))
+	}
+	got := items[0]
+	if got.TemplateID != "tpl-public-runner" {
+		t.Errorf("TemplateID = %q, want %q", got.TemplateID, "tpl-public-runner")
+	}
+	if len(got.Names) != 1 || got.Names[0] != "github-runner-ubuntu-24-04" {
+		t.Errorf("Names = %#v, want [github-runner-ubuntu-24-04]", got.Names)
+	}
+	if got.BuildStatus != "ready" {
+		t.Errorf("BuildStatus = %q, want %q", got.BuildStatus, "ready")
+	}
+	if !got.Public {
+		t.Error("Public = false, want true")
+	}
+}

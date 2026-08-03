@@ -36,27 +36,28 @@ import (
 )
 
 type fakeSandbox struct {
-	mu                 sync.Mutex
-	started            int
-	recovered          int
-	stopped            int
-	terminals          int
-	startBlock         chan struct{}
-	recoverBlock       chan struct{}
-	recoverStarted     chan string
-	recoverHook        func(sandboxrunner.RecoverInput)
-	recoverContextHook func(context.Context, sandboxrunner.RecoverInput)
-	recoverErr         error
-	recoverErrors      map[string]error
-	recoverResult      sandboxrunner.StartResult
-	recoverInput       sandboxrunner.RecoverInput
-	recoverInFlight    int
-	maxRecoverInFlight int
-	stopErr            error
-	commandContext     context.Context
-	repositoryURL      string
-	runnerGroup        string
-	terminal           *fakeTerminalSession
+	mu                  sync.Mutex
+	started             int
+	recovered           int
+	stopped             int
+	terminals           int
+	templateValidations int
+	startBlock          chan struct{}
+	recoverBlock        chan struct{}
+	recoverStarted      chan string
+	recoverHook         func(sandboxrunner.RecoverInput)
+	recoverContextHook  func(context.Context, sandboxrunner.RecoverInput)
+	recoverErr          error
+	recoverErrors       map[string]error
+	recoverResult       sandboxrunner.StartResult
+	recoverInput        sandboxrunner.RecoverInput
+	recoverInFlight     int
+	maxRecoverInFlight  int
+	stopErr             error
+	commandContext      context.Context
+	repositoryURL       string
+	runnerGroup         string
+	terminal            *fakeTerminalSession
 }
 
 type blockingSandboxDefaultStore struct {
@@ -76,6 +77,9 @@ func (s *blockingSandboxDefaultStore) GetSandboxServiceDefault() (state.SandboxS
 }
 
 func (f *fakeSandbox) ValidateTemplate(ctx context.Context, templateID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.templateValidations++
 	return nil
 }
 
@@ -235,6 +239,12 @@ func (f *fakeSandbox) startedCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.started
+}
+
+func (f *fakeSandbox) templateValidationCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.templateValidations
 }
 
 func (f *fakeSandbox) stoppedCount() int {
@@ -6172,9 +6182,10 @@ func TestProfileAndRepositoryPolicyEndpoints(t *testing.T) {
 
 func TestCreateProfileStoresTemplateWithoutSandboxValidation(t *testing.T) {
 	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, "http://example.test", fake)
 
-	profileBody := bytes.NewBufferString(`{"name":"large","labels":["self-hosted","e2b","large"],"template_id":"missing-template","max_concurrency":5,"enabled":true}`)
+	profileBody := bytes.NewBufferString(`{"name":"large","labels":["self-hosted","e2b","large"],"required_labels":["e2b","large"],"template_id":"missing-template","max_concurrency":5,"enabled":true}`)
 	req := adminRequest(http.MethodPost, "/runner_specs", profileBody)
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
@@ -6188,11 +6199,78 @@ func TestCreateProfileStoresTemplateWithoutSandboxValidation(t *testing.T) {
 	if profile.TemplateID != "missing-template" {
 		t.Fatalf("template id should be persisted without sandbox validation: %#v", profile)
 	}
+	if !reflect.DeepEqual(profile.RequiredLabels, []string{"e2b", "large"}) {
+		t.Fatalf("required labels = %#v, want [e2b large]", profile.RequiredLabels)
+	}
+	if got := fake.templateValidationCount(); got != 0 {
+		t.Fatalf("sandbox template validations = %d, want 0", got)
+	}
+}
+
+func TestCreateProfileRequiresTemplateID(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+
+	req := adminRequest(
+		http.MethodPost,
+		"/runner_specs",
+		bytes.NewBufferString(`{"name":"large","labels":["self-hosted","e2b","large"],"max_concurrency":5,"enabled":true}`),
+	)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body.String())
+	}
+	if _, err := store.GetProfile("large"); err == nil {
+		t.Fatal("profile without template_id was persisted")
+	}
+}
+
+func TestCreateProfileRejectsManagedMetadata(t *testing.T) {
+	metadataFields := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "managed by value", key: "managed_by", value: `"client"`},
+		{name: "managed by null", key: "managed_by", value: `null`},
+		{name: "catalog revision value", key: "catalog_revision", value: `99`},
+		{name: "catalog revision null", key: "catalog_revision", value: `null`},
+		{name: "default template name value", key: "default_template_name", value: `"client-template"`},
+		{name: "default template name null", key: "default_template_name", value: `null`},
+		{name: "mixed case managed by value", key: "Managed_By", value: `"client"`},
+		{name: "mixed case managed by null", key: "Managed_By", value: `null`},
+		{name: "mixed case catalog revision value", key: "Catalog_Revision", value: `99`},
+		{name: "mixed case catalog revision null", key: "Catalog_Revision", value: `null`},
+		{name: "mixed case default template name value", key: "Default_Template_Name", value: `"client-template"`},
+		{name: "mixed case default template name null", key: "Default_Template_Name", value: `null`},
+	}
+
+	for _, tt := range metadataFields {
+		t.Run(tt.name, func(t *testing.T) {
+			store := state.New(t.TempDir())
+			srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+			body := `{"name":"large","labels":["self-hosted","e2b","large"],"template_id":"custom-template","` +
+				tt.key + `":` + tt.value + `}`
+
+			req := adminRequest(http.MethodPost, "/runner_specs", bytes.NewBufferString(body))
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body.String())
+			}
+			if _, err := store.GetProfile("large"); err == nil {
+				t.Fatal("profile with client-supplied managed metadata was persisted")
+			}
+		})
+	}
 }
 
 func TestPatchProfileStoresTemplateWithoutSandboxValidation(t *testing.T) {
 	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, "http://example.test", fake)
 
 	profileBody := bytes.NewBufferString(`{"name":"large","labels":["self-hosted","e2b","large"],"template_id":"valid-template","max_concurrency":5,"enabled":true}`)
 	req := adminRequest(http.MethodPost, "/runner_specs", profileBody)
@@ -6214,6 +6292,9 @@ func TestPatchProfileStoresTemplateWithoutSandboxValidation(t *testing.T) {
 	}
 	if profile.TemplateID != "not-ready-template" {
 		t.Fatalf("template id update should be persisted without sandbox validation: %#v", profile)
+	}
+	if got := fake.templateValidationCount(); got != 0 {
+		t.Fatalf("sandbox template validations = %d, want 0", got)
 	}
 }
 
@@ -6255,6 +6336,397 @@ func TestPatchProfilePreservesAndAllowsZeroSchedulingFields(t *testing.T) {
 	}
 	if profile.MinIdle != 0 || profile.Priority != 0 {
 		t.Fatalf("explicit zero scheduling fields were not applied: %#v", profile)
+	}
+}
+
+func TestPatchProfileClearsExplicitEmptyFieldsAndPreservesOmittedFields(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	_, err := store.UpsertProfile(state.RunnerProfile{
+		Name:             "large",
+		Labels:           []string{"self-hosted", "e2b", "large"},
+		RequiredLabels:   []string{"e2b", "large"},
+		TemplateID:       "valid-template",
+		RunnerGroup:      "gpu",
+		MaxConcurrency:   5,
+		MinIdle:          2,
+		Priority:         10,
+		Enabled:          true,
+		DefaultAvailable: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := adminRequest(
+		http.MethodPatch,
+		"/runner_specs/large",
+		bytes.NewBufferString(`{"required_labels":[],"runner_group":""}`),
+	)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+
+	profile, err := store.GetProfile("large")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profile.RequiredLabels) != 0 {
+		t.Fatalf("required labels = %#v, want empty", profile.RequiredLabels)
+	}
+	if profile.RunnerGroup != "" {
+		t.Fatalf("runner group = %q, want empty", profile.RunnerGroup)
+	}
+	if !reflect.DeepEqual(profile.Labels, []string{"self-hosted", "e2b", "large"}) ||
+		profile.TemplateID != "valid-template" ||
+		profile.MaxConcurrency != 5 ||
+		profile.MinIdle != 2 ||
+		profile.Priority != 10 ||
+		!profile.Enabled ||
+		!profile.DefaultAvailable {
+		t.Fatalf("omitted fields changed: %#v", profile)
+	}
+}
+
+func TestPatchCustomProfileRejectsManagedMetadata(t *testing.T) {
+	metadataFields := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{name: "managed by value", key: "managed_by", value: `"client"`},
+		{name: "managed by null", key: "managed_by", value: `null`},
+		{name: "catalog revision value", key: "catalog_revision", value: `99`},
+		{name: "catalog revision null", key: "catalog_revision", value: `null`},
+		{name: "default template name value", key: "default_template_name", value: `"client-template"`},
+		{name: "default template name null", key: "default_template_name", value: `null`},
+		{name: "mixed case managed by value", key: "Managed_By", value: `"client"`},
+		{name: "mixed case managed by null", key: "Managed_By", value: `null`},
+		{name: "mixed case catalog revision value", key: "Catalog_Revision", value: `99`},
+		{name: "mixed case catalog revision null", key: "Catalog_Revision", value: `null`},
+		{name: "mixed case default template name value", key: "Default_Template_Name", value: `"client-template"`},
+		{name: "mixed case default template name null", key: "Default_Template_Name", value: `null`},
+	}
+
+	for _, tt := range metadataFields {
+		t.Run(tt.name, func(t *testing.T) {
+			store := state.New(t.TempDir())
+			srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+			want, err := store.UpsertProfile(state.RunnerProfile{
+				Name:             "large",
+				Labels:           []string{"self-hosted", "e2b", "large"},
+				RequiredLabels:   []string{"e2b", "large"},
+				TemplateID:       "custom-template",
+				MaxConcurrency:   5,
+				MinIdle:          2,
+				Priority:         10,
+				Enabled:          true,
+				DefaultAvailable: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := `{"` + tt.key + `":` + tt.value + `}`
+
+			req := adminRequest(http.MethodPatch, "/runner_specs/large", bytes.NewBufferString(body))
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body.String())
+			}
+
+			got, err := store.GetProfile("large")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("rejected patch changed custom profile: got %#v want %#v", got, want)
+			}
+		})
+	}
+}
+
+func TestPatchManagedProfileAllowsOnlyOperatorControls(t *testing.T) {
+	store := state.New(t.TempDir())
+	managed := managedProfileForServerTest()
+	if conflicts, err := store.ReconcileManagedProfiles([]state.RunnerProfile{managed}); err != nil {
+		t.Fatal(err)
+	} else if len(conflicts) != 0 {
+		t.Fatalf("managed profile conflicts = %#v, want none", conflicts)
+	}
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+
+	req := adminRequest(
+		http.MethodPatch,
+		"/runner_specs/"+managed.Name,
+		bytes.NewBufferString(`{"enabled":false,"max_concurrency":3,"min_idle":1}`),
+	)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+
+	got, err := store.GetProfile(managed.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled || got.MaxConcurrency != 3 || got.MinIdle != 1 {
+		t.Fatalf("operator controls were not updated: %#v", got)
+	}
+	if !reflect.DeepEqual(got.Labels, managed.Labels) ||
+		!reflect.DeepEqual(got.RequiredLabels, managed.RequiredLabels) ||
+		got.TemplateID != managed.TemplateID ||
+		got.DefaultTemplateName != managed.DefaultTemplateName ||
+		got.RunnerGroup != managed.RunnerGroup ||
+		got.Priority != managed.Priority ||
+		got.DefaultAvailable != managed.DefaultAvailable ||
+		got.ManagedBy != managed.ManagedBy ||
+		got.CatalogRevision != managed.CatalogRevision {
+		t.Fatalf("managed catalog fields changed: got %#v want catalog fields from %#v", got, managed)
+	}
+}
+
+func TestPatchManagedProfileRejectsProtectedFieldsByPresence(t *testing.T) {
+	protectedFields := []struct {
+		name  string
+		key   string
+		value string
+		extra string
+	}{
+		{name: "labels value", key: "labels", value: `[]`},
+		{name: "labels null", key: "labels", value: `null`},
+		{name: "required labels value", key: "required_labels", value: `[]`},
+		{name: "required labels null", key: "required_labels", value: `null`},
+		{name: "template id value", key: "template_id", value: `""`},
+		{name: "template id null", key: "template_id", value: `null`},
+		{name: "runner group value", key: "runner_group", value: `""`},
+		{name: "runner group null", key: "runner_group", value: `null`},
+		{name: "priority value", key: "priority", value: `0`},
+		{name: "priority null", key: "priority", value: `null`},
+		{name: "default availability value", key: "default_available", value: `false`},
+		{name: "default availability null", key: "default_available", value: `null`},
+		{name: "default template name value", key: "default_template_name", value: `"client-template"`},
+		{name: "default template name null", key: "default_template_name", value: `null`},
+		{name: "managed by value", key: "managed_by", value: `"client"`},
+		{name: "managed by null", key: "managed_by", value: `null`},
+		{name: "catalog revision value", key: "catalog_revision", value: `99`},
+		{name: "catalog revision null", key: "catalog_revision", value: `null`},
+		{name: "mixed case labels value", key: "Labels", value: `[]`, extra: `,"enabled":false`},
+		{name: "mixed case labels null", key: "Labels", value: `null`},
+		{name: "mixed case required labels value", key: "Required_Labels", value: `[]`},
+		{name: "mixed case required labels null", key: "Required_Labels", value: `null`},
+		{name: "mixed case template id value", key: "Template_ID", value: `""`},
+		{name: "mixed case template id null", key: "Template_ID", value: `null`},
+		{name: "mixed case runner group value", key: "Runner_Group", value: `""`},
+		{name: "mixed case runner group null", key: "Runner_Group", value: `null`},
+		{name: "mixed case priority value", key: "Priority", value: `0`},
+		{name: "mixed case priority null", key: "Priority", value: `null`},
+		{name: "mixed case default availability value", key: "Default_Available", value: `false`},
+		{name: "mixed case default availability null", key: "Default_Available", value: `null`},
+		{name: "mixed case default template name value", key: "Default_Template_Name", value: `"client-template"`},
+		{name: "mixed case default template name null", key: "Default_Template_Name", value: `null`},
+		{name: "mixed case managed by value", key: "Managed_By", value: `"client"`},
+		{name: "mixed case managed by null", key: "Managed_By", value: `null`},
+		{name: "mixed case catalog revision value", key: "Catalog_Revision", value: `99`},
+		{name: "mixed case catalog revision null", key: "Catalog_Revision", value: `null`},
+	}
+
+	for _, tt := range protectedFields {
+		t.Run(tt.name, func(t *testing.T) {
+			store := state.New(t.TempDir())
+			managed := managedProfileForServerTest()
+			if conflicts, err := store.ReconcileManagedProfiles([]state.RunnerProfile{managed}); err != nil {
+				t.Fatal(err)
+			} else if len(conflicts) != 0 {
+				t.Fatalf("managed profile conflicts = %#v, want none", conflicts)
+			}
+			srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+
+			req := adminRequest(
+				http.MethodPatch,
+				"/runner_specs/"+managed.Name,
+				bytes.NewBufferString(`{"`+tt.key+`":`+tt.value+tt.extra+`}`),
+			)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status = %d body=%s, want 409", rec.Code, rec.Body.String())
+			}
+			var response struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != "managed_runner_spec" {
+				t.Fatalf("error code = %q body=%s, want managed_runner_spec", response.Code, rec.Body.String())
+			}
+
+			got, err := store.GetProfile(managed.Name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			managed.CreatedAt = got.CreatedAt
+			managed.UpdatedAt = got.UpdatedAt
+			if !reflect.DeepEqual(got, managed) {
+				t.Fatalf("rejected patch changed managed profile: got %#v want %#v", got, managed)
+			}
+		})
+	}
+}
+
+func TestDeleteManagedProfileReturnsConflict(t *testing.T) {
+	store := state.New(t.TempDir())
+	managed := managedProfileForServerTest()
+	if conflicts, err := store.ReconcileManagedProfiles([]state.RunnerProfile{managed}); err != nil {
+		t.Fatal(err)
+	} else if len(conflicts) != 0 {
+		t.Fatalf("managed profile conflicts = %#v, want none", conflicts)
+	}
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+
+	req := adminRequest(http.MethodDelete, "/runner_specs/"+managed.Name, nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d body=%s, want 409", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != "managed_runner_spec" {
+		t.Fatalf("error code = %q body=%s, want managed_runner_spec", response.Code, rec.Body.String())
+	}
+	if _, err := store.GetProfile(managed.Name); err != nil {
+		t.Fatalf("managed profile was deleted: %v", err)
+	}
+}
+
+type profileLookupErrorStore struct {
+	state.Store
+	lookupErr   error
+	deleteCalls int
+}
+
+func (s *profileLookupErrorStore) GetProfile(string) (state.RunnerProfile, error) {
+	return state.RunnerProfile{}, s.lookupErr
+}
+
+func (s *profileLookupErrorStore) DeleteProfile(string) error {
+	s.deleteCalls++
+	return nil
+}
+
+func TestDeleteProfileFailsClosedWhenManagedStatusCannotBeLoaded(t *testing.T) {
+	store := &profileLookupErrorStore{
+		Store:     state.New(t.TempDir()),
+		lookupErr: errors.New("fixture profile lookup failure"),
+	}
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+
+	req := adminRequest(http.MethodDelete, "/runner_specs/qiniu-ubuntu-24.04", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d body=%s, want 500", rec.Code, rec.Body.String())
+	}
+	if store.deleteCalls != 0 {
+		t.Fatalf("DeleteProfile calls = %d, want 0 after lookup failure", store.deleteCalls)
+	}
+}
+
+func TestCreateProfileCannotOverwriteManagedProfile(t *testing.T) {
+	store := state.New(t.TempDir())
+	managed := managedProfileForServerTest()
+	if conflicts, err := store.ReconcileManagedProfiles([]state.RunnerProfile{managed}); err != nil {
+		t.Fatal(err)
+	} else if len(conflicts) != 0 {
+		t.Fatalf("managed profile conflicts = %#v, want none", conflicts)
+	}
+	before, err := store.GetProfile(managed.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+
+	req := adminRequest(
+		http.MethodPost,
+		"/runner_specs",
+		bytes.NewBufferString(`{
+			"name":"qiniu-ubuntu-24.04",
+			"labels":["self-hosted","custom"],
+			"template_id":"attacker-template",
+			"max_concurrency":1,
+			"enabled":true
+		}`),
+	)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d body=%s, want 409", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != "managed_runner_spec" {
+		t.Fatalf("error code = %q body=%s, want managed_runner_spec", response.Code, rec.Body.String())
+	}
+	after, err := store.GetProfile(managed.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("managed profile changed through create endpoint:\nbefore: %#v\nafter:  %#v", before, after)
+	}
+}
+
+func TestDeleteCustomProfileRemainsAllowed(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	if _, err := store.UpsertProfile(state.RunnerProfile{
+		Name:           "custom",
+		Labels:         []string{"self-hosted", "e2b"},
+		TemplateID:     "custom-template",
+		MaxConcurrency: 2,
+		Enabled:        true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := adminRequest(http.MethodDelete, "/runner_specs/custom", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	if _, err := store.GetProfile("custom"); err == nil {
+		t.Fatal("custom profile still exists after delete")
+	}
+}
+
+func managedProfileForServerTest() state.RunnerProfile {
+	return state.RunnerProfile{
+		Name:                "qiniu-ubuntu-24.04",
+		Labels:              []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-24.04"},
+		RequiredLabels:      []string{"qiniu", "ubuntu-24.04"},
+		DefaultTemplateName: "github-runner-ubuntu-24-04",
+		RunnerGroup:         "linux",
+		MaxConcurrency:      10,
+		MinIdle:             0,
+		Priority:            100,
+		Enabled:             true,
+		DefaultAvailable:    true,
+		ManagedBy:           "qiniu/ci-runner",
+		CatalogRevision:     1,
 	}
 }
 

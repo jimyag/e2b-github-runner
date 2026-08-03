@@ -274,18 +274,34 @@ func recordToProfile(record runnerProfileRecord) (RunnerProfile, error) {
 	if err := json.Unmarshal([]byte(record.LabelsJSON), &labels); err != nil {
 		return RunnerProfile{}, err
 	}
+	requiredLabels := []string{}
+	if record.RequiredLabelsJSON != nil {
+		data := strings.TrimSpace(*record.RequiredLabelsJSON)
+		if data != "" && data != "null" {
+			if err := json.Unmarshal([]byte(data), &requiredLabels); err != nil {
+				return RunnerProfile{}, err
+			}
+			if requiredLabels == nil {
+				requiredLabels = []string{}
+			}
+		}
+	}
 	return RunnerProfile{
-		Name:             record.Name,
-		Labels:           labels,
-		TemplateID:       record.TemplateID,
-		RunnerGroup:      record.RunnerGroup,
-		MaxConcurrency:   record.MaxConcurrency,
-		MinIdle:          record.MinIdle,
-		Priority:         record.Priority,
-		Enabled:          record.Enabled,
-		DefaultAvailable: record.DefaultAvailable,
-		CreatedAt:        record.CreatedAt,
-		UpdatedAt:        record.UpdatedAt,
+		Name:                record.Name,
+		Labels:              labels,
+		RequiredLabels:      requiredLabels,
+		TemplateID:          record.TemplateID,
+		DefaultTemplateName: record.DefaultTemplateName,
+		RunnerGroup:         record.RunnerGroup,
+		MaxConcurrency:      record.MaxConcurrency,
+		MinIdle:             record.MinIdle,
+		Priority:            record.Priority,
+		Enabled:             record.Enabled,
+		DefaultAvailable:    record.DefaultAvailable,
+		ManagedBy:           record.ManagedBy,
+		CatalogRevision:     record.CatalogRevision,
+		CreatedAt:           record.CreatedAt,
+		UpdatedAt:           record.UpdatedAt,
 	}, nil
 }
 

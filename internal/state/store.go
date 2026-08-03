@@ -90,17 +90,27 @@ type RunnerState struct {
 }
 
 type RunnerProfile struct {
-	Name             string    `json:"name"`
-	Labels           []string  `json:"labels"`
-	TemplateID       string    `json:"template_id"`
-	RunnerGroup      string    `json:"runner_group,omitempty"`
-	MaxConcurrency   int       `json:"max_concurrency"`
-	MinIdle          int       `json:"min_idle"`
-	Priority         int       `json:"priority"`
-	Enabled          bool      `json:"enabled"`
-	DefaultAvailable bool      `json:"default_available"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	Name                string    `json:"name"`
+	Labels              []string  `json:"labels"`
+	RequiredLabels      []string  `json:"required_labels"`
+	TemplateID          string    `json:"template_id"`
+	DefaultTemplateName string    `json:"default_template_name,omitempty"`
+	RunnerGroup         string    `json:"runner_group,omitempty"`
+	MaxConcurrency      int       `json:"max_concurrency"`
+	MinIdle             int       `json:"min_idle"`
+	Priority            int       `json:"priority"`
+	Enabled             bool      `json:"enabled"`
+	DefaultAvailable    bool      `json:"default_available"`
+	ManagedBy           string    `json:"managed_by,omitempty"`
+	CatalogRevision     int       `json:"catalog_revision,omitempty"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+// ManagedProfileConflict reports a catalog name already owned by another source.
+type ManagedProfileConflict struct {
+	Name              string
+	ExistingManagedBy string
 }
 
 type RunnerGroup struct {
@@ -304,6 +314,7 @@ type RunnerCatalogStore interface {
 	ListProfiles() ([]RunnerProfile, error)
 	GetProfile(name string) (RunnerProfile, error)
 	UpsertProfile(profile RunnerProfile) (RunnerProfile, error)
+	ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedProfileConflict, error)
 	DeleteProfile(name string) error
 	ListRunnerGroups() ([]RunnerGroup, error)
 	GetRunnerGroup(name string) (RunnerGroup, error)
