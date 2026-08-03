@@ -1888,6 +1888,7 @@ func TestVersionedTemplateSystemctlShimClosesDescriptorsBoundsAndVerifiesService
 					`start_new_session=True`,
 					`socket.create_connection((host, port), timeout=0.2)`,
 					`start_apache() {`,
+					`run_detached_until_tcp_state active 127.0.0.1 80 /usr/sbin/apachectl -DFOREGROUND`,
 					`stop_apache() {`,
 					`apache2:start)`,
 					`apache2:stop)`,

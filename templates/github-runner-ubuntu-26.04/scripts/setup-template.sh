@@ -265,7 +265,7 @@ sys.exit(124)
 PYTHON
 }
 start_apache() {
-  run_detached_until_tcp_state active 127.0.0.1 80 /usr/sbin/apachectl start
+  run_detached_until_tcp_state active 127.0.0.1 80 /usr/sbin/apachectl -DFOREGROUND
 }
 stop_apache() {
   run_detached_until_tcp_state inactive 127.0.0.1 80 /usr/sbin/apachectl stop
