@@ -242,6 +242,9 @@ process = subprocess.Popen(
     close_fds=True,
     start_new_session=True,
 )
+controller_pid_file = "/tmp/qiniu-runner-build-tools/apache2-controller.pid"
+with open(controller_pid_file, "w", encoding="ascii") as controller_file:
+    controller_file.write(str(process.pid))
 
 def service_is_active():
     try:
@@ -268,7 +271,44 @@ start_apache() {
   run_detached_until_tcp_state active 127.0.0.1 80 /usr/sbin/apachectl -DFOREGROUND
 }
 stop_apache() {
-  run_detached_until_tcp_state inactive 127.0.0.1 80 /usr/sbin/apachectl stop
+  /usr/bin/python3 - <<'PYTHON'
+import os
+import signal
+import socket
+import sys
+import time
+
+controller_pid_file = "/tmp/qiniu-runner-build-tools/apache2-controller.pid"
+
+def service_is_active():
+    try:
+        with socket.create_connection(("127.0.0.1", 80), timeout=0.2):
+            return True
+    except OSError:
+        return False
+
+try:
+    with open(controller_pid_file, encoding="ascii") as controller_file:
+        controller_pid = int(controller_file.read().strip())
+except (FileNotFoundError, ValueError):
+    sys.exit(1 if service_is_active() else 0)
+
+try:
+    os.killpg(controller_pid, signal.SIGTERM)
+except ProcessLookupError:
+    pass
+
+deadline = time.monotonic() + 30
+while time.monotonic() < deadline:
+    if not service_is_active():
+        try:
+            os.unlink(controller_pid_file)
+        except FileNotFoundError:
+            pass
+        sys.exit(0)
+    time.sleep(0.1)
+sys.exit(124)
+PYTHON
 }
 case "$unit:$action" in
   apache2:start)
