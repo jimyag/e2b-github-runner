@@ -1393,6 +1393,51 @@ fi
 	}
 }
 
+func TestUbuntu2204TemplateWgetBoundsStalledTransfers(t *testing.T) {
+	root := repositoryRoot(t)
+	fixture := t.TempDir()
+	wgetLog := filepath.Join(fixture, "wget.log")
+	fakeWget := filepath.Join(fixture, "wget")
+	writeExecutable(t, fakeWget, `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >"$WGET_TEST_LOG"
+`)
+	wrapper := filepath.Join(
+		root,
+		"templates",
+		"github-runner-ubuntu-22.04",
+		"scripts",
+		"wget",
+	)
+	output, err := runCommand(t, wrapper, []string{
+		"-O",
+		"/tmp/output",
+		"https://raw.githubusercontent.com/example/file",
+	},
+		"RUNNER_TEMPLATE_WGET_BIN="+fakeWget,
+		"WGET_TEST_LOG="+wgetLog,
+	)
+	if err != nil {
+		t.Fatalf("wget wrapper failed: %v\n%s", err, output)
+	}
+	logBytes, err := os.ReadFile(wgetLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invocation := string(logBytes)
+	for _, option := range []string{
+		"--timeout=15",
+		"--read-timeout=60",
+		"--tries=6",
+		"--waitretry=2",
+		"--retry-connrefused",
+	} {
+		if !strings.Contains(invocation, option) {
+			t.Fatalf("wget wrapper missing resilient transport option %q: %s", option, invocation)
+		}
+	}
+}
+
 func TestRunnerTemplateDockerfilesUseQshellCompatibleRunInstructions(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{

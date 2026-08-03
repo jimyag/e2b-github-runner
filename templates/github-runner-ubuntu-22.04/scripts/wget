@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_wget="${RUNNER_TEMPLATE_WGET_BIN:-/usr/bin/wget}"
+exec "$real_wget" \
+  --timeout=15 \
+  --read-timeout=60 \
+  --tries=6 \
+  --waitretry=2 \
+  --retry-connrefused \
+  "$@"

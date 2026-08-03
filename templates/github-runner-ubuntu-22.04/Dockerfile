@@ -25,6 +25,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 COPY scripts/setup-template.sh /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 COPY scripts/ensure-docker /usr/local/share/qiniu-sandbox-runner-template/ensure-docker
 COPY scripts/curl /usr/local/share/qiniu-sandbox-runner-template/curl
+COPY scripts/wget /usr/local/share/qiniu-sandbox-runner-template/wget
 
 RUN TEMPLATE_FLAVOR=versioned bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 
