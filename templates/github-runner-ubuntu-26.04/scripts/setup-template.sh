@@ -42,11 +42,43 @@ download_checked() {
   local url="$1"
   local destination="$2"
   local expected_sha256="$3"
-  /usr/bin/curl --http1.1 -fsSL --connect-timeout 15 --max-time 1800 \
-    --speed-limit 1024 --speed-time 60 \
-    --retry 5 --retry-all-errors --retry-delay 2 \
-    "$url" -o "$destination"
-  echo "$expected_sha256  $destination" | sha256sum --check -
+  local attempts="${RUNNER_TEMPLATE_DOWNLOAD_ATTEMPTS:-20}"
+  local retry_delay="${RUNNER_TEMPLATE_DOWNLOAD_RETRY_DELAY:-2}"
+  local attempt
+  local curl_status
+
+  touch "$destination"
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if [ -s "$destination" ] &&
+      echo "$expected_sha256  $destination" | sha256sum --check - >/dev/null 2>&1; then
+      return
+    fi
+    if /usr/bin/curl --http1.1 -fsSL --connect-timeout 15 --max-time 1800 \
+      --speed-limit 1024 --speed-time 60 --continue-at - \
+      "$url" -o "$destination"; then
+      if echo "$expected_sha256  $destination" | sha256sum --check -; then
+        return
+      fi
+      echo "download checksum mismatch; restarting from byte zero" >&2
+      rm -f "$destination"
+      touch "$destination"
+    else
+      curl_status=$?
+      if [ "$curl_status" -eq 33 ]; then
+        echo "download server rejected resume; restarting from byte zero" >&2
+        rm -f "$destination"
+        touch "$destination"
+      fi
+    fi
+    if [ "$attempt" -lt "$attempts" ]; then
+      echo "download interrupted; resuming (${attempt}/${attempts})" >&2
+      if [ "$retry_delay" != 0 ]; then
+        sleep "$retry_delay"
+      fi
+    fi
+  done
+  echo "download failed after ${attempts} attempts: $url" >&2
+  return 1
 }
 
 run_upstream_tests_if_available() {

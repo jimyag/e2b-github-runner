@@ -1,9 +1,11 @@
 package sandboxrunner
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -2304,6 +2306,113 @@ func TestPublicTemplatesPinFloatingCompatibilityTools(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPublicTemplateCheckedDownloadsResumeAcrossTransientFailures(t *testing.T) {
+	root := repositoryRoot(t)
+	var downloadChecked string
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptBytes, err := os.ReadFile(filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			functionStart := strings.Index(script, "download_checked() {")
+			functionEnd := strings.Index(script, "\nrun_upstream_tests_if_available() {")
+			if functionStart < 0 || functionEnd < functionStart {
+				t.Fatal("setup must define download_checked before the upstream test helper")
+			}
+			downloadChecked = script[functionStart:functionEnd]
+			for _, required := range []string{
+				`RUNNER_TEMPLATE_DOWNLOAD_ATTEMPTS:-20`,
+				`RUNNER_TEMPLATE_DOWNLOAD_RETRY_DELAY:-2`,
+				`--continue-at -`,
+				`sha256sum --check -`,
+			} {
+				if !strings.Contains(downloadChecked, required) {
+					t.Fatalf("download_checked must preserve verified partial downloads with %q", required)
+				}
+			}
+			if strings.Contains(downloadChecked, `--retry 5`) {
+				t.Fatal("download_checked must use an explicit resume loop instead of curl retries that discard partial output")
+			}
+		})
+	}
+
+	payload := []byte("checksum-pinned resumable template download")
+	partialLength := 9
+	var requestCount atomic.Int32
+	var resumedRange atomic.Value
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requestCount.Add(1) == 1 {
+			connection, buffer, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				return
+			}
+			_, _ = fmt.Fprintf(
+				buffer,
+				"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+				len(payload),
+				payload[:partialLength],
+			)
+			_ = buffer.Flush()
+			_ = connection.Close()
+			return
+		}
+		resumedRange.Store(r.Header.Get("Range"))
+		if r.Header.Get("Range") != fmt.Sprintf("bytes=%d-", partialLength) {
+			http.Error(w, "unexpected range", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		w.Header().Set(
+			"Content-Range",
+			fmt.Sprintf("bytes %d-%d/%d", partialLength, len(payload)-1, len(payload)),
+		)
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(payload[partialLength:])
+	}))
+	defer server.Close()
+
+	testScript := filepath.Join(t.TempDir(), "download-checked.sh")
+	writeExecutable(t, testScript, "#!/usr/bin/env bash\nset -euo pipefail\n"+
+		downloadChecked+"\ndownload_checked \"$1\" \"$2\" \"$3\"\n")
+	destination := filepath.Join(t.TempDir(), "artifact")
+	expectedSHA := fmt.Sprintf("%x", sha256.Sum256(payload))
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{testScript, server.URL, destination, expectedSHA},
+		"RUNNER_TEMPLATE_DOWNLOAD_ATTEMPTS=3",
+		"RUNNER_TEMPLATE_DOWNLOAD_RETRY_DELAY=0",
+	)
+	if err != nil {
+		t.Fatalf("resumable download failed: %v\n%s", err, output)
+	}
+	artifact, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(artifact) != string(payload) {
+		t.Fatalf("resumed artifact = %q, want %q", artifact, payload)
+	}
+	if requestCount.Load() != 2 {
+		t.Fatalf("download request count = %d, want 2", requestCount.Load())
+	}
+	if got, _ := resumedRange.Load().(string); got != fmt.Sprintf("bytes=%d-", partialLength) {
+		t.Fatalf("resumed Range = %q", got)
 	}
 }
 

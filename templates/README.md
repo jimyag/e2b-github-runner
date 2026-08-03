@@ -84,6 +84,11 @@ first querying the anonymous GitHub release API, avoiding both rate-limit
 failures and silent version drift between the compatibility manifest and the
 built template.
 
+Checksum-pinned downloads retain partial output and resume it across up to 20
+bounded attempts. A completed artifact is accepted only after its SHA-256
+digest matches; a digest mismatch or a server that rejects ranges restarts the
+transfer from byte zero.
+
 The curl compatibility wrapper remains available to unmodified upstream
 installers that resolve a fixed release through the GitHub API. It caches
 validated release metadata and uses bounded retries, but it is not part of the
