@@ -1608,6 +1608,54 @@ func TestDiskBoundedTemplatesSkipOnlyCMakeDependentNinjaAssertions(t *testing.T)
 	}
 }
 
+func TestPublicTemplatesUsePinnedMicrosoftAzCopyWithoutActionPrewarm(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			directory := filepath.Join(root, "templates", "github-runner-"+image)
+			dockerfileBytes, err := os.ReadFile(filepath.Join(directory, "Dockerfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			for _, pinned := range []string{
+				"ARG AZCOPY_VERSION=10.32.6",
+				"ARG AZCOPY_DEB_SHA256=1a5078a8260ba7524a4400c602519d36905e592cd87a1db91a30af0da528fc86",
+			} {
+				if !strings.Contains(dockerfile, pinned) {
+					t.Fatalf("Dockerfile must pin the Microsoft AzCopy package with %q", pinned)
+				}
+			}
+
+			scriptBytes, err := os.ReadFile(filepath.Join(directory, "scripts", "setup-template.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, required := range []string{
+				"install_azcopy_from_microsoft_package",
+				"https://packages.microsoft.com/ubuntu/24.04/prod/pool/main/a/azcopy/",
+				`test "$(azcopy --version)" = "azcopy version $AZCOPY_VERSION"`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("setup must use the pinned official AzCopy package with %q", required)
+				}
+			}
+			if strings.Contains(script, "install-actions-cache.sh") {
+				t.Fatal("public templates must not prewarm the nonessential GitHub action archive cache")
+			}
+			if image != "ubuntu-slim" && !strings.Contains(script, `invoke-tests.sh" Tools azcopy`) {
+				t.Fatal("versioned templates must retain the pinned upstream AzCopy test")
+			}
+		})
+	}
+}
+
 func TestUbuntu2604TemplateInstallsICUBeforePowerShell(t *testing.T) {
 	root := repositoryRoot(t)
 	scriptPath := filepath.Join(
@@ -2165,8 +2213,8 @@ func TestVersionedTemplateBuildUsesDiskBoundedToolset(t *testing.T) {
 			}
 			versioned := script[start : start+end]
 			for _, required := range []string{
-				"install-actions-cache.sh",
 				"install-apt-common.sh",
+				"install_azcopy_from_microsoft_package",
 				"install-azure-cli.sh",
 				"install-apache.sh",
 				"install-aws-tools.sh",
@@ -2185,6 +2233,8 @@ func TestVersionedTemplateBuildUsesDiskBoundedToolset(t *testing.T) {
 				}
 			}
 			for _, excluded := range []string{
+				"install-actions-cache.sh",
+				"install-azcopy.sh",
 				"install-dotnetcore-sdk.sh",
 				"install-android-sdk.sh",
 				"install-codeql-bundle.sh",

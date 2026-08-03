@@ -51,6 +51,12 @@ guaranteed to be preinstalled and should be installed in the workflow or
 included in a custom template. `excluded` describes the support contract, not
 a promise that the executable is absent.
 
+All four templates install checksum-pinned AzCopy 10.32.6 from Microsoft's
+official Ubuntu package pool instead of the upstream floating `aka.ms`
+archive. They intentionally do not prewarm the GitHub action archive cache;
+the runner resolves actions through the normal job-time GitHub protocol, so
+this changes build size and network exposure rather than workflow semantics.
+
 The versioned image build keeps the upstream Podman, Buildah, and Skopeo CLI
 checks. BuildKit cannot create the nested namespace needed by the upstream
 `podman networking` assertion, so setup marks only that assertion skipped in

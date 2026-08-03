@@ -11,6 +11,12 @@ toolset exceeds that limit. Full-image-only items are therefore `excluded`
 from the guarantee and can be installed at job time or included in a custom
 template.
 
+AzCopy 10.32.6 comes from Microsoft's official Ubuntu package pool with a
+pinned checksum instead of the upstream floating `aka.ms` archive. The image
+does not prewarm the optional GitHub action archive cache; actions resolve
+normally at job time. The pinned upstream AzCopy Pester assertion remains a
+build gate.
+
 The upstream Azure host kernel build string is excluded because a Qiniu
 Sandbox shares its host kernel. Systemd is not PID 1, so service software is
 not guaranteed merely because it appears in the full upstream report. Apache

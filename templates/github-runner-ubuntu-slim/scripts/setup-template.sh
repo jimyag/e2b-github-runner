@@ -5,6 +5,8 @@ set -euxo pipefail
 : "${RUNNER_IMAGES_ARCHIVE_SHA256:?RUNNER_IMAGES_ARCHIVE_SHA256 is required}"
 : "${RUNNER_VERSION:?RUNNER_VERSION is required}"
 : "${RUNNER_ARCHIVE_SHA256:?RUNNER_ARCHIVE_SHA256 is required}"
+: "${AZCOPY_VERSION:?AZCOPY_VERSION is required}"
+: "${AZCOPY_DEB_SHA256:?AZCOPY_DEB_SHA256 is required}"
 : "${DOCKER_GPG_SHA256:?DOCKER_GPG_SHA256 is required}"
 : "${DOCKER_GPG_FINGERPRINT:?DOCKER_GPG_FINGERPRINT is required}"
 export PATH="/usr/local/share/qiniu-sandbox-runner-template:${PATH}"
@@ -17,6 +19,18 @@ download_checked() {
     --retry 5 --retry-all-errors --retry-delay 2 \
     "$url" -o "$destination"
   echo "$expected_sha256  $destination" | sha256sum --check -
+}
+
+install_azcopy_from_microsoft_package() {
+  local package=/tmp/azcopy.deb
+  download_checked \
+    "https://packages.microsoft.com/ubuntu/24.04/prod/pool/main/a/azcopy/azcopy_${AZCOPY_VERSION}_amd64.deb" \
+    "$package" \
+    "$AZCOPY_DEB_SHA256"
+  dpkg -i "$package"
+  rm -f "$package"
+  ln -sf "$(command -v azcopy)" /usr/local/bin/azcopy10
+  test "$(azcopy --version)" = "azcopy version $AZCOPY_VERSION"
 }
 
 configure_reliable_apt_sources() {
@@ -122,6 +136,7 @@ export IMAGE_OS=ubuntu24
 if [ "${TEMPLATE_FLAVOR:-}" = slim ]; then
   upstream_build=/tmp/runner-images/images/ubuntu-slim/scripts/build
   ensure_upstream_apt_source_layout
+  install_azcopy_from_microsoft_package
   for installer in \
     configure-apt-sources.sh \
     configure-apt.sh \
@@ -129,9 +144,7 @@ if [ "${TEMPLATE_FLAVOR:-}" = slim ]; then
     install-ms-repos.sh \
     configure-image-data-file.sh \
     configure-environment.sh \
-    install-actions-cache.sh \
     install-apt-common.sh \
-    install-azcopy.sh \
     install-azure-cli.sh \
     install-azure-devops-cli.sh \
     install-bicep.sh \
@@ -277,6 +290,8 @@ WAAGENT
   test "$(grep -Fxc '        "$ContainerCommand -v" | Should -ReturnZeroExitCode' "$podman_networking_test" || true)" -eq 1
 
   bash "$upstream_build/install-ms-repos.sh"
+  install_azcopy_from_microsoft_package
+  bash "$HELPER_SCRIPTS/invoke-tests.sh" Tools azcopy
   bash "$upstream_build/configure-apt-sources.sh"
   bash "$upstream_build/configure-apt.sh"
   bash "$upstream_build/configure-environment.sh"
@@ -286,9 +301,7 @@ WAAGENT
   pwsh -File "$upstream_build/Install-PowerShellAzModules.ps1"
 
   for installer in \
-    install-actions-cache.sh \
     install-apt-common.sh \
-    install-azcopy.sh \
     install-azure-cli.sh \
     install-azure-devops-cli.sh \
     install-bicep.sh \
