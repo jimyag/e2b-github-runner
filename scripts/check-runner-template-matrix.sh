@@ -22,11 +22,17 @@ expected_name() {
   esac
 }
 
-expected_base() {
+expected_base_reference() {
   case "$1" in
-    ubuntu-slim | ubuntu-24.04) echo 24.04 ;;
-    ubuntu-22.04) echo 22.04 ;;
-    ubuntu-26.04) echo 26.04 ;;
+    ubuntu-slim | ubuntu-24.04)
+      echo public.ecr.aws/ubuntu/ubuntu:24.04@sha256:be20a0347f238b7d373edddc55923443b21dd9a60277bf8a93e43458cd0bf2fc
+      ;;
+    ubuntu-22.04)
+      echo public.ecr.aws/ubuntu/ubuntu:22.04@sha256:0bc16241504efa4cf92fcc8c8039dac604c6bb832b3d8fcc24097c6b05b60b7c
+      ;;
+    ubuntu-26.04)
+      echo public.ecr.aws/ubuntu/ubuntu:26.04@sha256:a5da6f6b18c3a4b8dcc73244592f7096f417d2667966d0e33460e9e308f25f67
+      ;;
     *) return 1 ;;
   esac
 }
@@ -74,22 +80,20 @@ for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
   test "$cpu_count" = 8 || fail "$image_key cpu_count is $cpu_count, want 8"
   test "$memory_mb" = 8192 || fail "$image_key memory_mb is $memory_mb, want 8192"
 
-  base_release="$(
+  base_reference="$(
     awk '
       toupper($1) == "FROM" {
         for (field_index = 1; field_index <= NF; field_index++) {
-          if ($field_index ~ /^ubuntu:[0-9][0-9]\.[0-9][0-9](@sha256:[0-9a-f]+)?$/) {
-            sub(/@.*/, "", $field_index)
-            sub(/^ubuntu:/, "", $field_index)
+          if ($field_index ~ /^public\.ecr\.aws\/ubuntu\/ubuntu:[0-9][0-9]\.[0-9][0-9]@sha256:[0-9a-f]{64}$/) {
             print $field_index
             exit
           }
         }
       }' "$directory/Dockerfile"
   )"
-  wanted_base="$(expected_base "$image_key")"
-  test "$base_release" = "$wanted_base" ||
-    fail "$image_key base release is $base_release, want $wanted_base"
+  wanted_base_reference="$(expected_base_reference "$image_key")"
+  test "$base_reference" = "$wanted_base_reference" ||
+    fail "$image_key base reference is $base_reference, want $wanted_base_reference"
 
   if grep -Eq '^[[:space:]]*RUN[[:space:]]+--mount=|/run/secrets/github_token' "$directory/Dockerfile"; then
     fail "$image_key uses a BuildKit-only RUN secret that qshell v2 cannot execute"

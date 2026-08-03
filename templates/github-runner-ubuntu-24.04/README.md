@@ -1,7 +1,8 @@
 # GitHub runner Ubuntu 24.04 template
 
-This stable 8-vCPU, 8192-MiB Linux x86_64 template uses the pinned Ubuntu 24.04
-OCI index and the complete x64 toolset/install chain from
+This stable 8-vCPU, 8192-MiB Linux x86_64 template uses the pinned
+Canonical-published Ubuntu 24.04 OCI index in Amazon ECR Public and the
+complete x64 toolset/install chain from
 `actions/runner-images@e986db797519f06a2e5e53701a715cfa4c1545e8`.
 
 The image supplies the `runner` account, `/home/runner/work`,

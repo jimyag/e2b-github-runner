@@ -54,6 +54,11 @@ Sandbox conformance runs it in the actual Qiniu template runtime.
 
 - [`runner-images-upstream.lock.json`](runner-images-upstream.lock.json) pins the
   `actions/runner-images` revision, report paths, and report checksums.
+- Each template Dockerfile pins the Canonical-published Ubuntu OCI index from
+  `public.ecr.aws/ubuntu/ubuntu` by digest. Canonical publishes the same Ubuntu
+  images through its documented OCI registry endpoints; the ECR endpoint is
+  reachable by Sandbox builders in both supported regions. The template matrix
+  check rejects a tag-only reference or a different registry.
 - [`runner-images-compatibility.json`](runner-images-compatibility.json) is the
   machine-readable coverage and conformance input. It is the only full
   inventory in this repository.

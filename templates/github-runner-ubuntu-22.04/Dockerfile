@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 ARG BASE_PLATFORM=linux/amd64
-FROM --platform=$BASE_PLATFORM ubuntu:22.04@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982
+FROM --platform=$BASE_PLATFORM public.ecr.aws/ubuntu/ubuntu:22.04@sha256:0bc16241504efa4cf92fcc8c8039dac604c6bb832b3d8fcc24097c6b05b60b7c
 
 ARG TEMPLATE_VERSION=20260727.1
 ARG RUNNER_IMAGES_REV=e986db797519f06a2e5e53701a715cfa4c1545e8
