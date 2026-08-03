@@ -7,6 +7,9 @@ set -euxo pipefail
 : "${RUNNER_ARCHIVE_SHA256:?RUNNER_ARCHIVE_SHA256 is required}"
 : "${AZCOPY_VERSION:?AZCOPY_VERSION is required}"
 : "${AZCOPY_DEB_SHA256:?AZCOPY_DEB_SHA256 is required}"
+: "${AZURE_CLI_VERSION:?AZURE_CLI_VERSION is required}"
+: "${AZURE_CLI_JAMMY_DEB_SHA256:?AZURE_CLI_JAMMY_DEB_SHA256 is required}"
+: "${AZURE_CLI_NOBLE_DEB_SHA256:?AZURE_CLI_NOBLE_DEB_SHA256 is required}"
 : "${AZURE_DEVOPS_EXTENSION_VERSION:?AZURE_DEVOPS_EXTENSION_VERSION is required}"
 : "${AZURE_DEVOPS_EXTENSION_SHA256:?AZURE_DEVOPS_EXTENSION_SHA256 is required}"
 : "${BICEP_VERSION:?BICEP_VERSION is required}"
@@ -36,6 +39,40 @@ run_upstream_tests_if_available() {
   if [ -f "$test_script" ]; then
     bash "$test_script" "$1" "$2"
   fi
+}
+
+install_azure_cli_from_microsoft_package() {
+  local package=/tmp/azure-cli.deb
+  local suite
+  local expected_sha256
+  # shellcheck disable=SC1091
+  source /etc/os-release
+  case "$VERSION_ID" in
+    22.04)
+      suite=jammy
+      expected_sha256="$AZURE_CLI_JAMMY_DEB_SHA256"
+      ;;
+    24.04 | 26.04)
+      suite=noble
+      expected_sha256="$AZURE_CLI_NOBLE_DEB_SHA256"
+      ;;
+    *)
+      echo "unsupported Ubuntu release for Azure CLI fallback: $VERSION_ID" >&2
+      return 1
+      ;;
+  esac
+
+  rm -f /etc/apt/sources.list.d/azure-cli.list \
+    /etc/apt/sources.list.d/azure-cli.list.save \
+    /etc/apt/sources.list.d/azure-cli.sources
+  download_checked \
+    "https://packages.microsoft.com/repos/azure-cli/pool/main/a/azure-cli/azure-cli_${AZURE_CLI_VERSION}-1~${suite}_amd64.deb" \
+    "$package" \
+    "$expected_sha256"
+  apt-get install -y --no-install-recommends "$package"
+  rm -f "$package"
+  test "$(az version --query '"azure-cli"' --output tsv)" = "$AZURE_CLI_VERSION"
+  run_upstream_tests_if_available "CLI.Tools" "Azure CLI"
 }
 
 install_bicep_from_nuget() {
@@ -146,6 +183,11 @@ run_upstream_installer() {
   if [ "$installer_name" = install-google-cloud-cli.sh ]; then
     echo "upstream installer failed after $max_attempts attempts; using checked Google Cloud CLI archive" >&2
     install_google_cloud_cli_from_archive
+    return
+  fi
+  if [ "$installer_name" = install-azure-cli.sh ]; then
+    echo "upstream Azure CLI installer unavailable; using checked Microsoft package" >&2
+    install_azure_cli_from_microsoft_package
     return
   fi
   if [ "$installer_name" = install-docker-cli.sh ]; then

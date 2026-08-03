@@ -53,7 +53,11 @@ a promise that the executable is absent.
 
 All four templates install checksum-pinned AzCopy 10.32.6 from Microsoft's
 official Ubuntu package pool instead of the upstream floating `aka.ms`
-archive. They intentionally do not prewarm the GitHub action archive cache;
+archive. Azure CLI remains upstream-first; if the upstream installer cannot
+reach Microsoft's repository, the build falls back to the official,
+checksum-pinned Azure CLI 2.88.0 package for Jammy or Noble and verifies the
+installed version. They intentionally do not prewarm the GitHub action
+archive cache;
 the runner resolves actions through the normal job-time GitHub protocol, so
 this changes build size and network exposure rather than workflow semantics.
 After Azure CLI is installed, they also install the upstream-selected Azure

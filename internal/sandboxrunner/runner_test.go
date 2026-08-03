@@ -2072,6 +2072,54 @@ func TestPublicTemplatesUsePinnedMicrosoftAzCopyWithoutActionPrewarm(t *testing.
 	}
 }
 
+func TestPublicTemplatesFallBackToCheckedAzureCLIPackage(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			templateRoot := filepath.Join(root, "templates", "github-runner-"+image)
+			dockerfileBytes, err := os.ReadFile(filepath.Join(templateRoot, "Dockerfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			for _, required := range []string{
+				"ARG AZURE_CLI_VERSION=2.88.0",
+				"ARG AZURE_CLI_JAMMY_DEB_SHA256=4decc8359ba3542becf2686474e3d068c2fc0b9bb9ec64cbcc8f5aa0cb7c2b61",
+				"ARG AZURE_CLI_NOBLE_DEB_SHA256=dedb0d666ad557edce8548e025c36fa3a28ac00df4f3d1e889e1246d2a261c36",
+			} {
+				if !strings.Contains(dockerfile, required) {
+					t.Fatalf("Dockerfile must pin the Azure CLI package with %q", required)
+				}
+			}
+
+			scriptBytes, err := os.ReadFile(filepath.Join(templateRoot, "scripts", "setup-template.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, required := range []string{
+				`: "${AZURE_CLI_VERSION:?AZURE_CLI_VERSION is required}"`,
+				`install_azure_cli_from_microsoft_package() {`,
+				`azure-cli_${AZURE_CLI_VERSION}-1~${suite}_amd64.deb`,
+				`expected_sha256="$AZURE_CLI_JAMMY_DEB_SHA256"`,
+				`expected_sha256="$AZURE_CLI_NOBLE_DEB_SHA256"`,
+				`upstream Azure CLI installer unavailable; using checked Microsoft package`,
+				`test "$(az version --query '"azure-cli"' --output tsv)" = "$AZURE_CLI_VERSION"`,
+				`run_upstream_tests_if_available "CLI.Tools" "Azure CLI"`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("setup must retain the checked Azure CLI fallback with %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestPublicTemplatesInstallPinnedAzureDevOpsExtensionAfterAzureCLI(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
