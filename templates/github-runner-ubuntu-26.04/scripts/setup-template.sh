@@ -5,6 +5,8 @@ set -euxo pipefail
 : "${RUNNER_IMAGES_ARCHIVE_SHA256:?RUNNER_IMAGES_ARCHIVE_SHA256 is required}"
 : "${RUNNER_VERSION:?RUNNER_VERSION is required}"
 : "${RUNNER_ARCHIVE_SHA256:?RUNNER_ARCHIVE_SHA256 is required}"
+: "${POWERSHELL_VERSION:?POWERSHELL_VERSION is required}"
+: "${POWERSHELL_ARCHIVE_SHA256:?POWERSHELL_ARCHIVE_SHA256 is required}"
 : "${DOCKER_GPG_SHA256:?DOCKER_GPG_SHA256 is required}"
 : "${DOCKER_GPG_FINGERPRINT:?DOCKER_GPG_FINGERPRINT is required}"
 export PATH="/usr/local/share/qiniu-sandbox-runner-template:${PATH}"
@@ -17,6 +19,19 @@ download_checked() {
     --retry 5 --retry-all-errors --retry-delay 2 \
     "$url" -o "$destination"
   echo "$expected_sha256  $destination" | sha256sum --check -
+}
+
+install_pinned_powershell() {
+  local archive_path="/tmp/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
+  download_checked \
+    "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" \
+    "$archive_path" \
+    "$POWERSHELL_ARCHIVE_SHA256"
+  install -d -m 0755 /opt/microsoft/powershell/7
+  tar -xzf "$archive_path" -C /opt/microsoft/powershell/7
+  chmod 0755 /opt/microsoft/powershell/7/pwsh
+  ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh
+  rm -f "$archive_path"
 }
 
 configure_reliable_apt_sources() {
@@ -362,7 +377,7 @@ WAAGENT
   bash "$upstream_build/configure-apt.sh"
   bash "$upstream_build/configure-environment.sh"
   bash "$upstream_build/install-apt-vital.sh"
-  bash "$upstream_build/install-powershell.sh"
+  install_pinned_powershell
   pwsh -File "$upstream_build/Install-PowerShellModules.ps1"
   pwsh -File "$upstream_build/Install-PowerShellAzModules.ps1"
 

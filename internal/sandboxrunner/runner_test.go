@@ -1497,7 +1497,7 @@ func TestUbuntu2604TemplateInstallsICUBeforePowerShell(t *testing.T) {
 	}
 	script := string(scriptBytes)
 	icuIndex := strings.Index(script, "libicu78")
-	powershellIndex := strings.Index(script, "install-powershell.sh")
+	powershellIndex := strings.LastIndex(script, "install_pinned_powershell")
 	if icuIndex < 0 || powershellIndex < 0 {
 		t.Fatalf(
 			"Ubuntu 26.04 setup must install ICU before PowerShell: icu=%d powershell=%d",
@@ -1511,6 +1511,54 @@ func TestUbuntu2604TemplateInstallsICUBeforePowerShell(t *testing.T) {
 			icuIndex,
 			powershellIndex,
 		)
+	}
+}
+
+func TestUbuntu2604TemplatePinsPowerShellReleaseAsset(t *testing.T) {
+	root := repositoryRoot(t)
+	dockerfileBytes, err := os.ReadFile(filepath.Join(
+		root,
+		"templates",
+		"github-runner-ubuntu-26.04",
+		"Dockerfile",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dockerfile := string(dockerfileBytes)
+	for _, expected := range []string{
+		"ARG POWERSHELL_VERSION=7.6.4",
+		"ARG POWERSHELL_ARCHIVE_SHA256=4471b5a36bfe86ec7af8525d36bb1cacba0128e7aac22d05cc064bc00e604721",
+	} {
+		if !strings.Contains(dockerfile, expected) {
+			t.Fatalf("Ubuntu 26.04 Dockerfile missing pinned PowerShell input %q", expected)
+		}
+	}
+
+	scriptBytes, err := os.ReadFile(filepath.Join(
+		root,
+		"templates",
+		"github-runner-ubuntu-26.04",
+		"scripts",
+		"setup-template.sh",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptBytes)
+	for _, expected := range []string{
+		`: "${POWERSHELL_VERSION:?POWERSHELL_VERSION is required}"`,
+		`: "${POWERSHELL_ARCHIVE_SHA256:?POWERSHELL_ARCHIVE_SHA256 is required}"`,
+		`"https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"`,
+		`download_checked`,
+		`install_pinned_powershell`,
+	} {
+		if !strings.Contains(script, expected) {
+			t.Fatalf("Ubuntu 26.04 setup missing pinned PowerShell behavior %q", expected)
+		}
+	}
+	if strings.Contains(script, `bash "$upstream_build/install-powershell.sh"`) {
+		t.Fatal("Ubuntu 26.04 must not query the GitHub Releases API through the generic upstream installer")
 	}
 }
 
