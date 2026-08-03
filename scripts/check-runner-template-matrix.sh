@@ -119,7 +119,8 @@ for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
       install-container-tools.sh \
       install-github-cli.sh \
       install-nodejs.sh \
-      install-python.sh; do
+      install-python.sh \
+      install_pester_for_upstream_tests; do
       grep -Fq "$required_installer" "$directory/scripts/setup-template.sh" ||
         fail "$image_key disk-bounded toolset is missing $required_installer"
     done

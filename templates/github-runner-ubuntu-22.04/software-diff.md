@@ -2,10 +2,11 @@
 
 The pinned upstream x64 report is the comparison inventory. The guaranteed
 software baseline is the pinned Ubuntu Slim-compatible core on Ubuntu 22.04,
-plus Apache, Podman, Buildah, Skopeo, Ninja, pipx packages, the ephemeral
-Actions runner, the `runner` filesystem contract, and direct Docker daemon
-initialization. The current Qiniu Sandbox public-template build allocation has
-a 22,222-MiB root disk; the complete GitHub-hosted runner toolset exceeds that
+plus Apache, Podman, Buildah, Skopeo, Ninja, pipx packages, pinned Pester for
+installer validation, the ephemeral Actions runner, the `runner` filesystem
+contract, and direct Docker daemon initialization. The current Qiniu Sandbox
+public-template build allocation has a 22,222-MiB root disk; the complete
+GitHub-hosted runner toolset exceeds that
 limit. Full-image-only items are therefore `excluded` from the guarantee and
 can be installed at job time or included in a custom template.
 

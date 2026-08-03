@@ -2308,9 +2308,8 @@
           "kind": "software",
           "upstream_name": "Pester",
           "upstream_value": "5.9.0",
-          "status": "excluded",
-          "verification": "pwsh -NoLogo -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name '\"'\"'Pester'\"'\"')) { exit 1 }'",
-          "reason": "The current Qiniu Sandbox public-template build allocation exposes a 22,222 MiB root disk, and the full GitHub-hosted runner inventory exceeds that limit. This public template guarantees the pinned Ubuntu Slim-compatible core on the requested OS release plus documented extensions; this full-image-only item is not guaranteed and should be installed at job time or included in a custom template."
+          "status": "provided",
+          "verification": "pwsh -NoLogo -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name '\"'\"'Pester'\"'\"')) { exit 1 }'"
         },
         {
           "category": "PowerShell Tools/PowerShell Modules",
@@ -4497,9 +4496,8 @@
           "kind": "software",
           "upstream_name": "Pester",
           "upstream_value": "5.9.0",
-          "status": "excluded",
-          "verification": "pwsh -NoLogo -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name '\"'\"'Pester'\"'\"')) { exit 1 }'",
-          "reason": "The current Qiniu Sandbox public-template build allocation exposes a 22,222 MiB root disk, and the full GitHub-hosted runner inventory exceeds that limit. This public template guarantees the pinned Ubuntu Slim-compatible core on the requested OS release plus documented extensions; this full-image-only item is not guaranteed and should be installed at job time or included in a custom template."
+          "status": "provided",
+          "verification": "pwsh -NoLogo -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name '\"'\"'Pester'\"'\"')) { exit 1 }'"
         },
         {
           "category": "PowerShell Tools/PowerShell Modules",
@@ -6244,9 +6242,8 @@
           "kind": "software",
           "upstream_name": "Pester",
           "upstream_value": "5.9.0",
-          "status": "excluded",
-          "verification": "pwsh -NoLogo -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name '\"'\"'Pester'\"'\"')) { exit 1 }'",
-          "reason": "The current Qiniu Sandbox public-template build allocation exposes a 22,222 MiB root disk, and the full GitHub-hosted runner inventory exceeds that limit. This public template guarantees the pinned Ubuntu Slim-compatible core on the requested OS release plus documented extensions; this full-image-only item is not guaranteed and should be installed at job time or included in a custom template."
+          "status": "provided",
+          "verification": "pwsh -NoLogo -NoProfile -Command 'if (-not (Get-Module -ListAvailable -Name '\"'\"'Pester'\"'\"')) { exit 1 }'"
         },
         {
           "category": "PowerShell Tools/PowerShell Modules",

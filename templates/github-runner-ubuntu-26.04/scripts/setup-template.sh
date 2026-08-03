@@ -100,6 +100,24 @@ install_runner() {
   test -x /opt/actions-runner/run.sh
 }
 
+install_pester_for_upstream_tests() {
+  local pester_version
+  pester_version="$(
+    jq -er '
+      .powershellModules[]
+      | select(.name == "Pester")
+      | .versions[]
+    ' "$INSTALLER_SCRIPT_FOLDER/toolset.json"
+  )"
+  PESTER_VERSION="$pester_version" pwsh -NoLogo -NoProfile -Command '
+    $ErrorActionPreference = "Stop"
+    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+    Install-Module -Name Pester -RequiredVersion $env:PESTER_VERSION -Scope AllUsers -SkipPublisherCheck -Force
+    Import-Module Pester -RequiredVersion $env:PESTER_VERSION -Force
+    if ((Get-Module Pester).Version.ToString() -ne $env:PESTER_VERSION) { exit 1 }
+  '
+}
+
 stop_validated_service() {
   local unit="$1"
   if [ "$unit" = apache2 ]; then
@@ -419,6 +437,7 @@ WAAGENT
   bash "$upstream_build/configure-environment.sh"
   bash "$upstream_build/install-apt-vital.sh"
   install_pinned_powershell
+  install_pester_for_upstream_tests
 
   for installer in \
     install-actions-cache.sh \

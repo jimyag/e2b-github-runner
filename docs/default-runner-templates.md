@@ -67,7 +67,8 @@ Sandbox public-template build allocation exposes a 22,222-MiB root disk, while
 the complete GitHub-hosted runner inventory requires more space. The three
 versioned templates guarantee the Ubuntu Slim-compatible core on the requested
 Ubuntu release, plus Apache, Podman, Buildah, Skopeo, Ninja, Docker support,
-the preinstalled Actions runner, and the runner filesystem contract.
+pinned Pester for installer validation, the preinstalled Actions runner, and
+the runner filesystem contract.
 
 [`templates/runner-images-compatibility.json`](../templates/runner-images-compatibility.json)
 is the executable item-level contract. `provided` means release conformance

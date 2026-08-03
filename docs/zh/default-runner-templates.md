@@ -64,7 +64,7 @@ required labels 和显式 template ID。
 22,222 MiB 根磁盘，而完整 GitHub 托管 Runner 软件清单需要更大空间。因此，3 个
 版本化模板保证在对应 Ubuntu 版本上提供与 Ubuntu Slim 兼容的核心工具，并额外
 提供 Apache、Podman、Buildah、Skopeo、Ninja、Docker 支持、预装 Actions
-Runner 和 Runner 文件系统契约。
+Runner、用于 installer 验证的固定版本 Pester，以及 Runner 文件系统契约。
 
 [`templates/runner-images-compatibility.json`](../../templates/runner-images-compatibility.json)
 是可执行的逐项契约。`provided` 表示发布 conformance 必须验证该项目；`excluded`

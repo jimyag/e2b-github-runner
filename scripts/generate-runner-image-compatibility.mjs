@@ -260,6 +260,7 @@ const versionedExtras = new Set([
   "Docker Compose",
   "Docker Server",
   "Ninja",
+  "Pester",
   "Podman",
   "Skopeo",
   "apache2",

@@ -1810,7 +1810,7 @@ func TestCompatibilityManifestDocumentsSandboxDiskBoundary(t *testing.T) {
 				reason string
 			}{entry.Status, entry.Reason}
 		}
-		for _, provided := range []string{"PowerShell", "apache2", "Buildah", "Podman", "Skopeo", "Ninja"} {
+		for _, provided := range []string{"PowerShell", "Pester", "apache2", "Buildah", "Podman", "Skopeo", "Ninja"} {
 			entry, ok := entries[provided]
 			if !ok || entry.status != "provided" {
 				t.Fatalf("%s must provide %s, got %#v", image, provided, entry)
@@ -2097,6 +2097,7 @@ func TestVersionedTemplateBuildUsesDiskBoundedToolset(t *testing.T) {
 				"install-python.sh",
 				"install-yq.sh",
 				"install-ninja.sh",
+				"install_pester_for_upstream_tests",
 			} {
 				if !strings.Contains(versioned, required) {
 					t.Fatalf("disk-bounded versioned toolset must retain %q", required)

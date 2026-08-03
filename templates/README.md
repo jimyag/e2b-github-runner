@@ -45,10 +45,11 @@ The current public-template build allocation exposes a 22,222-MiB root disk.
 The complete GitHub-hosted runner image exceeds that allocation. The three
 versioned templates therefore guarantee the pinned Ubuntu Slim-compatible
 core on the requested Ubuntu release, plus Apache, Podman, Buildah, Skopeo,
-Ninja, and the Qiniu runner contract. Full-image-only tools remain in the
-manifest as `excluded`; they are not guaranteed to be preinstalled and should
-be installed in the workflow or included in a custom template. `excluded`
-describes the support contract, not a promise that the executable is absent.
+Ninja, pinned Pester for build-time validation, and the Qiniu runner contract.
+Full-image-only tools remain in the manifest as `excluded`; they are not
+guaranteed to be preinstalled and should be installed in the workflow or
+included in a custom template. `excluded` describes the support contract, not
+a promise that the executable is absent.
 
 The versioned image build keeps the upstream Podman, Buildah, and Skopeo CLI
 checks. BuildKit cannot create the nested namespace needed by the upstream
