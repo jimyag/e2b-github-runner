@@ -1572,6 +1572,42 @@ func TestVersionedTemplateBuildStagesPinnedUpstreamTests(t *testing.T) {
 	}
 }
 
+func TestDiskBoundedTemplatesSkipOnlyCMakeDependentNinjaAssertions(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, assertion := range []string{
+				`It "Make a simple ninja project" -Skip {`,
+				`It "build.ninja file should exist" -Skip {`,
+				`It "Ninja" {`,
+			} {
+				if !strings.Contains(script, assertion) {
+					t.Fatalf("setup must pin the disk-bounded Ninja test adjustment %q", assertion)
+				}
+			}
+			if strings.Index(script, `It "Ninja" {`) > strings.Index(script, `install-ninja.sh`) {
+				t.Fatal("pinned Ninja test adjustment must be staged before the installer runs")
+			}
+		})
+	}
+}
+
 func TestUbuntu2604TemplateInstallsICUBeforePowerShell(t *testing.T) {
 	root := repositoryRoot(t)
 	scriptPath := filepath.Join(

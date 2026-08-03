@@ -428,6 +428,19 @@ WAAGENT
   test "$(grep -Fxc '    $testCases = @("podman", "buildah", "skopeo") | ForEach-Object { @{ContainerCommand = $_} }' "$podman_networking_test" || true)" -eq 1
   test "$(grep -Fxc '    It "<ContainerCommand>" -TestCases $testCases {' "$podman_networking_test" || true)" -eq 1
   test "$(grep -Fxc '        "$ContainerCommand -v" | Should -ReturnZeroExitCode' "$podman_networking_test" || true)" -eq 1
+  # The disk-bounded contract provides Ninja but excludes the full image's
+  # CMake toolchain. Keep the upstream Ninja CLI assertion while skipping only
+  # the two project-generation assertions that require CMake.
+  ninja_test=/imagegeneration/tests/Tools.Tests.ps1
+  test "$(grep -Fxc '    It "Make a simple ninja project" {' "$ninja_test" || true)" -eq 1
+  test "$(grep -Fxc '    It "build.ninja file should exist" {' "$ninja_test" || true)" -eq 1
+  test "$(grep -Fxc '    It "Ninja" {' "$ninja_test" || true)" -eq 1
+  sed -i \
+    -e 's/    It "Make a simple ninja project" {/    It "Make a simple ninja project" -Skip {/' \
+    -e 's/    It "build.ninja file should exist" {/    It "build.ninja file should exist" -Skip {/' \
+    "$ninja_test"
+  test "$(grep -Fxc '    It "Make a simple ninja project" -Skip {' "$ninja_test" || true)" -eq 1
+  test "$(grep -Fxc '    It "build.ninja file should exist" -Skip {' "$ninja_test" || true)" -eq 1
 
   bash "$upstream_build/install-ms-repos.sh"
   ensure_upstream_apt_source_layout
