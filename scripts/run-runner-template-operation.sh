@@ -10,6 +10,10 @@ operation="$1"
 template_dir="$2"
 build_name="${3:-}"
 qshell_bin="${QSHELL:-qshell}"
+script_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+if [[ "$template_dir" != /* ]]; then
+  template_dir="$script_root/$template_dir"
+fi
 
 : "${QINIU_SANDBOX_API_URL:?QINIU_SANDBOX_API_URL is required}"
 : "${QINIU_API_KEY:?QINIU_API_KEY is required}"

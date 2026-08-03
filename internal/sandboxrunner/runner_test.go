@@ -295,6 +295,49 @@ fi
 	}
 }
 
+func TestRunnerTemplateQshellResolvesRelativeTemplateFromScriptCheckout(t *testing.T) {
+	root := repositoryRoot(t)
+	fixture := t.TempDir()
+	qshellPath := filepath.Join(fixture, "qshell")
+	qshellLog := filepath.Join(fixture, "qshell.log")
+	writeExecutable(t, qshellPath, `#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = version ]; then
+  printf 'v2.19.10\n'
+  exit 0
+fi
+printf 'pwd=%s\n' "$PWD" >"$QSHELL_TEST_LOG"
+printf 'Status:       ready\n'
+`)
+	scriptPath := filepath.Join(root, "scripts", "run-runner-template-operation.sh")
+	cmd := exec.Command(
+		"bash",
+		scriptPath,
+		"build",
+		"templates/github-runner-ubuntu-slim",
+	)
+	cmd.Dir = fixture
+	cmd.Env = append(
+		os.Environ(),
+		"QSHELL="+qshellPath,
+		"QSHELL_TEST_LOG="+qshellLog,
+		"QINIU_SANDBOX_API_URL=https://sandbox.example.test",
+		"QINIU_API_KEY=test-api-key",
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("relative template build failed: %v\n%s", err, output)
+	}
+	logBytes, err := os.ReadFile(qshellLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "pwd=" + filepath.Join(root, "templates", "github-runner-ubuntu-slim")
+	if !strings.Contains(string(logBytes), want) {
+		t.Fatalf("relative template resolved outside the script checkout; want %q, got:\n%s", want, logBytes)
+	}
+}
+
 func TestRunnerTemplateQshellPublicationRunsFromTemplateDirectory(t *testing.T) {
 	fixture := t.TempDir()
 	templateDir := filepath.Join(fixture, "template")
