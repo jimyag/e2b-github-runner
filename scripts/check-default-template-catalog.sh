@@ -18,7 +18,7 @@ cleanup() {
 trap cleanup EXIT
 
 curl -fsS \
-  -H "X-API-Key: ${QINIU_API_KEY}" \
+  --header @<(printf 'X-API-Key: %s\n' "$QINIU_API_KEY") \
   "${QINIU_SANDBOX_API_URL%/}/default-templates" \
   >"$catalog_file"
 
