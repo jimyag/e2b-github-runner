@@ -2,10 +2,16 @@
 set -euo pipefail
 
 real_curl="${RUNNER_TEMPLATE_CURL_BIN:-/usr/bin/curl}"
+minimum_speed=1024
+for argument in "$@"; do
+  case "$argument" in
+    https://awscli.amazonaws.com/awscli-exe-linux-*.zip) minimum_speed=65536 ;;
+  esac
+done
 transport_options=(
   --http1.1
   --connect-timeout 15
-  --speed-limit 1024
+  --speed-limit "$minimum_speed"
   --speed-time 60
   --retry 5
   --retry-all-errors

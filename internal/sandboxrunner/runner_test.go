@@ -1537,6 +1537,53 @@ fi
 	}
 }
 
+func TestTemplateCurlRetriesStalledAWSCLIArchiveDownloads(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			fixture := t.TempDir()
+			curlLog := filepath.Join(fixture, "curl.log")
+			fakeCurl := filepath.Join(fixture, "curl")
+			writeExecutable(t, fakeCurl, `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >"$CURL_TEST_LOG"
+`)
+			wrapper := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"curl",
+			)
+			output, err := runCommand(
+				t, wrapper, []string{
+					"-fsSL",
+					"https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip",
+					"-o",
+					filepath.Join(fixture, "awscli.zip"),
+				},
+				"RUNNER_TEMPLATE_CURL_BIN="+fakeCurl,
+				"CURL_TEST_LOG="+curlLog,
+			)
+			if err != nil {
+				t.Fatalf("curl wrapper failed: %v\n%s", err, output)
+			}
+			logBytes, err := os.ReadFile(curlLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(logBytes), "--speed-limit 65536 --speed-time 60") {
+				t.Fatalf("AWS CLI download does not reject a stalled CDN connection: %s", logBytes)
+			}
+		})
+	}
+}
+
 func TestTemplateCurlRetriesTruncatedGitHubAPIResponses(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
