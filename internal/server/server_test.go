@@ -60,6 +60,20 @@ type fakeSandbox struct {
 	terminal            *fakeTerminalSession
 }
 
+func TestSandboxHTTPClientDoesNotBoundRunnerCommandStreams(t *testing.T) {
+	client := newSandboxHTTPClient()
+	if client.Timeout != 0 {
+		t.Fatalf("sandbox HTTP client timeout = %s, want no whole-request timeout", client.Timeout)
+	}
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("sandbox HTTP transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.ResponseHeaderTimeout != time.Minute {
+		t.Fatalf("sandbox response header timeout = %s, want 1m", transport.ResponseHeaderTimeout)
+	}
+}
+
 type blockingSandboxDefaultStore struct {
 	state.Store
 	getStarted  chan struct{}

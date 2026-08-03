@@ -225,6 +225,13 @@ jobs:
 - Job 的 `Set up runner` log 包含 Qiniu sandbox id、runner request id 和 runner name。
 - Job 结束后，runner request 变为 `completed`。
 
+参考证据：2026-08-04（CST），
+[run 30858489153](https://github.com/miclle/qiniu-ci-runner-test/actions/runs/30858489153)
+接收了带有效签名的 GitHub `workflow_run` 和 `workflow_job` deliveries，并让
+5 个 jobs 全部完成。5 条 requests 均进入 `completed`，Runner processes 均正常
+退出，Sandbox 均完成清理，repository 最终没有残留 self-hosted Runners。该参考
+run 不能替代对实际部署的 webhook secret 与 GitHub webhook 配置是否一致的验证。
+
 ## 6. Restart Recovery
 
 在 workflow 中增加一个持续时间足够长的步骤，并在 job 运行期间重启 runnerd。只重启 runnerd 服务，不要直接停止沙箱。

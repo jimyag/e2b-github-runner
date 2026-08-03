@@ -230,6 +230,14 @@ Expected result:
 - The job's `Set up runner` log includes the Qiniu sandbox id, runner request id, and runner name.
 - After the job finishes, the runner request becomes `completed`.
 
+Reference evidence: on 2026-08-04 CST,
+[run 30858489153](https://github.com/miclle/qiniu-ci-runner-test/actions/runs/30858489153)
+accepted signed GitHub `workflow_run` and `workflow_job` deliveries and completed
+all five jobs. The five requests reached `completed`, each runner process exited
+cleanly, each Sandbox was cleaned, and the repository had zero self-hosted
+runners afterward. This reference run does not replace verification that the
+deployment's own webhook secret matches its configured GitHub webhook.
+
 ## 6. Restart Recovery
 
 Add a step that runs long enough to restart runnerd while the job is active. Restart only the runnerd service; do not stop the sandbox directly.

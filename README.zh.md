@@ -74,9 +74,9 @@ cp runnerd.yaml.example runnerd.yaml
 
 5. 打开 `http://<host>:25500/`，使用 GitHub OAuth 登录。公开产品首页提供当前 GitHub 文档入口，以及指向 `/jobs` 受保护的 Jobs 控制台入口。用户首次登录访问 `/jobs` 时，会看到介绍 Jobs、Repositories、Settings 和 Sandbox 设置的六步引导；之后可从账户菜单重播。
 6. 打开 **Repositories** 查看账户或组织的 **Runner readiness**。有效来源只显示状态，不提供配置控件；缺少 Sandbox 且用户可管理该 scope 时，通过 **Configure Sandbox** 进入精确的账户或组织 **Preferences** 页面并配置 **Sandbox Service** 凭据。Settings 只列出个人账户和用户属于 active member 的组织；outside collaborator 只能看到 readiness 只读提示，不能浏览该组织的 Sandbox 资源目录。管理员可以在 `/admin/sandbox_service` 配置兜底。
-7. 公共模板完成双区域 release gate 后，在**管理控制台**中确认 5 个 Qiniu managed Runner Specs；在此之前，请创建带有明确 label 和显式 `template_id` 的自定义 spec。
+7. 在**管理控制台**中确认 5 个 Qiniu managed Runner Specs。它们的公共模板已通过双区域 release gate；operator 仍可禁用单个 managed spec，或调整并发与 idle capacity。
 8. 配置 GitHub webhook → `POST http://<host>:25500/webhooks/github`。
-9. 完成 release gate 后，可在 workflow 中配置 `runs-on: [qiniu, ubuntu-24.04]`；否则应配置自定义 spec 要求的 labels。
+9. 在 workflow 中配置 `runs-on: [qiniu, ubuntu-24.04]` 使用 managed default，或配置自定义 spec 要求的 labels。
 
 本地开发请使用 `task dev` 配合 `runnerd.local.yaml`。详细的本地环境搭建（包括 GitHub App 创建和 webhook 转发）请参阅 [docs/zh/testing.md](docs/zh/testing.md)。
 
@@ -156,8 +156,7 @@ unset secret_value
 ## Webhook 与 Workflow 配置
 
 1. 确保已按上述 [Webhook 事件订阅](#webhook-事件订阅) 配置好 GitHub App webhook，且 `webhook_secret` 与配置文件中的 `github.webhook_secret` 一致。
-2. [公共模板 release gate](docs/zh/default-runner-templates.md)确认两个区域都完成
-   验证后，在 workflow 中使用：
+2. 使用已验证的 managed label 组合，例如：
 
 ```yaml
 runs-on: [qiniu, ubuntu-24.04]

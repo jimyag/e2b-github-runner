@@ -10,15 +10,17 @@ fifth image.
 The four physical templates were published, catalog-checked, and release-smoke
 verified in both supported Sandbox regions on 2026-08-03. The regional IDs and
 evidence are retained in [Issue #38](https://github.com/qiniu/ci-runner/issues/38#issuecomment-5164811404).
-The separate managed Runner Spec rollout is still required before the five
-workflow labels are operational. See
+The managed Runner Spec rollout was end-to-end verified on 2026-08-04 CST by
+[GitHub Actions run 30858489153](https://github.com/miclle/qiniu-ci-runner-test/actions/runs/30858489153):
+all five logical labels completed successfully, all five runner requests
+reached `completed`, every Sandbox was cleaned, and no self-hosted runner
+registration remained. See
 [`templates/README.md`](../templates/README.md) for pinned upstream provenance,
 the compatibility contract, and per-image differences.
 
 ## Workflow labels
 
-After the managed Runner Spec rollout is verified, use the exact pair for the
-requested environment:
+Use the exact pair for the requested environment:
 
 ```yaml
 jobs:

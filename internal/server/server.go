@@ -158,7 +158,7 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		store:                     store,
 		gh:                        gh,
 		sandbox:                   sandbox,
-		sandboxHTTP:               &http.Client{Timeout: 60 * time.Second},
+		sandboxHTTP:               newSandboxHTTPClient(),
 		logger:                    logger,
 		mux:                       http.NewServeMux(),
 		slots:                     make(chan struct{}, cfg.MaxConcurrentRunners),
@@ -175,6 +175,12 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 	s.loopCtx, s.loopCancel = context.WithCancel(context.Background())
 	s.routes()
 	return s
+}
+
+func newSandboxHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = time.Minute
+	return &http.Client{Transport: transport}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

@@ -74,9 +74,9 @@ cp runnerd.yaml.example runnerd.yaml
 
 5. Open `http://<host>:25500/` and sign in with GitHub OAuth. The public product landing page links to the current GitHub documentation and the protected Jobs console at `/jobs`. On the first authenticated visit to `/jobs`, a six-step product tour introduces Jobs, Repositories, Settings, and Sandbox setup; it can be replayed from the account menu.
 6. Open **Repositories** to review **Runner readiness** for the account or organization. Ready sources are shown without configuration controls. If Sandbox setup is missing and you can manage that scope, use **Configure Sandbox** to open the exact account or organization **Preferences** page and configure **Sandbox Service** credentials. Settings lists only your account and organizations where you are an active member; outside collaborators receive a read-only readiness prompt and cannot browse that organization's Sandbox catalogs. Administrators can provide a fallback at `/admin/sandbox_service`.
-7. After the public-template two-region release gate is complete, confirm the five managed Qiniu Runner Specs in the **Admin Console**. Until then, create a custom spec with a meaningful label and an explicit `template_id`.
+7. Confirm the five managed Qiniu Runner Specs in the **Admin Console**. Their public templates have passed the two-region release gate; operators can still disable individual managed specs or adjust their concurrency and idle capacity.
 8. Configure a GitHub webhook → `POST http://<host>:25500/webhooks/github`.
-9. After that release gate, use `runs-on: [qiniu, ubuntu-24.04]` for a managed default; otherwise use the labels required by your custom spec.
+9. Use `runs-on: [qiniu, ubuntu-24.04]` for a managed default, or use the labels required by your custom spec.
 
 For local development, use `task dev` with `runnerd.local.yaml`. See [docs/testing.md](docs/testing.md) for detailed local setup including GitHub App creation and webhook forwarding.
 
@@ -156,8 +156,7 @@ In your GitHub App settings (**Settings → Developer settings → GitHub Apps �
 ## Webhook & Workflow Setup
 
 1. Ensure the GitHub App webhook is configured as described in [Webhook Events](#webhook-events) above, with the `webhook_secret` matching `github.webhook_secret` in your config.
-2. After the [public-template release gate](docs/default-runner-templates.md)
-   reports both regions verified, use:
+2. Use a verified managed label pair, for example:
 
 ```yaml
 runs-on: [qiniu, ubuntu-24.04]

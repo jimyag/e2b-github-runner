@@ -131,12 +131,16 @@ func TestStartScriptUsesHostedRunnerFilesystemContract(t *testing.T) {
 	runnerHome := filepath.Join(fixture, "home", "runner")
 	hookRoot := filepath.Join(fixture, "hooks")
 	logPath := filepath.Join(fixture, "runner.log")
+	environmentPath := filepath.Join(fixture, "environment")
 	if err := os.MkdirAll(actionsRunnerRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(environmentPath, []byte("ImageVersion=\"$TEMPLATE_VERSION\"\nIMAGE_VERSION=\"$TEMPLATE_VERSION\"\nCUSTOM_RUNNER_ENV=\"$HOME/from-environment\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	writeExecutable(t, filepath.Join(actionsRunnerRoot, "config.sh"), `#!/usr/bin/env bash
 set -euo pipefail
-printf 'config HOME=%s PWD=%s TOOL_CACHE=%s AGENT_TOOLS=%s\n' "$HOME" "$PWD" "$RUNNER_TOOL_CACHE" "$AGENT_TOOLSDIRECTORY" >>"$RUNNER_TEST_LOG"
+printf 'config HOME=%s PWD=%s TOOL_CACHE=%s AGENT_TOOLS=%s IMAGE_VERSION=%s CUSTOM_RUNNER_ENV=%s\n' "$HOME" "$PWD" "$RUNNER_TOOL_CACHE" "$AGENT_TOOLSDIRECTORY" "${IMAGE_VERSION:-}" "${CUSTOM_RUNNER_ENV:-}" >>"$RUNNER_TEST_LOG"
 `)
 	writeExecutable(t, filepath.Join(actionsRunnerRoot, "run.sh"), `#!/usr/bin/env bash
 set -euo pipefail
@@ -163,6 +167,7 @@ printf 'run HOME=%s PWD=%s RUNASROOT=%s\n' "$HOME" "$PWD" "${RUNNER_ALLOW_RUNASR
 		"RUNNER_HOME="+runnerHome,
 		"RUNNER_HOOK_ROOT="+hookRoot,
 		"RUNNER_TEST_LOG="+logPath,
+		"RUNNER_ENVIRONMENT_FILE="+environmentPath,
 		"ENSURE_DOCKER=/bin/true",
 	)
 	if err != nil {
@@ -176,6 +181,7 @@ printf 'run HOME=%s PWD=%s RUNASROOT=%s\n' "$HOME" "$PWD" "${RUNNER_ALLOW_RUNASR
 	for _, want := range []string{
 		"config HOME=" + runnerHome + " PWD=" + workdir,
 		"TOOL_CACHE=/opt/hostedtoolcache AGENT_TOOLS=/opt/hostedtoolcache",
+		"IMAGE_VERSION= CUSTOM_RUNNER_ENV=" + runnerHome + "/from-environment",
 		"run HOME=" + runnerHome + " PWD=" + workdir + " RUNASROOT=",
 	} {
 		if !strings.Contains(log, want) {

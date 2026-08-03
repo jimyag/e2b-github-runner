@@ -7,6 +7,7 @@ workdir="${RUNNER_WORKDIR:-/home/runner/actions-runner}"
 runner_job_work="${RUNNER_JOB_WORK:-/home/runner/work}"
 hook_root="${RUNNER_HOOK_ROOT:-/home/runner/_runnerd-hooks}"
 ensure_docker="${ENSURE_DOCKER:-/usr/local/bin/ensure-docker}"
+runner_environment_file="${RUNNER_ENVIRONMENT_FILE:-/etc/environment}"
 export HOME="${RUNNER_HOME:-/home/runner}"
 export XDG_CONFIG_HOME="${HOME}/.config"
 export GOPATH="${GOPATH:-/opt/go}"
@@ -14,11 +15,15 @@ export GOBIN="${GOBIN:-/usr/local/bin}"
 export RUNNER_TOOL_CACHE="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}"
 export AGENT_TOOLSDIRECTORY="${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
 export PATH="/usr/local/go/bin:/usr/local/bin:${GOPATH}/bin:${PATH}"
-if [ -r /etc/environment ]; then
+if [ -r "$runner_environment_file" ]; then
   set -a
   # runner-images writes shell-compatible KEY="value" entries here.
-  # shellcheck disable=SC1091
-  . /etc/environment
+  # The environment can contain references to build-only variables. Keep
+  # nounset disabled while loading it so those entries do not abort startup.
+  set +u
+  # shellcheck disable=SC1090
+  . "$runner_environment_file"
+  set -u
   set +a
 fi
 
@@ -33,6 +38,7 @@ if [ "$(id -u)" -eq 0 ] && id -u "$runner_user" >/dev/null 2>&1 && [ "${RUNNERD_
     RUNNER_JOB_WORK="$runner_job_work" \
     RUNNER_HOOK_ROOT="$hook_root" \
     ENSURE_DOCKER="$ensure_docker" \
+    RUNNER_ENVIRONMENT_FILE="$runner_environment_file" \
     HOME="$HOME" \
     bash "$0"
 fi
