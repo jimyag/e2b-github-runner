@@ -61,6 +61,11 @@ DevOps extension 1.0.6 from its official Microsoft Blob wheel with a pinned
 checksum and bounded curl retries; versioned templates retain the upstream
 Pester assertion for that extension.
 
+All four templates install Bicep 0.45.15 from Microsoft's signed NuGet
+package instead of resolving and downloading a floating GitHub release asset.
+The package checksum is pinned in each Dockerfile, and the upstream Bicep
+Pester assertion still runs after installation.
+
 Google Cloud CLI installation first follows the pinned upstream
 `actions/runner-images` APT path. If that repository remains unavailable after
 bounded retries, the build falls back to Google's official versioned x86_64

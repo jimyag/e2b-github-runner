@@ -2595,6 +2595,52 @@ func TestRunnerTemplateRetriesGoogleCloudInstaller(t *testing.T) {
 	}
 }
 
+func TestRunnerTemplatePinsBicepNuGetPackage(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			templateRoot := filepath.Join(root, "templates", "github-runner-"+image)
+			dockerfileBytes, err := os.ReadFile(filepath.Join(templateRoot, "Dockerfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			for _, required := range []string{
+				"ARG BICEP_VERSION=",
+				"ARG BICEP_NUGET_SHA256=",
+			} {
+				if !strings.Contains(dockerfile, required) {
+					t.Fatalf("template must pin the Bicep NuGet package; missing %q", required)
+				}
+			}
+
+			scriptBytes, err := os.ReadFile(filepath.Join(templateRoot, "scripts", "setup-template.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, required := range []string{
+				`: "${BICEP_VERSION:?BICEP_VERSION is required}"`,
+				`: "${BICEP_NUGET_SHA256:?BICEP_NUGET_SHA256 is required}"`,
+				"install_bicep_from_nuget() {",
+				`azure.bicep.commandline.linux-x64/${BICEP_VERSION}`,
+				`"$BICEP_NUGET_SHA256"`,
+				`install-bicep.sh)`,
+				`install_bicep_from_nuget`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("template must install checked Bicep from NuGet; missing %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestRunnerTemplateBuildUsesBoundedHTTPSAptSources(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{

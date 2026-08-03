@@ -9,6 +9,8 @@ set -euxo pipefail
 : "${AZCOPY_DEB_SHA256:?AZCOPY_DEB_SHA256 is required}"
 : "${AZURE_DEVOPS_EXTENSION_VERSION:?AZURE_DEVOPS_EXTENSION_VERSION is required}"
 : "${AZURE_DEVOPS_EXTENSION_SHA256:?AZURE_DEVOPS_EXTENSION_SHA256 is required}"
+: "${BICEP_VERSION:?BICEP_VERSION is required}"
+: "${BICEP_NUGET_SHA256:?BICEP_NUGET_SHA256 is required}"
 : "${GOOGLE_CLOUD_CLI_VERSION:?GOOGLE_CLOUD_CLI_VERSION is required}"
 : "${GOOGLE_CLOUD_CLI_ARCHIVE_SHA256:?GOOGLE_CLOUD_CLI_ARCHIVE_SHA256 is required}"
 : "${DOCKER_GPG_SHA256:?DOCKER_GPG_SHA256 is required}"
@@ -23,6 +25,23 @@ download_checked() {
     --retry 5 --retry-all-errors --retry-delay 2 \
     "$url" -o "$destination"
   echo "$expected_sha256  $destination" | sha256sum --check -
+}
+
+install_bicep_from_nuget() {
+  local package_name="azure.bicep.commandline.linux-x64.${BICEP_VERSION}.nupkg"
+  local package_path="/tmp/${package_name}"
+  local package_url="https://api.nuget.org/v3-flatcontainer/azure.bicep.commandline.linux-x64/${BICEP_VERSION}/${package_name}"
+  local extract_dir=/tmp/qiniu-bicep
+
+  download_checked "$package_url" "$package_path" "$BICEP_NUGET_SHA256"
+  install -d -m 0755 "$extract_dir"
+  unzip -q -j "$package_path" tools/bicep -d "$extract_dir"
+  install -m 0755 "$extract_dir/bicep" /usr/local/bin/bicep
+  find "$extract_dir" -mindepth 1 -delete
+  rmdir "$extract_dir"
+  rm -f "$package_path"
+  bicep --version | grep -F "Bicep CLI version ${BICEP_VERSION} "
+  invoke_tests "Tools" "Bicep"
 }
 
 install_google_cloud_cli_from_archive() {
@@ -52,6 +71,10 @@ run_upstream_installer() {
   local installer_name="${installer_path##*/}"
   local max_attempts=1
   case "$installer_name" in
+    install-bicep.sh)
+      install_bicep_from_nuget
+      return
+      ;;
     install-google-cloud-cli.sh) max_attempts=3 ;;
   esac
 
