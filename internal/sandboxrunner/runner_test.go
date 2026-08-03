@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -682,8 +683,9 @@ exec bash -lc "$1"
 		t.Fatal(readErr)
 	}
 	var result struct {
-		Passed  bool `json:"passed"`
-		Results []struct {
+		Completed bool `json:"completed"`
+		Passed    bool `json:"passed"`
+		Results   []struct {
 			Name       string `json:"name"`
 			Stdout     string `json:"stdout"`
 			Stderr     string `json:"stderr"`
@@ -693,7 +695,7 @@ exec bash -lc "$1"
 	if err := json.Unmarshal(resultBytes, &result); err != nil {
 		t.Fatalf("invalid result JSON: %v\n%s", err, resultBytes)
 	}
-	if result.Passed || len(result.Results) != 2 {
+	if !result.Completed || result.Passed || len(result.Results) != 2 {
 		t.Fatalf("result must contain the two executed assertions and fail: %#v", result)
 	}
 	if result.Results[0].Stdout != "first" || result.Results[1].Stderr != "second" || result.Results[1].ExitStatus != 17 {
@@ -719,6 +721,9 @@ case "$1 $2" in
     shift 2
     test "$1" = sb-fixture
     shift
+    test "$1" = -u
+    test "$2" = runner
+    shift 2
     test "$1" = --
     shift
     exec "$@"
@@ -780,8 +785,9 @@ esac
 		t.Fatal(readErr)
 	}
 	var result struct {
-		Passed  bool `json:"passed"`
-		Cleanup struct {
+		Completed bool `json:"completed"`
+		Passed    bool `json:"passed"`
+		Cleanup   struct {
 			Attempted bool `json:"attempted"`
 			Passed    bool `json:"passed"`
 		} `json:"cleanup"`
@@ -789,7 +795,7 @@ esac
 	if err := json.Unmarshal(resultBytes, &result); err != nil {
 		t.Fatalf("invalid result JSON: %v\n%s", err, resultBytes)
 	}
-	if result.Passed || !result.Cleanup.Attempted || !result.Cleanup.Passed {
+	if !result.Completed || result.Passed || !result.Cleanup.Attempted || !result.Cleanup.Passed {
 		t.Fatalf("failed assertion must retain successful Sandbox cleanup evidence: %#v", result)
 	}
 }
@@ -809,9 +815,16 @@ case "$1 $2" in
     printf 'Sandbox ID:   opaque-fixture-42\n'
     ;;
   "sandbox exec")
+    if IFS= read -r unexpected_input; then
+      printf 'unexpected stdin: %s\n' "$unexpected_input" >&2
+      exit 88
+    fi
     shift 2
     test "$1" = opaque-fixture-42
     shift
+    test "$1" = -u
+    test "$2" = runner
+    shift 2
     test "$1" = --
     shift
     exec "$@"
@@ -863,7 +876,7 @@ esac
 		t.Fatal(err)
 	}
 	for _, command := range []string{
-		"sandbox exec opaque-fixture-42",
+		"sandbox exec opaque-fixture-42 -u runner",
 		"sandbox kill opaque-fixture-42",
 	} {
 		if !strings.Contains(string(logBytes), command) {
@@ -980,6 +993,9 @@ case "$1 $2" in
     shift 2
     test "$1" = sb-fixture
     shift
+    test "$1" = -u
+    test "$2" = runner
+    shift 2
     test "$1" = --
     shift
     exec "$@"
@@ -1245,6 +1261,82 @@ exec "$@"
 			}
 			if strings.Count(string(sudoBytes), "chmod 0660 "+socketPath) != 2 {
 				t.Fatalf("both runs must preserve group-only socket access:\n%s", sudoBytes)
+			}
+		})
+	}
+}
+
+func TestEnsureDockerReplacesStalePIDOwnedByAnotherProcess(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("the stale PID contract requires the non-root sudo path")
+	}
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			fixture := t.TempDir()
+			binDir := filepath.Join(fixture, "bin")
+			if err := os.MkdirAll(binDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			readyPath := filepath.Join(fixture, "docker.ready")
+			startMarker := filepath.Join(fixture, "dockerd.started")
+			pidPath := filepath.Join(fixture, "docker.pid")
+			socketPath := filepath.Join(fixture, "docker.sock")
+			if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(socketPath, []byte("stale socket placeholder"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			writeExecutable(t, filepath.Join(binDir, "docker"), `#!/usr/bin/env bash
+set -euo pipefail
+test "$1" = info
+test -f "$DOCKER_READY_FILE"
+`)
+			writeExecutable(t, filepath.Join(binDir, "dockerd"), `#!/usr/bin/env bash
+set -euo pipefail
+pid_file=""
+for argument in "$@"; do
+  case "$argument" in
+    --pidfile=*) pid_file="${argument#--pidfile=}" ;;
+  esac
+done
+test -n "$pid_file"
+printf '%s\n' "$$" >"$pid_file"
+: >"$DOCKER_READY_FILE"
+: >"$DOCKER_START_MARKER"
+`)
+			writeExecutable(t, filepath.Join(binDir, "sudo"), `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = mkdir ]; then
+  exit 0
+fi
+exec "$@"
+`)
+			script := filepath.Join(root, "templates", "github-runner-"+image, "scripts", "ensure-docker")
+			output, err := runCommand(t, "bash", []string{script},
+				"PATH="+binDir+":"+os.Getenv("PATH"),
+				"DOCKER_BIN="+filepath.Join(binDir, "docker"),
+				"DOCKERD_BIN="+filepath.Join(binDir, "dockerd"),
+				"DOCKER_SOCKET="+socketPath,
+				"DOCKER_PID_FILE="+pidPath,
+				"DOCKER_LOG_FILE="+filepath.Join(fixture, "dockerd.log"),
+				"DOCKER_READY_FILE="+readyPath,
+				"DOCKER_START_MARKER="+startMarker,
+			)
+			if err != nil {
+				t.Fatalf("ensure-docker did not replace the stale PID: %v\n%s", err, output)
+			}
+			if _, err := os.Stat(startMarker); err != nil {
+				t.Fatalf("dockerd was not started after stale PID detection: %v", err)
+			}
+			if _, err := os.Stat(socketPath); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("stale socket was not removed: %v", err)
 			}
 		})
 	}

@@ -38,12 +38,17 @@ fi
 run_root mkdir -p "$(dirname "$docker_socket")" "$(dirname "$docker_pid_file")" /var/lib/docker
 if [ -f "$docker_pid_file" ]; then
   daemon_pid="$(run_root cat "$docker_pid_file" 2>/dev/null || true)"
-  if [ -z "$daemon_pid" ] || ! run_root kill -0 "$daemon_pid" 2>/dev/null; then
-    run_root rm -f "$docker_pid_file"
+  daemon_name=""
+  if [[ "$daemon_pid" =~ ^[1-9][0-9]*$ ]] && run_root kill -0 "$daemon_pid" 2>/dev/null; then
+    daemon_name="$(run_root cat "/proc/$daemon_pid/comm" 2>/dev/null || true)"
+  fi
+  if [ "$daemon_name" != dockerd ]; then
+    run_root rm -f "$docker_pid_file" "$docker_socket"
   fi
 fi
 
 if [ ! -f "$docker_pid_file" ]; then
+  run_root rm -f "$docker_socket"
   run_root nohup "$dockerd_command" \
     --host="unix://$docker_socket" \
     --pidfile="$docker_pid_file" \

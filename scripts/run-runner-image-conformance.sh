@@ -9,6 +9,9 @@ target=""
 output=""
 sandbox_id=""
 qshell_bin="${QSHELL:-qshell}"
+sandbox_exec_timeout_seconds="${RUNNER_CONFORMANCE_COMMAND_TIMEOUT_SECONDS:-300}"
+active_command_pid=""
+active_watchdog_pid=""
 
 usage() {
   cat >&2 <<'USAGE'
@@ -50,6 +53,10 @@ case "$executor" in
   docker | sandbox) ;;
   *) usage ;;
 esac
+if ! [[ "$sandbox_exec_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
+  echo "RUNNER_CONFORMANCE_COMMAND_TIMEOUT_SECONDS must be a positive integer" >&2
+  exit 64
+fi
 test -f "$manifest_file" || {
   echo "missing compatibility manifest $manifest_file" >&2
   exit 66
@@ -91,6 +98,12 @@ cleanup() {
   original_status=$?
   trap - EXIT
   cleanup_failed=0
+  if [ -n "$active_watchdog_pid" ]; then
+    kill "$active_watchdog_pid" 2>/dev/null || true
+  fi
+  if [ -n "$active_command_pid" ]; then
+    kill -TERM "$active_command_pid" 2>/dev/null || true
+  fi
   if [ -n "$sandbox_id" ]; then
     : >"$cleanup_stdout_file"
     : >"$cleanup_stderr_file"
@@ -155,6 +168,36 @@ cleanup() {
 }
 trap cleanup EXIT
 
+run_with_timeout() {
+  local timeout_seconds="$1"
+  local timeout_marker="$workdir/command.timeout"
+  local exit_status
+  shift
+  rm -f "$timeout_marker"
+  "$@" &
+  active_command_pid=$!
+  (
+    sleep "$timeout_seconds"
+    if kill -0 "$active_command_pid" 2>/dev/null; then
+      : >"$timeout_marker"
+      kill -TERM "$active_command_pid" 2>/dev/null || true
+      sleep 2
+      kill -KILL "$active_command_pid" 2>/dev/null || true
+    fi
+  ) &
+  active_watchdog_pid=$!
+  wait "$active_command_pid"
+  exit_status=$?
+  kill "$active_watchdog_pid" 2>/dev/null || true
+  wait "$active_watchdog_pid" 2>/dev/null || true
+  active_command_pid=""
+  active_watchdog_pid=""
+  if [ -f "$timeout_marker" ]; then
+    return 124
+  fi
+  return "$exit_status"
+}
+
 if [ "$executor" = sandbox ]; then
   : "${QINIU_SANDBOX_API_URL:?QINIU_SANDBOX_API_URL is required}"
   : "${QINIU_API_KEY:?QINIU_API_KEY is required}"
@@ -197,7 +240,8 @@ jq -n \
     executor: $executor,
     target: $target,
     started_at: $started_at,
-    passed: true,
+    completed: false,
+    passed: false,
     results: []
   }' >"$output"
 
@@ -218,8 +262,14 @@ while IFS=$'\t' read -r category upstream_name verification; do
     exit_status=$?
   else
     execution_command='printf "__QINIU_RUNNER_CONFORMANCE_REMOTE_STARTED__\n"; '"$execution_command"
-    "$qshell_bin" sandbox exec "$sandbox_id" -- bash -lc "$execution_command" >"$raw_stdout_file" 2>"$stderr_file"
+    run_with_timeout "$sandbox_exec_timeout_seconds" \
+      "$qshell_bin" sandbox exec "$sandbox_id" -u runner -- bash -lc "$execution_command" \
+      </dev/null >"$raw_stdout_file" 2>"$stderr_file"
     exit_status=$?
+    if [ "$exit_status" -eq 124 ]; then
+      printf 'qshell sandbox exec timed out after %s seconds\n' \
+        "$sandbox_exec_timeout_seconds" >>"$stderr_file"
+    fi
     if [ "$(sed -n '1p' "$raw_stdout_file")" = "$remote_start_marker" ]; then
       tail -n +2 "$raw_stdout_file" >"$stdout_file"
     else
@@ -260,7 +310,15 @@ while IFS=$'\t' read -r category upstream_name verification; do
   fi
 done <"$entries_file"
 
-jq --arg finished_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.finished_at = $finished_at' "$output" >"$result_tmp"
+overall_passed=true
+if [ "$failed" -ne 0 ]; then
+  overall_passed=false
+fi
+jq \
+  --arg finished_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson passed "$overall_passed" \
+  '.finished_at = $finished_at | .completed = true | .passed = $passed' \
+  "$output" >"$result_tmp"
 mv "$result_tmp" "$output"
 
 if [ "$failed" -ne 0 ]; then
