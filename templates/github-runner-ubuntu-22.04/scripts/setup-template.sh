@@ -146,6 +146,10 @@ run_upstream_installer() {
     install_google_cloud_cli_from_archive
     return
   fi
+  if [ "$installer_name" = install-docker-cli.sh ]; then
+    echo "upstream Docker CLI installer unavailable; deferring to sandbox-aware installer" >&2
+    return 0
+  fi
   echo "upstream installer failed after $max_attempts attempts: $installer_name" >&2
   return 1
 }
@@ -206,24 +210,39 @@ Acquire::https::Timeout "30";
 APT_NETWORK
 }
 
-install_docker_for_sandbox() {
+configure_docker_apt_repository() {
   install -d -m 0755 /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /tmp/docker.gpg
-  echo "${DOCKER_GPG_SHA256}  /tmp/docker.gpg" | sha256sum --check -
-  actual_fingerprint="$(gpg --show-keys --with-colons /tmp/docker.gpg | awk -F: '$1 == "fpr" {print $10; exit}')"
-  test "$actual_fingerprint" = "$DOCKER_GPG_FINGERPRINT"
-  gpg --dearmor -o /etc/apt/keyrings/docker.gpg /tmp/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
+  rm -f /tmp/docker.gpg /etc/apt/keyrings/docker.gpg /etc/apt/sources.list.d/docker.list
+  download_checked https://download.docker.com/linux/ubuntu/gpg /tmp/docker.gpg "$DOCKER_GPG_SHA256" || return 1
+  local actual_fingerprint
+  actual_fingerprint="$(gpg --show-keys --with-colons /tmp/docker.gpg | awk -F: '$1 == "fpr" {print $10; exit}')" || return 1
+  if [ "$actual_fingerprint" != "$DOCKER_GPG_FINGERPRINT" ]; then
+    echo "Docker repository key fingerprint mismatch" >&2
+    return 1
+  fi
+  gpg --dearmor -o /etc/apt/keyrings/docker.gpg /tmp/docker.gpg || return 1
+  chmod a+r /etc/apt/keyrings/docker.gpg || return 1
   . /etc/os-release
   echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
     >/etc/apt/sources.list.d/docker.list
-  apt-get update
-  if apt-cache show docker-ce >/dev/null 2>&1; then
+  apt-get update || return 1
+  apt-cache show docker-ce >/dev/null 2>&1
+}
+
+install_docker_for_sandbox() {
+  if configure_docker_apt_repository && \
     apt-get install -y --no-install-recommends \
-      containerd.io docker-buildx-plugin docker-ce docker-ce-cli docker-compose-plugin
+      containerd.io docker-buildx-plugin docker-ce docker-ce-cli docker-compose-plugin; then
+    echo "installed Docker packages from the official Docker repository"
   else
+    echo "official Docker packages unavailable; using Ubuntu archive packages" >&2
+    rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg
+    apt-get update
     apt-get install -y --no-install-recommends docker.io docker-buildx docker-compose-v2
   fi
+  docker --version
+  docker buildx version
+  docker compose version
 }
 
 install_runner() {

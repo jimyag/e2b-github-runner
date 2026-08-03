@@ -2769,6 +2769,46 @@ func TestRunnerTemplatePinsNVMArchive(t *testing.T) {
 	}
 }
 
+func TestRunnerTemplateFallsBackToUbuntuDockerPackages(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptBytes, err := os.ReadFile(filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, required := range []string{
+				"configure_docker_apt_repository() {",
+				`download_checked https://download.docker.com/linux/ubuntu/gpg /tmp/docker.gpg "$DOCKER_GPG_SHA256" || return 1`,
+				`if [ "$installer_name" = install-docker-cli.sh ]; then`,
+				"upstream Docker CLI installer unavailable; deferring to sandbox-aware installer",
+				"official Docker packages unavailable; using Ubuntu archive packages",
+				"rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg",
+				"apt-get install -y --no-install-recommends docker.io docker-buildx docker-compose-v2",
+				"docker --version",
+				"docker buildx version",
+				"docker compose version",
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("template must retain a verified Ubuntu Docker fallback; missing %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestRunnerTemplatePinsBicepNuGetPackage(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
