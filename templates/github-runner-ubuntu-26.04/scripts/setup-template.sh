@@ -8,7 +8,7 @@ set -euxo pipefail
 : "${AZCOPY_VERSION:?AZCOPY_VERSION is required}"
 : "${AZCOPY_DEB_SHA256:?AZCOPY_DEB_SHA256 is required}"
 : "${POWERSHELL_VERSION:?POWERSHELL_VERSION is required}"
-: "${POWERSHELL_ARCHIVE_SHA256:?POWERSHELL_ARCHIVE_SHA256 is required}"
+: "${POWERSHELL_DEB_SHA256:?POWERSHELL_DEB_SHA256 is required}"
 : "${DOCKER_GPG_SHA256:?DOCKER_GPG_SHA256 is required}"
 : "${DOCKER_GPG_FINGERPRINT:?DOCKER_GPG_FINGERPRINT is required}"
 export PATH="/usr/local/share/qiniu-sandbox-runner-template:${PATH}"
@@ -41,17 +41,21 @@ APT_PREFERENCE
   test "$(azcopy --version)" = "azcopy version $AZCOPY_VERSION"
 }
 
-install_pinned_powershell() {
-  local archive_path="/tmp/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz"
+install_pinned_powershell_package() {
+  local package=/tmp/powershell.deb
   download_checked \
-    "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/powershell-${POWERSHELL_VERSION}-linux-x64.tar.gz" \
-    "$archive_path" \
-    "$POWERSHELL_ARCHIVE_SHA256"
-  install -d -m 0755 /opt/microsoft/powershell/7
-  tar -xzf "$archive_path" -C /opt/microsoft/powershell/7
-  chmod 0755 /opt/microsoft/powershell/7/pwsh
-  ln -s /opt/microsoft/powershell/7/pwsh /usr/bin/pwsh
-  rm -f "$archive_path"
+    "https://packages.microsoft.com/ubuntu/24.04/prod/pool/main/p/powershell/powershell_${POWERSHELL_VERSION}-1.deb_amd64.deb" \
+    "$package" \
+    "$POWERSHELL_DEB_SHA256"
+  install -d -m 0755 /etc/apt/preferences.d
+  cat >/etc/apt/preferences.d/qiniu-powershell <<APT_PREFERENCE
+Package: powershell
+Pin: version ${POWERSHELL_VERSION}-1.deb
+Pin-Priority: 1001
+APT_PREFERENCE
+  apt-get install -y "$package"
+  rm -f "$package"
+  test "$(pwsh --version)" = "PowerShell $POWERSHELL_VERSION"
 }
 
 configure_reliable_apt_sources() {
@@ -469,7 +473,7 @@ WAAGENT
   bash "$upstream_build/configure-apt.sh"
   bash "$upstream_build/configure-environment.sh"
   bash "$upstream_build/install-apt-vital.sh"
-  install_pinned_powershell
+  install_pinned_powershell_package
   install_pester_for_upstream_tests
   bash "$HELPER_SCRIPTS/invoke-tests.sh" Tools azcopy
 

@@ -29,12 +29,13 @@ session and waits for the loopback HTTP port before continuing. This preserves
 the upstream start/config/stop assertion without depending on systemd or
 allowing a daemon or controller process to retain the Sandbox build session.
 
-PowerShell 7.6.4 is installed from its versioned official GitHub release asset
-with a pinned checksum instead of discovering that same asset through the
-GitHub Releases API during the build. Full-image PowerShell modules are not
-part of the disk-bounded guarantee and are listed as `excluded` in the
-compatibility manifest, except for the pinned Pester version required to run
-the upstream installer assertions.
+PowerShell 7.6.4 is installed from Microsoft's official Ubuntu package pool
+with a pinned checksum and apt version preference instead of querying or
+downloading through the GitHub Releases API during the build. The package is
+verified against the exact Ubuntu 26.04 base image. Full-image PowerShell
+modules are not part of the disk-bounded guarantee and are listed as
+`excluded` in the compatibility manifest, except for the pinned Pester version
+required to run the upstream installer assertions.
 
 Canonical's ECR rootfs keeps its apt configuration in `sources.list`, while
 the pinned upstream non-22.04 setup unconditionally rewrites the Azure
