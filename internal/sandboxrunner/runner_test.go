@@ -2532,6 +2532,43 @@ func TestVersionedTemplateBuildUsesDiskBoundedToolset(t *testing.T) {
 	}
 }
 
+func TestRunnerTemplateRetriesGoogleCloudInstaller(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, required := range []string{
+				"run_upstream_installer() {",
+				`install-google-cloud-cli.sh) max_attempts=3 ;;`,
+				`run_upstream_installer "$upstream_build/$installer"`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("template must retry the Google Cloud installer as a bounded unit; missing %q", required)
+				}
+			}
+			if strings.Contains(script, `bash "$upstream_build/$installer"`) {
+				t.Fatal("installer loop bypasses bounded upstream installer wrapper")
+			}
+		})
+	}
+}
+
 func TestRunnerTemplateBuildUsesBoundedHTTPSAptSources(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{

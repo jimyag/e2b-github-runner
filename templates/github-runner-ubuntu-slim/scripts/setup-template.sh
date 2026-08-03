@@ -23,6 +23,28 @@ download_checked() {
   echo "$expected_sha256  $destination" | sha256sum --check -
 }
 
+run_upstream_installer() {
+  local installer_path="$1"
+  local installer_name="${installer_path##*/}"
+  local max_attempts=1
+  case "$installer_name" in
+    install-google-cloud-cli.sh) max_attempts=3 ;;
+  esac
+
+  local attempt
+  for ((attempt = 1; attempt <= max_attempts; attempt++)); do
+    if bash "$installer_path"; then
+      return 0
+    fi
+    if [ "$attempt" -lt "$max_attempts" ]; then
+      echo "upstream installer failed; retrying $installer_name ($attempt/$max_attempts)" >&2
+      sleep 10
+    fi
+  done
+  echo "upstream installer failed after $max_attempts attempts: $installer_name" >&2
+  return 1
+}
+
 install_azcopy_from_microsoft_package() {
   local package=/tmp/azcopy.deb
   download_checked \
@@ -184,7 +206,7 @@ if [ "${TEMPLATE_FLAVOR:-}" = slim ]; then
     install-pipx-packages.sh \
     install-docker-cli.sh \
     configure-system.sh; do
-    bash "$upstream_build/$installer"
+    run_upstream_installer "$upstream_build/$installer"
     if [ "$installer" = configure-apt-sources.sh ]; then
       configure_reliable_apt_sources
     fi
@@ -373,7 +395,7 @@ WAAGENT
     install-python.sh \
     install-zstd.sh \
     install-ninja.sh; do
-    bash "$upstream_build/$installer"
+    run_upstream_installer "$upstream_build/$installer"
     if [ "$installer" = install-azure-cli.sh ]; then
       install_azure_devops_extension
       bash "$HELPER_SCRIPTS/invoke-tests.sh" CLI.Tools "Azure DevOps CLI"
@@ -397,9 +419,9 @@ WAAGENT
         # Mono 6.12 JIT aborts when an amd64 image is built through arm64
         # emulation. Scope interpreter mode to installation-time validation;
         # the completed amd64 image retains the native JIT default.
-        MONO_ENV_OPTIONS=--interp bash "$upstream_build/$installer"
+        MONO_ENV_OPTIONS=--interp run_upstream_installer "$upstream_build/$installer"
       else
-        bash "$upstream_build/$installer"
+        run_upstream_installer "$upstream_build/$installer"
       fi
     done
   fi
