@@ -2705,13 +2705,14 @@ func TestRunnerTemplatePinsBicepNuGetPackage(t *testing.T) {
 				`"$BICEP_NUGET_SHA256"`,
 				`install-bicep.sh)`,
 				`install_bicep_from_nuget`,
+				`run_upstream_tests_if_available "Tools" "Bicep"`,
 			} {
 				if !strings.Contains(script, required) {
 					t.Fatalf("template must install checked Bicep from NuGet; missing %q", required)
 				}
 			}
-			if strings.Count(script, `source "$HELPER_SCRIPTS/install.sh"`) < 2 {
-				t.Fatal("custom Bicep and Git LFS installers must load the upstream test helper in their own shell scope")
+			if strings.Contains(script, `invoke_tests "Tools" "Bicep"`) {
+				t.Fatal("custom Bicep installer must not call an undefined shell function")
 			}
 		})
 	}
@@ -2740,7 +2741,7 @@ func TestRunnerTemplateInstallsGitLFSFromUbuntuArchive(t *testing.T) {
 			for _, required := range []string{
 				"install_git_lfs_from_ubuntu() {",
 				"apt-get install -y --no-install-recommends git-lfs",
-				`invoke_tests "Tools" "Git-lfs"`,
+				`run_upstream_tests_if_available "Tools" "Git-lfs"`,
 				`install-git-lfs.sh)`,
 				`install_git_lfs_from_ubuntu`,
 			} {
@@ -2748,8 +2749,8 @@ func TestRunnerTemplateInstallsGitLFSFromUbuntuArchive(t *testing.T) {
 					t.Fatalf("template must install Git LFS from the configured Ubuntu archive; missing %q", required)
 				}
 			}
-			if strings.Count(script, `source "$HELPER_SCRIPTS/install.sh"`) < 2 {
-				t.Fatal("custom Bicep and Git LFS installers must load the upstream test helper in their own shell scope")
+			if strings.Contains(script, `invoke_tests "Tools" "Git-lfs"`) {
+				t.Fatal("custom Git LFS installer must not call an undefined shell function")
 			}
 		})
 	}

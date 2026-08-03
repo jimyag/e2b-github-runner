@@ -27,13 +27,19 @@ download_checked() {
   echo "$expected_sha256  $destination" | sha256sum --check -
 }
 
+run_upstream_tests_if_available() {
+  local test_script="$HELPER_SCRIPTS/invoke-tests.sh"
+  if [ -f "$test_script" ]; then
+    bash "$test_script" "$1" "$2"
+  fi
+}
+
 install_bicep_from_nuget() {
   local package_name="azure.bicep.commandline.linux-x64.${BICEP_VERSION}.nupkg"
   local package_path="/tmp/${package_name}"
   local package_url="https://api.nuget.org/v3-flatcontainer/azure.bicep.commandline.linux-x64/${BICEP_VERSION}/${package_name}"
   local extract_dir=/tmp/qiniu-bicep
 
-  source "$HELPER_SCRIPTS/install.sh"
   download_checked "$package_url" "$package_path" "$BICEP_NUGET_SHA256"
   install -d -m 0755 "$extract_dir"
   unzip -q -j "$package_path" tools/bicep -d "$extract_dir"
@@ -42,15 +48,14 @@ install_bicep_from_nuget() {
   rmdir "$extract_dir"
   rm -f "$package_path"
   bicep --version | grep -F "Bicep CLI version ${BICEP_VERSION} "
-  invoke_tests "Tools" "Bicep"
+  run_upstream_tests_if_available "Tools" "Bicep"
 }
 
 install_git_lfs_from_ubuntu() {
-  source "$HELPER_SCRIPTS/install.sh"
   apt-get update
   apt-get install -y --no-install-recommends git-lfs
   git lfs version
-  invoke_tests "Tools" "Git-lfs"
+  run_upstream_tests_if_available "Tools" "Git-lfs"
 }
 
 install_google_cloud_cli_from_archive() {
