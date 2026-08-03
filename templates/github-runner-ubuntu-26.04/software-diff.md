@@ -11,10 +11,15 @@ installed and disabled but direct process startup replaces upstream
 `systemctl` behavior. See `../runner-images-compatibility.json` for every
 item-level decision and executable check.
 
-Build-time service validation starts Apache in a detached session and waits
-for its PID file before continuing. This preserves the upstream start/config/
-stop assertion without allowing a daemon or controller process to retain the
-Sandbox build session.
+Build-time service validation starts Apache in the foreground inside a detached
+session and waits for the loopback HTTP port before continuing. This preserves
+the upstream start/config/stop assertion without depending on systemd or
+allowing a daemon or controller process to retain the Sandbox build session.
+
+PowerShell 7.6.4 is installed from its versioned official GitHub release asset
+with a pinned checksum instead of discovering that same asset through the
+GitHub Releases API during the build. The upstream PowerShell module installers
+and Pester assertions still run unchanged.
 
 Canonical's ECR rootfs keeps its apt configuration in `sources.list`, while
 the pinned upstream non-22.04 setup unconditionally rewrites the Azure
