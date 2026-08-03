@@ -1640,6 +1640,9 @@ func TestPublicTemplatesUsePinnedMicrosoftAzCopyWithoutActionPrewarm(t *testing.
 			for _, required := range []string{
 				"install_azcopy_from_microsoft_package",
 				"https://packages.microsoft.com/ubuntu/24.04/prod/pool/main/a/azcopy/",
+				"/etc/apt/preferences.d/qiniu-azcopy",
+				"Pin: version ${AZCOPY_VERSION}",
+				"Pin-Priority: 1001",
 				`test "$(azcopy --version)" = "azcopy version $AZCOPY_VERSION"`,
 			} {
 				if !strings.Contains(script, required) {

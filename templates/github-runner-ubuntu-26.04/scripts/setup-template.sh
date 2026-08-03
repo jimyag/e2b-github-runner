@@ -29,6 +29,12 @@ install_azcopy_from_microsoft_package() {
     "https://packages.microsoft.com/ubuntu/24.04/prod/pool/main/a/azcopy/azcopy_${AZCOPY_VERSION}_amd64.deb" \
     "$package" \
     "$AZCOPY_DEB_SHA256"
+  install -d -m 0755 /etc/apt/preferences.d
+  cat >/etc/apt/preferences.d/qiniu-azcopy <<APT_PREFERENCE
+Package: azcopy
+Pin: version ${AZCOPY_VERSION}
+Pin-Priority: 1001
+APT_PREFERENCE
   dpkg -i "$package"
   rm -f "$package"
   ln -sf "$(command -v azcopy)" /usr/local/bin/azcopy10
