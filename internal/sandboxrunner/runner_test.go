@@ -1342,6 +1342,112 @@ exec "$@"
 	}
 }
 
+func TestEnsureDockerRestartsUnreadyDockerdProcess(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("the unready dockerd contract requires the non-root sudo path")
+	}
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			fixture := t.TempDir()
+			binDir := filepath.Join(fixture, "bin")
+			if err := os.MkdirAll(binDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+
+			staleDockerd := exec.Command("sleep", "60")
+			if err := staleDockerd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			staleDockerdWait := make(chan error, 1)
+			go func() {
+				staleDockerdWait <- staleDockerd.Wait()
+			}()
+			staleDockerdExited := false
+			t.Cleanup(func() {
+				if staleDockerdExited {
+					return
+				}
+				_ = staleDockerd.Process.Kill()
+				<-staleDockerdWait
+			})
+
+			procDir := filepath.Join(fixture, "proc", strconv.Itoa(staleDockerd.Process.Pid))
+			if err := os.MkdirAll(procDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(procDir, "comm"), []byte("dockerd\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			readyPath := filepath.Join(fixture, "docker.ready")
+			startMarker := filepath.Join(fixture, "dockerd.started")
+			pidPath := filepath.Join(fixture, "docker.pid")
+			socketPath := filepath.Join(fixture, "docker.sock")
+			if err := os.WriteFile(pidPath, []byte(strconv.Itoa(staleDockerd.Process.Pid)+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			writeExecutable(t, filepath.Join(binDir, "docker"), `#!/usr/bin/env bash
+set -euo pipefail
+test "$1" = info
+test -f "$DOCKER_READY_FILE"
+`)
+			writeExecutable(t, filepath.Join(binDir, "dockerd"), `#!/usr/bin/env bash
+set -euo pipefail
+pid_file=""
+for argument in "$@"; do
+  case "$argument" in
+    --pidfile=*) pid_file="${argument#--pidfile=}" ;;
+  esac
+done
+test -n "$pid_file"
+printf '%s\n' "$$" >"$pid_file"
+: >"$DOCKER_READY_FILE"
+: >"$DOCKER_START_MARKER"
+`)
+			writeExecutable(t, filepath.Join(binDir, "sudo"), `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = mkdir ]; then
+  exit 0
+fi
+exec "$@"
+`)
+			script := filepath.Join(root, "templates", "github-runner-"+image, "scripts", "ensure-docker")
+			output, err := runCommand(t, "bash", []string{script},
+				"PATH="+binDir+":"+os.Getenv("PATH"),
+				"DOCKER_BIN="+filepath.Join(binDir, "docker"),
+				"DOCKERD_BIN="+filepath.Join(binDir, "dockerd"),
+				"DOCKER_SOCKET="+socketPath,
+				"DOCKER_PID_FILE="+pidPath,
+				"DOCKER_LOG_FILE="+filepath.Join(fixture, "dockerd.log"),
+				"DOCKER_PROC_ROOT="+filepath.Join(fixture, "proc"),
+				"DOCKER_READY_FILE="+readyPath,
+				"DOCKER_START_MARKER="+startMarker,
+			)
+			if err != nil {
+				t.Fatalf("ensure-docker did not restart the unready daemon: %v\n%s", err, output)
+			}
+			if _, err := os.Stat(startMarker); err != nil {
+				t.Fatalf("dockerd was not restarted after the unready daemon was stopped: %v", err)
+			}
+			select {
+			case err := <-staleDockerdWait:
+				staleDockerdExited = true
+				if err == nil {
+					t.Fatal("unready dockerd exited successfully; want termination by ensure-docker")
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("ensure-docker left the unready dockerd process running")
+			}
+		})
+	}
+}
+
 func TestTemplateCurlAddsAuthenticationOnlyForGitHubAPI(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
