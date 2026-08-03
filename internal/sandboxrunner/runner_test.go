@@ -2374,7 +2374,7 @@ func TestVersionedTemplateBuildStopsValidatedServicesBetweenInstallers(t *testin
 				t.Fatal(err)
 			}
 			script := string(scriptBytes)
-			installerRun := `bash "$upstream_build/$installer"`
+			installerRun := `run_upstream_installer "$upstream_build/$installer"`
 			serviceCleanup := `install-apache.sh) stop_validated_service apache2 ;;`
 			installerRunIndex := strings.LastIndex(script, installerRun)
 			if installerRunIndex < 0 {
