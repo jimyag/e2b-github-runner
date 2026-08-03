@@ -1307,6 +1307,9 @@ fi
 			for lineNumber, line := range lines {
 				for _, option := range []string{
 					"--http1.1",
+					"--connect-timeout 15",
+					"--speed-limit 1024",
+					"--speed-time 60",
 					"--retry 5",
 					"--retry-all-errors",
 					"--retry-delay 2",

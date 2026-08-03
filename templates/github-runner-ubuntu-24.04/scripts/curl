@@ -4,6 +4,9 @@ set -euo pipefail
 real_curl="${RUNNER_TEMPLATE_CURL_BIN:-/usr/bin/curl}"
 transport_options=(
   --http1.1
+  --connect-timeout 15
+  --speed-limit 1024
+  --speed-time 60
   --retry 5
   --retry-all-errors
   --retry-delay 2
