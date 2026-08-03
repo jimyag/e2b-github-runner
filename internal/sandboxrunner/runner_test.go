@@ -1650,6 +1650,80 @@ fi
 	}
 }
 
+func TestTemplateCurlCachesReleaseAPIAndSeedsTagMetadata(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			fixture := t.TempDir()
+			curlLog := filepath.Join(fixture, "curl.log")
+			fakeCurl := filepath.Join(fixture, "curl")
+			writeExecutable(t, fakeCurl, `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$CURL_TEST_LOG"
+if [[ "$*" == *"/repos/cli/cli/releases/latest"* ]]; then
+  printf '%s\n' '{"tag_name":"v2.97.0","assets":[{"name":"gh_2.97.0_checksums.txt","url":"https://api.github.com/repos/cli/cli/releases/assets/1"}]}'
+fi
+`)
+			wrapper := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"curl",
+			)
+			env := []string{
+				"RUNNER_TEMPLATE_CURL_BIN=" + fakeCurl,
+				"RUNNER_TEMPLATE_GITHUB_RELEASE_CACHE=" + filepath.Join(fixture, "release-cache"),
+				"RUNNER_TEMPLATE_GITHUB_API_RETRY_DELAY=0",
+				"CURL_TEST_LOG=" + curlLog,
+			}
+			latestArgs := []string{
+				"-fsSL",
+				"https://api.github.com/repos/cli/cli/releases/latest",
+			}
+			for attempt := 1; attempt <= 2; attempt++ {
+				output, err := runCommand(t, wrapper, latestArgs, env...)
+				if err != nil {
+					t.Fatalf("release API attempt %d failed: %v\n%s", attempt, err, output)
+				}
+				if !strings.Contains(string(output), `"tag_name":"v2.97.0"`) {
+					t.Fatalf("release API attempt %d returned %q", attempt, output)
+				}
+			}
+			output, err := runCommand(t, wrapper, []string{
+				"-fsSL",
+				"https://github.com/cli/cli/releases/download/v2.97.0/gh_2.97.0_checksums.txt",
+			}, env...)
+			if err != nil {
+				t.Fatalf("release asset download failed: %v\n%s", err, output)
+			}
+
+			logBytes, err := os.ReadFile(curlLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+			if len(lines) != 2 {
+				t.Fatalf("curl invocation count = %d, want one release lookup and one asset download\n%s", len(lines), logBytes)
+			}
+			if !strings.Contains(lines[0], "/repos/cli/cli/releases/latest") {
+				t.Fatalf("first request is not the release lookup: %s", lines[0])
+			}
+			if !strings.Contains(lines[1], "/repos/cli/cli/releases/assets/1") {
+				t.Fatalf("tag cache did not route the asset through the API: %s", lines[1])
+			}
+			if strings.Contains(string(logBytes), "/releases/tags/v2.97.0") {
+				t.Fatalf("latest response did not seed the tag cache: %s", logBytes)
+			}
+		})
+	}
+}
+
 func TestTemplateCurlDownloadsGitHubReleaseAssetsThroughAPI(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
