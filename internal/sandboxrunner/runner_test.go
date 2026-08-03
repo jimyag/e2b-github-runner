@@ -2541,6 +2541,26 @@ func TestRunnerTemplateRetriesGoogleCloudInstaller(t *testing.T) {
 		"ubuntu-26.04",
 	} {
 		t.Run(image, func(t *testing.T) {
+			dockerfilePath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"Dockerfile",
+			)
+			dockerfileBytes, err := os.ReadFile(dockerfilePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			for _, required := range []string{
+				"ARG GOOGLE_CLOUD_CLI_VERSION=",
+				"ARG GOOGLE_CLOUD_CLI_ARCHIVE_SHA256=",
+			} {
+				if !strings.Contains(dockerfile, required) {
+					t.Fatalf("template must pin the Google Cloud CLI archive fallback; missing %q", required)
+				}
+			}
+
 			scriptPath := filepath.Join(
 				root,
 				"templates",
@@ -2554,6 +2574,12 @@ func TestRunnerTemplateRetriesGoogleCloudInstaller(t *testing.T) {
 			}
 			script := string(scriptBytes)
 			for _, required := range []string{
+				`: "${GOOGLE_CLOUD_CLI_VERSION:?GOOGLE_CLOUD_CLI_VERSION is required}"`,
+				`: "${GOOGLE_CLOUD_CLI_ARCHIVE_SHA256:?GOOGLE_CLOUD_CLI_ARCHIVE_SHA256 is required}"`,
+				"install_google_cloud_cli_from_archive() {",
+				`google-cloud-cli-${GOOGLE_CLOUD_CLI_VERSION}-linux-x86_64.tar.gz`,
+				`"$GOOGLE_CLOUD_CLI_ARCHIVE_SHA256"`,
+				`install_google_cloud_cli_from_archive`,
 				"run_upstream_installer() {",
 				`install-google-cloud-cli.sh) max_attempts=3 ;;`,
 				`run_upstream_installer "$upstream_build/$installer"`,

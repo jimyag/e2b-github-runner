@@ -61,6 +61,12 @@ DevOps extension 1.0.6 from its official Microsoft Blob wheel with a pinned
 checksum and bounded curl retries; versioned templates retain the upstream
 Pester assertion for that extension.
 
+Google Cloud CLI installation first follows the pinned upstream
+`actions/runner-images` APT path. If that repository remains unavailable after
+bounded retries, the build falls back to Google's official versioned x86_64
+archive. The fallback version and SHA-256 digest are pinned in each Dockerfile,
+and the resulting `gcloud` command is verified before the build continues.
+
 The versioned image build keeps the upstream Podman, Buildah, and Skopeo CLI
 checks. BuildKit cannot create the nested namespace needed by the upstream
 `podman networking` assertion, so setup marks only that assertion skipped in

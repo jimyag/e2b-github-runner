@@ -9,6 +9,8 @@ set -euxo pipefail
 : "${AZCOPY_DEB_SHA256:?AZCOPY_DEB_SHA256 is required}"
 : "${AZURE_DEVOPS_EXTENSION_VERSION:?AZURE_DEVOPS_EXTENSION_VERSION is required}"
 : "${AZURE_DEVOPS_EXTENSION_SHA256:?AZURE_DEVOPS_EXTENSION_SHA256 is required}"
+: "${GOOGLE_CLOUD_CLI_VERSION:?GOOGLE_CLOUD_CLI_VERSION is required}"
+: "${GOOGLE_CLOUD_CLI_ARCHIVE_SHA256:?GOOGLE_CLOUD_CLI_ARCHIVE_SHA256 is required}"
 : "${DOCKER_GPG_SHA256:?DOCKER_GPG_SHA256 is required}"
 : "${DOCKER_GPG_FINGERPRINT:?DOCKER_GPG_FINGERPRINT is required}"
 export PATH="/usr/local/share/qiniu-sandbox-runner-template:${PATH}"
@@ -21,6 +23,28 @@ download_checked() {
     --retry 5 --retry-all-errors --retry-delay 2 \
     "$url" -o "$destination"
   echo "$expected_sha256  $destination" | sha256sum --check -
+}
+
+install_google_cloud_cli_from_archive() {
+  local archive_name="google-cloud-cli-${GOOGLE_CLOUD_CLI_VERSION}-linux-x86_64.tar.gz"
+  local archive_path="/tmp/${archive_name}"
+  local archive_url="https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${archive_name}"
+
+  rm -f /etc/apt/sources.list.d/google-cloud-sdk.list /usr/share/keyrings/cloud.google.gpg
+  download_checked "$archive_url" "$archive_path" "$GOOGLE_CLOUD_CLI_ARCHIVE_SHA256"
+  rm -rf /opt/google-cloud-sdk
+  tar -xzf "$archive_path" -C /opt
+  rm -f "$archive_path"
+  /opt/google-cloud-sdk/install.sh --quiet --usage-reporting false \
+    --path-update false --bash-completion false --command-completion false
+
+  local bin
+  for bin in bq docker-credential-gcloud gcloud gcloud-crc32c git-credential-gcloud.sh gsutil; do
+    test -e "/opt/google-cloud-sdk/bin/$bin" || continue
+    ln -sf "/opt/google-cloud-sdk/bin/$bin" "/usr/bin/$bin"
+  done
+  echo "google-cloud-sdk $archive_url" >>"$HELPER_SCRIPTS/apt-sources.txt"
+  gcloud --version
 }
 
 run_upstream_installer() {
@@ -41,6 +65,11 @@ run_upstream_installer() {
       sleep 10
     fi
   done
+  if [ "$installer_name" = install-google-cloud-cli.sh ]; then
+    echo "upstream installer failed after $max_attempts attempts; using checked Google Cloud CLI archive" >&2
+    install_google_cloud_cli_from_archive
+    return
+  fi
   echo "upstream installer failed after $max_attempts attempts: $installer_name" >&2
   return 1
 }
