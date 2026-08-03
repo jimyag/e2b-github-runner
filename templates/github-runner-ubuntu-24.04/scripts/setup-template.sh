@@ -13,6 +13,8 @@ set -euxo pipefail
 : "${BICEP_NUGET_SHA256:?BICEP_NUGET_SHA256 is required}"
 : "${GOOGLE_CLOUD_CLI_VERSION:?GOOGLE_CLOUD_CLI_VERSION is required}"
 : "${GOOGLE_CLOUD_CLI_ARCHIVE_SHA256:?GOOGLE_CLOUD_CLI_ARCHIVE_SHA256 is required}"
+: "${NVM_VERSION:?NVM_VERSION is required}"
+: "${NVM_ARCHIVE_SHA256:?NVM_ARCHIVE_SHA256 is required}"
 : "${DOCKER_GPG_SHA256:?DOCKER_GPG_SHA256 is required}"
 : "${DOCKER_GPG_FINGERPRINT:?DOCKER_GPG_FINGERPRINT is required}"
 export PATH="/usr/local/share/qiniu-sandbox-runner-template:${PATH}"
@@ -80,6 +82,31 @@ install_google_cloud_cli_from_archive() {
   gcloud --version
 }
 
+install_nvm_from_archive() {
+  local archive_name="nvm-v${NVM_VERSION}.tar.gz"
+  local archive_path="/tmp/${archive_name}"
+  local nvm_dir=/etc/skel/.nvm
+
+  download_checked \
+    "https://codeload.github.com/nvm-sh/nvm/tar.gz/refs/tags/v${NVM_VERSION}" \
+    "$archive_path" \
+    "$NVM_ARCHIVE_SHA256"
+  install -d -m 0755 "$nvm_dir"
+  tar -xzf "$archive_path" -C "$nvm_dir" --strip-components=1
+  rm -f "$archive_path"
+
+  source "$HELPER_SCRIPTS/etc-environment.sh"
+  set_etc_environment_variable "NVM_DIR" '$HOME/.nvm'
+  echo '[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm' >>/etc/skel/.bash_profile
+  echo 'source "$NVM_DIR/nvm.sh"' >>/etc/skel/.bashrc
+
+  export NVM_DIR="$nvm_dir"
+  # shellcheck disable=SC1091
+  source "$NVM_DIR/nvm.sh"
+  test "$(nvm --version)" = "$NVM_VERSION"
+  nvm alias default system
+}
+
 run_upstream_installer() {
   local installer_path="$1"
   local installer_name="${installer_path##*/}"
@@ -94,12 +121,20 @@ run_upstream_installer() {
       return
       ;;
     install-google-cloud-cli.sh) max_attempts=3 ;;
+    install-nvm.sh)
+      install_nvm_from_archive
+      return
+      ;;
   esac
 
   local attempt
   for ((attempt = 1; attempt <= max_attempts; attempt++)); do
     if bash "$installer_path"; then
-      return 0
+      if [ "$installer_name" = install-google-cloud-cli.sh ] && ! command -v gcloud >/dev/null 2>&1; then
+        echo "upstream Google Cloud installer returned success without gcloud" >&2
+      else
+        return 0
+      fi
     fi
     if [ "$attempt" -lt "$max_attempts" ]; then
       echo "upstream installer failed; retrying $installer_name ($attempt/$max_attempts)" >&2

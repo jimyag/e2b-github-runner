@@ -2662,6 +2662,7 @@ func TestRunnerTemplateRetriesGoogleCloudInstaller(t *testing.T) {
 				`install_google_cloud_cli_from_archive`,
 				"run_upstream_installer() {",
 				`install-google-cloud-cli.sh) max_attempts=3 ;;`,
+				`if [ "$installer_name" = install-google-cloud-cli.sh ] && ! command -v gcloud >/dev/null 2>&1; then`,
 				`run_upstream_installer "$upstream_build/$installer"`,
 			} {
 				if !strings.Contains(script, required) {
@@ -2670,6 +2671,52 @@ func TestRunnerTemplateRetriesGoogleCloudInstaller(t *testing.T) {
 			}
 			if strings.Contains(script, `bash "$upstream_build/$installer"`) {
 				t.Fatal("installer loop bypasses bounded upstream installer wrapper")
+			}
+		})
+	}
+}
+
+func TestRunnerTemplatePinsNVMArchive(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			templateRoot := filepath.Join(root, "templates", "github-runner-"+image)
+			dockerfileBytes, err := os.ReadFile(filepath.Join(templateRoot, "Dockerfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			for _, required := range []string{
+				"ARG NVM_VERSION=0.40.6",
+				"ARG NVM_ARCHIVE_SHA256=17302cad7feedb1ad33ba738f93d2176a90970724f22de119603624fcbdec1a2",
+			} {
+				if !strings.Contains(dockerfile, required) {
+					t.Fatalf("template must pin the NVM archive; missing %q", required)
+				}
+			}
+
+			scriptBytes, err := os.ReadFile(filepath.Join(templateRoot, "scripts", "setup-template.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, required := range []string{
+				`: "${NVM_VERSION:?NVM_VERSION is required}"`,
+				`: "${NVM_ARCHIVE_SHA256:?NVM_ARCHIVE_SHA256 is required}"`,
+				"install_nvm_from_archive() {",
+				`https://codeload.github.com/nvm-sh/nvm/tar.gz/refs/tags/v${NVM_VERSION}`,
+				`"$NVM_ARCHIVE_SHA256"`,
+				`install-nvm.sh)`,
+				`install_nvm_from_archive`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("template must install checked NVM from its pinned archive; missing %q", required)
+				}
 			}
 		})
 	}

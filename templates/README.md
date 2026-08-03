@@ -79,6 +79,10 @@ avoids another build-time repository key, and retains the upstream Git LFS
 Pester assertion on the three versioned templates. The Slim template verifies
 the installed Git LFS CLI directly.
 
+All four templates install NVM 0.40.6 from the checksum-pinned official tag
+archive instead of cloning the repository during the build. The resulting
+profile setup and system-Node default match the pinned upstream installer.
+
 Google Cloud CLI installation first follows the pinned upstream
 `actions/runner-images` APT path. If that repository remains unavailable after
 bounded retries, the build falls back to Google's official versioned x86_64
