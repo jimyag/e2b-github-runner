@@ -21,8 +21,10 @@ The four physical templates were published, catalog-checked, and release-smoke
 verified in `cn-yangzhou-1` and `us-south-1` on 2026-08-03. The regional IDs
 and smoke evidence are retained in [Issue #38](https://github.com/qiniu/ci-runner/issues/38#issuecomment-5164811404).
 The `ubuntu-latest` row inherits the verified publication state of its 24.04
-physical template. The workflow label is not operational until the separate
-managed Runner Spec rollout verifies all five labels.
+physical template. The managed Runner Spec rollout and all five workflow
+labels were end-to-end verified by
+[GitHub Actions run 30858489153](https://github.com/miclle/qiniu-ci-runner-test/actions/runs/30858489153)
+on 2026-08-04 CST; every request completed and its Sandbox was cleaned.
 
 Publication state is restricted to `development`, `published`, or `verified`.
 `published` means the physical template is public in both supported regions.

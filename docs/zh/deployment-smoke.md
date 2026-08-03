@@ -13,7 +13,9 @@
 - GitHub App OAuth callback URL 指向 runnerd origin 下的 `/auth/github/callback`。
 - GitHub App webhook 或 repository webhook 将 `workflow_job` events 发送到 `POST /webhooks/github`。
 - 目标 account/organization Preferences 已配置 Sandbox service API URL 和 API key，或 `/admin/sandbox_service` 已启用 admin fallback。
-- 至少一个 Qiniu sandbox template 包含 `/opt/actions-runner/config.sh` 和 `/opt/actions-runner/run.sh`。
+- 已按[公共 Runner 模板](default-runner-templates.md)完成 4 个公共 Qiniu 模板的
+  双区域构建、发布、catalog 检查和 smoke 验证。该门禁通过前，不要部署默认
+  启用的 managed specs。
 - 已通过 `runnerd --bootstrap-admin github:<github-user-id>` 引导 admin account（该命令设置 admin 后直接退出，需在启动服务前执行）。
 
 不要在本文档中写入真实 secret，也不要提交部署本地文件，例如 `runnerd.local.yaml`、`.smee-url`、sqlite databases、private keys 或 cookie jars。
@@ -118,27 +120,51 @@ curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/vars | jq
 - 移除 audience entry 会阻止新的 fallback resolution，但不会改变已 snapshot 的 runner request。
 - 禁用 admin default 后，原本未配置的 account 会得到 `sandbox service not configured`。
 
-创建或确认 runner spec：
+启动后确认 runnerd 协调了且仅协调了 5 个 managed specs，并且没有自定义名称
+冲突：
 
 ```bash
-curl -fsS -X POST https://<runnerd-host>/runner_specs \
-  -b "$COOKIE_JAR" \
-  -H 'content-type: application/json' \
-  -d '{"name":"ubuntu-24-04","labels":["self-hosted","e2b"],"template_id":"<template-id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
+curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/runner_specs |
+  jq '[.[] | select(.managed_by == "qiniu/ci-runner") |
+      {name, required_labels, default_template_name, enabled}]'
 ```
 
-如果 spec 需要限制访问，将 `default_available` 设为 `false`，并为目标仓库创建 runner policy 或 runner group。
+预期名称为 `qiniu-ubuntu-slim`、`qiniu-ubuntu-22.04`、
+`qiniu-ubuntu-24.04`、`qiniu-ubuntu-26.04` 和 `qiniu-ubuntu-latest`。
+确认启动日志中不存在 managed-profile name collision。在每个已配置的 Sandbox
+区域运行 `task template-defaults-check` 并保存 4 个 ID；runnerd 必须通过该
+scoped endpoint 解析相同稳定名称，不能保存某一区域的 ID。
 
-运行 match test：
+运行正向和负向 match tests：
 
 ```bash
 curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"repository_full_name":"<owner>/<repo>","labels":["self-hosted","e2b"]}' | jq
+  -d '{"repository_full_name":"<owner>/<repo>","labels":["qiniu","ubuntu-24.04"]}' | jq
+
+curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
+  -b "$COOKIE_JAR" \
+  -H 'content-type: application/json' \
+  -d '{"repository_full_name":"<owner>/<repo>","labels":["ubuntu-24.04"]}' | jq
+
+curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
+  -b "$COOKIE_JAR" \
+  -H 'content-type: application/json' \
+  -d '{"repository_full_name":"<owner>/<repo>","labels":["qiniu"]}' | jq
 ```
 
-预期结果：响应包含预期 runner spec。
+预期结果：只有第 1 个请求选择 `qiniu-ubuntu-24.04`。
+
+创建一个带显式 template ID 和 operator labels 的自定义回归 spec。确认保存时
+不会访问 Sandbox，运行时使用保存的 ID，并且仍可编辑和删除：
+
+```bash
+curl -fsS -X POST https://<runnerd-host>/runner_specs \
+  -b "$COOKIE_JAR" \
+  -H 'content-type: application/json' \
+  -d '{"name":"deployment-custom","labels":["self-hosted","deployment-custom"],"required_labels":["deployment-custom"],"template_id":"<private-template-id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
+```
 
 ## 4. Webhook Delivery
 
@@ -153,7 +179,7 @@ curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
 
 ## 5. Workflow Pickup
 
-使用最小 workflow：
+为每个 managed 逻辑 label 触发 1 个 job：
 
 ```yaml
 name: runnerd-smoke
@@ -162,8 +188,24 @@ on:
   workflow_dispatch:
 
 jobs:
-  smoke:
-    runs-on: [self-hosted, e2b]
+  slim:
+    runs-on: [qiniu, ubuntu-slim]
+    steps:
+      - run: uname -a
+  ubuntu_22:
+    runs-on: [qiniu, ubuntu-22.04]
+    steps:
+      - run: uname -a
+  ubuntu_24:
+    runs-on: [qiniu, ubuntu-24.04]
+    steps:
+      - run: uname -a
+  ubuntu_26_preview:
+    runs-on: [qiniu, ubuntu-26.04]
+    steps:
+      - run: uname -a
+  latest:
+    runs-on: [qiniu, ubuntu-latest]
     steps:
       - run: |
           uname -a
@@ -176,9 +218,19 @@ jobs:
 预期结果：
 
 - Runner request 依次显示为 `queued`、`creating`、`running`。
-- GitHub Actions job 离开 queued 状态，并运行在 `e2b-*` runner 上。
+- 5 个 GitHub Actions jobs 都离开 queued 状态，并运行在临时 managed runners
+  上。两个 24.04 逻辑 labels 都通过 scoped region catalog 解析到 24.04 物理
+  模板。
+- 每个 job 都启动请求的操作系统；26.04 job 记录为预览验收。
 - Job 的 `Set up runner` log 包含 Qiniu sandbox id、runner request id 和 runner name。
 - Job 结束后，runner request 变为 `completed`。
+
+参考证据：2026-08-04（CST），
+[run 30858489153](https://github.com/miclle/qiniu-ci-runner-test/actions/runs/30858489153)
+接收了带有效签名的 GitHub `workflow_run` 和 `workflow_job` deliveries，并让
+5 个 jobs 全部完成。5 条 requests 均进入 `completed`，Runner processes 均正常
+退出，Sandbox 均完成清理，repository 最终没有残留 self-hosted Runners。该参考
+run 不能替代对实际部署的 webhook secret 与 GitHub webhook 配置是否一致的验证。
 
 ## 6. Restart Recovery
 
@@ -205,16 +257,23 @@ Workflow 完成后确认：
 
 ## 8. Failure Drill
 
-部署仍在观察期时，运行一个受控失败：
+部署仍在观察期时，执行受控路由与 operator-control 检查：
 
-- 使用不匹配任何 runner spec 的 labels，或
-- 临时禁用匹配的 runner spec，或
-- 降低 spec concurrency 并触发两个 jobs。
+- 触发 `[ubuntu-24.04]` 和 `[qiniu]`；两者都必须保持 unmatched。
+- 在 Admin 中禁用 `qiniu-ubuntu-24.04`，重启 runnerd，并确认它仍保持禁用；
+  重新启用后确认恢复调度。
+- 降低某个 managed spec 的 concurrency，并触发两个 jobs。
+- 运行 `deployment-custom` spec，确认使用显式 template ID；随后删除它，并
+  确认删除 managed spec 仍返回 conflict。
 
 预期结果取决于场景：
 
 - unmatched labels 或 disabled specs 会记录为 admission failures；
+- reconciliation 会在重启后保留 operator 控制的 disabled 状态；
 - concurrency pressure 会让后续 requests 保持 queued，而不是被丢弃；
 - retryable placement 或 rate-limit failures 会填充 `next_retry_at`，并保持后续可处理。
+
+如果路由或模板健康状态回退，先禁用全部 5 个 managed specs。回滚时不要删除
+公共模板或自定义 specs。
 
 如果部署说明包含 private hosts、account names、channel URLs、secrets 或 cookie data，请记录在仓库外部。

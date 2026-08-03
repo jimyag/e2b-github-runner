@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -234,9 +235,37 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	var input upsertProfileRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+	payload, err := readProfileRequestPayload(r.Body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid profile payload")
+		return
+	}
+	if payload.containsAny("managed_by", "catalog_revision", "default_template_name") {
+		writeError(w, http.StatusBadRequest, "managed runner spec metadata cannot be set by clients")
+		return
+	}
+	var input createProfileRequest
+	if err := payload.decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid profile payload")
+		return
+	}
+	if strings.TrimSpace(input.TemplateID) == "" {
+		writeError(w, http.StatusBadRequest, "template_id is required")
+		return
+	}
+	existing, err := s.store.GetProfile(input.Name)
+	if err == nil && strings.TrimSpace(existing.ManagedBy) != "" {
+		writeErrorCode(
+			w,
+			http.StatusConflict,
+			managedRunnerSpecErrorCode,
+			"managed runner specs cannot be overwritten",
+		)
+		return
+	}
+	if err != nil && !errors.Is(err, state.ErrNotFound) {
+		s.logger.Error("load runner spec before create", "name", input.Name, "error", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	enabled := true
@@ -246,6 +275,7 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	profile, err := s.store.UpsertProfile(state.RunnerProfile{
 		Name:             input.Name,
 		Labels:           input.Labels,
+		RequiredLabels:   input.RequiredLabels,
 		TemplateID:       input.TemplateID,
 		RunnerGroup:      input.RunnerGroup,
 		MaxConcurrency:   input.MaxConcurrency,
@@ -286,22 +316,42 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "profile not found")
 		return
 	}
-	var input upsertProfileRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+	payload, err := readProfileRequestPayload(r.Body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid profile payload")
 		return
 	}
-	if len(input.Labels) > 0 {
-		current.Labels = input.Labels
+	if strings.TrimSpace(current.ManagedBy) != "" {
+		s.handlePatchManagedProfile(w, current, payload)
+		return
 	}
-	if input.TemplateID != "" {
-		current.TemplateID = input.TemplateID
+	if payload.containsAny("managed_by", "catalog_revision", "default_template_name") {
+		writeError(w, http.StatusBadRequest, "managed runner spec metadata cannot be set by clients")
+		return
 	}
-	if input.RunnerGroup != "" {
-		current.RunnerGroup = input.RunnerGroup
+	var input patchProfileRequest
+	if err := payload.decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid profile payload")
+		return
 	}
-	if input.MaxConcurrency > 0 {
-		current.MaxConcurrency = input.MaxConcurrency
+	if input.Labels != nil {
+		current.Labels = *input.Labels
+	}
+	if input.RequiredLabels != nil {
+		current.RequiredLabels = *input.RequiredLabels
+	}
+	if input.TemplateID != nil {
+		current.TemplateID = *input.TemplateID
+	}
+	if strings.TrimSpace(current.TemplateID) == "" {
+		writeError(w, http.StatusBadRequest, "template_id is required")
+		return
+	}
+	if input.RunnerGroup != nil {
+		current.RunnerGroup = *input.RunnerGroup
+	}
+	if input.MaxConcurrency != nil {
+		current.MaxConcurrency = *input.MaxConcurrency
 	}
 	if input.MinIdle != nil {
 		current.MinIdle = *input.MinIdle
@@ -327,17 +377,111 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, profile)
 }
 
+func (s *Server) handlePatchManagedProfile(w http.ResponseWriter, current state.RunnerProfile, payload profileRequestPayload) {
+	if payload.containsAny(
+		"labels",
+		"required_labels",
+		"template_id",
+		"runner_group",
+		"priority",
+		"default_available",
+		"default_template_name",
+		"managed_by",
+		"catalog_revision",
+	) {
+		writeErrorCode(
+			w,
+			http.StatusConflict,
+			managedRunnerSpecErrorCode,
+			"managed runner spec catalog fields cannot be changed",
+		)
+		return
+	}
+	var input patchProfileRequest
+	if err := payload.decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid profile payload")
+		return
+	}
+	if input.MaxConcurrency != nil {
+		current.MaxConcurrency = *input.MaxConcurrency
+	}
+	if input.MinIdle != nil {
+		current.MinIdle = *input.MinIdle
+	}
+	if input.Enabled != nil {
+		current.Enabled = *input.Enabled
+	}
+	profile, err := s.store.UpsertProfile(current)
+	if err != nil {
+		s.logger.Info("managed profile update rejected", "name", current.Name, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.logger.Info("managed profile updated", "name", profile.Name, "max_concurrency", profile.MaxConcurrency, "min_idle", profile.MinIdle, "enabled", profile.Enabled)
+	s.recordAudit("admin_api", "profile.update", "runner_profile", profile.Name, profile)
+	s.refreshMetrics()
+	writeJSON(w, http.StatusOK, profile)
+}
+
+type profileRequestPayload struct {
+	data   []byte
+	fields map[string]json.RawMessage
+}
+
+func readProfileRequestPayload(body io.Reader) (profileRequestPayload, error) {
+	data, err := io.ReadAll(io.LimitReader(body, 1<<20))
+	if err != nil {
+		return profileRequestPayload{}, err
+	}
+	payload := profileRequestPayload{data: data}
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&payload.fields); err != nil {
+		return profileRequestPayload{}, err
+	}
+	return payload, nil
+}
+
+func (p profileRequestPayload) decode(dst any) error {
+	return json.NewDecoder(bytes.NewReader(p.data)).Decode(dst)
+}
+
+func (p profileRequestPayload) containsAny(names ...string) bool {
+	for field := range p.fields {
+		for _, name := range names {
+			if strings.EqualFold(field, name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	if err := s.store.DeleteProfile(r.PathValue("name")); err != nil {
-		s.logger.Error("delete profile", "name", r.PathValue("name"), "error", err)
+	name := r.PathValue("name")
+	profile, err := s.store.GetProfile(name)
+	if err != nil && !errors.Is(err, state.ErrNotFound) {
+		s.logger.Error("load runner spec before delete", "name", name, "error", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.logger.Info("profile deleted", "name", r.PathValue("name"))
-	s.recordAudit("admin_api", "profile.delete", "runner_profile", r.PathValue("name"), map[string]any{"status": "deleted"})
+	if err == nil && strings.TrimSpace(profile.ManagedBy) != "" {
+		writeErrorCode(
+			w,
+			http.StatusConflict,
+			managedRunnerSpecErrorCode,
+			"managed runner specs cannot be deleted",
+		)
+		return
+	}
+	if err := s.store.DeleteProfile(name); err != nil {
+		s.logger.Error("delete profile", "name", name, "error", err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.logger.Info("profile deleted", "name", name)
+	s.recordAudit("admin_api", "profile.delete", "runner_profile", name, map[string]any{"status": "deleted"})
 	s.refreshMetrics()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

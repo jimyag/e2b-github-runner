@@ -61,11 +61,17 @@ Sandbox service API URL 和 API Key 不在 `runnerd.yaml` 中配置。登录后�
 
 首次使用产品引导只会在现有账户级 `account_preferences` 表的 `onboarding/product-tour` 下保存版本号、状态和 `tour_seen` 标记，不会保存 Sandbox API Key。记录缺失或版本过旧时返回 `pending` 且 `tour_seen=false`。走完引导浮层后写入 `pending` 且 `tour_seen=true`，因此不会再次自动弹出，但必需的设置仍会保留。当前登录账户能解析到 custom、inherited 或符合条件的 admin default 任一有效 Sandbox 来源后即写入 `completed`。首次引导中显式跳过会写入 `skipped` 并关闭浮层，但不会隐藏必需设置。从账户菜单重播引导不会重置或覆盖已保存状态。
 
-Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置；服务启动后通过后台页面或 admin API 创建。spec 名称建议使用有意义的名字，例如 `ubuntu-24-04`，`template_id` 填对应的 Qiniu sandbox template ID。template 是否可访问会在 runnerd 使用对应账户或组织的 Sandbox service 配置启动 sandbox 时确认。
+Runner spec、runner group 和 repository policy 不在 `runnerd.yaml` 中配置。
+runnerd 启动时会协调 5 个 Qiniu Ubuntu managed specs。其 labels、required
+labels、稳定公共模板名称、priority 和 default availability 由 runnerd 管理，
+operator 控制的 `enabled`、`max_concurrency` 和 `min_idle` 会被保留。自定义
+spec 仍通过 Admin API/UI 管理，需要显式 `template_id`、advertised labels 和
+可选 required labels。保存自定义 spec 时不会验证模板访问权限；runnerd 使用
+对应账户或组织的 Sandbox service 配置启动 sandbox 时才会检查。
 
 `database.backend` 支持 `sqlite`、`postgres` 和 `mysql`。本地开发优先使用 sqlite；共享数据库的多实例部署需要先用两个 runnerd 进程验证 lease 行为，再作为正式运行方式记录。
 
-状态表结构主要由 `internal/state/records.go` 里的 GORM tag 定义。服务启动时，已有 SQLite `runner_requests` 表只通过创建缺失的 model columns 和 indexes 做 additive migration；它会跳过通用 SQLite `AutoMigrate` 表重建，避免历史上通过 ALTER 添加的字段丢失。Admin newest-first 列表依赖 `(queued_at DESC, id ASC)` 上的 `idx_runner_requests_queued_id`。Repository-authorized 列表通过 `(github_installation_id, queued_at DESC, id ASC)` 上的 `idx_runner_requests_github_installation_queued_id` 分别查询每个 installation，再合并有界结果。创建任一缺失索引都不会重写 rows，但应先在 disposable production-sized copy 上测量启动 I/O 和锁等待。未来如需对 `runner_requests` 做 non-additive 变更，必须增加窄范围显式 migration 和数据保全回归 fixture。其他表会先针对旧 columns、obsolete OAuth constraints 和不兼容的 legacy scope tables 执行窄范围 compatibility pass，再运行 GORM `AutoMigrate`。缺少 `scope_type`/`scope_id` 的旧 `account_preferences` 和 `account_secrets` 表会被删除并重建，而不是迁移原数据。升级后必须重新配置其中保存的 Sandbox Preferences 和 API keys；已保存的 GitHub OAuth tokens 也会被清除，相关用户需重新使用 GitHub 登录后才能同步 installations。修改 state record、索引或迁移 helper 时，至少先跑：
+状态表结构主要由 `internal/state/records.go` 里的 GORM tag 定义。服务启动时，已有 SQLite `runner_requests` 和 `runner_profiles` 表只通过创建全部缺失的 model columns 和 indexes 做 additive migration；它们会跳过通用 SQLite `AutoMigrate` 表重建，从而保留历史上通过 ALTER 添加的 runner-request 字段，以及旧 runner-profile rows 和自定义 indexes，并补齐 managed-catalog 字段。Admin newest-first 列表依赖 `(queued_at DESC, id ASC)` 上的 `idx_runner_requests_queued_id`。Repository-authorized 列表通过 `(github_installation_id, queued_at DESC, id ASC)` 上的 `idx_runner_requests_github_installation_queued_id` 分别查询每个 installation，再合并有界结果。创建缺失索引不会重写 rows，但应先在 disposable production-sized copy 上测量启动 I/O 和锁等待。未来如需对任一 additive-only 表做 non-additive 变更，必须增加窄范围显式 migration 和数据保全回归 fixture。其他表会先针对旧 columns、obsolete OAuth constraints 和不兼容的 legacy scope tables 执行窄范围 compatibility pass，再运行 GORM `AutoMigrate`。缺少 `scope_type`/`scope_id` 的旧 `account_preferences` 和 `account_secrets` 表会被删除并重建，而不是迁移原数据。升级后必须重新配置其中保存的 Sandbox Preferences 和 API keys；已保存的 GitHub OAuth tokens 也会被清除，相关用户需重新使用 GitHub 登录后才能同步 installations。修改 state record、索引或迁移 helper 时，至少先跑：
 
 ```bash
 go test ./internal/state -count=1
@@ -336,13 +342,24 @@ allowlist 这两类 warning；它们表示 manual chunk 可能生成浏览器不
 
 `task test` 会重新构建 UI、运行同一套 Bun tests，然后执行带 race detection 和 coverage 的 Go tests。Bun suite 覆盖 helper 和 server-rendered component output；导航、dialog、头像加载/回退，以及角色变更后的权限切换仍需在真实浏览器中验证。修改 onboarding 时还要验证：`/jobs` 自动启动、六个目标、跳转到 `/account/preferences`、遮罩关闭后持续显示设置任务、显式跳过的持久化，以及重播不修改状态。
 
-先创建一个默认 runner spec：
+确认 runnerd 已协调 managed specs：
+
+```bash
+curl -fsS -b "$COOKIE_JAR" \
+  http://127.0.0.1:25500/runner_specs |
+  jq '.[] | select(.managed_by == "qiniu/ci-runner") |
+      {name, required_labels, default_template_name, enabled}'
+```
+
+结果应恰好包含 `qiniu-ubuntu-slim`、`qiniu-ubuntu-22.04`、
+`qiniu-ubuntu-24.04`、`qiniu-ubuntu-26.04` 和 `qiniu-ubuntu-latest`。验证向后
+兼容的显式模板路径时，请另外创建自定义 spec：
 
 ```bash
 curl -fsS -X POST http://127.0.0.1:25500/runner_specs \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"name":"ubuntu-24-04","labels":["self-hosted","e2b"],"template_id":"<template id>","max_concurrency":100,"enabled":true,"default_available":true}' | jq
+  -d '{"name":"custom-ubuntu","labels":["self-hosted","custom-ubuntu"],"required_labels":["custom-ubuntu"],"template_id":"<template id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
 ```
 
 手动创建一个 runner：
@@ -351,7 +368,7 @@ curl -fsS -X POST http://127.0.0.1:25500/runner_specs \
 curl -fsS -X POST http://127.0.0.1:25500/runner_requests \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"id":"manual-001","repository_full_name":"<owner>/<repo>","runner_spec_name":"ubuntu-24-04"}' | jq
+  -d '{"id":"manual-001","repository_full_name":"<owner>/<repo>","runner_spec_name":"qiniu-ubuntu-24.04"}' | jq
 ```
 
 查看状态：
@@ -463,14 +480,14 @@ Settings -> Webhooks -> Add webhook
 在目标仓库添加：
 
 ```yaml
-name: e2b-runner-smoke
+name: qiniu-runner-smoke
 
 on:
   workflow_dispatch:
 
 jobs:
   smoke:
-    runs-on: [self-hosted, e2b]
+    runs-on: [qiniu, ubuntu-24.04]
     steps:
       - name: Print runner info
         run: |
@@ -484,7 +501,7 @@ jobs:
 1. GitHub 创建一个 `workflow_job.queued` webhook。
 2. 本服务校验签名并在状态库里写入一条 `queued` runner request。
 3. 服务创建 sandbox，获取 GitHub registration token，并在 sandbox 内启动 ephemeral runner。
-4. GitHub job 被 `self-hosted,e2b` runner 接走执行。
+4. GitHub job 被 managed `qiniu,ubuntu-24.04` runner 接走执行。
 5. runner 进程退出后，服务清理对应 sandbox。
 
 如果同时配置了 `Workflow runs` 事件，`workflow_run.requested` / `workflow_run.in_progress` 只作为补偿信号：runnerd 会查询该 run 下仍处于 `queued` 的 jobs，并为尚未通过 `workflow_job` 入队的 job 补建 runner request。这个补偿动作本身不会让 GitHub Actions UI 立刻显示 job 正在运行；UI 会继续显示 queued / waiting for runner，直到 sandbox 内的 ephemeral runner 注册成功并被 GitHub 分配到该 job 后才会变成 in progress / running。
@@ -514,7 +531,12 @@ curl -fsS -b "$COOKIE_JAR" \
 
 - `invalid signature`：GitHub webhook secret 和 `github.webhook_secret` 不一致。
 - `runner start deferred because global concurrency is at capacity` 或 `runner start deferred because profile is at capacity`：request 会保持 queued，直到全局或 per-spec 容量可用。
-- GitHub job 一直 queued：workflow 的 `runs-on` labels 必须包含 `self-hosted` 和 `e2b`，并与 runner spec 的 labels 保持一致。
+- GitHub job 一直 queued：managed default 必须同时包含 `qiniu` 和准确的操作
+  系统 label。`[ubuntu-24.04]`、`[qiniu]` 和不受支持的额外 labels 都不会匹配；
+  自定义 spec 则使用它自己的 advertised labels 和 required labels。
+- 出现 `template_resolution` admission failure：确认 repository owner 对应的
+  scoped Sandbox endpoint 中，managed stable name 恰好对应 1 个公共的
+  `ready` 或 `uploaded` 模板。
 - sandbox 创建失败：确认账户/组织 Preferences 或已启用的 admin default 具有与 template 和本地环境匹配的完整 Sandbox service 配置；Runner detail 会显示实际选择的来源。
 - registration token 失败：检查 [GitHub App 权限表](../../README.zh.md#所需权限)。未配置 `runner_group` 的 spec 需要 repository `Administration`；配置了 `runner_group` 的 spec 需要 organization `Self-hosted runners`。
 

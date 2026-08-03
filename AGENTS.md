@@ -16,8 +16,21 @@ Use this guide for future Codex or agent work in this repository.
 - Current admin browser routes include `/admin/`, `/admin/accounts`, and `/admin/sandbox_service`; keep admin routes and role-gated APIs explicit when changing shared `ui/` code.
 - `/admin/accounts` lists OAuth/bootstrap-created accounts and linked identities. Its only mutation changes another account's `admin`/`user` role atomically with an audit event; self-role changes and changes that could leave no administrator are rejected.
 - Runtime state can use sqlite, Postgres, or MySQL. Do not document multi-instance support until two runnerd processes have been verified against the same database.
-- State schema is defined mostly by GORM tags in `internal/state/records.go`; startup migration runs a narrow legacy compatibility pass and then `AutoMigrate` in `internal/state/db.go`. Existing SQLite `runner_requests` tables are the exception: migrate them additively by creating missing columns and indexes because generic table recreation can erase ALTER-added historical values. GORM foreign-key creation is disabled intentionally, so preserve the foreign-keyless schema convention unless a separately tested migration changes it. Legacy account preference/secret tables without scope columns are intentionally reset; operator docs must warn about Sandbox reconfiguration and GitHub reauthentication before installation sync.
+- State schema is defined mostly by GORM tags in `internal/state/records.go`; startup migration runs a narrow legacy compatibility pass and then `AutoMigrate` in `internal/state/db.go`. Existing SQLite `runner_requests` and `runner_profiles` tables are the exceptions: migrate their missing model columns and indexes additively because generic table recreation can erase ALTER-added runner-request values or legacy runner-profile rows and custom indexes. GORM foreign-key creation is disabled intentionally, so preserve the foreign-keyless schema convention unless a separately tested migration changes it. Legacy account preference/secret tables without scope columns are intentionally reset; operator docs must warn about Sandbox reconfiguration and GitHub reauthentication before installation sync.
 - Runner specs, runner groups, and repository policies are admin API/UI data, not `runnerd.yaml` fields.
+- Runner Spec matching must preserve
+  `required_labels ⊆ job_labels ⊆ labels`. Managed Ubuntu defaults require
+  both `qiniu` and the exact OS label; never broaden them to accept partial
+  label sets or unsupported extra labels.
+- runnerd owns the managed catalog's labels, required labels, stable public
+  template name, priority, and default availability. Operators own
+  `enabled`, `max_concurrency`, and `min_idle`. Custom specs remain
+  operator-owned, retain explicit `template_id`, edit/delete behavior, and no
+  save-time Sandbox validation.
+- Resolve a managed spec's stable public template name against the
+  account/organization scoped Sandbox endpoint immediately before runner
+  registration. Never persist one region's default-template ID in a managed
+  spec.
 - The recommended production GitHub auth path is GitHub App auth for runner operations plus GitHub App OAuth sign-in for ordinary users and administrators. Local account roles authorize management APIs. Token and basic auth still exist as compatibility modes, but their long-term product status is undecided.
 
 ## Common Commands

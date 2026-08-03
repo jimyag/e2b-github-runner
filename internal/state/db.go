@@ -153,12 +153,23 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 	if err := migrateLegacySchemaColumns(db); err != nil {
 		return err
 	}
-	existingSQLiteRunnerRequests :=
-		s.opts.Backend == BackendSQLite &&
-			db.Migrator().HasTable(&runnerRequestRecord{})
+	existingSQLiteRunnerProfiles := s.opts.Backend == BackendSQLite &&
+		db.Migrator().HasTable(&runnerProfileRecord{})
+	if existingSQLiteRunnerProfiles {
+		if err := migrateSQLiteRunnerProfileSchema(db); err != nil {
+			return err
+		}
+	}
+	existingSQLiteRunnerRequests := s.opts.Backend == BackendSQLite &&
+		db.Migrator().HasTable(&runnerRequestRecord{})
 	models := []any{
 		&runnerEventRecord{},
-		&runnerProfileRecord{},
+	}
+	if !existingSQLiteRunnerProfiles {
+		models = append(models, &runnerProfileRecord{})
+	}
+	models = append(
+		models,
 		&runnerGroupRecord{},
 		&runnerGroupSpecRecord{},
 		&repositoryPolicyRecord{},
@@ -171,7 +182,7 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 		&accountPreferenceRecord{},
 		&sandboxServiceDefaultRecord{},
 		&sandboxServiceDefaultAudienceRecord{},
-	}
+	)
 	if existingSQLiteRunnerRequests {
 		if err := migrateSQLiteRunnerRequestSchema(db); err != nil {
 			return err
@@ -188,29 +199,37 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 	return nil
 }
 
+func migrateSQLiteRunnerProfileSchema(db *gorm.DB) error {
+	return migrateSQLiteSchemaAdditively(db, &runnerProfileRecord{}, "runner_profiles")
+}
+
 func migrateSQLiteRunnerRequestSchema(db *gorm.DB) error {
 	// SQLite records columns added through ALTER TABLE outside the original
 	// CREATE TABLE body. Recreating that table through the current GORM SQLite
 	// migrator can omit those columns from the copy and then add them back empty.
+	return migrateSQLiteSchemaAdditively(db, &runnerRequestRecord{}, "runner_requests")
+}
+
+func migrateSQLiteSchemaAdditively(db *gorm.DB, model any, tableName string) error {
 	stmt := &gorm.Statement{DB: db}
-	if err := stmt.Parse(&runnerRequestRecord{}); err != nil {
+	if err := stmt.Parse(model); err != nil {
 		return err
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
 		for _, field := range stmt.Schema.Fields {
-			if field.IgnoreMigration || field.DBName == "" || tx.Migrator().HasColumn(&runnerRequestRecord{}, field.Name) {
+			if field.IgnoreMigration || field.DBName == "" || tx.Migrator().HasColumn(model, field.Name) {
 				continue
 			}
-			if err := tx.Migrator().AddColumn(&runnerRequestRecord{}, field.Name); err != nil {
-				return fmt.Errorf("add runner_requests.%s: %w", field.DBName, err)
+			if err := tx.Migrator().AddColumn(model, field.Name); err != nil {
+				return fmt.Errorf("add %s.%s: %w", tableName, field.DBName, err)
 			}
 		}
 		for _, index := range stmt.Schema.ParseIndexes() {
-			if tx.Migrator().HasIndex(&runnerRequestRecord{}, index.Name) {
+			if tx.Migrator().HasIndex(model, index.Name) {
 				continue
 			}
-			if err := tx.Migrator().CreateIndex(&runnerRequestRecord{}, index.Name); err != nil {
-				return fmt.Errorf("create runner_requests index %s: %w", index.Name, err)
+			if err := tx.Migrator().CreateIndex(model, index.Name); err != nil {
+				return fmt.Errorf("create %s index %s: %w", tableName, index.Name, err)
 			}
 		}
 		return nil

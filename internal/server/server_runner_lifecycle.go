@@ -136,6 +136,12 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		s.store.AppendLog(id, "control.log", []byte("runner start skipped because request is stopped\n"))
 		return
 	}
+	profile, err := s.store.GetProfile(req.ProfileName)
+	if err != nil {
+		unlock()
+		s.failStart(id, st, "profile_lookup", fmt.Errorf("load profile %q: %w", req.ProfileName, err))
+		return
+	}
 	s.admissionMu.Lock()
 	inFlight, err := s.store.InFlightCount()
 	if err != nil {
@@ -154,7 +160,7 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		return
 	}
 	if req.ProfileName != "" {
-		rejected, err := s.profileAtCapacity(req.ProfileName)
+		rejected, err := s.profileAtCapacityFor(profile)
 		if err != nil {
 			s.admissionMu.Unlock()
 			unlock()
@@ -194,21 +200,6 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		return
 	}
 
-	s.logger.Info("creating github registration token", "id", id)
-	s.store.AppendLog(id, "control.log", []byte("creating github registration token\n"))
-	createStartedAt := time.Now()
-	token, err := s.gh.CreateRegistrationToken(ctx, req.RepositoryFullName, req.RunnerGroup)
-	if err != nil {
-		s.failStart(id, st, "github_registration", err)
-		return
-	}
-	s.logger.Info("starting sandbox runner", "id", id, "runner_name", req.RunnerName)
-	s.store.AppendLog(id, "control.log", []byte("starting sandbox runner\n"))
-	profile, err := s.store.GetProfile(req.ProfileName)
-	if err != nil {
-		s.failStart(id, st, "profile_lookup", fmt.Errorf("load profile %q: %w", req.ProfileName, err))
-		return
-	}
 	sandboxService, sandboxConfig, err := s.sandboxServiceAndConfigForRunnerRequestContext(ctx, req)
 	if err != nil {
 		s.failStart(id, st, "sandbox_config", err)
@@ -228,6 +219,42 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 			return
 		}
 	}
+	templateID := profile.TemplateID
+	if strings.TrimSpace(profile.ManagedBy) != "" {
+		catalog, ok := sandboxService.(sandboxrunner.DefaultTemplateCatalog)
+		if !ok {
+			s.failStart(id, st, "template_resolution", newDefaultTemplateResolutionError(
+				strings.TrimSpace(profile.DefaultTemplateName),
+				defaultTemplateResolutionReasonNoCatalog,
+			))
+			return
+		}
+		templates, err := catalog.ListDefaultTemplates(ctx)
+		if err != nil {
+			s.failStart(id, st, "template_resolution", fmt.Errorf(
+				"list default templates for %q: %w",
+				strings.TrimSpace(profile.DefaultTemplateName),
+				err,
+			))
+			return
+		}
+		templateID, err = resolveDefaultTemplateID(profile.DefaultTemplateName, templates)
+		if err != nil {
+			s.failStart(id, st, "template_resolution", err)
+			return
+		}
+	}
+
+	s.logger.Info("creating github registration token", "id", id)
+	s.store.AppendLog(id, "control.log", []byte("creating github registration token\n"))
+	createStartedAt := time.Now()
+	token, err := s.gh.CreateRegistrationToken(ctx, req.RepositoryFullName, req.RunnerGroup)
+	if err != nil {
+		s.failStart(id, st, "github_registration", err)
+		return
+	}
+	s.logger.Info("starting sandbox runner", "id", id, "runner_name", req.RunnerName)
+	s.store.AppendLog(id, "control.log", []byte("starting sandbox runner\n"))
 	exitCh := make(chan struct{})
 	startStage := "sandbox_start"
 	result, err := func() (sandboxrunner.StartResult, error) {
@@ -245,7 +272,7 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 			RegistrationToken: token.Token,
 			Labels:            req.Labels,
 			RunnerGroup:       strings.TrimSpace(req.RunnerGroup),
-			TemplateID:        profile.TemplateID,
+			TemplateID:        templateID,
 			Timeout:           s.cfg.SandboxTimeout,
 			CommandContext:    ctx,
 			OnStdout:          func(data []byte) { s.appendRunnerStdout(id, data) },
@@ -1195,6 +1222,10 @@ func classifyRetryableError(stage string, err error) (string, bool) {
 	if err == nil {
 		return "", false
 	}
+	var resolutionErr *defaultTemplateResolutionError
+	if errors.As(err, &resolutionErr) {
+		return resolutionErr.Reason, false
+	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		return "timeout", true
 	}
@@ -1354,15 +1385,11 @@ func appendError(current, extra string) string {
 	return current + "; " + extra
 }
 
-func (s *Server) profileAtCapacity(profileName string) (bool, error) {
-	profile, err := s.store.GetProfile(profileName)
-	if err != nil {
-		return false, err
-	}
+func (s *Server) profileAtCapacityFor(profile state.RunnerProfile) (bool, error) {
 	if profile.MaxConcurrency <= 0 {
 		return false, nil
 	}
-	inFlight, err := s.store.InFlightCountForProfile(profileName)
+	inFlight, err := s.store.InFlightCountForProfile(profile.Name)
 	if err != nil {
 		return false, err
 	}

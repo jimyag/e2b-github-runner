@@ -72,11 +72,11 @@ cp runnerd.yaml.example runnerd.yaml
 ./bin/runnerd --config runnerd.yaml
 ```
 
-5. 打开 `http://<host>:25500/`。公开产品首页提供当前 GitHub 文档入口，以及指向 `/jobs` 受保护的 Jobs 控制台入口。用户首次登录访问 `/jobs` 时，会看到介绍 Jobs、Repositories、Settings 和 Sandbox 设置的六步引导；之后可从账户菜单重播。
-6. 打开 **Repositories** 查看账户或组织的 **Runner readiness**。有效来源只显示状态，不提供配置控件；缺少 Sandbox 且用户可管理该 scope 时，通过 **Configure Sandbox** 进入精确的账户或组织 Settings 页面。Settings 只列出个人账户和用户属于 active member 的组织；outside collaborator 只能看到 readiness 只读提示，不能浏览该组织的 Sandbox 资源目录。
-7. 在**管理控制台**中创建 **Runner Spec**，设置有意义的 label（如 `ubuntu-24-04`），填写 `template_id`，并启用 `default_available`。
+5. 打开 `http://<host>:25500/`，使用 GitHub OAuth 登录。公开产品首页提供当前 GitHub 文档入口，以及指向 `/jobs` 受保护的 Jobs 控制台入口。用户首次登录访问 `/jobs` 时，会看到介绍 Jobs、Repositories、Settings 和 Sandbox 设置的六步引导；之后可从账户菜单重播。
+6. 打开 **Repositories** 查看账户或组织的 **Runner readiness**。有效来源只显示状态，不提供配置控件；缺少 Sandbox 且用户可管理该 scope 时，通过 **Configure Sandbox** 进入精确的账户或组织 **Preferences** 页面并配置 **Sandbox Service** 凭据。Settings 只列出个人账户和用户属于 active member 的组织；outside collaborator 只能看到 readiness 只读提示，不能浏览该组织的 Sandbox 资源目录。管理员可以在 `/admin/sandbox_service` 配置兜底。
+7. 在**管理控制台**中确认 5 个 Qiniu managed Runner Specs。它们的公共模板已通过双区域 release gate；operator 仍可禁用单个 managed spec，或调整并发与 idle capacity。
 8. 配置 GitHub webhook → `POST http://<host>:25500/webhooks/github`。
-9. 在 workflow 中使用 `runs-on: [self-hosted, <your-runner-label>]`。
+9. 在 workflow 中配置 `runs-on: [qiniu, ubuntu-24.04]` 使用 managed default，或配置自定义 spec 要求的 labels。
 
 本地开发请使用 `task dev` 配合 `runnerd.local.yaml`。详细的本地环境搭建（包括 GitHub App 创建和 webhook 转发）请参阅 [docs/zh/testing.md](docs/zh/testing.md)。
 
@@ -97,7 +97,7 @@ cp runnerd.yaml.example runnerd.yaml
 
 - 相对路径的 `database.dsn` 和 `github.app.private_key_file` 按配置文件所在目录解析。
 - 本地和单节点部署建议使用 SQLite。支持 PostgreSQL 和 MySQL，但多实例共享数据库尚未验证。
-- 已有 SQLite `runner_requests` 表会在启动时补建缺失的 model columns 和 indexes，不会重建整张表。创建列表排序索引不会重写 runner rows，但大数据库可能出现短暂的启动 I/O 和锁等待；迁移与查询计划检查见 [docs/zh/testing.md](docs/zh/testing.md)。
+- 已有 SQLite `runner_requests` 和 `runner_profiles` 表会在启动时补建缺失的 model columns 和 indexes，不会重建整张表，从而保留历史 runner 字段以及旧 profile rows 和 indexes。创建缺失索引不会重写 rows，但大数据库可能出现短暂的启动 I/O 和锁等待；迁移与查询计划检查见 [docs/zh/testing.md](docs/zh/testing.md)。
 - **不支持** GitHub Enterprise Server，请使用 GitHub.com App。
 - GitHub 鉴权方式三选一：`github.app`、`github.token` 或 `github.basic_auth`。
 - 省略 `github.app.installation_id` 时，runnerd 按仓库动态解析 installation，一个 App 可服务多个账号。
@@ -156,11 +156,14 @@ unset secret_value
 ## Webhook 与 Workflow 配置
 
 1. 确保已按上述 [Webhook 事件订阅](#webhook-事件订阅) 配置好 GitHub App webhook，且 `webhook_secret` 与配置文件中的 `github.webhook_secret` 一致。
-2. 在 workflow 中使用：
+2. 使用已验证的 managed label 组合，例如：
 
 ```yaml
-runs-on: [self-hosted, <your-runner-label>]
+runs-on: [qiniu, ubuntu-24.04]
 ```
+
+使用 managed defaults 时必须包含 `qiniu` label。自定义 spec 可以定义自己的
+advertised labels 和 required labels。
 
 runnerd 处理 `queued`、`in_progress` 和 `completed` 动作。对于 `workflow_run` 事件，runnerd 会列出该 run 下所有排队 job，并将尚未入队的匹配 job 创建 runner request。
 
@@ -168,14 +171,35 @@ runnerd 处理 `queued`、`in_progress` 和 `completed` 动作。对于 `workflo
 
 Runner spec、runner group 和 repository policy 通过管理 API 和控制台管理，**不在** `runnerd.yaml` 中配置。
 
-- **Runner Spec**：定义 runner label、沙箱模板和可选的 `runner_group`。设置 `default_available: true` 使其对所有允许的仓库可用。
+- **Managed Runner Spec**：runnerd 会协调 `ubuntu-slim`、`ubuntu-22.04`、
+  `ubuntu-24.04`、预览版 `ubuntu-26.04` 和 `ubuntu-latest` 这 5 个内置
+  specs。catalog labels、required labels、公共模板名称、priority 和
+  availability 由 runnerd 管理；operator 仍可控制 `enabled`、
+  `max_concurrency` 和 `min_idle`。
+- **自定义 Runner Spec**：由 operator 管理，保存显式 `template_id`、
+  advertised labels、可选 required labels 和 `runner_group`。保存时不会调用
+  Sandbox 验证模板。
 - **Runner Group**：spec 设置了 `runner_group` 时，runnerd 创建组织级 runner；否则创建仓库级 runner。
 
 > **⚠️ 个人账号注意：** `runner_group` 需要调用组织级 GitHub API。如果仓库属于个人账号（而非组织），必须将 `runner_group` 留**空**，否则 runner 注册会返回 404 错误。
 
 - **Repository Policy**：为特定仓库授权访问默认之外的额外 spec。
 
-每个 spec 的 `template_id` 应指向包含 GitHub runner 镜像的 Qiniu Sandbox 模板。创建沙箱时会使用 **Repositories → Runner readiness** 中显示的仓库 owner 有效 Sandbox service 检查模板访问权限。
+匹配始终遵守 `required_labels ⊆ job_labels ⊆ labels`。因此，managed Ubuntu
+spec 同时要求 `qiniu` 和准确的操作系统 label；`[ubuntu-24.04]` 或 `[qiniu]`
+都不能单独匹配。workflow 移除 `qiniu` 后不会选择 managed defaults；operator
+也可以在 Admin 中单独禁用某个 managed spec，而不改变 runnerd 协调的 catalog
+identity。
+
+Managed spec 保存稳定的公共模板名称。runnerd 会在创建 Runner 前，使用
+repository owner 对应的 scoped Sandbox endpoint 解析该名称，因此不同区域可以
+返回不同的 template ID。自定义 spec 仍直接使用保存的 `template_id`。当前
+catalog revision 中，`ubuntu-latest` 映射到 Ubuntu 24.04；修改映射前必须评审
+catalog 更新并取得新的区域 smoke 证据。
+
+支持的 workflow labels、发布状态和区域验证流程见[公共 Runner 模板](docs/zh/default-runner-templates.md)。
+
+对于自定义 spec，`template_id` 应指向包含 GitHub runner 镜像的 Qiniu Sandbox 模板。创建沙箱时会使用 **Repositories → Runner readiness** 中显示的仓库 owner 有效 Sandbox service 检查模板访问权限。
 
 ## 管理控制台
 

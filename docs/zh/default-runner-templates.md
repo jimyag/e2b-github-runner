@@ -10,15 +10,16 @@ Ubuntu Slim、Ubuntu 22.04、Ubuntu 24.04，以及处于预览阶段的 Ubuntu 2
 4 个物理模板已于 2026-08-03 在两个受支持的 Sandbox 区域完成发布、catalog
 检查和 release smoke 验证；区域 ID 和证据保存在
 [Issue #38](https://github.com/qiniu/ci-runner/issues/38#issuecomment-5164811404)。
-5 个 workflow label 仍需完成独立的 managed Runner Spec rollout 后才能投入
-使用。
+Managed Runner Spec rollout 已于 2026-08-04（CST）通过
+[GitHub Actions run 30858489153](https://github.com/miclle/qiniu-ci-runner-test/actions/runs/30858489153)
+完成端到端验证：5 个逻辑 labels 全部成功，5 条 Runner requests 均进入
+`completed`，所有 Sandbox 均已清理，且未残留 self-hosted Runner registration。
 上游版本来源、兼容性契约和各镜像差异见
 [`templates/README.md`](../../templates/README.md)。
 
 ## Workflow labels
 
-完成 managed Runner Spec rollout 验证后，请根据所需环境使用准确的 label
-组合：
+请根据所需环境使用准确的 label 组合：
 
 ```yaml
 jobs:

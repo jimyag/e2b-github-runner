@@ -1,6 +1,7 @@
 package state
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -338,6 +339,158 @@ func TestGetProfileReturnsCorrectProfile(t *testing.T) {
 	}
 	if got.Name != "get-prof" || got.TemplateID != "template-xyz" || got.MaxConcurrency != 7 || got.Priority != 5 {
 		t.Errorf("GetProfile returned unexpected profile: %#v", got)
+	}
+}
+
+func TestRunnerProfileManagedCatalogFieldsRoundTrip(t *testing.T) {
+	store := New(t.TempDir())
+	profile := RunnerProfile{
+		Name:                "managed-ubuntu-24.04",
+		Labels:              []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-24.04"},
+		RequiredLabels:      []string{"qiniu", "ubuntu-24.04"},
+		TemplateID:          "template-24.04",
+		DefaultTemplateName: "ubuntu-24.04",
+		MaxConcurrency:      5,
+		Enabled:             true,
+		DefaultAvailable:    true,
+		ManagedBy:           "runnerd",
+		CatalogRevision:     7,
+	}
+
+	saved, err := store.UpsertProfile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(saved.RequiredLabels, profile.RequiredLabels) ||
+		saved.DefaultTemplateName != profile.DefaultTemplateName ||
+		saved.ManagedBy != profile.ManagedBy ||
+		saved.CatalogRevision != profile.CatalogRevision {
+		t.Fatalf("created managed catalog fields = %#v, want %#v", saved, profile)
+	}
+
+	saved.RequiredLabels = []string{"qiniu"}
+	saved.DefaultTemplateName = "ubuntu-24.04-r8"
+	saved.ManagedBy = "catalog-sync"
+	saved.CatalogRevision = 8
+	updated, err := store.UpsertProfile(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(updated.RequiredLabels, saved.RequiredLabels) ||
+		updated.DefaultTemplateName != saved.DefaultTemplateName ||
+		updated.ManagedBy != saved.ManagedBy ||
+		updated.CatalogRevision != saved.CatalogRevision {
+		t.Fatalf("updated managed catalog fields = %#v, want %#v", updated, saved)
+	}
+}
+
+func TestRecordToProfileTreatsMissingRequiredLabelsAsEmpty(t *testing.T) {
+	empty := ""
+	jsonNull := "null"
+	tests := []struct {
+		name               string
+		requiredLabelsJSON *string
+	}{
+		{name: "nil", requiredLabelsJSON: nil},
+		{name: "empty string", requiredLabelsJSON: &empty},
+		{name: "json null", requiredLabelsJSON: &jsonNull},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profile, err := recordToProfile(runnerProfileRecord{
+				Name:               "legacy",
+				LabelsJSON:         `["self-hosted"]`,
+				RequiredLabelsJSON: tt.requiredLabelsJSON,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if profile.RequiredLabels == nil || len(profile.RequiredLabels) != 0 {
+				t.Fatalf("RequiredLabels = %#v, want non-nil empty slice", profile.RequiredLabels)
+			}
+		})
+	}
+}
+
+func TestUpsertProfilePersistsNilRequiredLabelsAsEmptyJSONArray(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name:           "empty-required-labels",
+		Labels:         []string{"self-hosted"},
+		TemplateID:     "base",
+		MaxConcurrency: 1,
+		Enabled:        true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requiredLabelsJSON *string
+	if err := db.Raw(`SELECT required_labels_json FROM runner_profiles WHERE name = ?`, "empty-required-labels").
+		Scan(&requiredLabelsJSON).Error; err != nil {
+		t.Fatal(err)
+	}
+	if requiredLabelsJSON == nil || *requiredLabelsJSON != "[]" {
+		t.Fatalf("required_labels_json = %#v, want non-NULL []", requiredLabelsJSON)
+	}
+}
+
+func TestManagedRunnerProfileRequiredLabelsMatch(t *testing.T) {
+	store := New(t.TempDir())
+	profile := RunnerProfile{
+		Name:             "managed-ubuntu-24.04",
+		Labels:           []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-24.04"},
+		RequiredLabels:   []string{"qiniu", "ubuntu-24.04"},
+		TemplateID:       "template-24.04",
+		MaxConcurrency:   5,
+		Enabled:          true,
+		DefaultAvailable: true,
+	}
+	if _, err := store.UpsertProfile(profile); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name   string
+		labels []string
+		want   bool
+	}{
+		{name: "required labels only", labels: []string{"qiniu", "ubuntu-24.04"}, want: true},
+		{name: "full advertised labels", labels: []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-24.04"}, want: true},
+		{name: "normalized case and whitespace", labels: []string{" QINIU ", "Ubuntu-24.04"}, want: true},
+		{name: "missing qiniu", labels: []string{"ubuntu-24.04"}, want: false},
+		{name: "missing ubuntu version", labels: []string{"qiniu"}, want: false},
+		{name: "unsupported ubuntu version", labels: []string{"qiniu", "ubuntu-22.04"}, want: false},
+		{name: "unsupported gpu label", labels: []string{"qiniu", "ubuntu-24.04", "gpu"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			match, err := store.MatchProfile("owner/repo", tt.labels)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := match.Profile != nil; got != tt.want {
+				t.Fatalf("MatchProfile(%v) matched = %v, want %v; result = %#v", tt.labels, got, tt.want, match)
+			}
+		})
+	}
+}
+
+func TestUpsertProfileRejectsRequiredLabelsOutsideAdvertisedLabels(t *testing.T) {
+	store := New(t.TempDir())
+	profile := RunnerProfile{
+		Name:           "invalid-managed-profile",
+		Labels:         []string{"qiniu", "ubuntu-24.04"},
+		RequiredLabels: []string{"qiniu", "gpu"},
+		TemplateID:     "template-24.04",
+		MaxConcurrency: 5,
+		Enabled:        true,
+	}
+
+	if _, err := store.UpsertProfile(profile); err == nil {
+		t.Fatal("expected required labels outside advertised labels to be rejected")
 	}
 }
 

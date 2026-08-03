@@ -59,6 +59,7 @@ type ExitResult struct {
 type CatalogTemplate struct {
 	TemplateID  string    `json:"template_id"`
 	Aliases     []string  `json:"aliases"`
+	Names       []string  `json:"names"`
 	BuildStatus string    `json:"build_status"`
 	CPUCount    int32     `json:"cpu_count"`
 	MemoryMB    int32     `json:"memory_mb"`
@@ -83,6 +84,11 @@ type CatalogSandbox struct {
 type Catalog interface {
 	ListTemplates(ctx context.Context) ([]CatalogTemplate, error)
 	ListRunnerSandboxes(ctx context.Context) ([]CatalogSandbox, error)
+}
+
+// DefaultTemplateCatalog lists public templates available on the scoped Sandbox endpoint.
+type DefaultTemplateCatalog interface {
+	ListDefaultTemplates(ctx context.Context) ([]CatalogTemplate, error)
 }
 
 type TerminalSession interface {
@@ -111,6 +117,8 @@ var (
 type E2BService struct {
 	client *qnsandbox.Client
 }
+
+const runnerBootstrapUser = "root"
 
 //go:embed scripts/start-github-runner.sh
 var startRunnerScriptTemplate string
@@ -158,6 +166,29 @@ func (s *E2BService) ListTemplates(ctx context.Context) ([]CatalogTemplate, erro
 		result = append(result, CatalogTemplate{
 			TemplateID:  item.TemplateID,
 			Aliases:     item.Aliases,
+			BuildStatus: string(item.BuildStatus),
+			CPUCount:    item.CPUCount,
+			MemoryMB:    item.MemoryMB,
+			DiskSizeMB:  item.DiskSizeMB,
+			Public:      item.Public,
+			SpawnCount:  item.SpawnCount,
+			UpdatedAt:   item.UpdatedAt,
+		})
+	}
+	return result, nil
+}
+
+// ListDefaultTemplates lists the public template catalog from the scoped Sandbox endpoint.
+func (s *E2BService) ListDefaultTemplates(ctx context.Context) ([]CatalogTemplate, error) {
+	items, err := s.client.ListDefaultTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]CatalogTemplate, 0, len(items))
+	for _, item := range items {
+		result = append(result, CatalogTemplate{
+			TemplateID:  item.TemplateID,
+			Names:       item.Names,
 			BuildStatus: string(item.BuildStatus),
 			CPUCount:    item.CPUCount,
 			MemoryMB:    item.MemoryMB,
@@ -229,6 +260,7 @@ func (s *E2BService) StartRunner(ctx context.Context, input StartInput) (StartRe
 	cmd := "chmod +x /tmp/start-github-runner.sh && /tmp/start-github-runner.sh"
 	handle, err := sb.Commands().Start(
 		commandCtx, cmd,
+		qnsandbox.WithCommandUser(runnerBootstrapUser),
 		qnsandbox.WithTag("github-runner"),
 		qnsandbox.WithOnStdout(input.OnStdout),
 		qnsandbox.WithOnStderr(input.OnStderr),

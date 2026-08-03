@@ -10,13 +10,9 @@ This file tracks active project work. Completed behavior should move into `READM
 - Verify DB lease behavior with two runnerd processes sharing the same database before documenting multi-instance support.
 - Decide whether expvar diagnostics need a Prometheus/export adapter or histogram-style latency views for deployment observability.
 - After the `ui-production-smoke` check has reported on `main`, enable it as a required status check in branch protection; the repository currently has no required status checks.
-- Complete the remaining Issue #38 release gate: the four physical templates
-  are published and verified in `cn-yangzhou-1` and `us-south-1`; verify all
-  five logical workflow labels through the managed Runner Spec rollout, then
-  close the issue.
 - Decide production credential ownership, approval, and rotation before adding
   a manual `workflow_dispatch` that publishes public Sandbox templates.
-- Keep old-schema upgrade coverage whenever state records or GORM tags change; the current migration path is a narrow legacy compatibility pass followed by `AutoMigrate`, with additive-only handling for existing SQLite `runner_requests`, not a full handwritten migration history.
+- Keep old-schema upgrade coverage whenever state records or GORM tags change; the current migration path is a narrow legacy compatibility pass followed by `AutoMigrate`, with additive-only handling for existing SQLite `runner_requests` and `runner_profiles`, not a full handwritten migration history.
 
 ## Maintenance
 

@@ -72,11 +72,11 @@ cp runnerd.yaml.example runnerd.yaml
 ./bin/runnerd --config runnerd.yaml
 ```
 
-5. Open `http://<host>:25500/`. The public product landing page links to the current GitHub documentation and the protected Jobs console at `/jobs`. On the first authenticated visit to `/jobs`, a six-step product tour introduces Jobs, Repositories, Settings, and Sandbox setup; it can be replayed from the account menu.
-6. Open **Repositories** to review **Runner readiness** for the account or organization. Ready sources are shown without configuration controls. If Sandbox setup is missing and you can manage that scope, use **Configure Sandbox** to open the exact account or organization Settings page. Settings lists only your account and organizations where you are an active member; outside collaborators receive a read-only readiness prompt and cannot browse that organization's Sandbox catalogs.
-7. In the **Admin Console**, create a **Runner Spec** with a meaningful label (e.g. `ubuntu-24-04`), set its `template_id`, and enable `default_available`.
+5. Open `http://<host>:25500/` and sign in with GitHub OAuth. The public product landing page links to the current GitHub documentation and the protected Jobs console at `/jobs`. On the first authenticated visit to `/jobs`, a six-step product tour introduces Jobs, Repositories, Settings, and Sandbox setup; it can be replayed from the account menu.
+6. Open **Repositories** to review **Runner readiness** for the account or organization. Ready sources are shown without configuration controls. If Sandbox setup is missing and you can manage that scope, use **Configure Sandbox** to open the exact account or organization **Preferences** page and configure **Sandbox Service** credentials. Settings lists only your account and organizations where you are an active member; outside collaborators receive a read-only readiness prompt and cannot browse that organization's Sandbox catalogs. Administrators can provide a fallback at `/admin/sandbox_service`.
+7. Confirm the five managed Qiniu Runner Specs in the **Admin Console**. Their public templates have passed the two-region release gate; operators can still disable individual managed specs or adjust their concurrency and idle capacity.
 8. Configure a GitHub webhook → `POST http://<host>:25500/webhooks/github`.
-9. Use `runs-on: [self-hosted, <your-runner-label>]` in your workflow.
+9. Use `runs-on: [qiniu, ubuntu-24.04]` for a managed default, or use the labels required by your custom spec.
 
 For local development, use `task dev` with `runnerd.local.yaml`. See [docs/testing.md](docs/testing.md) for detailed local setup including GitHub App creation and webhook forwarding.
 
@@ -97,7 +97,7 @@ Key notes:
 
 - Relative `database.dsn` and `github.app.private_key_file` paths resolve from the config file's directory.
 - Use SQLite for local and single-node deployments. PostgreSQL and MySQL are supported but multi-instance operation on a shared database has not been verified.
-- Existing SQLite `runner_requests` tables add missing model columns and indexes on startup without table recreation. Creating the list-ordering indexes does not rewrite runner rows, but it can add brief startup I/O and lock contention on a large database; see [docs/testing.md](docs/testing.md) for the migration and query-plan checks.
+- Existing SQLite `runner_requests` and `runner_profiles` tables add missing model columns and indexes on startup without table recreation. This preserves historical runner values plus legacy profile rows and indexes. Creating missing indexes does not rewrite rows, but it can add brief startup I/O and lock contention on a large database; see [docs/testing.md](docs/testing.md) for migration and query-plan checks.
 - GitHub Enterprise Server is **not** supported; use a GitHub.com App.
 - Configure exactly one GitHub auth method: `github.app`, `github.token`, or `github.basic_auth`.
 - When `github.app.installation_id` is omitted, runnerd resolves the installation dynamically per repository, allowing one App to serve multiple accounts.
@@ -156,11 +156,14 @@ In your GitHub App settings (**Settings → Developer settings → GitHub Apps �
 ## Webhook & Workflow Setup
 
 1. Ensure the GitHub App webhook is configured as described in [Webhook Events](#webhook-events) above, with the `webhook_secret` matching `github.webhook_secret` in your config.
-2. In your workflow, use:
+2. Use a verified managed label pair, for example:
 
 ```yaml
-runs-on: [self-hosted, <your-runner-label>]
+runs-on: [qiniu, ubuntu-24.04]
 ```
+
+The `qiniu` label is mandatory for managed defaults. A custom spec can define
+its own advertised and required labels instead.
 
 runnerd handles `queued`, `in_progress`, and `completed` actions. For `workflow_run`, it lists all queued jobs in the run and enqueues any matching jobs not already seen.
 
@@ -168,13 +171,37 @@ runnerd handles `queued`, `in_progress`, and `completed` actions. For `workflow_
 
 Runner specs, runner groups, and repository policies are managed through the admin API and console — not through `runnerd.yaml`.
 
-- **Runner Spec**: defines a runner label, sandbox template, and optional `runner_group`. Set `default_available: true` to make it available to all allowed repositories.
+- **Managed Runner Spec**: runnerd reconciles five built-in specs for
+  `ubuntu-slim`, `ubuntu-22.04`, `ubuntu-24.04`, preview `ubuntu-26.04`, and
+  `ubuntu-latest`. Their catalog labels, required labels, public template name,
+  priority, and availability are managed by runnerd. Operators retain
+  `enabled`, `max_concurrency`, and `min_idle`.
+- **Custom Runner Spec**: an operator-owned spec with an explicit
+  `template_id`, advertised labels, and optional required labels and
+  `runner_group`. Saving it does not call Sandbox to validate the template.
 - **Runner Group**: when a spec sets `runner_group`, runnerd creates an organization-level runner in that group; otherwise it creates a repository-level runner.
 
 > **⚠️ Personal accounts:** `runner_group` requires the organization-level GitHub API. If the repository belongs to a personal account (not an organization), leave `runner_group` **empty** — otherwise runner registration will fail with a 404 error.
 - **Repository Policy**: grants a specific repository access to additional specs beyond the defaults.
 
-Each spec's `template_id` should point to a Qiniu Sandbox template containing the GitHub runner image. Template access is checked against the repository owner's effective Sandbox service shown under **Repositories → Runner readiness** at sandbox creation time.
+Matching always enforces `required_labels ⊆ job_labels ⊆ labels`. Managed
+Ubuntu specs therefore require both `qiniu` and the exact OS label: neither
+`[ubuntu-24.04]` nor `[qiniu]` is sufficient. Removing `qiniu` from a workflow
+prevents managed-default routing; an operator can also disable an individual
+managed spec in Admin without changing its reconciled catalog identity.
+
+Managed specs store a stable public template name. Immediately before runner
+creation, runnerd resolves that name against the repository owner's scoped
+Sandbox endpoint, so different regions can return different template IDs.
+Custom specs continue to send their stored `template_id` directly.
+`ubuntu-latest` maps to Ubuntu 24.04 in the current catalog revision; changing
+that mapping requires a reviewed catalog update and new regional smoke
+evidence.
+
+See [Public Runner Templates](docs/default-runner-templates.md) for supported
+workflow labels, publication status, and regional verification.
+
+For custom specs, `template_id` should point to a Qiniu Sandbox template containing the GitHub runner image. Template access is checked against the repository owner's effective Sandbox service shown under **Repositories → Runner readiness** at sandbox creation time.
 
 ## Admin Console
 
