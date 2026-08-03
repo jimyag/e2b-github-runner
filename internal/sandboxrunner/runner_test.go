@@ -2710,6 +2710,9 @@ func TestRunnerTemplatePinsBicepNuGetPackage(t *testing.T) {
 					t.Fatalf("template must install checked Bicep from NuGet; missing %q", required)
 				}
 			}
+			if strings.Count(script, `source "$HELPER_SCRIPTS/install.sh"`) < 2 {
+				t.Fatal("custom Bicep and Git LFS installers must load the upstream test helper in their own shell scope")
+			}
 		})
 	}
 }
@@ -2744,6 +2747,9 @@ func TestRunnerTemplateInstallsGitLFSFromUbuntuArchive(t *testing.T) {
 				if !strings.Contains(script, required) {
 					t.Fatalf("template must install Git LFS from the configured Ubuntu archive; missing %q", required)
 				}
+			}
+			if strings.Count(script, `source "$HELPER_SCRIPTS/install.sh"`) < 2 {
+				t.Fatal("custom Bicep and Git LFS installers must load the upstream test helper in their own shell scope")
 			}
 		})
 	}

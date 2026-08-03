@@ -35,6 +35,7 @@ install_bicep_from_nuget() {
   local package_url="https://api.nuget.org/v3-flatcontainer/azure.bicep.commandline.linux-x64/${BICEP_VERSION}/${package_name}"
   local extract_dir=/tmp/qiniu-bicep
 
+  source "$HELPER_SCRIPTS/install.sh"
   download_checked "$package_url" "$package_path" "$BICEP_NUGET_SHA256"
   install -d -m 0755 "$extract_dir"
   unzip -q -j "$package_path" tools/bicep -d "$extract_dir"
@@ -47,6 +48,7 @@ install_bicep_from_nuget() {
 }
 
 install_git_lfs_from_ubuntu() {
+  source "$HELPER_SCRIPTS/install.sh"
   apt-get update
   apt-get install -y --no-install-recommends git-lfs
   git lfs version
