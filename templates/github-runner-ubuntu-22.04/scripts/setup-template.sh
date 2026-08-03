@@ -195,6 +195,31 @@ if [ "$action" = is-active ] && [ "${1:-}" = --quiet ]; then
 fi
 unit=${1:-}
 unit=${unit%.service}
+case "$unit:$action" in
+  apache2:start|apache2:stop|apache2:restart)
+    exec /usr/sbin/apachectl "$action" </dev/null >/dev/null 2>&1
+    ;;
+  apache2:is-active)
+    test -s /run/apache2/apache2.pid && kill -0 "$(cat /run/apache2/apache2.pid)" 2>/dev/null
+    exit $?
+    ;;
+  nginx:start)
+    exec /usr/sbin/nginx </dev/null >/dev/null 2>&1
+    ;;
+  nginx:stop)
+    exec /usr/sbin/nginx -s quit </dev/null >/dev/null 2>&1
+    ;;
+  nginx:restart)
+    if test -s /run/nginx.pid && kill -0 "$(cat /run/nginx.pid)" 2>/dev/null; then
+      exec /usr/sbin/nginx -s reload </dev/null >/dev/null 2>&1
+    fi
+    exec /usr/sbin/nginx </dev/null >/dev/null 2>&1
+    ;;
+  nginx:is-active)
+    test -s /run/nginx.pid && kill -0 "$(cat /run/nginx.pid)" 2>/dev/null
+    exit $?
+    ;;
+esac
 # VM-oriented upstream installers assume service operations always return. Bound
 # SysV calls so a missing init environment cannot wedge a Sandbox build forever.
 # Isolate their file descriptors so a daemon cannot keep Pester's capture pipe
