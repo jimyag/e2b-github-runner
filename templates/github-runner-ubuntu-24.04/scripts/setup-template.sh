@@ -43,6 +43,16 @@ Acquire::https::Timeout "30";
 APT_NETWORK
 }
 
+ensure_upstream_apt_source_layout() {
+  # Canonical's ECR rootfs remains apt-functional through sources.list, while
+  # runner-images' Ubuntu 24 setup unconditionally rewrites the deb822 path
+  # used by its Azure image. Keep the active source and provide that path.
+  install -d -m 0755 /etc/apt/sources.list.d
+  if [ ! -e /etc/apt/sources.list.d/ubuntu.sources ]; then
+    install -m 0644 /dev/null /etc/apt/sources.list.d/ubuntu.sources
+  fi
+}
+
 install_docker_for_sandbox() {
   install -d -m 0755 /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /tmp/docker.gpg
@@ -193,9 +203,69 @@ except subprocess.TimeoutExpired:
 sys.exit(result.returncode)
 PYTHON
 }
+run_detached_until_pid_state() {
+  desired_state="$1"
+  pid_file="$2"
+  shift 2
+  /usr/bin/python3 - "$desired_state" "$pid_file" "$@" <<'PYTHON'
+import os
+import signal
+import subprocess
+import sys
+import time
+
+desired_active = sys.argv[1] == "active"
+pid_file = sys.argv[2]
+process = subprocess.Popen(
+    sys.argv[3:],
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    close_fds=True,
+    start_new_session=True,
+)
+
+def service_is_active():
+    try:
+        with open(pid_file, encoding="utf-8") as stream:
+            pid = int(stream.read().strip())
+        os.kill(pid, 0)
+        return True
+    except (FileNotFoundError, ProcessLookupError, ValueError):
+        return False
+
+deadline = time.monotonic() + 30
+while time.monotonic() < deadline:
+    if service_is_active() == desired_active:
+        sys.exit(0)
+    return_code = process.poll()
+    if return_code not in (None, 0):
+        sys.exit(return_code)
+    time.sleep(0.1)
+
+if process.poll() is None:
+    os.killpg(process.pid, signal.SIGTERM)
+sys.exit(124)
+PYTHON
+}
+start_apache() {
+  run_detached_until_pid_state active /run/apache2/apache2.pid /usr/sbin/apachectl start
+}
+stop_apache() {
+  run_detached_until_pid_state inactive /run/apache2/apache2.pid /usr/sbin/apachectl stop
+}
 case "$unit:$action" in
-  apache2:start|apache2:stop|apache2:restart)
-    run_isolated /usr/sbin/apachectl "$action"
+  apache2:start)
+    start_apache
+    exit $?
+    ;;
+  apache2:stop)
+    stop_apache
+    exit $?
+    ;;
+  apache2:restart)
+    stop_apache || exit $?
+    start_apache
     exit $?
     ;;
   apache2:is-active)
@@ -286,6 +356,7 @@ WAAGENT
   test "$(grep -Fxc '        "$ContainerCommand -v" | Should -ReturnZeroExitCode' "$podman_networking_test" || true)" -eq 1
 
   bash "$upstream_build/install-ms-repos.sh"
+  ensure_upstream_apt_source_layout
   bash "$upstream_build/configure-apt-sources.sh"
   configure_reliable_apt_sources
   bash "$upstream_build/configure-apt.sh"
