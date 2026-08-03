@@ -1400,6 +1400,42 @@ func TestUbuntu2604TemplateInstallsICUBeforePowerShell(t *testing.T) {
 	}
 }
 
+func TestVersionedTemplatesInstallNetcatProviderBeforeAptCommon(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{"ubuntu-24.04", "ubuntu-26.04"} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			netcatIndex := strings.Index(script, "netcat-openbsd")
+			aptCommonIndex := strings.Index(script, "install-apt-common.sh")
+			if netcatIndex < 0 || aptCommonIndex < 0 {
+				t.Fatalf(
+					"setup must install a concrete netcat provider before apt-common: netcat=%d apt-common=%d",
+					netcatIndex,
+					aptCommonIndex,
+				)
+			}
+			if netcatIndex > aptCommonIndex {
+				t.Fatalf(
+					"netcat provider must exist before apt-common validation: netcat=%d apt-common=%d",
+					netcatIndex,
+					aptCommonIndex,
+				)
+			}
+		})
+	}
+}
+
 func TestVersionedTemplateBuildDefersOnlyPodmanNetworkingToRuntimeConformance(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{

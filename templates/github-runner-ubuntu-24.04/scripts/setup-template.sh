@@ -100,8 +100,11 @@ apt-get update
 apt-get install -y --no-install-recommends ca-certificates
 configure_reliable_apt_sources
 apt-get update
+# The pinned runner-images toolset asks apt for the ambiguous virtual netcat
+# package. Install its concrete provider before the upstream installer and
+# Pester check run.
 apt-get install -y --no-install-recommends \
-  curl gpg jq lsb-release man-db sudo tar wget xz-utils
+  curl gpg jq lsb-release man-db netcat-openbsd sudo tar wget xz-utils
 
 if ! id -u runner >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash runner

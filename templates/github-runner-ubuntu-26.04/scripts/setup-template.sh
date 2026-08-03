@@ -100,8 +100,11 @@ apt-get update
 apt-get install -y --no-install-recommends ca-certificates
 configure_reliable_apt_sources
 apt-get update
+# PowerShell needs the ICU runtime, and the pinned runner-images toolset asks
+# apt for the now-ambiguous virtual netcat package. Install its concrete
+# provider before the upstream installers and their Pester checks run.
 apt-get install -y --no-install-recommends \
-  curl gpg jq libicu78 lsb-release man-db sudo tar wget xz-utils
+  curl gpg jq libicu78 lsb-release man-db netcat-openbsd sudo tar wget xz-utils
 
 if ! id -u runner >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash runner
