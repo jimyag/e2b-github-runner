@@ -203,21 +203,24 @@ except subprocess.TimeoutExpired:
 sys.exit(result.returncode)
 PYTHON
 }
-run_detached_until_pid_state() {
+run_detached_until_tcp_state() {
   desired_state="$1"
-  pid_file="$2"
-  shift 2
-  /usr/bin/python3 - "$desired_state" "$pid_file" "$@" <<'PYTHON'
+  host="$2"
+  port="$3"
+  shift 3
+  /usr/bin/python3 - "$desired_state" "$host" "$port" "$@" <<'PYTHON'
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
 
 desired_active = sys.argv[1] == "active"
-pid_file = sys.argv[2]
+host = sys.argv[2]
+port = int(sys.argv[3])
 process = subprocess.Popen(
-    sys.argv[3:],
+    sys.argv[4:],
     stdin=subprocess.DEVNULL,
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
@@ -227,11 +230,9 @@ process = subprocess.Popen(
 
 def service_is_active():
     try:
-        with open(pid_file, encoding="utf-8") as stream:
-            pid = int(stream.read().strip())
-        os.kill(pid, 0)
-        return True
-    except (FileNotFoundError, ProcessLookupError, ValueError):
+        with socket.create_connection((host, port), timeout=0.2):
+            return True
+    except OSError:
         return False
 
 deadline = time.monotonic() + 30
@@ -249,10 +250,10 @@ sys.exit(124)
 PYTHON
 }
 start_apache() {
-  run_detached_until_pid_state active /run/apache2/apache2.pid /usr/sbin/apachectl start
+  run_detached_until_tcp_state active 127.0.0.1 80 /usr/sbin/apachectl start
 }
 stop_apache() {
-  run_detached_until_pid_state inactive /run/apache2/apache2.pid /usr/sbin/apachectl stop
+  run_detached_until_tcp_state inactive 127.0.0.1 80 /usr/sbin/apachectl stop
 }
 case "$unit:$action" in
   apache2:start)

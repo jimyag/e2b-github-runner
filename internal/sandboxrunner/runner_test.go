@@ -1883,9 +1883,10 @@ func TestVersionedTemplateSystemctlShimClosesDescriptorsBoundsAndVerifiesService
 				)
 			} else {
 				requiredFragments = append(requiredFragments,
-					`run_detached_until_pid_state() {`,
+					`run_detached_until_tcp_state() {`,
 					`subprocess.Popen(`,
 					`start_new_session=True`,
+					`socket.create_connection((host, port), timeout=0.2)`,
 					`start_apache() {`,
 					`stop_apache() {`,
 					`apache2:start)`,
