@@ -7,6 +7,8 @@ set -euxo pipefail
 : "${RUNNER_ARCHIVE_SHA256:?RUNNER_ARCHIVE_SHA256 is required}"
 : "${AZCOPY_VERSION:?AZCOPY_VERSION is required}"
 : "${AZCOPY_DEB_SHA256:?AZCOPY_DEB_SHA256 is required}"
+: "${AZURE_DEVOPS_EXTENSION_VERSION:?AZURE_DEVOPS_EXTENSION_VERSION is required}"
+: "${AZURE_DEVOPS_EXTENSION_SHA256:?AZURE_DEVOPS_EXTENSION_SHA256 is required}"
 : "${DOCKER_GPG_SHA256:?DOCKER_GPG_SHA256 is required}"
 : "${DOCKER_GPG_FINGERPRINT:?DOCKER_GPG_FINGERPRINT is required}"
 export PATH="/usr/local/share/qiniu-sandbox-runner-template:${PATH}"
@@ -37,6 +39,17 @@ APT_PREFERENCE
   rm -f "$package"
   ln -sf "$(command -v azcopy)" /usr/local/bin/azcopy10
   test "$(azcopy --version)" = "azcopy version $AZCOPY_VERSION"
+}
+
+install_azure_devops_extension() {
+  local wheel="/tmp/azure_devops-${AZURE_DEVOPS_EXTENSION_VERSION}-py2.py3-none-any.whl"
+  download_checked \
+    "https://azcliprod.blob.core.windows.net/cli-extensions/azure_devops-${AZURE_DEVOPS_EXTENSION_VERSION}-py2.py3-none-any.whl" \
+    "$wheel" \
+    "$AZURE_DEVOPS_EXTENSION_SHA256"
+  AZURE_EXTENSION_DIR=/opt/az/azcliextensions az extension add --yes --source "$wheel"
+  rm -f "$wheel"
+  test "$(AZURE_EXTENSION_DIR=/opt/az/azcliextensions az extension show --name azure-devops --query version -o tsv)" = "$AZURE_DEVOPS_EXTENSION_VERSION"
 }
 
 configure_reliable_apt_sources() {
@@ -192,7 +205,6 @@ if [ "${TEMPLATE_FLAVOR:-}" = slim ]; then
     configure-environment.sh \
     install-apt-common.sh \
     install-azure-cli.sh \
-    install-azure-devops-cli.sh \
     install-bicep.sh \
     install-aws-tools.sh \
     install-git.sh \
@@ -210,6 +222,9 @@ if [ "${TEMPLATE_FLAVOR:-}" = slim ]; then
     install-docker-cli.sh \
     configure-system.sh; do
     bash "$upstream_build/$installer"
+    if [ "$installer" = install-azure-cli.sh ]; then
+      install_azure_devops_extension
+    fi
   done
   ln -s /etc/skel/.nvm /home/runner/.nvm
 else
@@ -461,7 +476,6 @@ WAAGENT
   for installer in \
     install-apt-common.sh \
     install-azure-cli.sh \
-    install-azure-devops-cli.sh \
     install-bicep.sh \
     install-apache.sh \
     install-aws-tools.sh \
@@ -479,6 +493,10 @@ WAAGENT
     install-ninja.sh; do
     bash "$upstream_build/$installer"
     case "$installer" in
+      install-azure-cli.sh)
+        install_azure_devops_extension
+        bash "$HELPER_SCRIPTS/invoke-tests.sh" CLI.Tools "Azure DevOps CLI"
+        ;;
       install-apache.sh) stop_validated_service apache2 ;;
     esac
   done

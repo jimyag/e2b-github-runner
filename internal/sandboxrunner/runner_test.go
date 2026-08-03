@@ -1666,6 +1666,59 @@ func TestPublicTemplatesUsePinnedMicrosoftAzCopyWithoutActionPrewarm(t *testing.
 	}
 }
 
+func TestPublicTemplatesInstallPinnedAzureDevOpsExtensionAfterAzureCLI(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			directory := filepath.Join(root, "templates", "github-runner-"+image)
+			dockerfileBytes, err := os.ReadFile(filepath.Join(directory, "Dockerfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			for _, pinned := range []string{
+				"ARG AZURE_DEVOPS_EXTENSION_VERSION=1.0.6",
+				"ARG AZURE_DEVOPS_EXTENSION_SHA256=fa779e1fd6e6e1b726c3656b6a1968537c208041c6af54d2a7476772d896b34b",
+			} {
+				if !strings.Contains(dockerfile, pinned) {
+					t.Fatalf("Dockerfile must pin the Azure DevOps extension with %q", pinned)
+				}
+			}
+
+			scriptBytes, err := os.ReadFile(filepath.Join(directory, "scripts", "setup-template.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, required := range []string{
+				"install_azure_devops_extension",
+				"https://azcliprod.blob.core.windows.net/cli-extensions/azure_devops-",
+				`test "$(AZURE_EXTENSION_DIR=/opt/az/azcliextensions az extension show --name azure-devops --query version -o tsv)" = "$AZURE_DEVOPS_EXTENSION_VERSION"`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("setup must install the pinned Azure DevOps extension with %q", required)
+				}
+			}
+			if strings.Contains(script, "install-azure-devops-cli.sh") {
+				t.Fatal("setup must not use the upstream Python-client Azure DevOps extension download")
+			}
+			azureCLIIndex := strings.LastIndex(script, "install-azure-cli.sh")
+			extensionIndex := strings.LastIndex(script, "install_azure_devops_extension")
+			if azureCLIIndex < 0 || extensionIndex < azureCLIIndex {
+				t.Fatalf("Azure DevOps extension must install after Azure CLI: cli=%d extension=%d", azureCLIIndex, extensionIndex)
+			}
+			if image != "ubuntu-slim" && !strings.Contains(script, `invoke-tests.sh" CLI.Tools "Azure DevOps CLI"`) {
+				t.Fatal("versioned templates must retain the pinned upstream Azure DevOps CLI test")
+			}
+		})
+	}
+}
+
 func TestUbuntu2604TemplateInstallsICUBeforePowerShell(t *testing.T) {
 	root := repositoryRoot(t)
 	scriptPath := filepath.Join(

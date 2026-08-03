@@ -56,6 +56,10 @@ official Ubuntu package pool instead of the upstream floating `aka.ms`
 archive. They intentionally do not prewarm the GitHub action archive cache;
 the runner resolves actions through the normal job-time GitHub protocol, so
 this changes build size and network exposure rather than workflow semantics.
+After Azure CLI is installed, they also install the upstream-selected Azure
+DevOps extension 1.0.6 from its official Microsoft Blob wheel with a pinned
+checksum and bounded curl retries; versioned templates retain the upstream
+Pester assertion for that extension.
 
 The versioned image build keeps the upstream Podman, Buildah, and Skopeo CLI
 checks. BuildKit cannot create the nested namespace needed by the upstream
