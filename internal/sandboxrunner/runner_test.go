@@ -76,6 +76,12 @@ func TestStartScriptEncodesRunnerArguments(t *testing.T) {
 	}
 }
 
+func TestRunnerBootstrapRequiresRootUser(t *testing.T) {
+	if runnerBootstrapUser != "root" {
+		t.Fatalf("runner bootstrap user = %q, want root", runnerBootstrapUser)
+	}
+}
+
 func TestStartScriptRunsCleanupAfterRunnerExit(t *testing.T) {
 	script := startScript(StartInput{
 		RepositoryURL:     "https://github.com/o/r",

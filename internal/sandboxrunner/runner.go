@@ -118,6 +118,8 @@ type E2BService struct {
 	client *qnsandbox.Client
 }
 
+const runnerBootstrapUser = "root"
+
 //go:embed scripts/start-github-runner.sh
 var startRunnerScriptTemplate string
 
@@ -258,6 +260,7 @@ func (s *E2BService) StartRunner(ctx context.Context, input StartInput) (StartRe
 	cmd := "chmod +x /tmp/start-github-runner.sh && /tmp/start-github-runner.sh"
 	handle, err := sb.Commands().Start(
 		commandCtx, cmd,
+		qnsandbox.WithCommandUser(runnerBootstrapUser),
 		qnsandbox.WithTag("github-runner"),
 		qnsandbox.WithOnStdout(input.OnStdout),
 		qnsandbox.WithOnStderr(input.OnStderr),
