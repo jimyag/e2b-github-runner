@@ -43,6 +43,17 @@ Acquire::https::Timeout "30";
 APT_NETWORK
 }
 
+ensure_upstream_apt_source_layout() {
+  # Canonical's ECR rootfs remains apt-functional through sources.list, while
+  # runner-images' Ubuntu 24 slim setup unconditionally rewrites the deb822
+  # path used by its Azure image. Keep the working source and provide only the
+  # expected path; configure_reliable_apt_sources updates the active source.
+  install -d -m 0755 /etc/apt/sources.list.d
+  if [ ! -e /etc/apt/sources.list.d/ubuntu.sources ]; then
+    install -m 0644 /dev/null /etc/apt/sources.list.d/ubuntu.sources
+  fi
+}
+
 install_docker_for_sandbox() {
   install -d -m 0755 /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /tmp/docker.gpg
@@ -110,6 +121,7 @@ export IMAGE_OS=ubuntu24
 
 if [ "${TEMPLATE_FLAVOR:-}" = slim ]; then
   upstream_build=/tmp/runner-images/images/ubuntu-slim/scripts/build
+  ensure_upstream_apt_source_layout
   for installer in \
     configure-apt-sources.sh \
     configure-apt.sh \

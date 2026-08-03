@@ -106,6 +106,14 @@ for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
   grep -Fq 'MONO_ENV_OPTIONS=--interp bash "$upstream_build/$installer"' \
     "$directory/scripts/setup-template.sh" ||
     fail "$image_key must run the legacy Mono installer in interpreter mode for amd64 emulation"
+  if [ "$image_key" = ubuntu-slim ]; then
+    grep -Fq 'ensure_upstream_apt_source_layout' \
+      "$directory/scripts/setup-template.sh" ||
+      fail "$image_key must adapt the Canonical ECR apt layout before upstream setup"
+    grep -Fq 'install -m 0644 /dev/null /etc/apt/sources.list.d/ubuntu.sources' \
+      "$directory/scripts/setup-template.sh" ||
+      fail "$image_key must provide the deb822 path expected by upstream setup"
+  fi
   if [ "$image_key" = ubuntu-22.04 ]; then
     grep -Fq 'dotnet tool install Microsoft.SqlPackage' \
       "$directory/scripts/setup-template.sh" ||
