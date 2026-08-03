@@ -72,10 +72,20 @@ templates run the upstream Bicep Pester assertion after installation; the Slim
 template, whose pinned upstream tree has no Pester invocation helper, verifies
 the installed CLI version directly.
 
-Other GitHub release assets selected by the pinned upstream installers are
-resolved through GitHub's release API and downloaded through the corresponding
-official asset API URL. This avoids a separate browser-download handshake while
-retaining the upstream version selection and checksum validation.
+AWS CLI, the AWS Session Manager plugin, AWS SAM CLI, GitHub CLI, yq, zstd,
+and Ninja use the versions recorded by each image's pinned compatibility
+report. Their official versioned artifacts and SHA-256 digests are pinned in
+the Dockerfiles, and setup verifies the installed versions before continuing.
+These compatibility-critical tools do not resolve GitHub `latest` releases or
+the AWS `latest` download path at build time. Exact GitHub release assets are
+downloaded without first querying the anonymous GitHub release API, avoiding
+both rate-limit failures and silent version drift between the compatibility
+manifest and the built template.
+
+The curl compatibility wrapper remains available to unmodified upstream
+installers that resolve a fixed release through the GitHub API. It caches
+validated release metadata and uses bounded retries, but it is not part of the
+installation path for the pinned tools above.
 
 Git LFS comes from the configured Ubuntu archive instead of adding the
 packagecloud repository. This keeps the package on the OS-supported channel,

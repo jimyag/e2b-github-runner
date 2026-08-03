@@ -1797,6 +1797,57 @@ fi
 	}
 }
 
+func TestTemplateCurlCanDownloadPinnedGitHubReleaseAssetsDirectly(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			fixture := t.TempDir()
+			curlLog := filepath.Join(fixture, "curl.log")
+			fakeCurl := filepath.Join(fixture, "curl")
+			writeExecutable(t, fakeCurl, `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$CURL_TEST_LOG"
+`)
+			wrapper := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"curl",
+			)
+			assetURL := "https://github.com/mgoltzsche/podman-static/releases/download/v5.8.4/podman-linux-amd64.tar.gz"
+			output, err := runCommand(
+				t, wrapper, []string{"-fsSL", assetURL},
+				"RUNNER_TEMPLATE_CURL_BIN="+fakeCurl,
+				"RUNNER_TEMPLATE_DIRECT_GITHUB_ASSETS=1",
+				"CURL_TEST_LOG="+curlLog,
+			)
+			if err != nil {
+				t.Fatalf("direct release asset download failed: %v\n%s", err, output)
+			}
+			logBytes, err := os.ReadFile(curlLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+			if len(lines) != 1 {
+				t.Fatalf("curl invocation count = %d, want one direct download\n%s", len(lines), logBytes)
+			}
+			if !strings.Contains(lines[0], assetURL) {
+				t.Fatalf("direct download did not retain the browser asset URL: %s", lines[0])
+			}
+			if strings.Contains(lines[0], "api.github.com") {
+				t.Fatalf("direct download unexpectedly queried the GitHub API: %s", lines[0])
+			}
+		})
+	}
+}
+
 func TestUbuntu2204TemplateWgetBoundsStalledTransfers(t *testing.T) {
 	root := repositoryRoot(t)
 	fixture := t.TempDir()
@@ -2007,7 +2058,7 @@ func TestDiskBoundedTemplatesSkipOnlyCMakeDependentNinjaAssertions(t *testing.T)
 					t.Fatalf("setup must pin the disk-bounded Ninja test adjustment %q", assertion)
 				}
 			}
-			if strings.Index(script, `It "Ninja" {`) > strings.Index(script, `install-ninja.sh`) {
+			if strings.Index(script, `It "Ninja" {`) > strings.LastIndex(script, `install-ninja.sh`) {
 				t.Fatal("pinned Ninja test adjustment must be staged before the installer runs")
 			}
 		})
@@ -2114,6 +2165,142 @@ func TestPublicTemplatesFallBackToCheckedAzureCLIPackage(t *testing.T) {
 			} {
 				if !strings.Contains(script, required) {
 					t.Fatalf("setup must retain the checked Azure CLI fallback with %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestPublicTemplatesPinFloatingCompatibilityTools(t *testing.T) {
+	root := repositoryRoot(t)
+	testCases := []struct {
+		image        string
+		awsCLI       string
+		awsCLISHA    string
+		session      string
+		sessionSHA   string
+		sam          string
+		samSHA       string
+		githubCLI    string
+		githubCLISHA string
+		yq           string
+		yqSHA        string
+	}{
+		{
+			image:        "ubuntu-slim",
+			awsCLI:       "2.33.2",
+			awsCLISHA:    "03a62592085c43974bbb795c74df0da0345041cbceb97a22b29b04e5b5176a10",
+			session:      "1.2.764.0",
+			sessionSHA:   "beed4c95c42afd29756d9ecea59c3fcbf937b2c35b9ef84d12b93ac6e74726ba",
+			sam:          "1.151.0",
+			samSHA:       "679c54a86512e0f73616856d460b81b438fd5b9b004de5dcb624892dddfbb584",
+			githubCLI:    "2.85.0",
+			githubCLISHA: "4ed5ff89ef53da00af9d93ac1beaa5665694f18cee8cc8d644a201541d43148c",
+			yq:           "4.50.1",
+			yqSHA:        "c7a1278e6bbc4924f41b56db838086c39d13ee25dcb22089e7fbf16ac901f0d4",
+		},
+		{
+			image:        "ubuntu-22.04",
+			awsCLI:       "2.35.22",
+			awsCLISHA:    "edd9ba798acb3ef6131e5bf902d81999ebc8ad72fbec8771d690f3ed0c059110",
+			session:      "1.2.835.0",
+			sessionSHA:   "7c6dcad12518571cc7959a713e6a8ae1bdf6ed66fd9bee37dc189e39ca58ae03",
+			sam:          "1.163.0",
+			samSHA:       "3f12863f45da82bc2ad1fb837444cca57450bd07fef73449b917362ef2f5ab70",
+			githubCLI:    "2.96.0",
+			githubCLISHA: "11a731f4e0ca8c3db96ef6d2cc404dcab3d78247ce0e07c53e07117e7627d6a1",
+			yq:           "4.53.3",
+			yqSHA:        "fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4",
+		},
+		{
+			image:        "ubuntu-24.04",
+			awsCLI:       "2.35.22",
+			awsCLISHA:    "edd9ba798acb3ef6131e5bf902d81999ebc8ad72fbec8771d690f3ed0c059110",
+			session:      "1.2.835.0",
+			sessionSHA:   "7c6dcad12518571cc7959a713e6a8ae1bdf6ed66fd9bee37dc189e39ca58ae03",
+			sam:          "1.163.0",
+			samSHA:       "3f12863f45da82bc2ad1fb837444cca57450bd07fef73449b917362ef2f5ab70",
+			githubCLI:    "2.96.0",
+			githubCLISHA: "11a731f4e0ca8c3db96ef6d2cc404dcab3d78247ce0e07c53e07117e7627d6a1",
+			yq:           "4.53.3",
+			yqSHA:        "fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4",
+		},
+		{
+			image:        "ubuntu-26.04",
+			awsCLI:       "2.36.3",
+			awsCLISHA:    "512949c6175e7736e77761661d2e73809152c35914abd032ca00d4758e4041de",
+			session:      "1.2.835.0",
+			sessionSHA:   "7c6dcad12518571cc7959a713e6a8ae1bdf6ed66fd9bee37dc189e39ca58ae03",
+			sam:          "1.163.0",
+			samSHA:       "3f12863f45da82bc2ad1fb837444cca57450bd07fef73449b917362ef2f5ab70",
+			githubCLI:    "2.96.0",
+			githubCLISHA: "11a731f4e0ca8c3db96ef6d2cc404dcab3d78247ce0e07c53e07117e7627d6a1",
+			yq:           "4.53.3",
+			yqSHA:        "fa52a4e758c63d38299163fbdd1edfb4c4963247918bf9c1c5d31d84789eded4",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.image, func(t *testing.T) {
+			templateRoot := filepath.Join(root, "templates", "github-runner-"+tc.image)
+			dockerfileBytes, err := os.ReadFile(filepath.Join(templateRoot, "Dockerfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			for _, required := range []string{
+				"ARG AWS_CLI_VERSION=" + tc.awsCLI,
+				"ARG AWS_CLI_ARCHIVE_SHA256=" + tc.awsCLISHA,
+				"ARG AWS_SESSION_MANAGER_PLUGIN_VERSION=" + tc.session,
+				"ARG AWS_SESSION_MANAGER_PLUGIN_DEB_SHA256=" + tc.sessionSHA,
+				"ARG AWS_SAM_CLI_VERSION=" + tc.sam,
+				"ARG AWS_SAM_CLI_ARCHIVE_SHA256=" + tc.samSHA,
+				"ARG GITHUB_CLI_VERSION=" + tc.githubCLI,
+				"ARG GITHUB_CLI_DEB_SHA256=" + tc.githubCLISHA,
+				"ARG YQ_VERSION=" + tc.yq,
+				"ARG YQ_BINARY_SHA256=" + tc.yqSHA,
+				"ARG ZSTD_VERSION=1.5.7",
+				"ARG ZSTD_ARCHIVE_SHA256=eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3",
+			} {
+				if !strings.Contains(dockerfile, required) {
+					t.Fatalf("Dockerfile must pin the compatibility-report tool with %q", required)
+				}
+			}
+			if tc.image != "ubuntu-slim" {
+				for _, required := range []string{
+					"ARG NINJA_VERSION=1.13.2",
+					"ARG NINJA_ARCHIVE_SHA256=5749cbc4e668273514150a80e387a957f933c6ed3f5f11e03fb30955e2bbead6",
+				} {
+					if !strings.Contains(dockerfile, required) {
+						t.Fatalf("versioned Dockerfile must pin Ninja with %q", required)
+					}
+				}
+			}
+
+			scriptBytes, err := os.ReadFile(filepath.Join(templateRoot, "scripts", "setup-template.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, required := range []string{
+				`/usr/bin/curl --http1.1`,
+				`install_aws_tools_from_checked_archives() {`,
+				`awscli-exe-linux-x86_64-${AWS_CLI_VERSION}.zip`,
+				`plugin/${AWS_SESSION_MANAGER_PLUGIN_VERSION}/ubuntu_64bit/session-manager-plugin.deb`,
+				`aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip`,
+				`install_github_cli_from_checked_package() {`,
+				`cli/cli/releases/download/v${GITHUB_CLI_VERSION}/gh_${GITHUB_CLI_VERSION}_linux_amd64.deb`,
+				`install_yq_from_checked_binary() {`,
+				`mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64`,
+				`install_zstd_from_checked_archive() {`,
+				`facebook/zstd/releases/download/v${ZSTD_VERSION}/zstd-${ZSTD_VERSION}.tar.gz`,
+				`install_ninja_from_checked_archive() {`,
+				`ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-linux.zip`,
+				`install-container-tools.sh)`,
+				`RUNNER_TEMPLATE_DIRECT_GITHUB_ASSETS=1 bash "$installer_path"`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("setup must bypass floating release resolution with %q", required)
 				}
 			}
 		})

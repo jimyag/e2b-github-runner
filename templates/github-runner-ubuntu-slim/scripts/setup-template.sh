@@ -18,6 +18,18 @@ set -euxo pipefail
 : "${GOOGLE_CLOUD_CLI_ARCHIVE_SHA256:?GOOGLE_CLOUD_CLI_ARCHIVE_SHA256 is required}"
 : "${NVM_VERSION:?NVM_VERSION is required}"
 : "${NVM_ARCHIVE_SHA256:?NVM_ARCHIVE_SHA256 is required}"
+: "${AWS_CLI_VERSION:?AWS_CLI_VERSION is required}"
+: "${AWS_CLI_ARCHIVE_SHA256:?AWS_CLI_ARCHIVE_SHA256 is required}"
+: "${AWS_SESSION_MANAGER_PLUGIN_VERSION:?AWS_SESSION_MANAGER_PLUGIN_VERSION is required}"
+: "${AWS_SESSION_MANAGER_PLUGIN_DEB_SHA256:?AWS_SESSION_MANAGER_PLUGIN_DEB_SHA256 is required}"
+: "${AWS_SAM_CLI_VERSION:?AWS_SAM_CLI_VERSION is required}"
+: "${AWS_SAM_CLI_ARCHIVE_SHA256:?AWS_SAM_CLI_ARCHIVE_SHA256 is required}"
+: "${GITHUB_CLI_VERSION:?GITHUB_CLI_VERSION is required}"
+: "${GITHUB_CLI_DEB_SHA256:?GITHUB_CLI_DEB_SHA256 is required}"
+: "${YQ_VERSION:?YQ_VERSION is required}"
+: "${YQ_BINARY_SHA256:?YQ_BINARY_SHA256 is required}"
+: "${ZSTD_VERSION:?ZSTD_VERSION is required}"
+: "${ZSTD_ARCHIVE_SHA256:?ZSTD_ARCHIVE_SHA256 is required}"
 : "${DOCKER_GPG_SHA256:?DOCKER_GPG_SHA256 is required}"
 : "${DOCKER_GPG_FINGERPRINT:?DOCKER_GPG_FINGERPRINT is required}"
 export PATH="/usr/local/share/qiniu-sandbox-runner-template:${PATH}"
@@ -26,7 +38,8 @@ download_checked() {
   local url="$1"
   local destination="$2"
   local expected_sha256="$3"
-  curl --http1.1 -fsSL --connect-timeout 15 --max-time 1800 \
+  /usr/bin/curl --http1.1 -fsSL --connect-timeout 15 --max-time 1800 \
+    --speed-limit 1024 --speed-time 60 \
     --retry 5 --retry-all-errors --retry-delay 2 \
     "$url" -o "$destination"
   echo "$expected_sha256  $destination" | sha256sum --check -
@@ -144,22 +157,155 @@ install_nvm_from_archive() {
   nvm alias default system
 }
 
+install_aws_tools_from_checked_archives() {
+  local aws_archive=/tmp/qiniu-awscliv2.zip
+  local aws_extract=/tmp/qiniu-awscliv2
+  local session_manager_package=/tmp/qiniu-session-manager-plugin.deb
+  local sam_archive=/tmp/qiniu-aws-sam-cli.zip
+  local sam_extract=/tmp/qiniu-aws-sam-cli
+
+  download_checked \
+    "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWS_CLI_VERSION}.zip" \
+    "$aws_archive" \
+    "$AWS_CLI_ARCHIVE_SHA256"
+  rm -rf "$aws_extract"
+  install -d -m 0755 "$aws_extract"
+  unzip -q "$aws_archive" -d "$aws_extract"
+  "$aws_extract/aws/install" -i /usr/local/aws-cli -b /usr/local/bin
+  rm -rf "$aws_extract" "$aws_archive"
+  aws --version 2>&1 | grep -F "aws-cli/${AWS_CLI_VERSION} "
+
+  download_checked \
+    "https://s3.amazonaws.com/session-manager-downloads/plugin/${AWS_SESSION_MANAGER_PLUGIN_VERSION}/ubuntu_64bit/session-manager-plugin.deb" \
+    "$session_manager_package" \
+    "$AWS_SESSION_MANAGER_PLUGIN_DEB_SHA256"
+  apt-get install -y --no-install-recommends "$session_manager_package"
+  rm -f "$session_manager_package"
+  test "$(session-manager-plugin --version)" = "$AWS_SESSION_MANAGER_PLUGIN_VERSION"
+
+  download_checked \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    "$sam_archive" \
+    "$AWS_SAM_CLI_ARCHIVE_SHA256"
+  rm -rf "$sam_extract"
+  install -d -m 0755 "$sam_extract"
+  unzip -q "$sam_archive" -d "$sam_extract"
+  "$sam_extract/install"
+  rm -rf "$sam_extract" "$sam_archive"
+  test "$(sam --version)" = "SAM CLI, version ${AWS_SAM_CLI_VERSION}"
+
+  run_upstream_tests_if_available "CLI.Tools" "AWS"
+}
+
+install_github_cli_from_checked_package() {
+  local package=/tmp/qiniu-github-cli.deb
+
+  download_checked \
+    "https://github.com/cli/cli/releases/download/v${GITHUB_CLI_VERSION}/gh_${GITHUB_CLI_VERSION}_linux_amd64.deb" \
+    "$package" \
+    "$GITHUB_CLI_DEB_SHA256"
+  apt-get install -y --no-install-recommends "$package"
+  rm -f "$package"
+  test "$(gh --version | awk 'NR == 1 { print $3 }')" = "$GITHUB_CLI_VERSION"
+  run_upstream_tests_if_available "CLI.Tools" "GitHub CLI"
+}
+
+install_yq_from_checked_binary() {
+  local binary=/tmp/qiniu-yq
+
+  download_checked \
+    "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_linux_amd64" \
+    "$binary" \
+    "$YQ_BINARY_SHA256"
+  install -m 0755 "$binary" /usr/bin/yq
+  rm -f "$binary"
+  test "$(yq --version | awk '{ print $4 }' | sed 's/^v//')" = "$YQ_VERSION"
+  run_upstream_tests_if_available "Tools" "yq"
+}
+
+install_zstd_from_checked_archive() {
+  local archive=/tmp/qiniu-zstd.tar.gz
+  local source_dir="/tmp/zstd-${ZSTD_VERSION}"
+
+  download_checked \
+    "https://github.com/facebook/zstd/releases/download/v${ZSTD_VERSION}/zstd-${ZSTD_VERSION}.tar.gz" \
+    "$archive" \
+    "$ZSTD_ARCHIVE_SHA256"
+  rm -rf "$source_dir"
+  tar -xzf "$archive" -C /tmp
+  apt-get update
+  apt-get install -y --no-install-recommends liblz4-dev
+  make -C "$source_dir/contrib/pzstd" -j "$(nproc)" all
+  make -C "$source_dir" -j "$(nproc)" zstd-release
+  for executable in zstd zstdless zstdgrep; do
+    install -m 0755 "$source_dir/programs/$executable" "/usr/local/bin/$executable"
+  done
+  install -m 0755 "$source_dir/contrib/pzstd/pzstd" /usr/local/bin/pzstd
+  for symlink in zstdcat zstdmt unzstd; do
+    ln -sf /usr/local/bin/zstd "/usr/local/bin/$symlink"
+  done
+  rm -rf "$source_dir" "$archive"
+  zstd --version | grep -F "v${ZSTD_VERSION}"
+  run_upstream_tests_if_available "Tools" "Zstd"
+}
+
+install_ninja_from_checked_archive() {
+  local archive=/tmp/qiniu-ninja.zip
+  local extract_dir=/tmp/qiniu-ninja
+
+  download_checked \
+    "https://github.com/ninja-build/ninja/releases/download/v${NINJA_VERSION}/ninja-linux.zip" \
+    "$archive" \
+    "$NINJA_ARCHIVE_SHA256"
+  rm -rf "$extract_dir"
+  install -d -m 0755 "$extract_dir"
+  unzip -q "$archive" -d "$extract_dir"
+  install -m 0755 "$extract_dir/ninja" /usr/local/bin/ninja
+  rm -rf "$extract_dir" "$archive"
+  test "$(ninja --version)" = "$NINJA_VERSION"
+  run_upstream_tests_if_available "Tools" "Ninja"
+}
+
 run_upstream_installer() {
   local installer_path="$1"
   local installer_name="${installer_path##*/}"
   local max_attempts=1
   case "$installer_name" in
+    install-aws-tools.sh)
+      install_aws_tools_from_checked_archives
+      return
+      ;;
     install-bicep.sh)
       install_bicep_from_nuget
+      return
+      ;;
+    install-container-tools.sh)
+      RUNNER_TEMPLATE_DIRECT_GITHUB_ASSETS=1 bash "$installer_path"
       return
       ;;
     install-git-lfs.sh)
       install_git_lfs_from_ubuntu
       return
       ;;
+    install-github-cli.sh)
+      install_github_cli_from_checked_package
+      return
+      ;;
     install-google-cloud-cli.sh) max_attempts=3 ;;
     install-nvm.sh)
       install_nvm_from_archive
+      return
+      ;;
+    install-yq.sh)
+      install_yq_from_checked_binary
+      return
+      ;;
+    install-zstd.sh)
+      install_zstd_from_checked_archive
+      return
+      ;;
+    install-ninja.sh)
+      install_ninja_from_checked_archive
       return
       ;;
   esac
