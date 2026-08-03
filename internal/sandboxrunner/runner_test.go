@@ -1368,6 +1368,38 @@ func TestVersionedTemplateBuildStagesPinnedUpstreamTests(t *testing.T) {
 	}
 }
 
+func TestUbuntu2604TemplateInstallsICUBeforePowerShell(t *testing.T) {
+	root := repositoryRoot(t)
+	scriptPath := filepath.Join(
+		root,
+		"templates",
+		"github-runner-ubuntu-26.04",
+		"scripts",
+		"setup-template.sh",
+	)
+	scriptBytes, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(scriptBytes)
+	icuIndex := strings.Index(script, "libicu78")
+	powershellIndex := strings.Index(script, "install-powershell.sh")
+	if icuIndex < 0 || powershellIndex < 0 {
+		t.Fatalf(
+			"Ubuntu 26.04 setup must install ICU before PowerShell: icu=%d powershell=%d",
+			icuIndex,
+			powershellIndex,
+		)
+	}
+	if icuIndex > powershellIndex {
+		t.Fatalf(
+			"Ubuntu 26.04 ICU runtime must exist before PowerShell starts: icu=%d powershell=%d",
+			icuIndex,
+			powershellIndex,
+		)
+	}
+}
+
 func TestVersionedTemplateBuildDefersOnlyPodmanNetworkingToRuntimeConformance(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
@@ -1538,8 +1570,8 @@ func TestVersionedTemplateSystemctlShimRunsAvailableSysVServices(t *testing.T) {
 				`action=${1:-}`,
 				`unit=${unit%.service}`,
 				`if [ -x "/etc/init.d/$unit" ]; then`,
-				`exec /usr/sbin/service "$unit" "$action"`,
-				`/usr/sbin/service "$unit" status >/dev/null 2>&1`,
+				`exec /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" "$action"`,
+				`exec /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" status >/dev/null 2>&1`,
 			} {
 				if !strings.Contains(script, required) {
 					t.Fatalf("systemctl shim must run available SysV services; missing %q", required)

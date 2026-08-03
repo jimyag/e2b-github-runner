@@ -101,7 +101,7 @@ apt-get install -y --no-install-recommends ca-certificates
 configure_reliable_apt_sources
 apt-get update
 apt-get install -y --no-install-recommends \
-  curl gpg jq lsb-release man-db sudo tar wget xz-utils
+  curl gpg jq libicu78 lsb-release man-db sudo tar wget xz-utils
 
 if ! id -u runner >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash runner
@@ -178,15 +178,17 @@ if [ "$action" = is-active ] && [ "${1:-}" = --quiet ]; then
 fi
 unit=${1:-}
 unit=${unit%.service}
+# VM-oriented upstream installers assume service operations always return. Bound
+# SysV calls so a missing init environment cannot wedge a Sandbox build forever.
 case "$action" in
   start|stop|restart)
     if [ -x "/etc/init.d/$unit" ]; then
-      exec /usr/sbin/service "$unit" "$action"
+      exec /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" "$action"
     fi
     ;;
   is-active)
     if [ -x "/etc/init.d/$unit" ]; then
-      exec /usr/sbin/service "$unit" status >/dev/null 2>&1
+      exec /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" status >/dev/null 2>&1
     fi
     ;;
 esac

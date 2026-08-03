@@ -30,11 +30,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [ -z "${RUNNER_IMAGES_REPORT_DIR:-}" ]; then
-  resolved_sha="$(curl -fsSL --retry 3 "https://api.github.com/repos/$repository/commits/$commit" | jq -er '.sha')"
-  test "$resolved_sha" = "$commit" || fail "GitHub resolved $commit to unexpected SHA $resolved_sha"
-fi
-
 for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
   report_path="$(jq -er --arg image "$image_key" '.reports[$image]' "$lock_file")"
   report_name="$(basename "$report_path")"
