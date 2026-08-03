@@ -16,6 +16,12 @@ for its PID file before continuing. This preserves the upstream start/config/
 stop assertion without allowing a daemon or controller process to retain the
 Sandbox build session.
 
+Canonical's ECR rootfs keeps its apt configuration in `sources.list`, while
+the pinned upstream non-22.04 setup unconditionally rewrites the Azure
+image's `ubuntu.sources` path. Setup supplies an empty compatibility file at
+that path and then applies the reviewed mirror list to the active apt source;
+it does not skip upstream apt setup or disable TLS verification.
+
 The upstream Podman, Buildah, and Skopeo CLI assertions remain build gates.
 Only the namespace-dependent `podman networking` assertion is skipped in the
 staged Pester copy because BuildKit cannot create its nested namespace; the

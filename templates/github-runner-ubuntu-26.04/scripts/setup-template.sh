@@ -43,6 +43,16 @@ Acquire::https::Timeout "30";
 APT_NETWORK
 }
 
+ensure_upstream_apt_source_layout() {
+  # Canonical's ECR rootfs remains apt-functional through sources.list, while
+  # runner-images' non-22.04 setup unconditionally rewrites the deb822 path
+  # used by its Azure image. Keep the active source and provide that path.
+  install -d -m 0755 /etc/apt/sources.list.d
+  if [ ! -e /etc/apt/sources.list.d/ubuntu.sources ]; then
+    install -m 0644 /dev/null /etc/apt/sources.list.d/ubuntu.sources
+  fi
+}
+
 install_docker_for_sandbox() {
   install -d -m 0755 /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /tmp/docker.gpg
@@ -346,6 +356,7 @@ WAAGENT
   test "$(grep -Fxc '        "$ContainerCommand -v" | Should -ReturnZeroExitCode' "$podman_networking_test" || true)" -eq 1
 
   bash "$upstream_build/install-ms-repos.sh"
+  ensure_upstream_apt_source_layout
   bash "$upstream_build/configure-apt-sources.sh"
   configure_reliable_apt_sources
   bash "$upstream_build/configure-apt.sh"
