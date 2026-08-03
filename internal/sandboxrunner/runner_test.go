@@ -1328,7 +1328,8 @@ fi
 exec "$@"
 `)
 			script := filepath.Join(root, "templates", "github-runner-"+image, "scripts", "ensure-docker")
-			output, err := runCommand(t, "bash", []string{script},
+			output, err := runCommand(
+				t, "bash", []string{script},
 				"PATH="+binDir+":"+os.Getenv("PATH"),
 				"DOCKER_BIN="+filepath.Join(binDir, "docker"),
 				"DOCKERD_BIN="+filepath.Join(binDir, "dockerd"),
@@ -1427,7 +1428,8 @@ fi
 exec "$@"
 `)
 			script := filepath.Join(root, "templates", "github-runner-"+image, "scripts", "ensure-docker")
-			output, err := runCommand(t, "bash", []string{script},
+			output, err := runCommand(
+				t, "bash", []string{script},
 				"PATH="+binDir+":"+os.Getenv("PATH"),
 				"DOCKER_BIN="+filepath.Join(binDir, "docker"),
 				"DOCKERD_BIN="+filepath.Join(binDir, "dockerd"),
@@ -1570,10 +1572,11 @@ fi
 				"scripts",
 				"curl",
 			)
-			output, err := runCommand(t, wrapper, []string{
-				"-fsSL",
-				"https://api.github.com/repos/actions/runner/releases",
-			},
+			output, err := runCommand(
+				t, wrapper, []string{
+					"-fsSL",
+					"https://api.github.com/repos/actions/runner/releases",
+				},
 				"RUNNER_TEMPLATE_CURL_BIN="+fakeCurl,
 				"RUNNER_TEMPLATE_GITHUB_API_RETRY_DELAY=0",
 				"CURL_TEST_LOG="+curlLog,
@@ -1689,11 +1692,12 @@ printf '%s\n' "$*" >"$WGET_TEST_LOG"
 		"scripts",
 		"wget",
 	)
-	output, err := runCommand(t, wrapper, []string{
-		"-O",
-		"/tmp/output",
-		"https://raw.githubusercontent.com/example/file",
-	},
+	output, err := runCommand(
+		t, wrapper, []string{
+			"-O",
+			"/tmp/output",
+			"https://raw.githubusercontent.com/example/file",
+		},
 		"RUNNER_TEMPLATE_WGET_BIN="+fakeWget,
 		"WGET_TEST_LOG="+wgetLog,
 	)
@@ -1734,11 +1738,12 @@ printf '%s\n' "$*" >"$CURL_TEST_LOG"
 		"scripts",
 		"wget",
 	)
-	output, err := runCommand(t, wrapper, []string{
-		"https://raw.githubusercontent.com/ilikenwf/apt-fast/master/apt-fast",
-		"-O",
-		"/usr/local/bin/apt-fast",
-	},
+	output, err := runCommand(
+		t, wrapper, []string{
+			"https://raw.githubusercontent.com/ilikenwf/apt-fast/master/apt-fast",
+			"-O",
+			"/usr/local/bin/apt-fast",
+		},
 		"RUNNER_TEMPLATE_CURL_BIN="+fakeCurl,
 		"CURL_TEST_LOG="+curlLog,
 	)
@@ -2397,12 +2402,14 @@ func TestVersionedTemplateSystemctlShimClosesDescriptorsBoundsAndVerifiesService
 				`[ "$action" = stop ] && exit 0`,
 			}
 			if image == "ubuntu-slim" {
-				requiredFragments = append(requiredFragments,
+				requiredFragments = append(
+					requiredFragments,
 					`apache2:start|apache2:stop|apache2:restart)`,
 					`run_isolated /usr/sbin/apachectl "$action"`,
 				)
 			} else {
-				requiredFragments = append(requiredFragments,
+				requiredFragments = append(
+					requiredFragments,
 					`run_detached_until_tcp_state() {`,
 					`subprocess.Popen(`,
 					`start_new_session=True`,
