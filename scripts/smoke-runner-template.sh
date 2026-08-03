@@ -66,9 +66,32 @@ case "$image_key" in
     ;;
 esac
 
+docker_smoke_command="$(
+  cat <<'DOCKER_SMOKE' | tr '\n' ' '
+sudo -H -u runner -- bash -lc '
+  set -euo pipefail;
+  ensure-docker;
+  docker info >/dev/null;
+  smoke_root="$(mktemp -d)";
+  cleanup_docker_smoke() {
+    rm -rf "$smoke_root";
+    docker image rm -f qiniu-runner-smoke:local >/dev/null 2>&1 || true;
+  };
+  trap cleanup_docker_smoke EXIT;
+  install -D /bin/sh "$smoke_root/bin/sh";
+  ldd /bin/sh | grep -Eo "/[^[:space:]]+" | while read -r library; do
+    install -D "$library" "$smoke_root$library";
+  done;
+  tar -C "$smoke_root" -cf - . | docker import - qiniu-runner-smoke:local >/dev/null;
+  docker run --rm --network none qiniu-runner-smoke:local /bin/sh -c "exit 0";
+'
+DOCKER_SMOKE
+)"
+
 jq \
   --arg image "$image_key" \
   --arg expected_release "$expected_release" \
+  --arg docker_smoke_command "$docker_smoke_command" \
   '
     .images[$image].entries = [
       {
@@ -99,7 +122,7 @@ jq \
         category: "Release smoke",
         upstream_name: "Docker daemon",
         status: "provided",
-        verification: "sudo -H -u runner -- bash -lc \"ensure-docker && docker info >/dev/null && docker run --rm hello-world >/dev/null\""
+        verification: $docker_smoke_command
       },
       {
         category: "Release smoke",

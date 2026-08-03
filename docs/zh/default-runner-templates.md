@@ -7,15 +7,18 @@ Ubuntu Slim、Ubuntu 22.04、Ubuntu 24.04，以及处于预览阶段的 Ubuntu 2
 `ubuntu-latest` 是 Runner catalog 中指向 Ubuntu 24.04 的逻辑映射，不是第
 5 个镜像。
 
-这些定义目前仍处于开发阶段。只有模板在两个受支持的 Sandbox 区域都完成
-构建、发布、catalog 检查和 smoke 验证后，本文才会将其描述为公共模板。
+4 个物理模板已于 2026-08-03 在两个受支持的 Sandbox 区域完成发布、catalog
+检查和 release smoke 验证；区域 ID 和证据保存在
+[Issue #38](https://github.com/qiniu/ci-runner/issues/38#issuecomment-5164811404)。
+5 个 workflow label 仍需完成独立的 managed Runner Spec rollout 后才能投入
+使用。
 上游版本来源、兼容性契约和各镜像差异见
 [`templates/README.md`](../../templates/README.md)。
 
 ## Workflow labels
 
-完成双区域发布和 managed Runner rollout 验证后，请根据所需环境使用准确的
-label 组合：
+完成 managed Runner Spec rollout 验证后，请根据所需环境使用准确的 label
+组合：
 
 ```yaml
 jobs:
@@ -134,6 +137,8 @@ Runner、出站 HTTPS、Docker daemon、可写 work/tool-cache 路径和清理�
 无论验证是否成功，脚本都会尝试终止临时 Sandbox。请保存命令输出的 JSON 路径
 作为发布证据。完整 compatibility manifest 仍是静态 inventory contract；
 逐条 runtime conformance 只作为可选诊断，不阻塞发布可用性门槛。
+Docker 检查会导入并运行一个关闭网络的本地最小 rootfs，用于验证 daemon、
+socket 和容器执行能力；registry 可达性不属于该检查，出站 HTTPS 会独立验证。
 
 本地 Docker 构建和 `task template-conformance-local` 只用于按需诊断，不能替代
 qshell 模板构建或 Sandbox smoke。

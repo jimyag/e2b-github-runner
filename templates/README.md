@@ -2,13 +2,13 @@
 
 ## Supported templates
 
-| Workflow label | Physical template | Upstream baseline | Support channel | Initial publication state |
+| Workflow label | Physical template | Upstream baseline | Support channel | Publication state |
 | --- | --- | --- | --- | --- |
-| `ubuntu-slim` | `github-runner-ubuntu-slim` | Ubuntu Slim x64 | stable | development |
-| `ubuntu-22.04` | `github-runner-ubuntu-22-04` | Ubuntu 22.04 x64 | follows upstream deprecation | development |
-| `ubuntu-24.04` | `github-runner-ubuntu-24-04` | Ubuntu 24.04 x64 | stable | development |
-| `ubuntu-26.04` | `github-runner-ubuntu-26-04` | Ubuntu 26.04 x64 | preview | development |
-| `ubuntu-latest` | `github-runner-ubuntu-24-04` | Ubuntu 24.04 x64 | stable logical mapping | development |
+| `ubuntu-slim` | `github-runner-ubuntu-slim` | Ubuntu Slim x64 | stable | verified |
+| `ubuntu-22.04` | `github-runner-ubuntu-22-04` | Ubuntu 22.04 x64 | follows upstream deprecation | verified |
+| `ubuntu-24.04` | `github-runner-ubuntu-24-04` | Ubuntu 24.04 x64 | stable | verified |
+| `ubuntu-26.04` | `github-runner-ubuntu-26-04` | Ubuntu 26.04 x64 | preview | verified |
+| `ubuntu-latest` | `github-runner-ubuntu-24-04` | Ubuntu 24.04 x64 | stable logical mapping | verified |
 
 The image-specific reports are [Ubuntu Slim](github-runner-ubuntu-slim/software-diff.md),
 [Ubuntu 22.04](github-runner-ubuntu-22.04/software-diff.md),
@@ -16,6 +16,13 @@ The image-specific reports are [Ubuntu Slim](github-runner-ubuntu-slim/software-
 [Ubuntu 26.04](github-runner-ubuntu-26.04/software-diff.md).
 `ubuntu-latest` is a logical mapping to the 24.04 physical template and has no
 fifth physical template directory.
+
+The four physical templates were published, catalog-checked, and release-smoke
+verified in `cn-yangzhou-1` and `us-south-1` on 2026-08-03. The regional IDs
+and smoke evidence are retained in [Issue #38](https://github.com/qiniu/ci-runner/issues/38#issuecomment-5164811404).
+The `ubuntu-latest` row inherits the verified publication state of its 24.04
+physical template. The workflow label is not operational until the separate
+managed Runner Spec rollout verifies all five labels.
 
 Publication state is restricted to `development`, `published`, or `verified`.
 `published` means the physical template is public in both supported regions.
@@ -159,6 +166,10 @@ Release smoke checks the OS, architecture, preinstalled Actions runner,
 outbound HTTPS, Docker, writable work/tool-cache paths, and cleanup. Full
 per-inventory runtime conformance and local Docker builds remain optional
 diagnostics; neither is a substitute for the remote usability gate.
+The Docker check imports a minimal root filesystem from the Sandbox itself and
+runs it with networking disabled. This verifies daemon, socket, image-import,
+and container execution behavior without conflating template correctness with
+regional Docker Hub availability; outbound HTTPS remains a separate check.
 
 Each `template-build-*` target must:
 

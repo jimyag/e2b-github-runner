@@ -7,16 +7,18 @@ Ubuntu Slim, Ubuntu 22.04, Ubuntu 24.04, and preview Ubuntu 26.04.
 `ubuntu-latest` is a logical runner catalog mapping to Ubuntu 24.04, not a
 fifth image.
 
-The definitions are currently in development. This document does not claim
-that a template is public until it has been built, published, catalog-checked,
-and smoke-tested in both supported Sandbox regions. See
+The four physical templates were published, catalog-checked, and release-smoke
+verified in both supported Sandbox regions on 2026-08-03. The regional IDs and
+evidence are retained in [Issue #38](https://github.com/qiniu/ci-runner/issues/38#issuecomment-5164811404).
+The separate managed Runner Spec rollout is still required before the five
+workflow labels are operational. See
 [`templates/README.md`](../templates/README.md) for pinned upstream provenance,
 the compatibility contract, and per-image differences.
 
 ## Workflow labels
 
-After both-region publication and the managed-runner rollout are verified, use
-the exact pair for the requested environment:
+After the managed Runner Spec rollout is verified, use the exact pair for the
+requested environment:
 
 ```yaml
 jobs:
@@ -143,6 +145,9 @@ writable work/tool-cache paths, and cleanup. Preserve the emitted JSON paths as
 release evidence. The full compatibility manifest remains the static inventory
 contract; per-entry runtime conformance is an optional diagnostic and does not
 block the release usability gate.
+The Docker check imports and runs a local minimal root filesystem with
+networking disabled. Registry reachability is not part of the daemon check;
+outbound HTTPS is verified independently.
 
 Local Docker builds and `task template-conformance-local` remain optional
 diagnostic tools. They are not substitutes for qshell template builds or

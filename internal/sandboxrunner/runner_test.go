@@ -1164,8 +1164,16 @@ esac
 		if check.Category != "Release smoke" {
 			t.Fatalf("release smoke unexpectedly ran full inventory check %#v", check)
 		}
-		if check.Name == "Docker daemon" && !strings.Contains(check.Command, "sudo -H -u runner") {
-			t.Fatalf("Docker smoke does not reproduce the runnerd group context: %#v", check)
+		if check.Name == "Docker daemon" {
+			if !strings.Contains(check.Command, "sudo -H -u runner") {
+				t.Fatalf("Docker smoke does not reproduce the runnerd group context: %#v", check)
+			}
+			if strings.Contains(check.Command, "hello-world") || strings.Contains(check.Command, "docker.io") {
+				t.Fatalf("Docker daemon smoke must not depend on Docker Hub availability: %#v", check)
+			}
+			if !strings.Contains(check.Command, "docker import") || !strings.Contains(check.Command, "docker run") {
+				t.Fatalf("Docker daemon smoke must execute a local container without a registry pull: %#v", check)
+			}
 		}
 	}
 }
