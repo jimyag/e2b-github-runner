@@ -429,7 +429,6 @@ WAAGENT
 
   bash "$upstream_build/install-ms-repos.sh"
   install_azcopy_from_microsoft_package
-  bash "$HELPER_SCRIPTS/invoke-tests.sh" Tools azcopy
   bash "$upstream_build/configure-apt-sources.sh"
   configure_reliable_apt_sources
   bash "$upstream_build/configure-apt.sh"
@@ -437,6 +436,7 @@ WAAGENT
   bash "$upstream_build/install-apt-vital.sh"
   bash "$upstream_build/install-powershell.sh"
   install_pester_for_upstream_tests
+  bash "$HELPER_SCRIPTS/invoke-tests.sh" Tools azcopy
 
   for installer in \
     install-apt-common.sh \

@@ -1649,8 +1649,15 @@ func TestPublicTemplatesUsePinnedMicrosoftAzCopyWithoutActionPrewarm(t *testing.
 			if strings.Contains(script, "install-actions-cache.sh") {
 				t.Fatal("public templates must not prewarm the nonessential GitHub action archive cache")
 			}
-			if image != "ubuntu-slim" && !strings.Contains(script, `invoke-tests.sh" Tools azcopy`) {
-				t.Fatal("versioned templates must retain the pinned upstream AzCopy test")
+			if image != "ubuntu-slim" {
+				invokeIndex := strings.LastIndex(script, `invoke-tests.sh" Tools azcopy`)
+				pesterIndex := strings.LastIndex(script, "install_pester_for_upstream_tests")
+				if invokeIndex < 0 {
+					t.Fatal("versioned templates must retain the pinned upstream AzCopy test")
+				}
+				if pesterIndex < 0 || invokeIndex < pesterIndex {
+					t.Fatalf("AzCopy Pester must run after pinned Pester is installed: pester=%d invoke=%d", pesterIndex, invokeIndex)
+				}
 			}
 		})
 	}

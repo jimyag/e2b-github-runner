@@ -291,7 +291,6 @@ WAAGENT
 
   bash "$upstream_build/install-ms-repos.sh"
   install_azcopy_from_microsoft_package
-  bash "$HELPER_SCRIPTS/invoke-tests.sh" Tools azcopy
   bash "$upstream_build/configure-apt-sources.sh"
   bash "$upstream_build/configure-apt.sh"
   bash "$upstream_build/configure-environment.sh"
@@ -299,6 +298,7 @@ WAAGENT
   bash "$upstream_build/install-powershell.sh"
   pwsh -File "$upstream_build/Install-PowerShellModules.ps1"
   pwsh -File "$upstream_build/Install-PowerShellAzModules.ps1"
+  bash "$HELPER_SCRIPTS/invoke-tests.sh" Tools azcopy
 
   for installer in \
     install-apt-common.sh \
