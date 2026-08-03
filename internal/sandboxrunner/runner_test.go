@@ -1143,6 +1143,7 @@ esac
 		Results        []struct {
 			Category string `json:"category"`
 			Name     string `json:"name"`
+			Command  string `json:"command"`
 		} `json:"results"`
 		Cleanup struct {
 			Passed bool `json:"passed"`
@@ -1160,6 +1161,9 @@ esac
 	for _, check := range result.Results {
 		if check.Category != "Release smoke" {
 			t.Fatalf("release smoke unexpectedly ran full inventory check %#v", check)
+		}
+		if check.Name == "Docker daemon" && !strings.Contains(check.Command, "sudo -H -u runner") {
+			t.Fatalf("Docker smoke does not reproduce the runnerd group context: %#v", check)
 		}
 	}
 }
@@ -1202,19 +1206,23 @@ func TestEnsureDockerIsIdempotentAndKeepsSocketNonRootAccessible(t *testing.T) {
 			}
 			sudoLog := filepath.Join(fixture, "sudo.log")
 			dockerdLog := filepath.Join(fixture, "dockerd.log")
+			socketFixedMarker := filepath.Join(fixture, "docker-socket.fixed")
 			writeExecutable(t, filepath.Join(binDir, "docker"), `#!/usr/bin/env bash
 set -euo pipefail
 test "$1" = info
+test -f "$DOCKER_SOCKET_FIXED_MARKER"
 `)
 			writeExecutable(t, filepath.Join(binDir, "dockerd"), `#!/usr/bin/env bash
 set -euo pipefail
 printf 'unexpected dockerd start\n' >>"$DOCKERD_TEST_LOG"
+: >"$DOCKER_SOCKET_FIXED_MARKER"
 exit 1
 `)
 			writeExecutable(t, filepath.Join(binDir, "sudo"), `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"$SUDO_TEST_LOG"
 if [ "$1" = chmod ]; then
+  : >"$DOCKER_SOCKET_FIXED_MARKER"
   exec "$@"
 fi
 if [ "$1" = chgrp ]; then
@@ -1237,6 +1245,7 @@ exec "$@"
 				"DOCKER_PID_FILE=" + filepath.Join(fixture, "docker.pid"),
 				"DOCKER_LOG_FILE=" + dockerdLog,
 				"DOCKERD_TEST_LOG=" + dockerdLog,
+				"DOCKER_SOCKET_FIXED_MARKER=" + socketFixedMarker,
 				"SUDO_TEST_LOG=" + sudoLog,
 			}
 			for run := 0; run < 2; run++ {

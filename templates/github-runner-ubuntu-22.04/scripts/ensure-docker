@@ -31,8 +31,8 @@ fix_docker_socket() {
   run_root chmod 0660 "$docker_socket"
 }
 
+fix_docker_socket
 if docker_ready; then
-  fix_docker_socket
   exit 0
 fi
 
@@ -65,8 +65,8 @@ run_root nohup "$dockerd_command" \
   >"$docker_log_file" 2>&1 &
 
 for _ in $(seq 1 60); do
+  fix_docker_socket
   if docker_ready; then
-    fix_docker_socket
     docker_ready
     exit 0
   fi

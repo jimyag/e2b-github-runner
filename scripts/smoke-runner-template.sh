@@ -99,7 +99,7 @@ jq \
         category: "Release smoke",
         upstream_name: "Docker daemon",
         status: "provided",
-        verification: "ensure-docker && docker info >/dev/null && docker run --rm hello-world >/dev/null"
+        verification: "sudo -H -u runner -- bash -lc \"ensure-docker && docker info >/dev/null && docker run --rm hello-world >/dev/null\""
       },
       {
         category: "Release smoke",
