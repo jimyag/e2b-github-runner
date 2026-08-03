@@ -33,6 +33,7 @@ task test
 task build
 task docker-check
 task release-check
+task template-check-all
 ```
 
 Use `task dev` for local development. It defaults to `RUNNERD_CONFIG=runnerd.local.yaml`, starts Vite on the first available localhost port at or after `5173`, and starts smee forwarding when `.smee-url` exists.
@@ -40,6 +41,13 @@ Use `task dev` for local development. It defaults to `RUNNERD_CONFIG=runnerd.loc
 Use `task smee` for standalone GitHub webhook forwarding. It reads `.smee-url` and defaults to `SMEE_TARGET=http://127.0.0.1:25500/webhooks/github`.
 
 Use `task build` when verifying production embedded UI behavior because it rebuilds `internal/server/ui/` before compiling `bin/runnerd`.
+
+Public runner templates are built with `qiniu/qshell` 2.19.10 or newer.
+`task template-build-ubuntu-*` performs the real remote template build and
+requires `QINIU_SANDBOX_API_URL` plus `QINIU_API_KEY`. A local Docker build is
+diagnostic only and does not prove that a Sandbox template exists or is
+usable. Release evidence requires qshell `Status: ready` followed by
+`task template-smoke` in both supported regions.
 
 Use `cd ui && bun run test` for focused UI tests. `task test` rebuilds the UI, runs the Bun UI tests, and then runs Go tests with race detection and coverage.
 

@@ -6,6 +6,7 @@
 
 - [本地测试与 GitHub 配置](testing.md)：本地配置、GitHub App/OAuth 设置、webhook forwarding、admin API 示例和排障流程。
 - [部署 Smoke Checklist](deployment-smoke.md)：面向真实 GitHub App、webhook、Qiniu sandbox template、runner pickup、cleanup 和 diagnostics 的生产风格 smoke checklist。
+- [公共 Runner 模板](default-runner-templates.md)：qshell 环境要求、双区域构建与发布顺序、Sandbox smoke 证据、维护责任和回滚流程。
 - [Runner 架构对比](runner-architecture-comparison.md)：当前 runnerd 架构基线、Mermaid 系统/生命周期/状态图、DB-backed state model，以及和 Fireactions、Actions Runner Controller 的对比。
 - [Runnerd 实现评审](runner-implementation-review.md)：当前实现状态、schema migration notes，以及剩余产品/运维决策。
 

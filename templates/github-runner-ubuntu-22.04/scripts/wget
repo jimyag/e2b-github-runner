@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_wget="${RUNNER_TEMPLATE_WGET_BIN:-/usr/bin/wget}"
+apt_fast_url=""
+output_file=""
+arguments=("$@")
+for ((index = 0; index < ${#arguments[@]}; index++)); do
+  argument="${arguments[$index]}"
+  case "$argument" in
+    https://raw.githubusercontent.com/ilikenwf/apt-fast/master/apt-fast | \
+      https://raw.githubusercontent.com/ilikenwf/apt-fast/master/apt-fast.conf)
+      apt_fast_url="$argument"
+      ;;
+    -O | --output-document)
+      if ((index + 1 < ${#arguments[@]})); then
+        output_file="${arguments[$((index + 1))]}"
+      fi
+      ;;
+    --output-document=*)
+      output_file="${argument#*=}"
+      ;;
+  esac
+done
+
+if [ -n "$apt_fast_url" ] && [ -n "$output_file" ]; then
+  real_curl="${RUNNER_TEMPLATE_CURL_BIN:-/usr/bin/curl}"
+  exec "$real_curl" \
+    --fail \
+    --location \
+    --http1.1 \
+    --connect-timeout 15 \
+    --speed-limit 1024 \
+    --speed-time 60 \
+    --retry 8 \
+    --retry-all-errors \
+    --retry-delay 2 \
+    --output "$output_file" \
+    "$apt_fast_url"
+fi
+
+exec "$real_wget" \
+  --timeout=15 \
+  --read-timeout=60 \
+  --tries=6 \
+  --waitretry=2 \
+  --retry-connrefused \
+  "$@"

@@ -32,6 +32,8 @@ set -euxo pipefail
 : "${ZSTD_ARCHIVE_SHA256:?ZSTD_ARCHIVE_SHA256 is required}"
 : "${NINJA_VERSION:?NINJA_VERSION is required}"
 : "${NINJA_ARCHIVE_SHA256:?NINJA_ARCHIVE_SHA256 is required}"
+: "${POWERSHELL_VERSION:?POWERSHELL_VERSION is required}"
+: "${POWERSHELL_DEB_SHA256:?POWERSHELL_DEB_SHA256 is required}"
 : "${DOCKER_GPG_SHA256:?DOCKER_GPG_SHA256 is required}"
 : "${DOCKER_GPG_FINGERPRINT:?DOCKER_GPG_FINGERPRINT is required}"
 export PATH="/usr/local/share/qiniu-sandbox-runner-template:${PATH}"
@@ -394,6 +396,23 @@ install_azure_devops_extension() {
   test "$(az extension show --name azure-devops --query version -o tsv)" = "$AZURE_DEVOPS_EXTENSION_VERSION"
 }
 
+install_pinned_powershell_package() {
+  local package=/tmp/powershell.deb
+  download_checked \
+    "https://packages.microsoft.com/ubuntu/24.04/prod/pool/main/p/powershell/powershell_${POWERSHELL_VERSION}-1.deb_amd64.deb" \
+    "$package" \
+    "$POWERSHELL_DEB_SHA256"
+  install -d -m 0755 /etc/apt/preferences.d
+  cat >/etc/apt/preferences.d/qiniu-powershell <<APT_PREFERENCE
+Package: powershell
+Pin: version ${POWERSHELL_VERSION}-1.deb
+Pin-Priority: 1001
+APT_PREFERENCE
+  apt-get install -y "$package"
+  rm -f "$package"
+  test "$(pwsh --version)" = "PowerShell $POWERSHELL_VERSION"
+}
+
 configure_reliable_apt_sources() {
   cat >/etc/apt/apt-mirrors.txt <<'APT_MIRRORS'
 https://mirrors.tuna.tsinghua.edu.cn/ubuntu/	priority:1
@@ -420,7 +439,7 @@ APT_NETWORK
 
 ensure_upstream_apt_source_layout() {
   # Canonical's ECR rootfs remains apt-functional through sources.list, while
-  # runner-images' Ubuntu 24 setup unconditionally rewrites the deb822 path
+  # runner-images' non-22.04 setup unconditionally rewrites the deb822 path
   # used by its Azure image. Keep the active source and provide that path.
   install -d -m 0755 /etc/apt/sources.list.d
   if [ ! -e /etc/apt/sources.list.d/ubuntu.sources ]; then
@@ -518,11 +537,11 @@ apt-get update
 apt-get install -y --no-install-recommends ca-certificates
 configure_reliable_apt_sources
 apt-get update
-# The pinned runner-images toolset asks apt for the ambiguous virtual netcat
-# package. Install its concrete provider before the upstream installer and
-# Pester check run.
+# PowerShell needs the ICU runtime, and the pinned runner-images toolset asks
+# apt for the now-ambiguous virtual netcat package. Install its concrete
+# provider before the upstream installers and their Pester checks run.
 apt-get install -y --no-install-recommends \
-  curl gpg jq lsb-release man-db netcat-openbsd sudo tar wget xz-utils
+  curl gpg jq libicu78 lsb-release man-db netcat-openbsd sudo tar wget xz-utils
 
 if ! id -u runner >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash runner
@@ -826,7 +845,7 @@ WAAGENT
   bash "$upstream_build/configure-apt.sh"
   bash "$upstream_build/configure-environment.sh"
   bash "$upstream_build/install-apt-vital.sh"
-  bash "$upstream_build/install-powershell.sh"
+  install_pinned_powershell_package
   install_pester_for_upstream_tests
   bash "$HELPER_SCRIPTS/invoke-tests.sh" Tools azcopy
 

@@ -30,8 +30,6 @@ set -euxo pipefail
 : "${YQ_BINARY_SHA256:?YQ_BINARY_SHA256 is required}"
 : "${ZSTD_VERSION:?ZSTD_VERSION is required}"
 : "${ZSTD_ARCHIVE_SHA256:?ZSTD_ARCHIVE_SHA256 is required}"
-: "${NINJA_VERSION:?NINJA_VERSION is required}"
-: "${NINJA_ARCHIVE_SHA256:?NINJA_ARCHIVE_SHA256 is required}"
 : "${DOCKER_GPG_SHA256:?DOCKER_GPG_SHA256 is required}"
 : "${DOCKER_GPG_FINGERPRINT:?DOCKER_GPG_FINGERPRINT is required}"
 export PATH="/usr/local/share/qiniu-sandbox-runner-template:${PATH}"
@@ -420,8 +418,9 @@ APT_NETWORK
 
 ensure_upstream_apt_source_layout() {
   # Canonical's ECR rootfs remains apt-functional through sources.list, while
-  # runner-images' Ubuntu 24 setup unconditionally rewrites the deb822 path
-  # used by its Azure image. Keep the active source and provide that path.
+  # runner-images' Ubuntu 24 slim setup unconditionally rewrites the deb822
+  # path used by its Azure image. Keep the working source and provide only the
+  # expected path; configure_reliable_apt_sources updates the active source.
   install -d -m 0755 /etc/apt/sources.list.d
   if [ ! -e /etc/apt/sources.list.d/ubuntu.sources ]; then
     install -m 0644 /dev/null /etc/apt/sources.list.d/ubuntu.sources
@@ -475,54 +474,12 @@ install_runner() {
   test -x /opt/actions-runner/run.sh
 }
 
-install_pester_for_upstream_tests() {
-  local pester_version
-  pester_version="$(
-    jq -er '
-      .powershellModules[]
-      | select(.name == "Pester")
-      | .versions[]
-    ' "$INSTALLER_SCRIPT_FOLDER/toolset.json"
-  )"
-  PESTER_VERSION="$pester_version" pwsh -NoLogo -NoProfile -Command '
-    $ErrorActionPreference = "Stop"
-    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-    Install-Module -Name Pester -RequiredVersion $env:PESTER_VERSION -Scope AllUsers -SkipPublisherCheck -Force
-    Import-Module Pester -RequiredVersion $env:PESTER_VERSION -Force
-    if ((Get-Module Pester).Version.ToString() -ne $env:PESTER_VERSION) { exit 1 }
-  '
-}
-
-stop_validated_service() {
-  local unit="$1"
-  if [ "$unit" = apache2 ]; then
-    apache2ctl stop || true
-    for _ in $(seq 1 100); do
-      if ! ss -ltn 'sport = :80' | grep -q LISTEN; then
-        return 0
-      fi
-      sleep 0.1
-    done
-    echo "validated service kept port 80 busy after cleanup: apache2" >&2
-    ss -ltnp 'sport = :80' >&2 || true
-    return 1
-  fi
-  systemctl stop "$unit" || true
-  if systemctl is-active --quiet "$unit"; then
-    echo "validated service remained active after cleanup: $unit" >&2
-    return 1
-  fi
-}
-
 apt-get update
 apt-get install -y --no-install-recommends ca-certificates
 configure_reliable_apt_sources
 apt-get update
-# The pinned runner-images toolset asks apt for the ambiguous virtual netcat
-# package. Install its concrete provider before the upstream installer and
-# Pester check run.
 apt-get install -y --no-install-recommends \
-  curl gpg jq lsb-release man-db netcat-openbsd sudo tar wget xz-utils
+  curl gpg jq lsb-release man-db sudo tar wget xz-utils
 
 if ! id -u runner >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash runner
@@ -552,6 +509,7 @@ export IMAGE_OS=ubuntu24
 
 if [ "${TEMPLATE_FLAVOR:-}" = slim ]; then
   upstream_build=/tmp/runner-images/images/ubuntu-slim/scripts/build
+  ensure_upstream_apt_source_layout
   install_azcopy_from_microsoft_package
   for installer in \
     configure-apt-sources.sh \
@@ -579,6 +537,9 @@ if [ "${TEMPLATE_FLAVOR:-}" = slim ]; then
     install-docker-cli.sh \
     configure-system.sh; do
     run_upstream_installer "$upstream_build/$installer"
+    if [ "$installer" = configure-apt-sources.sh ]; then
+      configure_reliable_apt_sources
+    fi
     if [ "$installer" = install-azure-cli.sh ]; then
       install_azure_devops_extension
     fi
@@ -612,110 +573,9 @@ except subprocess.TimeoutExpired:
 sys.exit(result.returncode)
 PYTHON
 }
-run_detached_until_tcp_state() {
-  desired_state="$1"
-  host="$2"
-  port="$3"
-  shift 3
-  /usr/bin/python3 - "$desired_state" "$host" "$port" "$@" <<'PYTHON'
-import os
-import signal
-import socket
-import subprocess
-import sys
-import time
-
-desired_active = sys.argv[1] == "active"
-host = sys.argv[2]
-port = int(sys.argv[3])
-process = subprocess.Popen(
-    sys.argv[4:],
-    stdin=subprocess.DEVNULL,
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL,
-    close_fds=True,
-    start_new_session=True,
-)
-controller_pid_file = "/tmp/qiniu-runner-build-tools/apache2-controller.pid"
-with open(controller_pid_file, "w", encoding="ascii") as controller_file:
-    controller_file.write(str(process.pid))
-
-def service_is_active():
-    try:
-        with socket.create_connection((host, port), timeout=0.2):
-            return True
-    except OSError:
-        return False
-
-deadline = time.monotonic() + 30
-while time.monotonic() < deadline:
-    if service_is_active() == desired_active:
-        sys.exit(0)
-    return_code = process.poll()
-    if return_code not in (None, 0):
-        sys.exit(return_code)
-    time.sleep(0.1)
-
-if process.poll() is None:
-    os.killpg(process.pid, signal.SIGTERM)
-sys.exit(124)
-PYTHON
-}
-start_apache() {
-  run_detached_until_tcp_state active 127.0.0.1 80 /usr/sbin/apachectl -DFOREGROUND
-}
-stop_apache() {
-  /usr/bin/python3 - <<'PYTHON'
-import os
-import signal
-import socket
-import sys
-import time
-
-controller_pid_file = "/tmp/qiniu-runner-build-tools/apache2-controller.pid"
-
-def service_is_active():
-    try:
-        with socket.create_connection(("127.0.0.1", 80), timeout=0.2):
-            return True
-    except OSError:
-        return False
-
-try:
-    with open(controller_pid_file, encoding="ascii") as controller_file:
-        controller_pid = int(controller_file.read().strip())
-except (FileNotFoundError, ValueError):
-    sys.exit(1 if service_is_active() else 0)
-
-try:
-    os.killpg(controller_pid, signal.SIGTERM)
-except ProcessLookupError:
-    pass
-
-deadline = time.monotonic() + 30
-while time.monotonic() < deadline:
-    if not service_is_active():
-        try:
-            os.unlink(controller_pid_file)
-        except FileNotFoundError:
-            pass
-        sys.exit(0)
-    time.sleep(0.1)
-sys.exit(124)
-PYTHON
-}
 case "$unit:$action" in
-  apache2:start)
-    start_apache
-    exit $?
-    ;;
-  apache2:stop)
-    stop_apache
-    exit $?
-    ;;
-  apache2:restart)
-    stop_apache || exit $?
-    start_apache
+  apache2:start|apache2:stop|apache2:restart)
+    run_isolated /usr/sbin/apachectl "$action"
     exit $?
     ;;
   apache2:is-active)
@@ -804,30 +664,16 @@ WAAGENT
   test "$(grep -Fxc '    $testCases = @("podman", "buildah", "skopeo") | ForEach-Object { @{ContainerCommand = $_} }' "$podman_networking_test" || true)" -eq 1
   test "$(grep -Fxc '    It "<ContainerCommand>" -TestCases $testCases {' "$podman_networking_test" || true)" -eq 1
   test "$(grep -Fxc '        "$ContainerCommand -v" | Should -ReturnZeroExitCode' "$podman_networking_test" || true)" -eq 1
-  # The disk-bounded contract provides Ninja but excludes the full image's
-  # CMake toolchain. Keep the upstream Ninja CLI assertion while skipping only
-  # the two project-generation assertions that require CMake.
-  ninja_test=/imagegeneration/tests/Tools.Tests.ps1
-  test "$(grep -Fxc '    It "Make a simple ninja project" {' "$ninja_test" || true)" -eq 1
-  test "$(grep -Fxc '    It "build.ninja file should exist" {' "$ninja_test" || true)" -eq 1
-  test "$(grep -Fxc '    It "Ninja" {' "$ninja_test" || true)" -eq 1
-  sed -i \
-    -e 's/    It "Make a simple ninja project" {/    It "Make a simple ninja project" -Skip {/' \
-    -e 's/    It "build.ninja file should exist" {/    It "build.ninja file should exist" -Skip {/' \
-    "$ninja_test"
-  test "$(grep -Fxc '    It "Make a simple ninja project" -Skip {' "$ninja_test" || true)" -eq 1
-  test "$(grep -Fxc '    It "build.ninja file should exist" -Skip {' "$ninja_test" || true)" -eq 1
 
   bash "$upstream_build/install-ms-repos.sh"
   install_azcopy_from_microsoft_package
-  ensure_upstream_apt_source_layout
   bash "$upstream_build/configure-apt-sources.sh"
-  configure_reliable_apt_sources
   bash "$upstream_build/configure-apt.sh"
   bash "$upstream_build/configure-environment.sh"
   bash "$upstream_build/install-apt-vital.sh"
   bash "$upstream_build/install-powershell.sh"
-  install_pester_for_upstream_tests
+  pwsh -File "$upstream_build/Install-PowerShellModules.ps1"
+  pwsh -File "$upstream_build/Install-PowerShellAzModules.ps1"
   bash "$HELPER_SCRIPTS/invoke-tests.sh" Tools azcopy
 
   for installer in \
@@ -836,30 +682,87 @@ WAAGENT
     install-bicep.sh \
     install-apache.sh \
     install-aws-tools.sh \
+    install-clang.sh \
+    install-swift.sh \
+    install-cmake.sh \
+    install-codeql-bundle.sh \
+    install-awf.sh \
     install-container-tools.sh \
+    install-dotnetcore-sdk.sh \
+    install-microsoft-edge.sh \
+    install-gcc-compilers.sh \
+    install-firefox.sh \
+    install-gfortran.sh \
     install-git.sh \
     install-git-lfs.sh \
     install-github-cli.sh \
+    install-google-chrome.sh \
     install-google-cloud-cli.sh \
+    install-haskell.sh \
+    install-java-tools.sh \
+    install-kubernetes-tools.sh \
+    install-miniconda.sh \
+    install-kotlin.sh \
+    install-mysql.sh \
+    install-nginx.sh \
     install-nvm.sh \
     install-nodejs.sh \
+    install-copilot-cli.sh \
+    install-bazel.sh \
+    install-php.sh \
+    install-postgresql.sh \
+    install-pulumi.sh \
+    install-ruby.sh \
+    install-rust.sh \
+    install-julia.sh \
+    install-selenium.sh \
+    install-packer.sh \
+    install-vcpkg.sh \
     configure-dpkg.sh \
     install-yq.sh \
+    install-android-sdk.sh \
+    install-pypy.sh \
     install-python.sh \
     install-zstd.sh \
     install-ninja.sh; do
     run_upstream_installer "$upstream_build/$installer"
-    case "$installer" in
-      install-azure-cli.sh)
-        install_azure_devops_extension
-        bash "$HELPER_SCRIPTS/invoke-tests.sh" CLI.Tools "Azure DevOps CLI"
-        ;;
-      install-apache.sh) stop_validated_service apache2 ;;
-    esac
+    if [ "$installer" = install-azure-cli.sh ]; then
+      install_azure_devops_extension
+      bash "$HELPER_SCRIPTS/invoke-tests.sh" CLI.Tools "Azure DevOps CLI"
+    fi
   done
-  . "$HELPER_SCRIPTS/etc-environment.sh"
-  reload_etc_environment
+
+  if [ "$VERSION_ID" = 22.04 ]; then
+    for installer in \
+      install-aliyun-cli.sh \
+      install-heroku.sh \
+      install-leiningen.sh \
+      install-mssql-tools.sh \
+      install-oc-cli.sh \
+      install-oras-cli.sh \
+      install-rlang.sh \
+      install-mono.sh \
+      install-sbt.sh \
+      install-sqlpackage.sh \
+      install-terraform.sh; do
+      if [ "$installer" = install-mono.sh ]; then
+        # Mono 6.12 JIT aborts when an amd64 image is built through arm64
+        # emulation. Scope interpreter mode to installation-time validation;
+        # the completed amd64 image retains the native JIT default.
+        MONO_ENV_OPTIONS=--interp run_upstream_installer "$upstream_build/$installer"
+      else
+        run_upstream_installer "$upstream_build/$installer"
+      fi
+    done
+  fi
+
+  pwsh -File "$upstream_build/Install-Toolset.ps1"
+  pwsh -File "$upstream_build/Configure-Toolset.ps1"
   bash "$upstream_build/install-pipx-packages.sh"
+  sudo -H -u runner \
+    HELPER_SCRIPTS="$HELPER_SCRIPTS" \
+    INSTALLER_SCRIPT_FOLDER="$INSTALLER_SCRIPT_FOLDER" \
+    bash "$upstream_build/install-homebrew.sh"
 fi
 
 install_docker_for_sandbox

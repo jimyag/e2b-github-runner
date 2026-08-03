@@ -233,12 +233,18 @@ task release-check # 验证发布构建
 
 ### 沙箱模板
 
-| 模板                                   | 说明                                                               |
-| -------------------------------------- | ------------------------------------------------------------------ |
-| `templates/github-runner-ubuntu-24.04` | 默认 GitHub runner 镜像（runner 运行时、Docker、辅助工具、rclone） |
-| `templates/qbox-kodo-ubuntu-16.04`     | 旧版 Ubuntu 16.04，用于 qbox/kodo 风格的 job                       |
+| 模板                                   | 说明                                          |
+| -------------------------------------- | --------------------------------------------- |
+| `templates/github-runner-ubuntu-slim`  | 维护中的 Ubuntu Slim x64 Runner 模板          |
+| `templates/github-runner-ubuntu-22.04` | 维护中的 Ubuntu 22.04 x64 Runner 模板         |
+| `templates/github-runner-ubuntu-24.04` | 维护中的 Ubuntu 24.04 x64 Runner 模板         |
+| `templates/github-runner-ubuntu-26.04` | 预览版 Ubuntu 26.04 x64 Runner 模板           |
+| `templates/qbox-kodo-ubuntu-16.04`     | 旧版 Ubuntu 16.04，用于 qbox/kodo 风格的 job  |
 
-使用 `task template-build-prod` 构建模板。qbox-kodo 基础镜像可通过 `task qbox-kodo-base-build` 单独重建。
+先运行 `task template-check-all`，再通过 4 个
+`task template-build-ubuntu-*` targets 执行真实 qshell Sandbox 构建。发布与
+smoke 命令见[公共 Runner 模板](docs/zh/default-runner-templates.md)。qbox-kodo
+基础镜像仍使用独立的 `task qbox-kodo-base-build` 流程。
 
 ## 文档
 
@@ -246,6 +252,7 @@ task release-check # 验证发布构建
 | -------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | [docs/zh/testing.md](docs/zh/testing.md)                                               | 本地测试、GitHub App/OAuth 设置、webhook 转发、故障排查 |
 | [docs/zh/deployment-smoke.md](docs/zh/deployment-smoke.md)                             | 生产环境就绪检查清单                                    |
+| [docs/zh/default-runner-templates.md](docs/zh/default-runner-templates.md)             | 公共模板 labels、qshell 发布流程、区域 smoke 和回滚     |
 | [docs/zh/runner-architecture-comparison.md](docs/zh/runner-architecture-comparison.md) | 架构图及与 ARC / Fireactions 的对比                     |
 | [docs/zh/runner-implementation-review.md](docs/zh/runner-implementation-review.md)     | 实现状态与 schema 迁移说明                              |
 

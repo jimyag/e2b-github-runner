@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 ARG BASE_PLATFORM=linux/amd64
-FROM --platform=$BASE_PLATFORM public.ecr.aws/ubuntu/ubuntu:24.04@sha256:be20a0347f238b7d373edddc55923443b21dd9a60277bf8a93e43458cd0bf2fc
+FROM --platform=$BASE_PLATFORM public.ecr.aws/ubuntu/ubuntu:22.04@sha256:0bc16241504efa4cf92fcc8c8039dac604c6bb832b3d8fcc24097c6b05b60b7c
 
 ARG TEMPLATE_VERSION=20260727.1
 ARG RUNNER_IMAGES_REV=e986db797519f06a2e5e53701a715cfa4c1545e8
@@ -38,20 +38,20 @@ ARG DOCKER_GPG_SHA256=1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170
 ARG DOCKER_GPG_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    ImageOS=ubuntu24 \
+    ImageOS=ubuntu22 \
     ImageVersion=$TEMPLATE_VERSION \
     IMAGE_VERSION=$TEMPLATE_VERSION \
-    IMAGE_TEMPLATE=github-runner-ubuntu-24-04 \
+    IMAGE_TEMPLATE=github-runner-ubuntu-22-04 \
     RUNNER_TOOL_CACHE=/opt/hostedtoolcache \
     AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache \
     HOME=/home/runner \
     LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
-    PATH=/usr/local/bin:$PATH
+    LC_ALL=C.UTF-8
 
 COPY scripts/setup-template.sh /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 COPY scripts/ensure-docker /usr/local/share/qiniu-sandbox-runner-template/ensure-docker
 COPY scripts/curl /usr/local/share/qiniu-sandbox-runner-template/curl
+COPY scripts/wget /usr/local/share/qiniu-sandbox-runner-template/wget
 
 RUN TEMPLATE_FLAVOR=versioned bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 

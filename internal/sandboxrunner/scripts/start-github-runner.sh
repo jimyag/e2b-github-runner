@@ -1,32 +1,62 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export RUNNER_ALLOW_RUNASROOT=1
-export HOME="${RUNNER_HOME:-/tmp/runner-home}"
+runner_user="${RUNNER_USER:-runner}"
+actions_runner_root="${ACTIONS_RUNNER_ROOT:-/opt/actions-runner}"
+workdir="${RUNNER_WORKDIR:-/home/runner/actions-runner}"
+runner_job_work="${RUNNER_JOB_WORK:-/home/runner/work}"
+hook_root="${RUNNER_HOOK_ROOT:-/home/runner/_runnerd-hooks}"
+ensure_docker="${ENSURE_DOCKER:-/usr/local/bin/ensure-docker}"
+export HOME="${RUNNER_HOME:-/home/runner}"
 export XDG_CONFIG_HOME="${HOME}/.config"
 export GOPATH="${GOPATH:-/opt/go}"
 export GOBIN="${GOBIN:-/usr/local/bin}"
 export RUNNER_TOOL_CACHE="${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}"
 export AGENT_TOOLSDIRECTORY="${AGENT_TOOLSDIRECTORY:-/opt/hostedtoolcache}"
 export PATH="/usr/local/go/bin:/usr/local/bin:${GOPATH}/bin:${PATH}"
-workdir="${RUNNER_WORKDIR:-/tmp/actions-runner}"
-mkdir -p "$workdir" "$HOME" "$XDG_CONFIG_HOME/git"
+if [ -r /etc/environment ]; then
+  set -a
+  # runner-images writes shell-compatible KEY="value" entries here.
+  # shellcheck disable=SC1091
+  . /etc/environment
+  set +a
+fi
+
+if [ "$(id -u)" -eq 0 ] && id -u "$runner_user" >/dev/null 2>&1 && [ "${RUNNERD_AS_RUNNER:-}" != 1 ]; then
+  install -d -o "$runner_user" -g "$runner_user" \
+    "$workdir" "$runner_job_work" "$HOME" "$XDG_CONFIG_HOME/git" "$hook_root"
+  exec sudo -E -u "$runner_user" \
+    RUNNERD_AS_RUNNER=1 \
+    RUNNER_USER="$runner_user" \
+    ACTIONS_RUNNER_ROOT="$actions_runner_root" \
+    RUNNER_WORKDIR="$workdir" \
+    RUNNER_JOB_WORK="$runner_job_work" \
+    RUNNER_HOOK_ROOT="$hook_root" \
+    ENSURE_DOCKER="$ensure_docker" \
+    HOME="$HOME" \
+    bash "$0"
+fi
+if [ "$(id -u)" -eq 0 ]; then
+  export RUNNER_ALLOW_RUNASROOT=1
+fi
+
+mkdir -p "$workdir" "$runner_job_work" "$HOME" "$XDG_CONFIG_HOME/git" "$hook_root"
 cd "$workdir"
 
-if [ ! -x /opt/actions-runner/config.sh ]; then
-  echo "missing preinstalled GitHub Actions runner at /opt/actions-runner/config.sh" >&2
-  echo "build the sandbox template from templates/github-runner-ubuntu-24.04 before starting runners" >&2
+if [ ! -x "$actions_runner_root/config.sh" ]; then
+  echo "missing preinstalled GitHub Actions runner at $actions_runner_root/config.sh" >&2
+  echo "build one of the managed GitHub runner templates before starting runners" >&2
   exit 1
 fi
 
 if [ ! -x ./config.sh ]; then
   echo "copying preinstalled GitHub Actions runner"
-  cp -a /opt/actions-runner/. "$workdir"/
+  cp -a "$actions_runner_root"/. "$workdir"/
 fi
 
-if [ -x /usr/local/bin/ensure-docker ]; then
+if [ -x "$ensure_docker" ]; then
   echo "checking Docker daemon"
-  /usr/local/bin/ensure-docker || true
+  "$ensure_docker"
 fi
 
 runner_url="$(printf '%%s' "%[1]s" | base64 -d)"
@@ -37,11 +67,10 @@ runner_group="$(printf '%%s' "%[5]s" | base64 -d)"
 runner_request_id="$(printf '%%s' "%[6]s" | base64 -d)"
 sandbox_id="$(printf '%%s' "%[7]s" | base64 -d)"
 
-mkdir -p /tmp/runnerd-hooks
 export RUNNERD_SANDBOX_ID="$sandbox_id"
 export RUNNERD_REQUEST_ID="$runner_request_id"
 export RUNNERD_RUNNER_NAME="$runner_name"
-cat >/tmp/runnerd-hooks/job-started.sh <<'HOOK'
+cat >"$hook_root/job-started.sh" <<'HOOK'
 #!/usr/bin/env bash
 echo "RUNNERD_JOB_STARTED"
 echo "::notice title=Qiniu sandbox::sandbox_id=${RUNNERD_SANDBOX_ID} runner_request_id=${RUNNERD_REQUEST_ID} runner_name=${RUNNERD_RUNNER_NAME}"
@@ -49,15 +78,15 @@ echo "Qiniu sandbox id: ${RUNNERD_SANDBOX_ID}"
 echo "Runner request id: ${RUNNERD_REQUEST_ID}"
 echo "Runner name: ${RUNNERD_RUNNER_NAME}"
 HOOK
-cat >/tmp/runnerd-hooks/job-completed.sh <<'HOOK'
+cat >"$hook_root/job-completed.sh" <<'HOOK'
 #!/usr/bin/env bash
 echo "RUNNERD_JOB_COMPLETED"
 HOOK
-chmod +x /tmp/runnerd-hooks/job-started.sh /tmp/runnerd-hooks/job-completed.sh
-export ACTIONS_RUNNER_HOOK_JOB_STARTED=/tmp/runnerd-hooks/job-started.sh
-export ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/tmp/runnerd-hooks/job-completed.sh
+chmod +x "$hook_root/job-started.sh" "$hook_root/job-completed.sh"
+export ACTIONS_RUNNER_HOOK_JOB_STARTED="$hook_root/job-started.sh"
+export ACTIONS_RUNNER_HOOK_JOB_COMPLETED="$hook_root/job-completed.sh"
 
-config_args=(--url "$runner_url" --token "$registration_token" --name "$runner_name" --labels "$runner_labels" --ephemeral --unattended --replace --disableupdate)
+config_args=(--url "$runner_url" --token "$registration_token" --name "$runner_name" --labels "$runner_labels" --work "$runner_job_work" --ephemeral --unattended --replace --disableupdate)
 if [ -n "$runner_group" ]; then
   config_args+=(--runnergroup "$runner_group")
 fi

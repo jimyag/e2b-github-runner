@@ -418,16 +418,6 @@ Acquire::https::Timeout "30";
 APT_NETWORK
 }
 
-ensure_upstream_apt_source_layout() {
-  # Canonical's ECR rootfs remains apt-functional through sources.list, while
-  # runner-images' Ubuntu 24 setup unconditionally rewrites the deb822 path
-  # used by its Azure image. Keep the active source and provide that path.
-  install -d -m 0755 /etc/apt/sources.list.d
-  if [ ! -e /etc/apt/sources.list.d/ubuntu.sources ]; then
-    install -m 0644 /dev/null /etc/apt/sources.list.d/ubuntu.sources
-  fi
-}
-
 configure_docker_apt_repository() {
   install -d -m 0755 /etc/apt/keyrings
   rm -f /tmp/docker.gpg /etc/apt/keyrings/docker.gpg /etc/apt/sources.list.d/docker.list
@@ -518,11 +508,8 @@ apt-get update
 apt-get install -y --no-install-recommends ca-certificates
 configure_reliable_apt_sources
 apt-get update
-# The pinned runner-images toolset asks apt for the ambiguous virtual netcat
-# package. Install its concrete provider before the upstream installer and
-# Pester check run.
 apt-get install -y --no-install-recommends \
-  curl gpg jq lsb-release man-db netcat-openbsd sudo tar wget xz-utils
+  curl gpg jq lsb-release man-db sudo tar wget xz-utils
 
 if ! id -u runner >/dev/null 2>&1; then
   useradd --create-home --shell /bin/bash runner
@@ -820,7 +807,6 @@ WAAGENT
 
   bash "$upstream_build/install-ms-repos.sh"
   install_azcopy_from_microsoft_package
-  ensure_upstream_apt_source_layout
   bash "$upstream_build/configure-apt-sources.sh"
   configure_reliable_apt_sources
   bash "$upstream_build/configure-apt.sh"
