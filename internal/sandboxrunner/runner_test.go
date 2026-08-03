@@ -2166,23 +2166,27 @@ func TestVersionedTemplateBuildStopsValidatedServicesBetweenInstallers(t *testin
 			}
 			script := string(scriptBytes)
 			installerRun := `bash "$upstream_build/$installer"`
-			serviceCleanup := `case "$installer" in
-      install-apache.sh) stop_validated_service apache2 ;;
-    esac`
-			installerRunIndex := strings.Index(script, installerRun)
-			serviceCleanupIndex := strings.Index(script, serviceCleanup)
-			if installerRunIndex < 0 || serviceCleanupIndex < 0 {
+			serviceCleanup := `install-apache.sh) stop_validated_service apache2 ;;`
+			installerRunIndex := strings.LastIndex(script, installerRun)
+			if installerRunIndex < 0 {
+				t.Fatal("versioned build must run the pinned installer loop")
+			}
+			installerLoop := script[installerRunIndex:]
+			serviceCleanupIndex := strings.Index(installerLoop, serviceCleanup)
+			loopEndIndex := strings.Index(installerLoop, "\n  done")
+			if serviceCleanupIndex < 0 || loopEndIndex < 0 {
 				t.Fatalf(
-					"versioned build must stop validated services between installers: installer=%d cleanup=%d",
+					"versioned build must stop validated services between installers: installer=%d cleanup=%d loop_end=%d",
 					installerRunIndex,
 					serviceCleanupIndex,
+					loopEndIndex,
 				)
 			}
-			if serviceCleanupIndex < installerRunIndex {
+			if serviceCleanupIndex > loopEndIndex {
 				t.Fatalf(
-					"service cleanup must run after each installer validation: installer=%d cleanup=%d",
-					installerRunIndex,
+					"service cleanup must run inside the installer loop: cleanup=%d loop_end=%d",
 					serviceCleanupIndex,
+					loopEndIndex,
 				)
 			}
 			for _, required := range []string{
