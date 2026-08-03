@@ -197,15 +197,31 @@ unit=${1:-}
 unit=${unit%.service}
 # VM-oriented upstream installers assume service operations always return. Bound
 # SysV calls so a missing init environment cannot wedge a Sandbox build forever.
+# Isolate their file descriptors so a daemon cannot keep Pester's capture pipe
+# open after the service command exits or is killed.
+service_status() {
+  /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" status </dev/null >/dev/null 2>&1
+}
 case "$action" in
   start|stop|restart)
     if [ -x "/etc/init.d/$unit" ]; then
-      exec /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" "$action"
+      /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" "$action" </dev/null >/dev/null 2>&1
+      service_result=$?
+      if [ "$service_result" -eq 0 ]; then
+        exit 0
+      fi
+      if service_status; then
+        [ "$action" = stop ] && exit "$service_result"
+        exit 0
+      fi
+      [ "$action" = stop ] && exit 0
+      exit "$service_result"
     fi
     ;;
   is-active)
     if [ -x "/etc/init.d/$unit" ]; then
-      exec /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" status >/dev/null 2>&1
+      service_status
+      exit $?
     fi
     ;;
 esac

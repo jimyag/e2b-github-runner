@@ -1581,7 +1581,7 @@ func TestVersionedTemplateBuildMakesSystemctlShimVisibleToSudoAndCleansIt(t *tes
 	}
 }
 
-func TestVersionedTemplateSystemctlShimRunsAvailableSysVServices(t *testing.T) {
+func TestVersionedTemplateSystemctlShimBoundsAndVerifiesSysVServices(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
 		"ubuntu-slim",
@@ -1606,11 +1606,16 @@ func TestVersionedTemplateSystemctlShimRunsAvailableSysVServices(t *testing.T) {
 				`action=${1:-}`,
 				`unit=${unit%.service}`,
 				`if [ -x "/etc/init.d/$unit" ]; then`,
-				`exec /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" "$action"`,
-				`exec /usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" status >/dev/null 2>&1`,
+				`service_status() {`,
+				`/usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" status </dev/null >/dev/null 2>&1`,
+				`/usr/bin/timeout --signal=KILL 30s /usr/sbin/service "$unit" "$action" </dev/null >/dev/null 2>&1`,
+				`service_result=$?`,
+				`if service_status; then`,
+				`[ "$action" = stop ] && exit "$service_result"`,
+				`[ "$action" = stop ] && exit 0`,
 			} {
 				if !strings.Contains(script, required) {
-					t.Fatalf("systemctl shim must run available SysV services; missing %q", required)
+					t.Fatalf("systemctl shim must isolate, bound, and verify available SysV services; missing %q", required)
 				}
 			}
 		})
