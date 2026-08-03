@@ -5,6 +5,7 @@ set -euxo pipefail
 : "${RUNNER_IMAGES_ARCHIVE_SHA256:?RUNNER_IMAGES_ARCHIVE_SHA256 is required}"
 : "${RUNNER_VERSION:?RUNNER_VERSION is required}"
 : "${RUNNER_ARCHIVE_SHA256:?RUNNER_ARCHIVE_SHA256 is required}"
+: "${SQLPACKAGE_DOTNET_TOOL_VERSION:?SQLPACKAGE_DOTNET_TOOL_VERSION is required}"
 : "${DOCKER_GPG_SHA256:?DOCKER_GPG_SHA256 is required}"
 : "${DOCKER_GPG_FINGERPRINT:?DOCKER_GPG_FINGERPRINT is required}"
 export PATH="/usr/local/share/qiniu-sandbox-runner-template:${PATH}"
@@ -73,6 +74,22 @@ install_runner() {
   /opt/actions-runner/bin/installdependencies.sh
   test -x /opt/actions-runner/config.sh
   test -x /opt/actions-runner/run.sh
+}
+
+install_sqlpackage_from_dotnet_tool() {
+  # The pinned upstream evergreen aka.ms archive can expose an incomplete
+  # certificate chain on container networks. Microsoft also publishes
+  # SqlPackage as an official .NET tool for automated environments.
+  install -d -m 0755 /usr/local/sqlpackage
+  DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1 \
+    DOTNET_SYSTEM_NET_HTTP_SOCKETSHTTPHANDLER_HTTP2SUPPORT=false \
+    dotnet tool install Microsoft.SqlPackage \
+      --tool-path /usr/local/sqlpackage \
+      --version "$SQLPACKAGE_DOTNET_TOOL_VERSION" \
+      --add-source https://api.nuget.org/v3/index.json
+  ln -sf /usr/local/sqlpackage/sqlpackage /usr/local/bin/sqlpackage
+  bash "$HELPER_SCRIPTS/invoke-tests.sh" "Tools" "SqlPackage"
 }
 
 stop_validated_service() {
@@ -311,6 +328,8 @@ WAAGENT
         # emulation. Scope interpreter mode to installation-time validation;
         # the completed amd64 image retains the native JIT default.
         MONO_ENV_OPTIONS=--interp bash "$upstream_build/$installer"
+      elif [ "$installer" = install-sqlpackage.sh ]; then
+        install_sqlpackage_from_dotnet_tool
       else
         bash "$upstream_build/$installer"
       fi

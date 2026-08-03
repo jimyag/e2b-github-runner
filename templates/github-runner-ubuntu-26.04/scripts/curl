@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+real_curl="${RUNNER_TEMPLATE_CURL_BIN:-/usr/bin/curl}"
+transport_options=(
+  --http1.1
+  --retry 5
+  --retry-all-errors
+  --retry-delay 2
+)
+for argument in "$@"; do
+  case "$argument" in
+    https://api.github.com/*)
+      if [ -n "${GITHUB_TOKEN:-}" ]; then
+        exec "$real_curl" \
+          "${transport_options[@]}" \
+          --header "Authorization: Bearer ${GITHUB_TOKEN}" \
+          "$@"
+      fi
+      break
+    ;;
+  esac
+done
+exec "$real_curl" "${transport_options[@]}" "$@"

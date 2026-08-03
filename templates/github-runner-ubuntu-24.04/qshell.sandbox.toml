@@ -2,7 +2,7 @@
 #
 # This tracked file is the stable build input. Use Taskfile build targets so
 # qshell writes any generated template_id only to a temporary copy:
-#   task template-build-prod
+#   task template-build-ubuntu-24-04
 #
 # Prefer a stable name over a committed environment-specific template_id.
 

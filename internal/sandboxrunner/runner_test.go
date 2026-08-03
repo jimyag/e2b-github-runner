@@ -2,12 +2,46 @@ package sandboxrunner
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	qnsandbox "github.com/qiniu/go-sdk/v7/sandbox"
 )
+
+func repositoryRoot(t *testing.T) string {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func writeExecutable(t *testing.T, name, contents string) {
+	t.Helper()
+	if err := os.WriteFile(name, []byte(contents), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func runCommand(t *testing.T, command string, args []string, env ...string) (string, error) {
+	t.Helper()
+	cmd := exec.Command(command, args...)
+	cmd.Dir = repositoryRoot(t)
+	cmd.Env = append(os.Environ(), env...)
+	output, err := cmd.CombinedOutput()
+	return string(output), err
+}
 
 func TestStartScriptEncodesRunnerArguments(t *testing.T) {
 	input := StartInput{
@@ -65,7 +99,7 @@ func TestStartScriptReportsSandboxIDInJobStartedHook(t *testing.T) {
 	}, "sb-78433740691")
 
 	for _, want := range []string{
-		"export ACTIONS_RUNNER_HOOK_JOB_STARTED=/tmp/runnerd-hooks/job-started.sh",
+		`export ACTIONS_RUNNER_HOOK_JOB_STARTED="$hook_root/job-started.sh"`,
 		"RUNNERD_JOB_STARTED",
 		"::notice title=Qiniu sandbox::sandbox_id=${RUNNERD_SANDBOX_ID} runner_request_id=${RUNNERD_REQUEST_ID} runner_name=${RUNNERD_RUNNER_NAME}",
 		"Qiniu sandbox id: ${RUNNERD_SANDBOX_ID}",
@@ -77,6 +111,1658 @@ func TestStartScriptReportsSandboxIDInJobStartedHook(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Fatalf("script missing %q:\n%s", want, script)
 		}
+	}
+}
+
+func TestStartScriptUsesHostedRunnerFilesystemContract(t *testing.T) {
+	fixture := t.TempDir()
+	actionsRunnerRoot := filepath.Join(fixture, "actions-runner")
+	workdir := filepath.Join(fixture, "home", "runner", "work", "_runner")
+	runnerJobWork := filepath.Join(fixture, "home", "runner", "work")
+	runnerHome := filepath.Join(fixture, "home", "runner")
+	hookRoot := filepath.Join(fixture, "hooks")
+	logPath := filepath.Join(fixture, "runner.log")
+	if err := os.MkdirAll(actionsRunnerRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(actionsRunnerRoot, "config.sh"), `#!/usr/bin/env bash
+set -euo pipefail
+printf 'config HOME=%s PWD=%s TOOL_CACHE=%s AGENT_TOOLS=%s\n' "$HOME" "$PWD" "$RUNNER_TOOL_CACHE" "$AGENT_TOOLSDIRECTORY" >>"$RUNNER_TEST_LOG"
+`)
+	writeExecutable(t, filepath.Join(actionsRunnerRoot, "run.sh"), `#!/usr/bin/env bash
+set -euo pipefail
+printf 'run HOME=%s PWD=%s RUNASROOT=%s\n' "$HOME" "$PWD" "${RUNNER_ALLOW_RUNASROOT:-}" >>"$RUNNER_TEST_LOG"
+`)
+
+	script := startScript(StartInput{
+		RequestID:         "request-1",
+		RepositoryURL:     "https://github.com/o/r",
+		RegistrationToken: "token",
+		RunnerName:        "runner",
+		Labels:            []string{"self-hosted", "linux", "x64"},
+	}, "sandbox-1")
+	scriptPath := filepath.Join(fixture, "start-runner.sh")
+	writeExecutable(t, scriptPath, script)
+
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{scriptPath},
+		"ACTIONS_RUNNER_ROOT="+actionsRunnerRoot,
+		"RUNNER_WORKDIR="+workdir,
+		"RUNNER_JOB_WORK="+runnerJobWork,
+		"RUNNER_HOME="+runnerHome,
+		"RUNNER_HOOK_ROOT="+hookRoot,
+		"RUNNER_TEST_LOG="+logPath,
+		"ENSURE_DOCKER=/bin/true",
+	)
+	if err != nil {
+		t.Fatalf("start script failed: %v\n%s", err, output)
+	}
+	logBytes, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logBytes)
+	for _, want := range []string{
+		"config HOME=" + runnerHome + " PWD=" + workdir,
+		"TOOL_CACHE=/opt/hostedtoolcache AGENT_TOOLS=/opt/hostedtoolcache",
+		"run HOME=" + runnerHome + " PWD=" + workdir + " RUNASROOT=",
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("runner execution log missing %q:\n%s", want, log)
+		}
+	}
+}
+
+func TestRunnerTemplateMatrixGateAcceptsManagedCatalog(t *testing.T) {
+	output, err := runCommand(t, "bash", []string{"scripts/check-runner-template-matrix.sh"})
+	if err != nil {
+		t.Fatalf("matrix gate failed: %v\n%s", err, output)
+	}
+}
+
+func TestRunnerTemplateMatrixGateAcceptsLifecycleStatesAndRejectsUnknownState(t *testing.T) {
+	root := repositoryRoot(t)
+	readmeBytes, err := os.ReadFile(filepath.Join(root, "templates", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(t.TempDir(), "templates-readme.md")
+	verified := strings.ReplaceAll(string(readmeBytes), "| development |", "| verified |")
+	if err := os.WriteFile(fixture, []byte(verified), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{"scripts/check-runner-template-matrix.sh"},
+		"RUNNER_TEMPLATES_README="+fixture,
+	)
+	if err != nil {
+		t.Fatalf("verified publication state must pass: %v\n%s", err, output)
+	}
+
+	invalid := strings.Replace(verified, "| verified |", "| released |", 1)
+	if err := os.WriteFile(fixture, []byte(invalid), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err = runCommand(
+		t,
+		"bash",
+		[]string{"scripts/check-runner-template-matrix.sh"},
+		"RUNNER_TEMPLATES_README="+fixture,
+	)
+	if err == nil || !strings.Contains(output, "unsupported publication state") {
+		t.Fatalf("unsupported publication state must fail, got err=%v\n%s", err, output)
+	}
+}
+
+func TestRunnerTemplateQshellBuildUsesTemporaryConfigAndRequiresReady(t *testing.T) {
+	fixture := t.TempDir()
+	templateDir := filepath.Join(fixture, "template")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(templateDir, "qshell.sandbox.toml")
+	const trackedConfig = "name = \"fixture-template\"\n"
+	if err := os.WriteFile(configPath, []byte(trackedConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	qshellPath := filepath.Join(fixture, "qshell")
+	qshellLog := filepath.Join(fixture, "qshell.log")
+	writeExecutable(t, qshellPath, `#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = version ]; then
+  printf 'v2.19.10\n'
+  exit 0
+fi
+printf 'pwd=%s args=%s\n' "$PWD" "$*" >>"$QSHELL_TEST_LOG"
+if [ "$QSHELL_TEST_MODE" = ready ]; then
+  printf 'Status:       ready\n'
+else
+  printf 'Error: fixture build failed\n' >&2
+fi
+`)
+	commonEnv := []string{
+		"QSHELL=" + qshellPath,
+		"QSHELL_TEST_LOG=" + qshellLog,
+		"QINIU_SANDBOX_API_URL=https://sandbox.example.test",
+		"QINIU_API_KEY=test-api-key",
+	}
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{"scripts/run-runner-template-operation.sh", "build", templateDir},
+		append(commonEnv, "QSHELL_TEST_MODE=ready")...,
+	)
+	if err != nil {
+		t.Fatalf("ready qshell build failed: %v\n%s", err, output)
+	}
+	configBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(configBytes) != trackedConfig {
+		t.Fatalf("tracked qshell config changed:\n%s", configBytes)
+	}
+	temporaryConfigs, err := filepath.Glob(filepath.Join(templateDir, ".qshell-sandbox.*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temporaryConfigs) != 0 {
+		t.Fatalf("temporary qshell configs were not removed: %v", temporaryConfigs)
+	}
+	logBytes, err := os.ReadFile(qshellLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logBytes)
+	if !strings.Contains(log, "pwd="+templateDir) ||
+		!strings.Contains(log, "args=sandbox template build --wait --config .qshell-sandbox.") ||
+		strings.Contains(log, "--config qshell.sandbox.toml") {
+		t.Fatalf("build did not use a temporary config from the template directory:\n%s", log)
+	}
+
+	output, err = runCommand(
+		t,
+		"bash",
+		[]string{"scripts/run-runner-template-operation.sh", "build", templateDir},
+		append(commonEnv, "QSHELL_TEST_MODE=failed")...,
+	)
+	if err == nil || !strings.Contains(output, "did not report terminal Status: ready") {
+		t.Fatalf("zero-exit qshell failure must fail closed, got err=%v\n%s", err, output)
+	}
+}
+
+func TestRunnerTemplateQshellPublicationRunsFromTemplateDirectory(t *testing.T) {
+	fixture := t.TempDir()
+	templateDir := filepath.Join(fixture, "template")
+	if err := os.MkdirAll(templateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(templateDir, "qshell.sandbox.toml"),
+		[]byte("name = \"fixture-template\"\n"),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	qshellPath := filepath.Join(fixture, "qshell")
+	qshellLog := filepath.Join(fixture, "qshell.log")
+	writeExecutable(t, qshellPath, `#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = version ]; then
+  printf 'v2.19.10\n'
+  exit 0
+fi
+printf 'pwd=%s args=%s\n' "$PWD" "$*" >>"$QSHELL_TEST_LOG"
+case "$3" in
+  publish) printf 'Template tmpl-fixture published\n' ;;
+  unpublish) printf 'Template tmpl-fixture unpublished\n' ;;
+  *) exit 64 ;;
+esac
+`)
+	commonEnv := []string{
+		"QSHELL=" + qshellPath,
+		"QSHELL_TEST_LOG=" + qshellLog,
+		"QINIU_SANDBOX_API_URL=https://sandbox.example.test",
+		"QINIU_API_KEY=test-api-key",
+	}
+	for _, operation := range []string{"publish", "unpublish"} {
+		output, err := runCommand(
+			t,
+			"bash",
+			[]string{"scripts/run-runner-template-operation.sh", operation, templateDir},
+			commonEnv...,
+		)
+		if err != nil {
+			t.Fatalf("%s failed: %v\n%s", operation, err, output)
+		}
+	}
+	logBytes, err := os.ReadFile(qshellLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := string(logBytes)
+	for _, operation := range []string{"publish", "unpublish"} {
+		want := "pwd=" + templateDir + " args=sandbox template " + operation + " -y"
+		if !strings.Contains(log, want) {
+			t.Fatalf("missing qshell publication invocation %q:\n%s", want, log)
+		}
+	}
+	if strings.Contains(log, "--config") {
+		t.Fatalf("publish/unpublish must not use build-only --config:\n%s", log)
+	}
+}
+
+func TestDefaultTemplateCatalogCheckRequiresUniqueRunnablePublicTemplates(t *testing.T) {
+	templates := []map[string]any{
+		{
+			"templateID":  "tmpl-slim",
+			"names":       []string{"qiniu/github-runner-ubuntu-slim"},
+			"public":      true,
+			"buildStatus": "ready",
+		},
+		{
+			"templateID":  "tmpl-22",
+			"names":       []string{"github-runner-ubuntu-22-04"},
+			"public":      true,
+			"buildStatus": "uploaded",
+		},
+		{
+			"templateID":  "tmpl-24",
+			"names":       []string{"github-runner-ubuntu-24-04"},
+			"public":      true,
+			"buildStatus": "ready",
+		},
+		{
+			"templateID":  "tmpl-26",
+			"names":       []string{"github-runner-ubuntu-26-04"},
+			"public":      true,
+			"buildStatus": "ready",
+		},
+	}
+	initialResponseBody, err := json.Marshal(templates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var responseBody atomic.Value
+	responseBody.Store(initialResponseBody)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/default-templates" {
+			http.NotFound(response, request)
+			return
+		}
+		if request.Header.Get("X-API-Key") != "test-api-key" {
+			http.Error(response, "missing API key", http.StatusUnauthorized)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_, _ = response.Write(responseBody.Load().([]byte))
+	}))
+	defer server.Close()
+
+	commonEnv := []string{
+		"QINIU_SANDBOX_API_URL=" + server.URL,
+		"QINIU_API_KEY=test-api-key",
+	}
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{"scripts/check-default-template-catalog.sh"},
+		commonEnv...,
+	)
+	if err != nil {
+		t.Fatalf("valid default-template catalog failed: %v\n%s", err, output)
+	}
+	for _, want := range []string{
+		"github-runner-ubuntu-slim\ttmpl-slim\tready",
+		"github-runner-ubuntu-22-04\ttmpl-22\tuploaded",
+		"github-runner-ubuntu-24-04\ttmpl-24\tready",
+		"github-runner-ubuntu-26-04\ttmpl-26\tready",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("catalog output missing %q:\n%s", want, output)
+		}
+	}
+
+	templates = append(templates, map[string]any{
+		"templateID":  "tmpl-24-duplicate",
+		"names":       []string{"team/github-runner-ubuntu-24-04"},
+		"public":      true,
+		"buildStatus": "ready",
+	})
+	duplicateResponseBody, err := json.Marshal(templates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseBody.Store(duplicateResponseBody)
+	output, err = runCommand(
+		t,
+		"bash",
+		[]string{"scripts/check-default-template-catalog.sh"},
+		commonEnv...,
+	)
+	if err == nil || !strings.Contains(
+		output,
+		"expected exactly one default template name match for github-runner-ubuntu-24-04; found 2",
+	) {
+		t.Fatalf("duplicate catalog entry must fail, got err=%v\n%s", err, output)
+	}
+
+	privateDuplicateTemplates := append(
+		templates[:len(templates)-1],
+		map[string]any{
+			"templateID":  "tmpl-24-private",
+			"names":       []string{"team/github-runner-ubuntu-24-04"},
+			"public":      false,
+			"buildStatus": "ready",
+		},
+	)
+	privateDuplicateResponseBody, err := json.Marshal(privateDuplicateTemplates)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseBody.Store(privateDuplicateResponseBody)
+	output, err = runCommand(
+		t,
+		"bash",
+		[]string{"scripts/check-default-template-catalog.sh"},
+		commonEnv...,
+	)
+	if err == nil || !strings.Contains(
+		output,
+		"expected exactly one default template name match for github-runner-ubuntu-24-04; found 2",
+	) {
+		t.Fatalf("private duplicate catalog entry must fail, got err=%v\n%s", err, output)
+	}
+}
+
+func TestCompatibilityGateRejectsMissingAndUnexplainedCoverage(t *testing.T) {
+	fixture := t.TempDir()
+	reportDir := filepath.Join(fixture, "reports")
+	if err := os.MkdirAll(reportDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	report := `# Fixture
+- OS Version: 24.04
+
+## Installed Software
+
+### Tools
+- Git 2.0
+- Docker Client 28.0
+`
+	for _, name := range []string{
+		"Ubuntu2204-Readme.md",
+		"Ubuntu2404-Readme.md",
+		"Ubuntu2604-Readme.md",
+		"ubuntu-slim-Readme.md",
+	} {
+		if err := os.WriteFile(filepath.Join(reportDir, name), []byte(report), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lockPath := filepath.Join(fixture, "lock.json")
+	lock := `{
+  "repository": "actions/runner-images",
+  "commit": "e986db797519f06a2e5e53701a715cfa4c1545e8",
+  "reports": {
+    "ubuntu-slim": "images/ubuntu-slim/ubuntu-slim-Readme.md",
+    "ubuntu-22.04": "images/ubuntu/Ubuntu2204-Readme.md",
+    "ubuntu-24.04": "images/ubuntu/Ubuntu2404-Readme.md",
+    "ubuntu-26.04": "images/ubuntu/Ubuntu2604-Readme.md"
+  }
+}`
+	if err := os.WriteFile(lockPath, []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(fixture, "compatibility.json")
+	missingManifest := `{
+  "upstream_commit": "e986db797519f06a2e5e53701a715cfa4c1545e8",
+  "images": {
+    "ubuntu-slim": {"entries": []},
+    "ubuntu-22.04": {"entries": []},
+    "ubuntu-24.04": {"entries": []},
+    "ubuntu-26.04": {"entries": []}
+  }
+}`
+	if err := os.WriteFile(manifestPath, []byte(missingManifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	commonEnv := []string{
+		"RUNNER_IMAGES_REPORT_DIR=" + reportDir,
+		"RUNNER_IMAGES_LOCK=" + lockPath,
+		"RUNNER_IMAGES_MANIFEST=" + manifestPath,
+	}
+	output, err := runCommand(t, "bash", []string{"scripts/check-runner-image-compatibility.sh"}, commonEnv...)
+	if err == nil || !strings.Contains(output, "missing compatibility entry") {
+		t.Fatalf("missing coverage must fail with a specific error, got err=%v\n%s", err, output)
+	}
+
+	entries := make([]map[string]string, 0, 12)
+	for _, image := range []string{"ubuntu-slim", "ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04"} {
+		for _, item := range []string{"Image metadata|OS Version", "Tools|Git", "Tools|Docker Client"} {
+			parts := strings.Split(item, "|")
+			entries = append(entries, map[string]string{
+				"image":         image,
+				"category":      parts[0],
+				"upstream_name": parts[1],
+				"status":        "excluded",
+				"verification":  "false",
+				"reason":        "",
+			})
+		}
+	}
+	images := map[string]map[string]any{}
+	for _, image := range []string{"ubuntu-slim", "ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04"} {
+		imageEntries := make([]map[string]string, 0, 3)
+		for _, entry := range entries {
+			if entry["image"] == image {
+				delete(entry, "image")
+				imageEntries = append(imageEntries, entry)
+			}
+		}
+		images[image] = map[string]any{"entries": imageEntries}
+	}
+	unexplained, err := json.Marshal(map[string]any{
+		"upstream_commit": "e986db797519f06a2e5e53701a715cfa4c1545e8",
+		"images":          images,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, unexplained, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output, err = runCommand(t, "bash", []string{"scripts/check-runner-image-compatibility.sh"}, commonEnv...)
+	if err == nil || !strings.Contains(output, "Sandbox-specific reason") {
+		t.Fatalf("unexplained exclusion must fail with a specific error, got err=%v\n%s", err, output)
+	}
+}
+
+func TestDockerConformanceStopsOnFirstFailureAndRecordsJSON(t *testing.T) {
+	fixture := t.TempDir()
+	binDir := filepath.Join(fixture, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(binDir, "docker"), `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" != run ]; then
+  exit 64
+fi
+shift
+while [ "$#" -gt 0 ] && [ "$1" != bash ]; do
+  shift
+done
+shift
+test "$1" = -lc
+shift
+exec bash -lc "$1"
+`)
+	manifestPath := filepath.Join(fixture, "compatibility.json")
+	manifest := `{
+  "images": {
+    "ubuntu-24.04": {
+      "entries": [
+        {"category":"Tools","upstream_name":"first","status":"provided","verification":"printf first"},
+        {"category":"Tools","upstream_name":"second","status":"provided","verification":"printf second >&2; exit 17"},
+        {"category":"Tools","upstream_name":"third","status":"provided","verification":"printf third"}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(fixture, "result.json")
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{
+			"scripts/run-runner-image-conformance.sh",
+			"--image", "ubuntu-24.04",
+			"--executor", "docker",
+			"--target", "fixture-image",
+			"--output", resultPath,
+		},
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"RUNNER_IMAGES_MANIFEST="+manifestPath,
+	)
+	if err == nil {
+		t.Fatalf("conformance must fail on the failing assertion:\n%s", output)
+	}
+	resultBytes, readErr := os.ReadFile(resultPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var result struct {
+		Passed  bool `json:"passed"`
+		Results []struct {
+			Name       string `json:"name"`
+			Stdout     string `json:"stdout"`
+			Stderr     string `json:"stderr"`
+			ExitStatus int    `json:"exit_status"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		t.Fatalf("invalid result JSON: %v\n%s", err, resultBytes)
+	}
+	if result.Passed || len(result.Results) != 2 {
+		t.Fatalf("result must contain the two executed assertions and fail: %#v", result)
+	}
+	if result.Results[0].Stdout != "first" || result.Results[1].Stderr != "second" || result.Results[1].ExitStatus != 17 {
+		t.Fatalf("unexpected command evidence: %#v", result.Results)
+	}
+}
+
+func TestSandboxConformanceKillsSandboxOnFailure(t *testing.T) {
+	fixture := t.TempDir()
+	binDir := filepath.Join(fixture, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	qshellLog := filepath.Join(fixture, "qshell.log")
+	writeExecutable(t, filepath.Join(binDir, "qshell"), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$QSHELL_TEST_LOG"
+case "$1 $2" in
+  "sandbox create")
+    printf '{"sandbox_id":"sb-fixture"}\n'
+    ;;
+  "sandbox exec")
+    shift 2
+    test "$1" = sb-fixture
+    shift
+    test "$1" = --
+    shift
+    exec "$@"
+    ;;
+  "sandbox kill")
+    test "$3" = sb-fixture
+    printf 'Killed sandbox sb-fixture\n'
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+`)
+	manifestPath := filepath.Join(fixture, "compatibility.json")
+	manifest := `{
+  "images": {
+    "ubuntu-slim": {
+      "entries": [
+        {"category":"Tools","upstream_name":"failure","status":"provided","verification":"exit 23"}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(fixture, "result.json")
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{
+			"scripts/run-runner-image-conformance.sh",
+			"--image", "ubuntu-slim",
+			"--executor", "sandbox",
+			"--target", "template-fixture",
+			"--output", resultPath,
+		},
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"RUNNER_IMAGES_MANIFEST="+manifestPath,
+		"QSHELL_TEST_LOG="+qshellLog,
+		"QINIU_SANDBOX_API_URL=https://sandbox.example.test",
+		"QINIU_API_KEY=test-api-key",
+	)
+	if err == nil {
+		t.Fatalf("sandbox conformance must fail on the assertion:\n%s", output)
+	}
+	logBytes, readErr := os.ReadFile(qshellLog)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !strings.Contains(string(logBytes), "sandbox kill sb-fixture") {
+		t.Fatalf("temporary sandbox was not killed:\n%s", logBytes)
+	}
+	if _, statErr := os.Stat(resultPath); errors.Is(statErr, os.ErrNotExist) {
+		t.Fatal("failure result JSON was not written")
+	}
+	resultBytes, readErr := os.ReadFile(resultPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var result struct {
+		Passed  bool `json:"passed"`
+		Cleanup struct {
+			Attempted bool `json:"attempted"`
+			Passed    bool `json:"passed"`
+		} `json:"cleanup"`
+	}
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		t.Fatalf("invalid result JSON: %v\n%s", err, resultBytes)
+	}
+	if result.Passed || !result.Cleanup.Attempted || !result.Cleanup.Passed {
+		t.Fatalf("failed assertion must retain successful Sandbox cleanup evidence: %#v", result)
+	}
+}
+
+func TestSandboxConformanceParsesOpaqueQshellSandboxID(t *testing.T) {
+	fixture := t.TempDir()
+	binDir := filepath.Join(fixture, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	qshellLog := filepath.Join(fixture, "qshell.log")
+	writeExecutable(t, filepath.Join(binDir, "qshell"), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$QSHELL_TEST_LOG"
+case "$1 $2" in
+  "sandbox create")
+    printf 'Sandbox ID:   opaque-fixture-42\n'
+    ;;
+  "sandbox exec")
+    shift 2
+    test "$1" = opaque-fixture-42
+    shift
+    test "$1" = --
+    shift
+    exec "$@"
+    ;;
+  "sandbox kill")
+    test "$3" = opaque-fixture-42
+    printf 'Killed sandbox opaque-fixture-42\n'
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+`)
+	manifestPath := filepath.Join(fixture, "compatibility.json")
+	manifest := `{
+  "images": {
+    "ubuntu-slim": {
+      "entries": [
+        {"category":"Tools","upstream_name":"success","status":"provided","verification":"printf verified"}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(fixture, "result.json")
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{
+			"scripts/run-runner-image-conformance.sh",
+			"--image", "ubuntu-slim",
+			"--executor", "sandbox",
+			"--target", "template-fixture",
+			"--output", resultPath,
+		},
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"RUNNER_IMAGES_MANIFEST="+manifestPath,
+		"QSHELL_TEST_LOG="+qshellLog,
+		"QINIU_SANDBOX_API_URL=https://sandbox.example.test",
+		"QINIU_API_KEY=test-api-key",
+	)
+	if err != nil {
+		t.Fatalf("sandbox conformance rejected an opaque qshell Sandbox ID: %v\n%s", err, output)
+	}
+	logBytes, err := os.ReadFile(qshellLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{
+		"sandbox exec opaque-fixture-42",
+		"sandbox kill opaque-fixture-42",
+	} {
+		if !strings.Contains(string(logBytes), command) {
+			t.Fatalf("qshell did not receive %q:\n%s", command, logBytes)
+		}
+	}
+}
+
+func TestSandboxConformanceRejectsQshellTransportErrorsWithZeroExitStatus(t *testing.T) {
+	fixture := t.TempDir()
+	binDir := filepath.Join(fixture, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	qshellLog := filepath.Join(fixture, "qshell.log")
+	writeExecutable(t, filepath.Join(binDir, "qshell"), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$QSHELL_TEST_LOG"
+case "$1 $2" in
+  "sandbox create")
+    printf 'Sandbox ID:   sb-fixture\n'
+    ;;
+  "sandbox exec")
+    printf 'Error: connect to sandbox sb-fixture failed: fixture transport failure\n' >&2
+    exit 0
+    ;;
+  "sandbox kill")
+    test "$3" = sb-fixture
+    printf 'Killed sandbox sb-fixture\n'
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+`)
+	manifestPath := filepath.Join(fixture, "compatibility.json")
+	manifest := `{
+  "images": {
+    "ubuntu-slim": {
+      "entries": [
+        {"category":"Tools","upstream_name":"transport","status":"provided","verification":"printf should-not-run"}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(fixture, "result.json")
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{
+			"scripts/run-runner-image-conformance.sh",
+			"--image", "ubuntu-slim",
+			"--executor", "sandbox",
+			"--target", "template-fixture",
+			"--output", resultPath,
+		},
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"RUNNER_IMAGES_MANIFEST="+manifestPath,
+		"QSHELL_TEST_LOG="+qshellLog,
+		"QINIU_SANDBOX_API_URL=https://sandbox.example.test",
+		"QINIU_API_KEY=test-api-key",
+	)
+	if err == nil {
+		t.Fatalf("sandbox conformance must reject a qshell transport error even when qshell exits zero:\n%s", output)
+	}
+	resultBytes, readErr := os.ReadFile(resultPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var result struct {
+		Passed  bool `json:"passed"`
+		Results []struct {
+			Stdout     string `json:"stdout"`
+			Stderr     string `json:"stderr"`
+			ExitStatus int    `json:"exit_status"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		t.Fatalf("invalid result JSON: %v\n%s", err, resultBytes)
+	}
+	if result.Passed || len(result.Results) != 1 {
+		t.Fatalf("transport failure must be retained as one failed result: %#v", result)
+	}
+	if result.Results[0].ExitStatus == 0 ||
+		!strings.Contains(result.Results[0].Stderr, "fixture transport failure") ||
+		strings.Contains(result.Results[0].Stdout, "should-not-run") {
+		t.Fatalf("transport failure evidence was not preserved: %#v", result.Results[0])
+	}
+	logBytes, readErr := os.ReadFile(qshellLog)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !strings.Contains(string(logBytes), "sandbox kill sb-fixture") {
+		t.Fatalf("temporary sandbox was not killed after transport failure:\n%s", logBytes)
+	}
+}
+
+func TestSandboxConformanceFailsWhenCleanupCannotBeConfirmed(t *testing.T) {
+	fixture := t.TempDir()
+	binDir := filepath.Join(fixture, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(binDir, "qshell"), `#!/usr/bin/env bash
+set -euo pipefail
+case "$1 $2" in
+  "sandbox create")
+    printf 'Sandbox ID:   sb-fixture\n'
+    ;;
+  "sandbox exec")
+    shift 2
+    test "$1" = sb-fixture
+    shift
+    test "$1" = --
+    shift
+    exec "$@"
+    ;;
+  "sandbox kill")
+    printf 'Error: kill sandbox sb-fixture failed: fixture cleanup failure\n' >&2
+    exit 0
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+`)
+	manifestPath := filepath.Join(fixture, "compatibility.json")
+	manifest := `{
+  "images": {
+    "ubuntu-slim": {
+      "entries": [
+        {"category":"Tools","upstream_name":"success","status":"provided","verification":"printf verified"}
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(fixture, "result.json")
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{
+			"scripts/run-runner-image-conformance.sh",
+			"--image", "ubuntu-slim",
+			"--executor", "sandbox",
+			"--target", "template-fixture",
+			"--output", resultPath,
+		},
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"RUNNER_IMAGES_MANIFEST="+manifestPath,
+		"QINIU_SANDBOX_API_URL=https://sandbox.example.test",
+		"QINIU_API_KEY=test-api-key",
+	)
+	if err == nil {
+		t.Fatalf("sandbox conformance must fail when cleanup cannot be confirmed:\n%s", output)
+	}
+	resultBytes, readErr := os.ReadFile(resultPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var result struct {
+		Passed  bool `json:"passed"`
+		Cleanup struct {
+			Attempted  bool   `json:"attempted"`
+			Passed     bool   `json:"passed"`
+			ExitStatus int    `json:"exit_status"`
+			Stderr     string `json:"stderr"`
+		} `json:"cleanup"`
+	}
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		t.Fatalf("invalid result JSON: %v\n%s", err, resultBytes)
+	}
+	if result.Passed ||
+		!result.Cleanup.Attempted ||
+		result.Cleanup.Passed ||
+		result.Cleanup.ExitStatus == 0 ||
+		!strings.Contains(result.Cleanup.Stderr, "fixture cleanup failure") {
+		t.Fatalf("unconfirmed cleanup must be retained as failed release evidence: %#v", result)
+	}
+}
+
+func TestTemplateReleaseSmokeRunsOnlyUsabilityContract(t *testing.T) {
+	fixture := t.TempDir()
+	binDir := filepath.Join(fixture, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(binDir, "qshell"), `#!/usr/bin/env bash
+set -euo pipefail
+if [ "${1:-}" = version ]; then
+  printf 'v2.19.10\n'
+  exit 0
+fi
+case "$1 $2" in
+  "sandbox create")
+    printf 'Sandbox ID:   sb-smoke\n'
+    ;;
+  "sandbox exec")
+    printf '__QINIU_RUNNER_CONFORMANCE_REMOTE_STARTED__\n'
+    ;;
+  "sandbox kill")
+    test "$3" = sb-smoke
+    printf 'Killed sandbox sb-smoke\n'
+    ;;
+  *)
+    exit 64
+    ;;
+esac
+`)
+	manifestPath := filepath.Join(fixture, "compatibility.json")
+	manifest := `{
+  "images": {
+    "ubuntu-26.04": {
+      "entries": [
+        {
+          "category": "Full inventory",
+          "upstream_name": "expensive diagnostic",
+          "status": "provided",
+          "verification": "exit 99"
+        }
+      ]
+    }
+  }
+}`
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outputDir := filepath.Join(fixture, "smoke")
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{"scripts/smoke-runner-template.sh", "ubuntu-26.04", "template-fixture"},
+		"PATH="+binDir+":"+os.Getenv("PATH"),
+		"RUNNER_IMAGES_MANIFEST="+manifestPath,
+		"RUNNER_SMOKE_OUTPUT_DIR="+outputDir,
+		"QINIU_SANDBOX_API_URL=https://sandbox.example.test",
+		"QINIU_API_KEY=test-api-key",
+	)
+	if err != nil {
+		t.Fatalf("release smoke failed: %v\n%s", err, output)
+	}
+	resultFiles, err := filepath.Glob(filepath.Join(outputDir, "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resultFiles) != 1 {
+		t.Fatalf("release smoke result files = %#v, want one", resultFiles)
+	}
+	resultBytes, err := os.ReadFile(resultFiles[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Passed         bool   `json:"passed"`
+		SupportChannel string `json:"support_channel"`
+		Results        []struct {
+			Category string `json:"category"`
+			Name     string `json:"name"`
+		} `json:"results"`
+		Cleanup struct {
+			Passed bool `json:"passed"`
+		} `json:"cleanup"`
+	}
+	if err := json.Unmarshal(resultBytes, &result); err != nil {
+		t.Fatalf("invalid release smoke JSON: %v\n%s", err, resultBytes)
+	}
+	if !result.Passed ||
+		result.SupportChannel != "preview" ||
+		!result.Cleanup.Passed ||
+		len(result.Results) != 6 {
+		t.Fatalf("release smoke result = %#v, want six passing usability checks and cleanup", result)
+	}
+	for _, check := range result.Results {
+		if check.Category != "Release smoke" {
+			t.Fatalf("release smoke unexpectedly ran full inventory check %#v", check)
+		}
+	}
+}
+
+func TestEnsureDockerIsIdempotentAndKeepsSocketNonRootAccessible(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("the non-root socket contract requires a non-root test process")
+	}
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			fixture, err := os.MkdirTemp("", "runnerd-docker-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := os.RemoveAll(fixture); err != nil {
+					t.Errorf("remove fixture: %v", err)
+				}
+			})
+			binDir := filepath.Join(fixture, "bin")
+			if err := os.MkdirAll(binDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			socketPath := filepath.Join(fixture, "docker.sock")
+			listener, err := net.Listen("unix", socketPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				_ = listener.Close()
+			})
+			if err := os.Chmod(socketPath, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			sudoLog := filepath.Join(fixture, "sudo.log")
+			dockerdLog := filepath.Join(fixture, "dockerd.log")
+			writeExecutable(t, filepath.Join(binDir, "docker"), `#!/usr/bin/env bash
+set -euo pipefail
+test "$1" = info
+`)
+			writeExecutable(t, filepath.Join(binDir, "dockerd"), `#!/usr/bin/env bash
+set -euo pipefail
+printf 'unexpected dockerd start\n' >>"$DOCKERD_TEST_LOG"
+exit 1
+`)
+			writeExecutable(t, filepath.Join(binDir, "sudo"), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$SUDO_TEST_LOG"
+if [ "$1" = chmod ]; then
+  exec "$@"
+fi
+if [ "$1" = chgrp ]; then
+  exit 0
+fi
+exec "$@"
+`)
+			script := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"ensure-docker",
+			)
+			env := []string{
+				"PATH=" + binDir + ":" + os.Getenv("PATH"),
+				"DOCKER_BIN=" + filepath.Join(binDir, "docker"),
+				"DOCKERD_BIN=" + filepath.Join(binDir, "dockerd"),
+				"DOCKER_SOCKET=" + socketPath,
+				"DOCKER_PID_FILE=" + filepath.Join(fixture, "docker.pid"),
+				"DOCKER_LOG_FILE=" + dockerdLog,
+				"DOCKERD_TEST_LOG=" + dockerdLog,
+				"SUDO_TEST_LOG=" + sudoLog,
+			}
+			for run := 0; run < 2; run++ {
+				output, err := runCommand(t, "bash", []string{script}, env...)
+				if err != nil {
+					t.Fatalf("ensure-docker run %d failed: %v\n%s", run+1, err, output)
+				}
+			}
+			info, err := os.Stat(socketPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := info.Mode().Perm(); got != 0o660 {
+				t.Fatalf("socket mode = %04o, want 0660", got)
+			}
+			if contents, err := os.ReadFile(dockerdLog); err == nil && len(contents) > 0 {
+				t.Fatalf("idempotent ready path started dockerd:\n%s", contents)
+			}
+			sudoBytes, err := os.ReadFile(sudoLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Count(string(sudoBytes), "chmod 0660 "+socketPath) != 2 {
+				t.Fatalf("both runs must preserve group-only socket access:\n%s", sudoBytes)
+			}
+		})
+	}
+}
+
+func TestTemplateCurlAddsAuthenticationOnlyForGitHubAPI(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			fixture := t.TempDir()
+			curlLog := filepath.Join(fixture, "curl.log")
+			fakeCurl := filepath.Join(fixture, "curl")
+			writeExecutable(t, fakeCurl, `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >>"$CURL_TEST_LOG"
+`)
+			wrapper := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"curl",
+			)
+			env := []string{
+				"RUNNER_TEMPLATE_CURL_BIN=" + fakeCurl,
+				"GITHUB_TOKEN=fixture-token",
+				"CURL_TEST_LOG=" + curlLog,
+			}
+			for _, url := range []string{
+				"https://api.github.com/repos/actions/runner/releases",
+				"https://download.docker.com/linux/ubuntu/gpg",
+			} {
+				output, err := runCommand(t, wrapper, []string{"-fsSL", url}, env...)
+				if err != nil {
+					t.Fatalf("curl wrapper failed for %s: %v\n%s", url, err, output)
+				}
+			}
+			logBytes, err := os.ReadFile(curlLog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSpace(string(logBytes)), "\n")
+			if len(lines) != 2 {
+				t.Fatalf("curl invocation log = %q", logBytes)
+			}
+			if !strings.Contains(lines[0], "Authorization: Bearer fixture-token") {
+				t.Fatalf("GitHub API request was not authenticated: %s", lines[0])
+			}
+			if strings.Contains(lines[1], "Authorization:") {
+				t.Fatalf("non-GitHub request received the GitHub credential: %s", lines[1])
+			}
+			for lineNumber, line := range lines {
+				for _, option := range []string{
+					"--http1.1",
+					"--retry 5",
+					"--retry-all-errors",
+					"--retry-delay 2",
+				} {
+					if !strings.Contains(line, option) {
+						t.Fatalf(
+							"curl invocation %d missing resilient transport option %q: %s",
+							lineNumber+1,
+							option,
+							line,
+						)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestRunnerTemplateDockerfilesUseQshellCompatibleRunInstructions(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			dockerfilePath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"Dockerfile",
+			)
+			dockerfileBytes, err := os.ReadFile(dockerfilePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			for _, unsupported := range []string{
+				"RUN --mount=",
+				"/run/secrets/github_token",
+			} {
+				if strings.Contains(dockerfile, unsupported) {
+					t.Fatalf(
+						"qshell v2.19.10 passes RUN arguments to the remote shell and cannot execute BuildKit-only %q",
+						unsupported,
+					)
+				}
+			}
+			if !strings.Contains(dockerfile, "RUN TEMPLATE_FLAVOR=") {
+				t.Fatal("template setup must remain a plain qshell-compatible RUN instruction")
+			}
+		})
+	}
+}
+
+func TestVersionedTemplateBuildStagesPinnedUpstreamTests(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			stage := `cp -a "$HELPER_SCRIPTS/../tests" /imagegeneration/tests`
+			helperStage := `cp -a "$HELPER_SCRIPTS" /imagegeneration/helpers`
+			powershellModules := `pwsh -File "$upstream_build/Install-PowerShellModules.ps1"`
+			cleanup := `find /imagegeneration -mindepth 1 -delete`
+			stageIndex := strings.Index(script, stage)
+			helperStageIndex := strings.Index(script, helperStage)
+			powershellIndex := strings.Index(script, powershellModules)
+			cleanupIndex := strings.Index(script, cleanup)
+			if stageIndex < 0 || helperStageIndex < 0 || powershellIndex < 0 || cleanupIndex < 0 {
+				t.Fatalf(
+					"setup must stage and clean pinned upstream Pester tests and helpers: tests=%d helpers=%d powershell=%d cleanup=%d",
+					stageIndex,
+					helperStageIndex,
+					powershellIndex,
+					cleanupIndex,
+				)
+			}
+			if stageIndex > powershellIndex || helperStageIndex > powershellIndex || cleanupIndex < powershellIndex {
+				t.Fatalf(
+					"upstream tests and helpers must exist for PowerShell validation and be removed afterward: tests=%d helpers=%d powershell=%d cleanup=%d",
+					stageIndex,
+					helperStageIndex,
+					powershellIndex,
+					cleanupIndex,
+				)
+			}
+		})
+	}
+}
+
+func TestVersionedTemplateBuildDefersOnlyPodmanNetworkingToRuntimeConformance(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, required := range []string{
+				`podman_networking_test=/imagegeneration/tests/Tools.Tests.ps1`,
+				`grep -Fxc '    It "podman networking" -TestCases "podman CNI plugins" {' "$podman_networking_test"`,
+				`sed -i 's/    It "podman networking" -TestCases "podman CNI plugins" {/    It "podman networking" -Skip -TestCases "podman CNI plugins" {/' "$podman_networking_test"`,
+				`grep -Fxc '    It "podman networking" -Skip -TestCases "podman CNI plugins" {' "$podman_networking_test"`,
+				`grep -Fxc '    $testCases = @("podman", "buildah", "skopeo") | ForEach-Object { @{ContainerCommand = $_} }' "$podman_networking_test"`,
+				`grep -Fxc '    It "<ContainerCommand>" -TestCases $testCases {' "$podman_networking_test"`,
+				`grep -Fxc '        "$ContainerCommand -v" | Should -ReturnZeroExitCode' "$podman_networking_test"`,
+			} {
+				if strings.Count(script, required) != 1 {
+					t.Fatalf("setup must contain exactly one %q guard/patch, got %d", required, strings.Count(script, required))
+				}
+			}
+			if strings.Contains(script, `/tmp/runner-images/images/ubuntu/scripts/tests/Tools.Tests.ps1`) {
+				t.Fatal("setup must not modify the pinned upstream source tree")
+			}
+		})
+	}
+}
+
+func TestCompatibilityGeneratorRequiresPodmanNetworkLifecycle(t *testing.T) {
+	root := repositoryRoot(t)
+	const verification = `command -v podman >/dev/null || exit 1; podman_network="qiniu-conformance-$$-${RANDOM}"; cleanup_podman_network() { podman network rm "$podman_network" >/dev/null 2>&1 || true; }; trap cleanup_podman_network EXIT; podman network create -d bridge "$podman_network" >/dev/null || exit 1; podman network ls --format "{{.Name}}" | grep -Fx "$podman_network" >/dev/null || exit 1; podman network rm "$podman_network" >/dev/null || exit 1; trap - EXIT`
+
+	generatorBytes, err := os.ReadFile(filepath.Join(root, "scripts", "generate-runner-image-compatibility.mjs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(generatorBytes), verification) {
+		t.Fatal("compatibility generator must emit the Podman network lifecycle assertion")
+	}
+
+	manifestBytes, err := os.ReadFile(filepath.Join(root, "templates", "runner-images-compatibility.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Images map[string]struct {
+			Entries []struct {
+				UpstreamName string `json:"upstream_name"`
+				Status       string `json:"status"`
+				Verification string `json:"verification"`
+			} `json:"entries"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, image := range []string{"ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04"} {
+		found := false
+		for _, entry := range manifest.Images[image].Entries {
+			if entry.UpstreamName != "Podman" {
+				continue
+			}
+			found = true
+			if entry.Status != "provided" || entry.Verification != verification {
+				t.Fatalf("%s Podman assertion = status %q, verification %q", image, entry.Status, entry.Verification)
+			}
+		}
+		if !found {
+			t.Fatalf("%s has no Podman compatibility entry", image)
+		}
+	}
+
+	conformanceBytes, err := os.ReadFile(filepath.Join(root, "scripts", "run-runner-image-conformance.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(conformanceBytes), `docker run --rm --privileged "$target"`) {
+		t.Fatal("Docker conformance must execute the Podman lifecycle assertion with runtime namespace privileges")
+	}
+}
+
+func TestVersionedTemplateBuildMakesSystemctlShimVisibleToSudoAndCleansIt(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			expose := `ln -s /tmp/qiniu-runner-build-tools/systemctl /usr/local/bin/systemctl`
+			apache := `install-apache.sh`
+			cleanup := `rm -f /usr/local/bin/systemctl`
+			exposeIndex := strings.Index(script, expose)
+			apacheIndex := strings.Index(script, apache)
+			cleanupIndex := strings.Index(script, cleanup)
+			if exposeIndex < 0 || apacheIndex < 0 || cleanupIndex < 0 {
+				t.Fatalf(
+					"setup must expose and clean the build-only systemctl shim: expose=%d apache=%d cleanup=%d",
+					exposeIndex,
+					apacheIndex,
+					cleanupIndex,
+				)
+			}
+			if exposeIndex > apacheIndex || cleanupIndex < apacheIndex {
+				t.Fatalf(
+					"sudo-visible systemctl shim must exist during upstream validation and be removed afterward: expose=%d apache=%d cleanup=%d",
+					exposeIndex,
+					apacheIndex,
+					cleanupIndex,
+				)
+			}
+			if strings.Contains(script, `rm -f /usr/bin/systemctl`) ||
+				strings.Contains(script, `/usr/bin/systemctl /usr/local/bin/systemctl`) {
+				t.Fatal("setup must preserve the distribution-owned /usr/bin/systemctl")
+			}
+		})
+	}
+}
+
+func TestVersionedTemplateSystemctlShimRunsAvailableSysVServices(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			for _, required := range []string{
+				`action=${1:-}`,
+				`unit=${unit%.service}`,
+				`if [ -x "/etc/init.d/$unit" ]; then`,
+				`exec /usr/sbin/service "$unit" "$action"`,
+				`/usr/sbin/service "$unit" status >/dev/null 2>&1`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("systemctl shim must run available SysV services; missing %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestVersionedTemplateBuildStopsValidatedServicesBetweenInstallers(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			installerRun := `bash "$upstream_build/$installer"`
+			serviceCleanup := `case "$installer" in
+      install-apache.sh) stop_validated_service apache2 ;;
+      install-mysql.sh) stop_validated_service mysql ;;
+      install-nginx.sh) stop_validated_service nginx ;;
+      install-postgresql.sh) stop_validated_service postgresql ;;
+    esac`
+			installerRunIndex := strings.Index(script, installerRun)
+			serviceCleanupIndex := strings.Index(script, serviceCleanup)
+			if installerRunIndex < 0 || serviceCleanupIndex < 0 {
+				t.Fatalf(
+					"versioned build must stop validated services between installers: installer=%d cleanup=%d",
+					installerRunIndex,
+					serviceCleanupIndex,
+				)
+			}
+			if serviceCleanupIndex < installerRunIndex {
+				t.Fatalf(
+					"service cleanup must run after each installer validation: installer=%d cleanup=%d",
+					installerRunIndex,
+					serviceCleanupIndex,
+				)
+			}
+			for _, required := range []string{
+				`stop_validated_service() {`,
+				`if [ "$unit" = apache2 ]; then`,
+				`apache2ctl stop`,
+				`if ! ss -ltn 'sport = :80' | grep -q LISTEN; then`,
+				`echo "validated service kept port 80 busy after cleanup: apache2" >&2`,
+				`systemctl stop "$unit" || true`,
+				`if systemctl is-active --quiet "$unit"; then`,
+				`return 1`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("service cleanup must verify the service stopped; missing %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestVersionedTemplateBuildReloadsPersistedEnvironmentBeforePipxPackages(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			configureToolset := `pwsh -File "$upstream_build/Configure-Toolset.ps1"`
+			reloadEnvironment := `. "$HELPER_SCRIPTS/etc-environment.sh"
+  reload_etc_environment`
+			installPipx := `bash "$upstream_build/install-pipx-packages.sh"`
+			configureIndex := strings.Index(script, configureToolset)
+			reloadIndex := strings.Index(script, reloadEnvironment)
+			pipxIndex := strings.Index(script, installPipx)
+			if configureIndex < 0 || reloadIndex < 0 || pipxIndex < 0 {
+				t.Fatalf(
+					"versioned build must reload persisted PIPX_HOME, PIPX_BIN_DIR, and PATH before pipx packages: configure=%d reload=%d pipx=%d",
+					configureIndex,
+					reloadIndex,
+					pipxIndex,
+				)
+			}
+			if configureIndex > reloadIndex || reloadIndex > pipxIndex {
+				t.Fatalf(
+					"persisted environment reload must follow toolset configuration and precede pipx packages: configure=%d reload=%d pipx=%d",
+					configureIndex,
+					reloadIndex,
+					pipxIndex,
+				)
+			}
+		})
+	}
+}
+
+func TestRunnerTemplateBuildUsesBoundedHTTPSAptSources(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			bootstrapInstall := strings.Index(
+				script,
+				"\napt-get install -y --no-install-recommends ca-certificates\n",
+			)
+			firstReliableIndex := strings.Index(script, "\nconfigure_reliable_apt_sources\n")
+			if bootstrapInstall < 0 || firstReliableIndex < 0 {
+				t.Fatalf(
+					"template must configure reliable apt sources after CA bootstrap: install=%d reliable=%d",
+					bootstrapInstall,
+					firstReliableIndex,
+				)
+			}
+			if firstReliableIndex < bootstrapInstall {
+				t.Fatalf(
+					"HTTPS apt source hardening must follow CA bootstrap: install=%d reliable=%d",
+					bootstrapInstall,
+					firstReliableIndex,
+				)
+			}
+			if strings.Count(script, "configure_reliable_apt_sources") < 3 {
+				t.Fatal("apt source hardening must run initially and after upstream source configuration")
+			}
+			for _, required := range []string{
+				`configure_reliable_apt_sources() {`,
+				`/etc/apt/sources.list`,
+				`/etc/apt/sources.list.d/ubuntu.sources`,
+				`http://archive.ubuntu.com/ubuntu`,
+				`https://archive.ubuntu.com/ubuntu`,
+				`http://security.ubuntu.com/ubuntu`,
+				`mirror+file:/etc/apt/apt-mirrors.txt`,
+				`https://mirrors.tuna.tsinghua.edu.cn/ubuntu/`,
+				`https://mirrors.edge.kernel.org/ubuntu/`,
+				`https://archive.ubuntu.com/ubuntu/`,
+				`Acquire::Retries "5";`,
+				`Acquire::http::Timeout "30";`,
+				`Acquire::https::Timeout "30";`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("apt source hardening missing %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestRunnerTemplateBuildBootstrapsTLSCertificatesBeforeStrictHTTPS(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptPath := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			)
+			scriptBytes, err := os.ReadFile(scriptPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			bootstrap := strings.Index(
+				script,
+				"apt-get update\napt-get install -y --no-install-recommends ca-certificates",
+			)
+			strictSetup := strings.Index(
+				script,
+				"apt-get install -y --no-install-recommends ca-certificates\nconfigure_reliable_apt_sources\napt-get update",
+			)
+			if bootstrap < 0 || strictSetup < 0 {
+				t.Fatalf(
+					"template must bootstrap CA certificates before enabling HTTPS mirrors: bootstrap=%d strict=%d",
+					bootstrap,
+					strictSetup,
+				)
+			}
+			if strings.Contains(script, "Acquire::https::Verify-Peer=false") {
+				t.Fatal("template must never disable apt HTTPS peer verification")
+			}
+		})
 	}
 }
 

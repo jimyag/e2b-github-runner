@@ -1,0 +1,7 @@
+# Stable public Ubuntu 22.04 runner template.
+name = "github-runner-ubuntu-22-04"
+dockerfile = "./Dockerfile"
+path = "."
+cpu_count = 8
+memory_mb = 8192
+no_cache = false

@@ -75,27 +75,6 @@ install_runner() {
   test -x /opt/actions-runner/run.sh
 }
 
-stop_validated_service() {
-  local unit="$1"
-  if [ "$unit" = apache2 ]; then
-    apache2ctl stop || true
-    for _ in $(seq 1 100); do
-      if ! ss -ltn 'sport = :80' | grep -q LISTEN; then
-        return 0
-      fi
-      sleep 0.1
-    done
-    echo "validated service kept port 80 busy after cleanup: apache2" >&2
-    ss -ltnp 'sport = :80' >&2 || true
-    return 1
-  fi
-  systemctl stop "$unit" || true
-  if systemctl is-active --quiet "$unit"; then
-    echo "validated service remained active after cleanup: $unit" >&2
-    return 1
-  fi
-}
-
 apt-get update
 apt-get install -y --no-install-recommends ca-certificates
 configure_reliable_apt_sources
@@ -160,6 +139,9 @@ if [ "${TEMPLATE_FLAVOR:-}" = slim ]; then
     install-docker-cli.sh \
     configure-system.sh; do
     bash "$upstream_build/$installer"
+    if [ "$installer" = configure-apt-sources.sh ]; then
+      configure_reliable_apt_sources
+    fi
   done
   ln -s /etc/skel/.nvm /home/runner/.nvm
 else
@@ -224,7 +206,6 @@ WAAGENT
 
   bash "$upstream_build/install-ms-repos.sh"
   bash "$upstream_build/configure-apt-sources.sh"
-  configure_reliable_apt_sources
   bash "$upstream_build/configure-apt.sh"
   bash "$upstream_build/configure-environment.sh"
   bash "$upstream_build/install-apt-vital.sh"
@@ -285,12 +266,6 @@ WAAGENT
     install-zstd.sh \
     install-ninja.sh; do
     bash "$upstream_build/$installer"
-    case "$installer" in
-      install-apache.sh) stop_validated_service apache2 ;;
-      install-mysql.sh) stop_validated_service mysql ;;
-      install-nginx.sh) stop_validated_service nginx ;;
-      install-postgresql.sh) stop_validated_service postgresql ;;
-    esac
   done
 
   if [ "$VERSION_ID" = 22.04 ]; then
@@ -319,8 +294,6 @@ WAAGENT
 
   pwsh -File "$upstream_build/Install-Toolset.ps1"
   pwsh -File "$upstream_build/Configure-Toolset.ps1"
-  . "$HELPER_SCRIPTS/etc-environment.sh"
-  reload_etc_environment
   bash "$upstream_build/install-pipx-packages.sh"
   sudo -H -u runner \
     HELPER_SCRIPTS="$HELPER_SCRIPTS" \

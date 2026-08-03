@@ -5,6 +5,8 @@ vars:
   IMAGE: ghcr.io/qiniu/ci-runner
   LDFLAGS: "-s -w"
   TEMPLATE_DIR: templates/github-runner-ubuntu-24.04
+  QSHELL: qshell
+  RUNNER_TEMPLATE_IMAGE_PREFIX: qiniu-ci-runner
   QBOX_KODO_TEMPLATE_DIR: templates/qbox-kodo-ubuntu-16.04
   QBOX_KODO_BASE_IMAGE: jimyag/qbox-kodo-ubuntu-16.04-base:runner-docker
   GO_PACKAGES: "./cmd/... ./internal/..."
@@ -253,25 +255,138 @@ tasks:
 
   template-build-dev:
     desc: Build the development Qiniu sandbox template
-    dir: "{{.TEMPLATE_DIR}}"
     cmds:
-      - |
-        set -e
-        tmp_config="$(mktemp ".qshell-sandbox.XXXXXX")"
-        trap 'rm -f "$tmp_config"' EXIT
-        cp qshell.sandbox.toml "$tmp_config"
-        qshell sandbox template build --config "$tmp_config" --name github-runner-ubuntu-24-04-dev --wait
+      - QSHELL="{{.QSHELL}}" scripts/run-runner-template-operation.sh build "{{.TEMPLATE_DIR}}" github-runner-ubuntu-24-04-dev
 
   template-build-prod:
     desc: Build the production Qiniu sandbox template
-    dir: "{{.TEMPLATE_DIR}}"
+    cmds:
+      - task: template-build-ubuntu-24-04
+
+  template-check-all:
+    desc: Check the public runner template matrix, compatibility manifest, and Dockerfiles
+    cmds:
+      - bash scripts/check-runner-template-matrix.sh
+      - bash scripts/check-runner-image-compatibility.sh
+      - for: [github-runner-ubuntu-slim, github-runner-ubuntu-22.04, github-runner-ubuntu-24.04, github-runner-ubuntu-26.04]
+        cmd: docker build --check --platform=linux/amd64 -f templates/{{.ITEM}}/Dockerfile templates/{{.ITEM}}
+
+  _template-build:
+    internal: true
+    requires:
+      vars: [PUBLIC_TEMPLATE_DIR]
+    cmds:
+      - QSHELL="{{.QSHELL}}" scripts/run-runner-template-operation.sh build "{{.PUBLIC_TEMPLATE_DIR}}"
+
+  _template-publish:
+    internal: true
+    requires:
+      vars: [PUBLIC_TEMPLATE_DIR]
+    cmds:
+      - QSHELL="{{.QSHELL}}" scripts/run-runner-template-operation.sh publish "{{.PUBLIC_TEMPLATE_DIR}}"
+
+  _template-unpublish:
+    internal: true
+    requires:
+      vars: [PUBLIC_TEMPLATE_DIR]
+    cmds:
+      - QSHELL="{{.QSHELL}}" scripts/run-runner-template-operation.sh unpublish "{{.PUBLIC_TEMPLATE_DIR}}"
+
+  template-build-ubuntu-slim:
+    desc: Build the Ubuntu Slim template with qshell and wait until ready
+    cmds:
+      - task: _template-build
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-slim}
+
+  template-build-ubuntu-22-04:
+    desc: Build the Ubuntu 22.04 template with qshell and wait until ready
+    cmds:
+      - task: _template-build
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-22.04}
+
+  template-build-ubuntu-24-04:
+    desc: Build the Ubuntu 24.04 template with qshell and wait until ready
+    cmds:
+      - task: _template-build
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-24.04}
+
+  template-build-ubuntu-26-04:
+    desc: Build the Ubuntu 26.04 preview template with qshell and wait until ready
+    cmds:
+      - task: _template-build
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-26.04}
+
+  template-publish-ubuntu-slim:
+    desc: Publish the Ubuntu Slim template
+    cmds:
+      - task: _template-publish
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-slim}
+
+  template-publish-ubuntu-22-04:
+    desc: Publish the Ubuntu 22.04 template
+    cmds:
+      - task: _template-publish
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-22.04}
+
+  template-publish-ubuntu-24-04:
+    desc: Publish the Ubuntu 24.04 template
+    cmds:
+      - task: _template-publish
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-24.04}
+
+  template-publish-ubuntu-26-04:
+    desc: Publish the Ubuntu 26.04 preview template
+    cmds:
+      - task: _template-publish
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-26.04}
+
+  template-unpublish-ubuntu-slim:
+    desc: Roll back publication of the Ubuntu Slim template
+    cmds:
+      - task: _template-unpublish
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-slim}
+
+  template-unpublish-ubuntu-22-04:
+    desc: Roll back publication of the Ubuntu 22.04 template
+    cmds:
+      - task: _template-unpublish
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-22.04}
+
+  template-unpublish-ubuntu-24-04:
+    desc: Roll back publication of the Ubuntu 24.04 template
+    cmds:
+      - task: _template-unpublish
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-24.04}
+
+  template-unpublish-ubuntu-26-04:
+    desc: Roll back publication of the Ubuntu 26.04 preview template
+    cmds:
+      - task: _template-unpublish
+        vars: {PUBLIC_TEMPLATE_DIR: templates/github-runner-ubuntu-26.04}
+
+  template-defaults-check:
+    desc: Verify the four public templates in the current Sandbox region catalog
+    cmds:
+      - bash scripts/check-default-template-catalog.sh
+
+  template-conformance-local:
+    desc: Run Docker conformance against four already-built local runner images
+    cmds:
+      - mkdir -p .build/runner-conformance
+      - for:
+          matrix:
+            IMAGE_KEY: [ubuntu-slim, ubuntu-22.04, ubuntu-24.04, ubuntu-26.04]
+        cmd: scripts/run-runner-image-conformance.sh --image "{{.ITEM.IMAGE_KEY}}" --executor docker --target "{{.RUNNER_TEMPLATE_IMAGE_PREFIX}}/github-runner-{{.ITEM.IMAGE_KEY}}:local" --output ".build/runner-conformance/{{.ITEM.IMAGE_KEY}}-docker.json"
+
+  template-smoke:
+    desc: Smoke a built Sandbox template (requires IMAGE_KEY and TEMPLATE_ID)
+    requires:
+      vars: [IMAGE_KEY, TEMPLATE_ID]
     cmds:
       - |
-        set -e
-        tmp_config="$(mktemp ".qshell-sandbox.XXXXXX")"
-        trap 'rm -f "$tmp_config"' EXIT
-        cp qshell.sandbox.toml "$tmp_config"
-        qshell sandbox template build --config "$tmp_config" --wait
+        : "${QINIU_SANDBOX_API_URL:?QINIU_SANDBOX_API_URL is required}"
+        : "${QINIU_API_KEY:?QINIU_API_KEY is required}"
+        QSHELL="{{.QSHELL}}" scripts/smoke-runner-template.sh "{{.IMAGE_KEY}}" "{{.TEMPLATE_ID}}"
 
   qbox-kodo-base-build:
     desc: Build the qbox kodo Ubuntu 16.04 base Docker image locally
@@ -297,6 +412,8 @@ tasks:
     cmds:
       - |
         set -e
+        : "${QINIU_SANDBOX_API_URL:?QINIU_SANDBOX_API_URL is required}"
+        : "${QINIU_API_KEY:?QINIU_API_KEY is required}"
         tmp_config="$(mktemp ".qshell-sandbox.XXXXXX")"
         trap 'rm -f "$tmp_config"' EXIT
         cp qshell.sandbox.toml "$tmp_config"

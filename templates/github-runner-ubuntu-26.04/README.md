@@ -1,6 +1,6 @@
-# GitHub runner Ubuntu 24.04 template
+# GitHub runner Ubuntu 26.04 template
 
-This stable 8-vCPU, 8192-MiB Linux x86_64 template uses the pinned Ubuntu 24.04
+This preview 8-vCPU, 8192-MiB Linux x86_64 template uses the pinned Ubuntu 26.04
 OCI index and the complete x64 toolset/install chain from
 `actions/runner-images@e986db797519f06a2e5e53701a715cfa4c1545e8`.
 
@@ -10,7 +10,7 @@ The image supplies the `runner` account, `/home/runner/work`,
 runner process normally executes as non-root. Root is used only during image
 construction and when `ensure-docker` must initialize the daemon/socket.
 
-Build with Task 8's `task template-build-ubuntu-24-04`; this tracked file does
+Build with Task 8's `task template-build-ubuntu-26-04`; this tracked file does
 not contain a region-specific template ID. See
 [`software-diff.md`](software-diff.md) and the repository-level compatibility
 manifest for the verified contract.

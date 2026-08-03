@@ -235,10 +235,17 @@ loading.
 
 | Template | Description |
 | --- | --- |
-| `templates/github-runner-ubuntu-24.04` | Default GitHub runner image (runner runtime, Docker, helper tools, rclone) |
+| `templates/github-runner-ubuntu-slim` | Maintained Ubuntu Slim x64 runner template |
+| `templates/github-runner-ubuntu-22.04` | Maintained Ubuntu 22.04 x64 runner template |
+| `templates/github-runner-ubuntu-24.04` | Maintained Ubuntu 24.04 x64 runner template |
+| `templates/github-runner-ubuntu-26.04` | Preview Ubuntu 26.04 x64 runner template |
 | `templates/qbox-kodo-ubuntu-16.04` | Legacy Ubuntu 16.04 for qbox/kodo-style jobs |
 
-Build templates with `task template-build-prod`. The qbox-kodo base image can be rebuilt separately with `task qbox-kodo-base-build`.
+Run `task template-check-all`, then use the four
+`task template-build-ubuntu-*` targets for real qshell Sandbox builds. See
+[Public Runner Templates](docs/default-runner-templates.md) for publication and
+smoke commands. The qbox-kodo base image remains a separate
+`task qbox-kodo-base-build` workflow.
 
 ## Documentation
 
@@ -246,6 +253,7 @@ Build templates with `task template-build-prod`. The qbox-kodo base image can be
 | --- | --- |
 | [docs/testing.md](docs/testing.md) | Local testing, GitHub App/OAuth setup, webhook forwarding, troubleshooting |
 | [docs/deployment-smoke.md](docs/deployment-smoke.md) | Production-style readiness checklist |
+| [docs/default-runner-templates.md](docs/default-runner-templates.md) | Public template labels, qshell release flow, regional smoke, and rollback |
 | [docs/runner-architecture-comparison.md](docs/runner-architecture-comparison.md) | Architecture diagrams and comparison with ARC / Fireactions |
 | [docs/runner-implementation-review.md](docs/runner-implementation-review.md) | Implementation status and schema migration notes |
 

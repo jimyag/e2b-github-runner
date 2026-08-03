@@ -1,0 +1,19 @@
+# Ubuntu 24.04 software differences
+
+The pinned upstream x64 toolset and installer chain is the software baseline;
+Qiniu-specific changes are limited to container-safe service setup, the
+ephemeral Actions runner, the `runner` filesystem contract, and direct Docker
+daemon initialization.
+
+The upstream Azure host kernel build string is excluded because a Qiniu
+Sandbox shares its host kernel. Systemd is not PID 1, so service software is
+installed and disabled but direct process startup replaces upstream
+`systemctl` behavior. See `../runner-images-compatibility.json` for every
+item-level decision and executable check.
+
+The upstream Podman, Buildah, and Skopeo CLI assertions remain build gates.
+Only the namespace-dependent `podman networking` assertion is skipped in the
+staged Pester copy because BuildKit cannot create its nested namespace; the
+pinned source is not edited. Podman remains `provided`, with bridge-network
+create/list/remove verified by privileged local Docker conformance and by
+conformance in the Qiniu Sandbox runtime.

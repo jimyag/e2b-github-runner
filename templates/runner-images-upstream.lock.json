@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "repository": "actions/runner-images",
+  "commit": "e986db797519f06a2e5e53701a715cfa4c1545e8",
+  "archive_url": "https://codeload.github.com/actions/runner-images/tar.gz/e986db797519f06a2e5e53701a715cfa4c1545e8",
+  "archive_sha256": "e87ede55bbdee21ee92113124a598e64d23a21e322f65f45e3a874c563f9f4cb",
+  "reports": {
+    "ubuntu-slim": "images/ubuntu-slim/ubuntu-slim-Readme.md",
+    "ubuntu-22.04": "images/ubuntu/Ubuntu2204-Readme.md",
+    "ubuntu-24.04": "images/ubuntu/Ubuntu2404-Readme.md",
+    "ubuntu-26.04": "images/ubuntu/Ubuntu2604-Readme.md"
+  },
+  "report_sha256": {
+    "ubuntu-slim": "b33c5ccd9c8acbe58fadc33ac95c9dc5a7f0c96a19a0417a9f7bb496da9e0804",
+    "ubuntu-22.04": "67c1bb9bcb0bb207e9dc1c99f4e499ef2fec77fdd73de2e402b5e0061f7c18ff",
+    "ubuntu-24.04": "9b57a55420c6f613e50369f8239113defb65af165a5ecbd5c27fa42d231f9e51",
+    "ubuntu-26.04": "5c0288224b441e3c29c812ebbbcaf4853fa739cae318f95087e30e9011e9a9d9"
+  },
+  "slim_sources": {
+    "dockerfile": "images/ubuntu-slim/Dockerfile",
+    "toolset": "images/ubuntu-slim/toolsets/toolset.json",
+    "software_report": "images/ubuntu-slim/ubuntu-slim-Readme.md"
+  }
+}
