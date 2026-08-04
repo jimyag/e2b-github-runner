@@ -23,6 +23,7 @@ type StartInput struct {
 	Labels            []string
 	RunnerGroup       string
 	TemplateID        string
+	RequireDocker     bool
 	Timeout           time.Duration
 	CommandContext    context.Context
 	OnStdout          func([]byte)
@@ -478,6 +479,10 @@ func (s *e2bTerminalSession) Close(ctx context.Context) error {
 
 func startScript(input StartInput, sandboxID string) string {
 	labels := strings.Join(input.Labels, ",")
+	requireDocker := "0"
+	if input.RequireDocker {
+		requireDocker = "1"
+	}
 	return fmt.Sprintf(
 		startRunnerScriptTemplate,
 		base64.StdEncoding.EncodeToString([]byte(input.RepositoryURL)),
@@ -487,5 +492,6 @@ func startScript(input StartInput, sandboxID string) string {
 		base64.StdEncoding.EncodeToString([]byte(input.RunnerGroup)),
 		base64.StdEncoding.EncodeToString([]byte(input.RequestID)),
 		base64.StdEncoding.EncodeToString([]byte(sandboxID)),
+		requireDocker,
 	)
 }

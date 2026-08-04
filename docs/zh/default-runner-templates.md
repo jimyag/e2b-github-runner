@@ -61,6 +61,10 @@ Admin 中禁用单个 managed spec；从 workflow 中移除 `qiniu` 则会从 wo
 侧阻止 managed-default selection。自定义 spec 仍可使用 operator 定义的
 required labels 和显式 template ID。
 
+Runner 启动时，如果模板无法使 Docker daemon 可用，managed spec 会直接失败，
+因为 Docker 属于 managed 兼容性契约。自定义 spec 保留原有的 best-effort 行为：
+runnerd 记录 warning 后继续注册，使不依赖 Docker 的 jobs 仍可运行。
+
 ## 软件兼容性
 
 这些模板会逐项跟踪固定版本的 `actions/runner-images` 软件报告，但并非与 GitHub

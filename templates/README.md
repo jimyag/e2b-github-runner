@@ -212,9 +212,3 @@ target for rollback. Qshell publish and unpublish do not support the build-only
 `--config` option. Their Task targets run from the matching template directory,
 read the stable name from its tracked `qshell.sandbox.toml`, and invoke the
 matching operation with `-y`; no Region-specific template ID is committed.
-
-## Current versus target state
-
-All rows above are currently `development`. They are tracked build definitions,
-not a claim that the templates are public. The target catalog becomes public
-only through the publication and verification transitions described above.

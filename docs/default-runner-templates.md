@@ -63,6 +63,11 @@ workflow disables managed-default selection from the workflow side. Custom
 specs remain available with operator-defined required labels and explicit
 template IDs.
 
+At runner bootstrap, managed specs fail closed if their template cannot make
+the Docker daemon available because Docker is part of the managed compatibility
+contract. Custom specs retain the legacy best-effort behavior: runnerd logs a
+warning and continues registration so non-Docker jobs can still run.
+
 ## Software compatibility
 
 These templates track the pinned `actions/runner-images` reports item by item,
