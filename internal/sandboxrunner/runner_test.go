@@ -192,12 +192,15 @@ printf 'run HOME=%s PWD=%s RUNASROOT=%s\n' "$HOME" "$PWD" "${RUNNER_ALLOW_RUNASR
 
 func TestStartScriptDockerBootstrapPolicy(t *testing.T) {
 	tests := []struct {
-		name          string
-		requireDocker bool
-		wantSuccess   bool
+		name                string
+		requireDocker       bool
+		installDockerHelper bool
+		wantSuccess         bool
 	}{
-		{name: "custom runner continues without Docker", wantSuccess: true},
-		{name: "managed runner requires Docker", requireDocker: true},
+		{name: "custom runner continues when Docker bootstrap fails", installDockerHelper: true, wantSuccess: true},
+		{name: "managed runner requires working Docker", requireDocker: true, installDockerHelper: true},
+		{name: "custom runner continues when Docker helper is missing", wantSuccess: true},
+		{name: "managed runner requires Docker helper", requireDocker: true},
 	}
 
 	for _, tt := range tests {
@@ -218,9 +221,11 @@ printf 'config %s\n' "$*" >>"$RUNNER_TEST_LOG"
 set -euo pipefail
 printf 'run\n' >>"$RUNNER_TEST_LOG"
 `)
-			writeExecutable(t, ensureDockerPath, `#!/usr/bin/env bash
+			if tt.installDockerHelper {
+				writeExecutable(t, ensureDockerPath, `#!/usr/bin/env bash
 exit 1
 `)
+			}
 
 			script := startScript(StartInput{
 				RequestID:         "request-1",

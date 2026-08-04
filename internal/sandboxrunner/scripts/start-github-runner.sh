@@ -61,7 +61,13 @@ if [ ! -x ./config.sh ]; then
   cp -a "$actions_runner_root"/. "$workdir"/
 fi
 
-if [ -x "$ensure_docker" ]; then
+if [ ! -x "$ensure_docker" ]; then
+  if [ "$require_docker" = 1 ]; then
+    echo "missing required Docker bootstrap helper at $ensure_docker" >&2
+    exit 1
+  fi
+  echo "Docker bootstrap helper is unavailable; continuing without Docker" >&2
+else
   echo "checking Docker daemon"
   if ! "$ensure_docker"; then
     if [ "$require_docker" = 1 ]; then
