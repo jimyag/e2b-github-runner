@@ -273,6 +273,7 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 			Labels:            req.Labels,
 			RunnerGroup:       strings.TrimSpace(req.RunnerGroup),
 			TemplateID:        templateID,
+			RequireDocker:     strings.TrimSpace(profile.ManagedBy) != "",
 			Timeout:           s.cfg.SandboxTimeout,
 			CommandContext:    ctx,
 			OnStdout:          func(data []byte) { s.appendRunnerStdout(id, data) },

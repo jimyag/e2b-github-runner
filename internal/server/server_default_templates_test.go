@@ -249,6 +249,9 @@ func TestRunnerLifecycleCustomTemplateUsesStoredIDWithoutCatalog(t *testing.T) {
 	if len(inputs) != 1 || inputs[0].TemplateID != "custom-template-id" {
 		t.Fatalf("StartRunner inputs = %#v, want stored custom template id", inputs)
 	}
+	if inputs[0].RequireDocker {
+		t.Fatalf("custom StartRunner input requires Docker: %#v", inputs[0])
+	}
 }
 
 func TestRunnerLifecycleManagedDefaultResolvesBeforeRegistration(t *testing.T) {
@@ -277,6 +280,9 @@ func TestRunnerLifecycleManagedDefaultResolvesBeforeRegistration(t *testing.T) {
 	inputs := sandbox.startInputs()
 	if len(inputs) != 1 || inputs[0].TemplateID != "scoped-template-id" {
 		t.Fatalf("StartRunner inputs = %#v, want resolved scoped template id", inputs)
+	}
+	if !inputs[0].RequireDocker {
+		t.Fatalf("managed StartRunner input does not require Docker: %#v", inputs[0])
 	}
 	if got := events.snapshot(); !equalStrings(got, []string{"profile", "catalog", "token", "start"}) {
 		t.Fatalf("lifecycle order = %#v, want [profile catalog token start]", got)

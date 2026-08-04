@@ -190,6 +190,90 @@ printf 'run HOME=%s PWD=%s RUNASROOT=%s\n' "$HOME" "$PWD" "${RUNNER_ALLOW_RUNASR
 	}
 }
 
+func TestStartScriptDockerBootstrapPolicy(t *testing.T) {
+	tests := []struct {
+		name                string
+		requireDocker       bool
+		installDockerHelper bool
+		wantSuccess         bool
+	}{
+		{name: "custom runner continues when Docker bootstrap fails", installDockerHelper: true, wantSuccess: true},
+		{name: "managed runner requires working Docker", requireDocker: true, installDockerHelper: true},
+		{name: "custom runner continues when Docker helper is missing", wantSuccess: true},
+		{name: "managed runner requires Docker helper", requireDocker: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := t.TempDir()
+			actionsRunnerRoot := filepath.Join(fixture, "actions-runner")
+			ensureDockerPath := filepath.Join(fixture, "ensure-docker")
+			workdir := filepath.Join(fixture, "workdir")
+			logPath := filepath.Join(fixture, "runner.log")
+			if err := os.MkdirAll(actionsRunnerRoot, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeExecutable(t, filepath.Join(actionsRunnerRoot, "config.sh"), `#!/usr/bin/env bash
+set -euo pipefail
+printf 'config %s\n' "$*" >>"$RUNNER_TEST_LOG"
+`)
+			writeExecutable(t, filepath.Join(actionsRunnerRoot, "run.sh"), `#!/usr/bin/env bash
+set -euo pipefail
+printf 'run\n' >>"$RUNNER_TEST_LOG"
+`)
+			if tt.installDockerHelper {
+				writeExecutable(t, ensureDockerPath, `#!/usr/bin/env bash
+exit 1
+`)
+			}
+
+			script := startScript(StartInput{
+				RequestID:         "request-1",
+				RepositoryURL:     "https://github.com/o/r",
+				RegistrationToken: "token",
+				RunnerName:        "runner",
+				Labels:            []string{"self-hosted", "linux", "x64"},
+				RequireDocker:     tt.requireDocker,
+			}, "sandbox-1")
+			scriptPath := filepath.Join(fixture, "start-runner.sh")
+			writeExecutable(t, scriptPath, script)
+
+			output, err := runCommand(
+				t,
+				"bash",
+				[]string{scriptPath},
+				"ACTIONS_RUNNER_ROOT="+actionsRunnerRoot,
+				"RUNNER_WORKDIR="+workdir,
+				"RUNNER_JOB_WORK="+filepath.Join(fixture, "job-work"),
+				"RUNNER_HOME="+filepath.Join(fixture, "home"),
+				"RUNNER_HOOK_ROOT="+filepath.Join(fixture, "hooks"),
+				"RUNNER_ENVIRONMENT_FILE="+filepath.Join(fixture, "missing-environment"),
+				"RUNNER_TEST_LOG="+logPath,
+				"RUNNERD_AS_RUNNER=1",
+				"ENSURE_DOCKER="+ensureDockerPath,
+			)
+			if tt.wantSuccess && err != nil {
+				t.Fatalf("custom runner start failed: %v\n%s", err, output)
+			}
+			if !tt.wantSuccess && err == nil {
+				t.Fatalf("managed runner start succeeded without Docker:\n%s", output)
+			}
+
+			logBytes, readErr := os.ReadFile(logPath)
+			if tt.wantSuccess {
+				if readErr != nil {
+					t.Fatal(readErr)
+				}
+				if !strings.Contains(string(logBytes), "run\n") {
+					t.Fatalf("custom runner did not execute after Docker failure: %q", logBytes)
+				}
+			} else if readErr == nil && strings.Contains(string(logBytes), "run\n") {
+				t.Fatalf("managed runner executed after Docker failure: %q", logBytes)
+			}
+		})
+	}
+}
+
 func TestRunnerTemplateMatrixGateAcceptsManagedCatalog(t *testing.T) {
 	output, err := runCommand(t, "bash", []string{"scripts/check-runner-template-matrix.sh"})
 	if err != nil {

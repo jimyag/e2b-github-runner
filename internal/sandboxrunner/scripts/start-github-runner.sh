@@ -7,6 +7,7 @@ workdir="${RUNNER_WORKDIR:-/home/runner/actions-runner}"
 runner_job_work="${RUNNER_JOB_WORK:-/home/runner/work}"
 hook_root="${RUNNER_HOOK_ROOT:-/home/runner/_runnerd-hooks}"
 ensure_docker="${ENSURE_DOCKER:-/usr/local/bin/ensure-docker}"
+require_docker="%[8]s"
 runner_environment_file="${RUNNER_ENVIRONMENT_FILE:-/etc/environment}"
 export HOME="${RUNNER_HOME:-/home/runner}"
 export XDG_CONFIG_HOME="${HOME}/.config"
@@ -60,9 +61,21 @@ if [ ! -x ./config.sh ]; then
   cp -a "$actions_runner_root"/. "$workdir"/
 fi
 
-if [ -x "$ensure_docker" ]; then
+if [ ! -x "$ensure_docker" ]; then
+  if [ "$require_docker" = 1 ]; then
+    echo "missing required Docker bootstrap helper at $ensure_docker" >&2
+    exit 1
+  fi
+  echo "Docker bootstrap helper is unavailable; continuing without Docker" >&2
+else
   echo "checking Docker daemon"
-  "$ensure_docker"
+  if ! "$ensure_docker"; then
+    if [ "$require_docker" = 1 ]; then
+      echo "Docker daemon is required for this managed runner" >&2
+      exit 1
+    fi
+    echo "Docker daemon is unavailable; continuing without Docker" >&2
+  fi
 fi
 
 runner_url="$(printf '%%s' "%[1]s" | base64 -d)"
