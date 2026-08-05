@@ -2,7 +2,7 @@
 ARG BASE_PLATFORM=linux/amd64
 FROM --platform=$BASE_PLATFORM public.ecr.aws/ubuntu/ubuntu:26.04@sha256:a5da6f6b18c3a4b8dcc73244592f7096f417d2667966d0e33460e9e308f25f67
 
-ARG TEMPLATE_VERSION=20260804.1
+ARG TEMPLATE_VERSION=20260805.1
 ARG RUNNER_IMAGES_REV=e986db797519f06a2e5e53701a715cfa4c1545e8
 ARG RUNNER_IMAGES_ARCHIVE_SHA256=e87ede55bbdee21ee92113124a598e64d23a21e322f65f45e3a874c563f9f4cb
 ARG RUNNER_VERSION=2.336.0
@@ -56,10 +56,129 @@ COPY scripts/ensure-docker /usr/local/share/qiniu-sandbox-runner-template/ensure
 COPY scripts/curl /usr/local/share/qiniu-sandbox-runner-template/curl
 
 RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=bootstrap bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[0:7][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[7:8][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[8:14][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[14:15][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[15:18][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[18:21][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[21:22][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[22:23][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[23:24][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[24:27][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[27:28][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[28:30][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[30:32][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[32:33][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    patched_toolset="${toolset}.patched"; \
+    jq '(.apt.common_packages, .apt.cmd_packages) |= map(if . == "netcat" then "netcat-openbsd" else . end)' \
+      "$toolset" >"$patched_toolset"; \
+    mv "$patched_toolset" "$toolset"; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[33:45][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[45:56][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[56:57][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[57:][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    patched_toolset="${toolset}.patched"; \
+    jq '(.apt.common_packages, .apt.cmd_packages) |= map(if . == "netcat-openbsd" then "netcat" else . end)' \
+      "$toolset" >"$patched_toolset"; \
+    mv "$patched_toolset" "$toolset"; \
+    installer=/opt/qiniu-runner-images/images/ubuntu/scripts/build/install-apt-common.sh; \
+    test "$(grep -Fxc '    apt-get install --no-install-recommends $package' "$installer")" -eq 1; \
+    sed -i 's|    apt-get install --no-install-recommends \$package|    apt-get install --no-install-recommends ${package/netcat/netcat-openbsd}|' "$installer"; \
+    test "$(grep -Fxc '    apt-get install --no-install-recommends ${package/netcat/netcat-openbsd}' "$installer")" -eq 1
 RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=platform bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=node bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=toolchain bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=runtime bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+
+RUN set -eux; \
+    environment_file=/etc/environment; \
+    touch "$environment_file"; \
+    sed -i -e '/^ImageOS=/d' -e '/^ImageVersion=/d' -e '/^IMAGE_VERSION=/d' \
+      -e '/^IMAGE_TEMPLATE=/d' -e '/^RUNNER_TOOL_CACHE=/d' \
+      -e '/^AGENT_TOOLSDIRECTORY=/d' "$environment_file"; \
+    printf '%s\n' \
+      "ImageOS=\"$ImageOS\"" \
+      "ImageVersion=\"$TEMPLATE_VERSION\"" \
+      "IMAGE_VERSION=\"$TEMPLATE_VERSION\"" \
+      "IMAGE_TEMPLATE=\"$IMAGE_TEMPLATE\"" \
+      "RUNNER_TOOL_CACHE=\"$RUNNER_TOOL_CACHE\"" \
+      "AGENT_TOOLSDIRECTORY=\"$AGENT_TOOLSDIRECTORY\"" \
+      >>"$environment_file"
 
 USER runner
 WORKDIR /home/runner/work

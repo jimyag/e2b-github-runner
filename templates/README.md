@@ -62,10 +62,9 @@ a promise that the executable is absent.
 
 All four templates install checksum-pinned AzCopy 10.32.6 from Microsoft's
 official Ubuntu package pool instead of the upstream floating `aka.ms`
-archive. Azure CLI remains upstream-first; if the upstream installer cannot
-reach Microsoft's repository, the build falls back to the official,
-checksum-pinned Azure CLI 2.88.0 package for Jammy or Noble and verifies the
-installed version. They intentionally do not prewarm the GitHub action
+archive. They also install the official, checksum-pinned Azure CLI 2.88.0
+package for Jammy or Noble directly and verify the installed version. They
+intentionally do not prewarm the GitHub action
 archive cache;
 the runner resolves actions through the normal job-time GitHub protocol, so
 this changes build size and network exposure rather than workflow semantics.
@@ -167,13 +166,21 @@ followed by release smoke inside a real Sandbox created from that template.
 The Slim Dockerfile divides setup into four cacheable qshell-compatible phases:
 `bootstrap`, `platform`, `toolchain`, and `runtime`. The versioned templates add
 a dedicated `node` phase between `platform` and `toolchain`, keeping their large
-Node/npm toolset within the remote builder's per-layer time limit. If the remote builder hits
-its hard time limit after one or more phases finish, rerun the same
+Node/npm toolset within the remote builder's per-layer time limit. Ubuntu 26.04
+also preinstalls the pinned runner-images apt package list in eighteen cacheable
+batches before the upstream platform installer rechecks every package and runs
+its Pester contract. Large emoji-font, ICU, RPM, Tk, Xvfb, binutils, and
+`systemd-coredump` dependency sets are isolated, and the final batch is
+open-ended so appended pinned packages are not skipped; this keeps slow
+Resolute mirrors from trapping the whole package set in one non-cacheable
+timeout. If the remote builder hits its hard
+time limit after one or more phases finish, rerun the same
 `template-build-*` task with cache enabled; completed phases are reused. Do not
 use `--no-cache` for that recovery, and do not publish until one build reaches
 terminal `Status: ready`.
-Release smoke checks the OS, architecture, preinstalled Actions runner,
-outbound HTTPS, Docker, writable work/tool-cache paths, and cleanup. Full
+Release smoke checks the OS, architecture, the exact Dockerfile-pinned Actions
+Runner version, persisted runtime template name/version metadata, outbound
+HTTPS, Docker, writable work/tool-cache paths, and cleanup. Full
 per-inventory runtime conformance and local Docker builds remain optional
 diagnostics; neither is a substitute for the remote usability gate.
 The source gate rejects an Actions Runner version below `2.336.0`, while the

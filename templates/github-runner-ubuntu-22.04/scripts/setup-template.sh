@@ -72,6 +72,7 @@ download_checked() {
   local expected_sha256="$3"
   local attempts="${RUNNER_TEMPLATE_DOWNLOAD_ATTEMPTS:-20}"
   local retry_delay="${RUNNER_TEMPLATE_DOWNLOAD_RETRY_DELAY:-2}"
+  local retry_max_delay="${RUNNER_TEMPLATE_DOWNLOAD_RETRY_MAX_DELAY:-30}"
   local attempt
   local curl_status
 
@@ -102,6 +103,12 @@ download_checked() {
       echo "download interrupted; resuming (${attempt}/${attempts})" >&2
       if [ "$retry_delay" != 0 ]; then
         sleep "$retry_delay"
+        if [ "$retry_delay" -lt "$retry_max_delay" ]; then
+          retry_delay=$((retry_delay * 2))
+          if [ "$retry_delay" -gt "$retry_max_delay" ]; then
+            retry_delay="$retry_max_delay"
+          fi
+        fi
       fi
     fi
   done
@@ -496,6 +503,21 @@ configure_docker_apt_repository() {
   apt-cache show docker-ce >/dev/null 2>&1
 }
 
+remove_official_docker_packages() {
+  local official_docker_packages=(
+    containerd.io
+    docker-buildx-plugin
+    docker-ce
+    docker-ce-cli
+    docker-ce-rootless-extras
+    docker-compose-plugin
+  )
+  if ! apt-get purge -y "${official_docker_packages[@]}"; then
+    dpkg --purge --force-depends "${official_docker_packages[@]}" || true
+  fi
+  apt-get -f install -y
+}
+
 install_docker_for_sandbox() {
   if configure_docker_apt_repository && \
     apt-get install -y --no-install-recommends \
@@ -503,6 +525,7 @@ install_docker_for_sandbox() {
     echo "installed Docker packages from the official Docker repository"
   else
     echo "official Docker packages unavailable; using Ubuntu archive packages" >&2
+    remove_official_docker_packages
     rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg
     apt-get update
     apt-get install -y --no-install-recommends docker.io docker-buildx docker-compose-v2

@@ -48,23 +48,47 @@ if ! awk -v actual="$qshell_version" -v minimum="2.19.10" '
 fi
 
 case "$image_key" in
-  ubuntu-slim | ubuntu-24.04)
+  ubuntu-slim)
     expected_release=24.04
     support_channel=stable
+    template_name=github-runner-ubuntu-slim
+    template_directory=github-runner-ubuntu-slim
+    ;;
+  ubuntu-24.04)
+    expected_release=24.04
+    support_channel=stable
+    template_name=github-runner-ubuntu-24-04
+    template_directory=github-runner-ubuntu-24.04
     ;;
   ubuntu-22.04)
     expected_release=22.04
     support_channel=stable
+    template_name=github-runner-ubuntu-22-04
+    template_directory=github-runner-ubuntu-22.04
     ;;
   ubuntu-26.04)
     expected_release=26.04
     support_channel=preview
+    template_name=github-runner-ubuntu-26-04
+    template_directory=github-runner-ubuntu-26.04
     ;;
   *)
     echo "unknown image key $image_key" >&2
     exit 65
     ;;
 esac
+
+template_dockerfile="$repository_root/templates/$template_directory/Dockerfile"
+expected_runner_version="$(awk -F= '$1 == "ARG RUNNER_VERSION" {print $2; exit}' "$template_dockerfile")"
+expected_template_version="$(awk -F= '$1 == "ARG TEMPLATE_VERSION" {print $2; exit}' "$template_dockerfile")"
+test -n "$expected_runner_version" || {
+  echo "could not determine RUNNER_VERSION from $template_dockerfile" >&2
+  exit 65
+}
+test -n "$expected_template_version" || {
+  echo "could not determine TEMPLATE_VERSION from $template_dockerfile" >&2
+  exit 65
+}
 
 docker_smoke_command="$(
   cat <<'DOCKER_SMOKE' | tr '\n' ' '
@@ -91,6 +115,9 @@ DOCKER_SMOKE
 jq \
   --arg image "$image_key" \
   --arg expected_release "$expected_release" \
+  --arg expected_runner_version "$expected_runner_version" \
+  --arg expected_template_version "$expected_template_version" \
+  --arg template_name "$template_name" \
   --arg docker_smoke_command "$docker_smoke_command" \
   '
     .images[$image].entries = [
@@ -110,7 +137,23 @@ jq \
         category: "Release smoke",
         upstream_name: "preinstalled Actions runner",
         status: "provided",
-        verification: "test -x /opt/actions-runner/config.sh && test -x /opt/actions-runner/run.sh"
+        verification: (
+          "test -x /opt/actions-runner/config.sh && "
+          + "test -x /opt/actions-runner/run.sh && "
+          + "test \"$(/opt/actions-runner/bin/Runner.Listener --version)\" = \""
+          + $expected_runner_version
+          + "\""
+        )
+      },
+      {
+        category: "Release smoke",
+        upstream_name: "runtime image metadata",
+        status: "provided",
+        verification: (
+          "test \"$IMAGE_TEMPLATE\" = \"" + $template_name + "\" && "
+          + "test \"$ImageVersion\" = \"" + $expected_template_version + "\" && "
+          + "test \"$IMAGE_VERSION\" = \"" + $expected_template_version + "\""
+        )
       },
       {
         category: "Release smoke",

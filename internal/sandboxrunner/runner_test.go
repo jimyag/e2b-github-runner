@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -1164,7 +1165,7 @@ esac
 	}
 }
 
-func TestTemplateReleaseSmokeRunsOnlyUsabilityContract(t *testing.T) {
+func TestTemplateReleaseSmokeRunsUsabilityAndIdentityContract(t *testing.T) {
 	fixture := t.TempDir()
 	binDir := filepath.Join(fixture, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
@@ -1253,12 +1254,23 @@ esac
 	if !result.Passed ||
 		result.SupportChannel != "preview" ||
 		!result.Cleanup.Passed ||
-		len(result.Results) != 6 {
-		t.Fatalf("release smoke result = %#v, want six passing usability checks and cleanup", result)
+		len(result.Results) != 7 {
+		t.Fatalf("release smoke result = %#v, want seven passing usability and identity checks plus cleanup", result)
 	}
+	runnerVersionChecked := false
+	runtimeMetadataChecked := false
 	for _, check := range result.Results {
 		if check.Category != "Release smoke" {
 			t.Fatalf("release smoke unexpectedly ran full inventory check %#v", check)
+		}
+		if check.Name == "preinstalled Actions runner" {
+			runnerVersionChecked = strings.Contains(check.Command, "Runner.Listener --version") &&
+				strings.Contains(check.Command, `= "2.336.0"`)
+		}
+		if check.Name == "runtime image metadata" {
+			runtimeMetadataChecked = strings.Contains(check.Command, `"$IMAGE_TEMPLATE" = "github-runner-ubuntu-26-04"`) &&
+				strings.Contains(check.Command, `"$ImageVersion" = "20260805.1"`) &&
+				strings.Contains(check.Command, `"$IMAGE_VERSION" = "20260805.1"`)
 		}
 		if check.Name == "Docker daemon" {
 			if !strings.Contains(check.Command, "sudo -H -u runner") {
@@ -1271,6 +1283,12 @@ esac
 				t.Fatalf("Docker daemon smoke must execute a local container without a registry pull: %#v", check)
 			}
 		}
+	}
+	if !runnerVersionChecked {
+		t.Fatalf("release smoke did not pin the Actions runner version: %#v", result.Results)
+	}
+	if !runtimeMetadataChecked {
+		t.Fatalf("release smoke did not pin runtime template metadata: %#v", result.Results)
 	}
 }
 
@@ -2163,6 +2181,106 @@ func TestRunnerTemplateDockerfilesSplitSetupIntoCacheablePhases(t *testing.T) {
 	}
 }
 
+func TestUbuntu2604DockerfilePreinstallsAptCommonInCacheableChunks(t *testing.T) {
+	dockerfileBytes, err := os.ReadFile(filepath.Join(
+		repositoryRoot(t),
+		"templates",
+		"github-runner-ubuntu-26.04",
+		"Dockerfile",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dockerfile := string(dockerfileBytes)
+	bootstrap := strings.Index(
+		dockerfile,
+		"RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=bootstrap ",
+	)
+	platform := strings.Index(
+		dockerfile,
+		"RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=platform ",
+	)
+	if bootstrap < 0 || platform < 0 || bootstrap >= platform {
+		t.Fatalf("Ubuntu 26.04 setup phases are not ordered: bootstrap=%d platform=%d", bootstrap, platform)
+	}
+
+	previous := bootstrap
+	for _, packageRange := range []string{
+		"0:7",
+		"7:8",
+		"8:14",
+		"14:15",
+		"15:18",
+		"18:21",
+		"21:22",
+		"22:23",
+		"23:24",
+		"24:27",
+		"27:28",
+		"28:30",
+		"30:32",
+		"32:33",
+		"33:45",
+		"45:56",
+		"56:57",
+		"57:",
+	} {
+		chunk := "[.apt.common_packages[], .apt.cmd_packages[]] | .[" +
+			packageRange + "][]"
+		index := strings.Index(dockerfile, chunk)
+		if index < 0 {
+			t.Fatalf("Ubuntu 26.04 Dockerfile must preinstall apt package chunk %s", packageRange)
+		}
+		if index <= previous || index >= platform {
+			t.Fatalf(
+				"Ubuntu 26.04 apt package chunk %s must be cacheable between bootstrap and platform: index=%d previous=%d platform=%d",
+				packageRange,
+				index,
+				previous,
+				platform,
+			)
+		}
+		previous = index
+	}
+	if count := strings.Count(
+		dockerfile,
+		`packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]]`,
+	); count != 18 {
+		t.Fatalf("Ubuntu 26.04 must expose exactly 18 cacheable apt package chunks; got %d", count)
+	}
+
+	if !strings.Contains(
+		dockerfile,
+		`map(if . == "netcat" then "netcat-openbsd" else . end)`,
+	) {
+		t.Fatal("Ubuntu 26.04 apt preinstall must resolve the virtual netcat package to netcat-openbsd")
+	}
+	restoreVirtualPackage := strings.Index(
+		dockerfile,
+		`map(if . == "netcat-openbsd" then "netcat" else . end)`,
+	)
+	patchUpstreamInstaller := strings.Index(
+		dockerfile,
+		`${package/netcat/netcat-openbsd}`,
+	)
+	if restoreVirtualPackage <= previous || restoreVirtualPackage >= platform {
+		t.Fatalf(
+			"Ubuntu 26.04 must restore netcat for the upstream command test after preinstalling every package: restore=%d last_chunk=%d platform=%d",
+			restoreVirtualPackage,
+			previous,
+			platform,
+		)
+	}
+	if patchUpstreamInstaller <= restoreVirtualPackage || patchUpstreamInstaller >= platform {
+		t.Fatalf(
+			"Ubuntu 26.04 must map netcat only for the upstream apt install before platform tests: patch=%d restore=%d platform=%d",
+			patchUpstreamInstaller,
+			restoreVirtualPackage,
+			platform,
+		)
+	}
+}
+
 func TestVersionedTemplateBuildStagesPinnedUpstreamTests(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
@@ -2551,7 +2669,7 @@ func TestPublicTemplatesPinFloatingCompatibilityTools(t *testing.T) {
 
 func TestPublicTemplateCheckedDownloadsResumeAcrossTransientFailures(t *testing.T) {
 	root := repositoryRoot(t)
-	var downloadChecked string
+	downloadCheckedByImage := make(map[string]string)
 	for _, image := range []string{
 		"ubuntu-slim",
 		"ubuntu-22.04",
@@ -2575,7 +2693,8 @@ func TestPublicTemplateCheckedDownloadsResumeAcrossTransientFailures(t *testing.
 			if functionStart < 0 || functionEnd < functionStart {
 				t.Fatal("setup must define download_checked before the upstream test helper")
 			}
-			downloadChecked = script[functionStart:functionEnd]
+			downloadChecked := script[functionStart:functionEnd]
+			downloadCheckedByImage[image] = downloadChecked
 			for _, required := range []string{
 				`RUNNER_TEMPLATE_DOWNLOAD_ATTEMPTS:-20`,
 				`RUNNER_TEMPLATE_DOWNLOAD_RETRY_DELAY:-2`,
@@ -2588,6 +2707,46 @@ func TestPublicTemplateCheckedDownloadsResumeAcrossTransientFailures(t *testing.
 			}
 			if strings.Contains(downloadChecked, `--retry 5`) {
 				t.Fatal("download_checked must use an explicit resume loop instead of curl retries that discard partial output")
+			}
+		})
+	}
+
+	for image, downloadChecked := range downloadCheckedByImage {
+		t.Run(image+"-bounded-backoff", func(t *testing.T) {
+			failureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "transient failure", http.StatusServiceUnavailable)
+			}))
+			defer failureServer.Close()
+
+			fixture := t.TempDir()
+			fakeBin := filepath.Join(fixture, "bin")
+			if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			delayLog := filepath.Join(fixture, "delays")
+			writeExecutable(t, filepath.Join(fakeBin, "sleep"), "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\" >> \"$DELAY_LOG\"\n")
+			testScript := filepath.Join(fixture, "download-checked.sh")
+			writeExecutable(t, testScript, "#!/usr/bin/env bash\nset -euo pipefail\n"+
+				downloadChecked+"\ndownload_checked \"$1\" \"$2\" \"$3\"\n")
+			output, err := runCommand(
+				t,
+				"bash",
+				[]string{testScript, failureServer.URL, filepath.Join(fixture, "artifact"), strings.Repeat("0", 64)},
+				"PATH="+fakeBin+":"+os.Getenv("PATH"),
+				"DELAY_LOG="+delayLog,
+				"RUNNER_TEMPLATE_DOWNLOAD_ATTEMPTS=5",
+				"RUNNER_TEMPLATE_DOWNLOAD_RETRY_DELAY=1",
+				"RUNNER_TEMPLATE_DOWNLOAD_RETRY_MAX_DELAY=3",
+			)
+			if err == nil {
+				t.Fatalf("download unexpectedly succeeded:\n%s", output)
+			}
+			delays, readErr := os.ReadFile(delayLog)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if got, want := strings.Fields(string(delays)), []string{"1", "2", "3", "3"}; !slices.Equal(got, want) {
+				t.Fatalf("retry delays = %v, want bounded exponential backoff %v", got, want)
 			}
 		})
 	}
@@ -2628,7 +2787,7 @@ func TestPublicTemplateCheckedDownloadsResumeAcrossTransientFailures(t *testing.
 
 	testScript := filepath.Join(t.TempDir(), "download-checked.sh")
 	writeExecutable(t, testScript, "#!/usr/bin/env bash\nset -euo pipefail\n"+
-		downloadChecked+"\ndownload_checked \"$1\" \"$2\" \"$3\"\n")
+		downloadCheckedByImage["ubuntu-slim"]+"\ndownload_checked \"$1\" \"$2\" \"$3\"\n")
 	destination := filepath.Join(t.TempDir(), "artifact")
 	expectedSHA := fmt.Sprintf("%x", sha256.Sum256(payload))
 	output, err := runCommand(
@@ -3540,10 +3699,14 @@ func TestRunnerTemplateFallsBackToUbuntuDockerPackages(t *testing.T) {
 			script := string(scriptBytes)
 			for _, required := range []string{
 				"configure_docker_apt_repository() {",
+				"remove_official_docker_packages() {",
 				`download_checked https://download.docker.com/linux/ubuntu/gpg /tmp/docker.gpg "$DOCKER_GPG_SHA256" || return 1`,
 				`if [ "$installer_name" = install-docker-cli.sh ]; then`,
 				"upstream Docker CLI installer unavailable; deferring to sandbox-aware installer",
 				"official Docker packages unavailable; using Ubuntu archive packages",
+				"apt-get purge -y \"${official_docker_packages[@]}\"",
+				"dpkg --purge --force-depends \"${official_docker_packages[@]}\"",
+				"apt-get -f install -y",
 				"rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg",
 				"apt-get install -y --no-install-recommends docker.io docker-buildx docker-compose-v2",
 				"docker --version",

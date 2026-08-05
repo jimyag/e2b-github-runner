@@ -2,7 +2,7 @@
 ARG BASE_PLATFORM=linux/amd64
 FROM --platform=$BASE_PLATFORM public.ecr.aws/ubuntu/ubuntu:24.04@sha256:be20a0347f238b7d373edddc55923443b21dd9a60277bf8a93e43458cd0bf2fc
 
-ARG TEMPLATE_VERSION=20260804.1
+ARG TEMPLATE_VERSION=20260805.1
 ARG RUNNER_IMAGES_REV=e986db797519f06a2e5e53701a715cfa4c1545e8
 ARG RUNNER_IMAGES_ARCHIVE_SHA256=e87ede55bbdee21ee92113124a598e64d23a21e322f65f45e3a874c563f9f4cb
 ARG RUNNER_VERSION=2.336.0
@@ -55,6 +55,21 @@ RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=bootstrap bash /usr/local/share/q
 RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=platform bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=toolchain bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=runtime bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+
+RUN set -eux; \
+    environment_file=/etc/environment; \
+    touch "$environment_file"; \
+    sed -i -e '/^ImageOS=/d' -e '/^ImageVersion=/d' -e '/^IMAGE_VERSION=/d' \
+      -e '/^IMAGE_TEMPLATE=/d' -e '/^RUNNER_TOOL_CACHE=/d' \
+      -e '/^AGENT_TOOLSDIRECTORY=/d' "$environment_file"; \
+    printf '%s\n' \
+      "ImageOS=\"$ImageOS\"" \
+      "ImageVersion=\"$TEMPLATE_VERSION\"" \
+      "IMAGE_VERSION=\"$TEMPLATE_VERSION\"" \
+      "IMAGE_TEMPLATE=\"$IMAGE_TEMPLATE\"" \
+      "RUNNER_TOOL_CACHE=\"$RUNNER_TOOL_CACHE\"" \
+      "AGENT_TOOLSDIRECTORY=\"$AGENT_TOOLSDIRECTORY\"" \
+      >>"$environment_file"
 
 USER runner
 WORKDIR /home/runner/work

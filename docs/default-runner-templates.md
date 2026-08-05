@@ -116,12 +116,14 @@ Then build the actual Sandbox templates with qshell. Each target waits for
 qshell to report terminal `Status: ready`; a zero process exit without that
 status is treated as a failed build.
 
-The source gate rejects Actions Runner versions below `2.336.0`. Runtime
-conformance also checks the exact pinned Runner and Azure CLI versions, so
-their Dockerfile versions, official checksums, and compatibility verification
-must be updated together. Python and pipx installation has bounded retries for
-transient package-index failures; other upstream installers are not retried
-automatically because they may not be idempotent.
+The source gate rejects Actions Runner versions below `2.336.0`. Release smoke
+checks the exact Dockerfile-pinned Runner version and the template name/version
+persisted into the Sandbox runtime environment. Full runtime conformance also
+checks the exact pinned Azure CLI version, so Dockerfile versions, official
+checksums, and compatibility verification must be updated together. Python and
+pipx installation has bounded retries for transient package-index failures;
+other upstream installers are not retried automatically because they may not
+be idempotent.
 
 ```bash
 task template-build-ubuntu-slim
@@ -130,8 +132,14 @@ task template-build-ubuntu-24-04
 task template-build-ubuntu-26-04
 ```
 
-The Dockerfiles keep `bootstrap`, `platform`, `toolchain`, and `runtime` as
-separate qshell-compatible cache layers. If a remote build reaches the service
+The Dockerfiles keep `bootstrap`, `platform`, `node`, `toolchain`, and
+`runtime` work in separate qshell-compatible cache layers where applicable.
+Ubuntu 26.04 additionally preinstalls the pinned runner-images apt package list
+in eighteen cacheable batches before the upstream platform installer rechecks
+the packages and runs its Pester contract. Large emoji-font, ICU, RPM, Tk,
+Xvfb, binutils, and `systemd-coredump` dependency sets are isolated, and the
+final batch is open-ended so appended pinned packages are not skipped. If a
+remote build reaches the service
 time limit after completing an earlier layer, rerun the same command with the
 normal cache enabled. Do not force `--no-cache`; the release gate remains a
 single build reaching terminal `Status: ready`.
