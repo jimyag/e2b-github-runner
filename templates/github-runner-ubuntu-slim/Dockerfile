@@ -2,11 +2,11 @@
 ARG BASE_PLATFORM=linux/amd64
 FROM --platform=$BASE_PLATFORM public.ecr.aws/ubuntu/ubuntu:24.04@sha256:be20a0347f238b7d373edddc55923443b21dd9a60277bf8a93e43458cd0bf2fc
 
-ARG TEMPLATE_VERSION=20260727.1
+ARG TEMPLATE_VERSION=20260804.1
 ARG RUNNER_IMAGES_REV=e986db797519f06a2e5e53701a715cfa4c1545e8
 ARG RUNNER_IMAGES_ARCHIVE_SHA256=e87ede55bbdee21ee92113124a598e64d23a21e322f65f45e3a874c563f9f4cb
-ARG RUNNER_VERSION=2.334.0
-ARG RUNNER_ARCHIVE_SHA256=048024cd2c848eb6f14d5646d56c13a4def2ae7ee3ad12122bee960c56f3d271
+ARG RUNNER_VERSION=2.336.0
+ARG RUNNER_ARCHIVE_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
 ARG AZCOPY_VERSION=10.32.6
 ARG AZCOPY_DEB_SHA256=1a5078a8260ba7524a4400c602519d36905e592cd87a1db91a30af0da528fc86
 ARG AZURE_CLI_VERSION=2.88.0
@@ -51,7 +51,10 @@ COPY scripts/setup-template.sh /usr/local/share/qiniu-sandbox-runner-template/se
 COPY scripts/ensure-docker /usr/local/share/qiniu-sandbox-runner-template/ensure-docker
 COPY scripts/curl /usr/local/share/qiniu-sandbox-runner-template/curl
 
-RUN TEMPLATE_FLAVOR=slim bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=bootstrap bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=platform bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=toolchain bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=runtime bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 
 USER runner
 WORKDIR /home/runner/work

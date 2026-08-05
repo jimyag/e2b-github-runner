@@ -2,11 +2,11 @@
 ARG BASE_PLATFORM=linux/amd64
 FROM --platform=$BASE_PLATFORM public.ecr.aws/ubuntu/ubuntu:26.04@sha256:a5da6f6b18c3a4b8dcc73244592f7096f417d2667966d0e33460e9e308f25f67
 
-ARG TEMPLATE_VERSION=20260727.1
+ARG TEMPLATE_VERSION=20260804.1
 ARG RUNNER_IMAGES_REV=e986db797519f06a2e5e53701a715cfa4c1545e8
 ARG RUNNER_IMAGES_ARCHIVE_SHA256=e87ede55bbdee21ee92113124a598e64d23a21e322f65f45e3a874c563f9f4cb
-ARG RUNNER_VERSION=2.334.0
-ARG RUNNER_ARCHIVE_SHA256=048024cd2c848eb6f14d5646d56c13a4def2ae7ee3ad12122bee960c56f3d271
+ARG RUNNER_VERSION=2.336.0
+ARG RUNNER_ARCHIVE_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
 ARG AZCOPY_VERSION=10.32.6
 ARG AZCOPY_DEB_SHA256=1a5078a8260ba7524a4400c602519d36905e592cd87a1db91a30af0da528fc86
 ARG AZURE_CLI_VERSION=2.88.0
@@ -16,6 +16,7 @@ ARG AZURE_DEVOPS_EXTENSION_VERSION=1.0.6
 ARG AZURE_DEVOPS_EXTENSION_SHA256=fa779e1fd6e6e1b726c3656b6a1968537c208041c6af54d2a7476772d896b34b
 ARG BICEP_VERSION=0.45.15
 ARG BICEP_NUGET_SHA256=2055d8e4b2b984591d06b8c054dfb6db3b68f2bf236309ae185f06a161ae714a
+ARG PESTER_NUPKG_SHA256=5a0fd80b361600bf4bbd4c307c1fd01b17f11668bab19e657add41b00ad22ab9
 ARG GOOGLE_CLOUD_CLI_VERSION=577.0.0
 ARG GOOGLE_CLOUD_CLI_ARCHIVE_SHA256=0b32d330446ce7b0f57f253e7efab4636c18fb1f87a3ac31c6c3f2a2a697525e
 ARG NVM_VERSION=0.40.6
@@ -54,7 +55,11 @@ COPY scripts/setup-template.sh /usr/local/share/qiniu-sandbox-runner-template/se
 COPY scripts/ensure-docker /usr/local/share/qiniu-sandbox-runner-template/ensure-docker
 COPY scripts/curl /usr/local/share/qiniu-sandbox-runner-template/curl
 
-RUN TEMPLATE_FLAVOR=versioned bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=bootstrap bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=platform bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=node bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=toolchain bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=runtime bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 
 USER runner
 WORKDIR /home/runner/work

@@ -116,12 +116,25 @@ Then build the actual Sandbox templates with qshell. Each target waits for
 qshell to report terminal `Status: ready`; a zero process exit without that
 status is treated as a failed build.
 
+The source gate rejects Actions Runner versions below `2.336.0`. Runtime
+conformance also checks the exact pinned Runner and Azure CLI versions, so
+their Dockerfile versions, official checksums, and compatibility verification
+must be updated together. Python and pipx installation has bounded retries for
+transient package-index failures; other upstream installers are not retried
+automatically because they may not be idempotent.
+
 ```bash
 task template-build-ubuntu-slim
 task template-build-ubuntu-22-04
 task template-build-ubuntu-24-04
 task template-build-ubuntu-26-04
 ```
+
+The Dockerfiles keep `bootstrap`, `platform`, `toolchain`, and `runtime` as
+separate qshell-compatible cache layers. If a remote build reaches the service
+time limit after completing an earlier layer, rerun the same command with the
+normal cache enabled. Do not force `--no-cache`; the release gate remains a
+single build reaching terminal `Status: ready`.
 
 Publish only after all four builds are ready:
 

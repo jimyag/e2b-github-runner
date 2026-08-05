@@ -164,10 +164,24 @@ task template-smoke IMAGE_KEY=ubuntu-24.04 TEMPLATE_ID=<published-template-id>
 
 The formal template gate is a qshell build reaching terminal `Status: ready`,
 followed by release smoke inside a real Sandbox created from that template.
+The Slim Dockerfile divides setup into four cacheable qshell-compatible phases:
+`bootstrap`, `platform`, `toolchain`, and `runtime`. The versioned templates add
+a dedicated `node` phase between `platform` and `toolchain`, keeping their large
+Node/npm toolset within the remote builder's per-layer time limit. If the remote builder hits
+its hard time limit after one or more phases finish, rerun the same
+`template-build-*` task with cache enabled; completed phases are reused. Do not
+use `--no-cache` for that recovery, and do not publish until one build reaches
+terminal `Status: ready`.
 Release smoke checks the OS, architecture, preinstalled Actions runner,
 outbound HTTPS, Docker, writable work/tool-cache paths, and cleanup. Full
 per-inventory runtime conformance and local Docker builds remain optional
 diagnostics; neither is a substitute for the remote usability gate.
+The source gate rejects an Actions Runner version below `2.336.0`, while the
+compatibility contract checks the exact version pinned by each Dockerfile.
+Update the runner version, official archive checksum, and compatibility
+verification together. Python and pipx upstream installers use bounded retries
+and longer pip read timeouts because remote template builds must tolerate
+transient package-index failures without retrying unrelated installers.
 The Docker check imports a minimal root filesystem from the Sandbox itself and
 runs it with networking disabled. This verifies daemon, socket, image-import,
 and container execution behavior without conflating template correctness with

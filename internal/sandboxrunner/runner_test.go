@@ -2084,6 +2084,85 @@ func TestRunnerTemplateDockerfilesUseQshellCompatibleRunInstructions(t *testing.
 	}
 }
 
+func TestRunnerTemplateDockerfilesSplitSetupIntoCacheablePhases(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			templateRoot := filepath.Join(root, "templates", "github-runner-"+image)
+			dockerfileBytes, err := os.ReadFile(filepath.Join(templateRoot, "Dockerfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			flavor := "versioned"
+			if image == "ubuntu-slim" {
+				flavor = "slim"
+			}
+			phases := []string{"bootstrap", "platform", "toolchain", "runtime"}
+			if image != "ubuntu-slim" {
+				phases = []string{"bootstrap", "platform", "node", "toolchain", "runtime"}
+			}
+			previous := -1
+			for _, phase := range phases {
+				instruction := "RUN TEMPLATE_FLAVOR=" + flavor +
+					" RUNNER_TEMPLATE_PHASE=" + phase +
+					" bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh"
+				index := strings.Index(dockerfile, instruction)
+				if index < 0 {
+					t.Fatalf("template must expose a cacheable %s setup layer", phase)
+				}
+				if index <= previous {
+					t.Fatalf("template setup phases must preserve order; %s index=%d previous=%d", phase, index, previous)
+				}
+				previous = index
+			}
+			if strings.Count(dockerfile, "RUN TEMPLATE_FLAVOR=") != len(phases) {
+				t.Fatalf("template must have exactly %d cacheable setup layers; got %d", len(phases), strings.Count(dockerfile, "RUN TEMPLATE_FLAVOR="))
+			}
+
+			scriptBytes, err := os.ReadFile(filepath.Join(templateRoot, "scripts", "setup-template.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			if strings.Contains(script, "/tmp/runner-images/") ||
+				strings.Contains(script, "mkdir -p /tmp/runner-images") ||
+				strings.Contains(script, "test -d /tmp/runner-images") {
+				t.Fatal("runner-images source must survive qshell cache layers outside /tmp")
+			}
+			if !strings.Contains(script, "mkdir -p /opt/qiniu-runner-images") ||
+				!strings.Contains(script, "test -d /opt/qiniu-runner-images") {
+				t.Fatal("runner-images source must use the durable cross-phase directory /opt/qiniu-runner-images")
+			}
+			required := []string{
+				`runner_template_phase="${RUNNER_TEMPLATE_PHASE:-all}"`,
+				`phase_selected() {`,
+				`if phase_selected runtime; then`,
+			}
+			if image == "ubuntu-slim" {
+				required = append(required, `all | bootstrap | platform | toolchain | runtime)`)
+			} else {
+				required = append(
+					required,
+					`all | bootstrap | platform | node | toolchain | runtime)`,
+					`install-nvm.sh | install-nodejs.sh)`,
+					`echo node`,
+				)
+			}
+			for _, required := range required {
+				if !strings.Contains(script, required) {
+					t.Fatalf("phase-aware setup is missing %q", required)
+				}
+			}
+		})
+	}
+}
+
 func TestVersionedTemplateBuildStagesPinnedUpstreamTests(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
@@ -2229,7 +2308,60 @@ func TestPublicTemplatesUsePinnedMicrosoftAzCopyWithoutActionPrewarm(t *testing.
 	}
 }
 
-func TestPublicTemplatesFallBackToCheckedAzureCLIPackage(t *testing.T) {
+func TestVersionedTemplatesInstallPinnedPesterPackage(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			templateRoot := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+			)
+			dockerfileBytes, err := os.ReadFile(filepath.Join(templateRoot, "Dockerfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(dockerfileBytes), "ARG PESTER_NUPKG_SHA256=5a0fd80b361600bf4bbd4c307c1fd01b17f11668bab19e657add41b00ad22ab9") {
+				t.Fatal("Dockerfile must pin the Pester 5.9.0 package checksum")
+			}
+
+			scriptBytes, err := os.ReadFile(filepath.Join(templateRoot, "scripts", "setup-template.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			functionStart := strings.Index(script, "install_pester_for_upstream_tests() {")
+			if functionStart < 0 {
+				t.Fatal("setup must define the Pester installation helper")
+			}
+			functionEnd := strings.Index(script[functionStart:], "\n}\n\nstop_validated_service()")
+			if functionEnd < 0 {
+				t.Fatal("setup must define the Pester installation helper")
+			}
+			functionBody := script[functionStart : functionStart+functionEnd]
+			for _, required := range []string{
+				`"https://www.powershellgallery.com/api/v2/package/Pester/${pester_version}"`,
+				`"$PESTER_NUPKG_SHA256"`,
+				`/usr/local/share/powershell/Modules/Pester/${pester_version}`,
+				`unzip -q "$package" -d "$module_dir"`,
+				"Import-Module Pester -RequiredVersion $env:PESTER_VERSION -Force",
+			} {
+				if !strings.Contains(functionBody, required) {
+					t.Fatalf("Pester installation must use the pinned package with %q", required)
+				}
+			}
+			if strings.Contains(functionBody, "Register-PSRepository") || strings.Contains(functionBody, "Install-Module") {
+				t.Fatal("Pester installation must not depend on PowerShellGet repository registration")
+			}
+		})
+	}
+}
+
+func TestPublicTemplatesInstallPinnedAzureCLIPackage(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
 		"ubuntu-slim",
@@ -2265,13 +2397,17 @@ func TestPublicTemplatesFallBackToCheckedAzureCLIPackage(t *testing.T) {
 				`azure-cli_${AZURE_CLI_VERSION}-1~${suite}_amd64.deb`,
 				`expected_sha256="$AZURE_CLI_JAMMY_DEB_SHA256"`,
 				`expected_sha256="$AZURE_CLI_NOBLE_DEB_SHA256"`,
-				`upstream Azure CLI installer unavailable; using checked Microsoft package`,
+				`install-azure-cli.sh)`,
+				`install_azure_cli_from_microsoft_package`,
 				`test "$(az version --query '"azure-cli"' --output tsv)" = "$AZURE_CLI_VERSION"`,
 				`run_upstream_tests_if_available "CLI.Tools" "Azure CLI"`,
 			} {
 				if !strings.Contains(script, required) {
-					t.Fatalf("setup must retain the checked Azure CLI fallback with %q", required)
+					t.Fatalf("setup must install the checked Azure CLI package with %q", required)
 				}
+			}
+			if strings.Contains(script, `upstream Azure CLI installer unavailable`) {
+				t.Fatal("setup must not install a floating Azure CLI before falling back to the pinned package")
 			}
 		})
 	}
@@ -2520,6 +2656,88 @@ func TestPublicTemplateCheckedDownloadsResumeAcrossTransientFailures(t *testing.
 	}
 }
 
+func TestPublicTemplatesRetryPythonInstallersAfterTransientNetworkFailures(t *testing.T) {
+	root := repositoryRoot(t)
+	var retryInstaller string
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptBytes, err := os.ReadFile(filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			functionStart := strings.Index(script, "run_retryable_upstream_installer() {")
+			functionEnd := strings.Index(script, "\nrun_upstream_installer() {")
+			if functionStart < 0 || functionEnd < functionStart {
+				t.Fatal("setup must define a retryable upstream installer helper")
+			}
+			retryInstaller = script[functionStart:functionEnd]
+			for _, required := range []string{
+				`RUNNER_TEMPLATE_UPSTREAM_INSTALL_ATTEMPTS:-3`,
+				`RUNNER_TEMPLATE_UPSTREAM_INSTALL_RETRY_DELAY:-2`,
+				`PIP_DEFAULT_TIMEOUT="${PIP_DEFAULT_TIMEOUT:-120}"`,
+				`PIP_RETRIES="${PIP_RETRIES:-10}"`,
+				`install-python.sh | install-pipx-packages.sh)`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("setup must retry Python installers with %q", required)
+				}
+			}
+			if !strings.Contains(script, `run_upstream_installer "$upstream_build/install-pipx-packages.sh"`) {
+				t.Fatal("standalone pipx package installation must use the retryable installer wrapper")
+			}
+		})
+	}
+
+	tempDir := t.TempDir()
+	attemptFile := filepath.Join(tempDir, "attempts")
+	installer := filepath.Join(tempDir, "install-python.sh")
+	writeExecutable(t, installer, `#!/usr/bin/env bash
+set -euo pipefail
+attempt=0
+if [ -f "$ATTEMPT_FILE" ]; then
+  attempt="$(cat "$ATTEMPT_FILE")"
+fi
+attempt=$((attempt + 1))
+printf '%s\n' "$attempt" >"$ATTEMPT_FILE"
+test "$PIP_DEFAULT_TIMEOUT" = 120
+test "$PIP_RETRIES" = 10
+test "$attempt" -ge 2
+`)
+	testScript := filepath.Join(tempDir, "retry-installer.sh")
+	writeExecutable(t, testScript, "#!/usr/bin/env bash\nset -euo pipefail\n"+
+		retryInstaller+"\nrun_retryable_upstream_installer \"$1\"\n")
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{testScript, installer},
+		"ATTEMPT_FILE="+attemptFile,
+		"RUNNER_TEMPLATE_UPSTREAM_INSTALL_ATTEMPTS=3",
+		"RUNNER_TEMPLATE_UPSTREAM_INSTALL_RETRY_DELAY=0",
+	)
+	if err != nil {
+		t.Fatalf("retryable installer failed: %v\n%s", err, output)
+	}
+	attempts, err := os.ReadFile(attemptFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(attempts)); got != "2" {
+		t.Fatalf("installer attempts = %s, want 2", got)
+	}
+}
+
 func TestPublicTemplatesInstallPinnedAzureDevOpsExtensionAfterAzureCLI(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
@@ -2676,7 +2894,7 @@ func TestVersionedTemplatesInstallNetcatProviderBeforeAptCommon(t *testing.T) {
 			}
 			script := string(scriptBytes)
 			netcatIndex := strings.Index(script, "netcat-openbsd")
-			aptCommonIndex := strings.Index(script, "install-apt-common.sh")
+			aptCommonIndex := strings.LastIndex(script, "install-apt-common.sh")
 			if netcatIndex < 0 || aptCommonIndex < 0 {
 				t.Fatalf(
 					"setup must install a concrete netcat provider before apt-common: netcat=%d apt-common=%d",
@@ -2773,7 +2991,7 @@ func TestVersionedTemplateBuildDefersOnlyPodmanNetworkingToRuntimeConformance(t 
 					t.Fatalf("setup must contain exactly one %q guard/patch, got %d", required, strings.Count(script, required))
 				}
 			}
-			if strings.Contains(script, `/tmp/runner-images/images/ubuntu/scripts/tests/Tools.Tests.ps1`) {
+			if strings.Contains(script, `/opt/qiniu-runner-images/images/ubuntu/scripts/tests/Tools.Tests.ps1`) {
 				t.Fatal("setup must not modify the pinned upstream source tree")
 			}
 		})
@@ -2900,7 +3118,7 @@ func TestVersionedTemplateBuildMakesSystemctlShimVisibleToSudoAndCleansIt(t *tes
 			apache := `install-apache.sh`
 			cleanup := `rm -f /usr/local/bin/systemctl`
 			exposeIndex := strings.Index(script, expose)
-			apacheIndex := strings.Index(script, apache)
+			apacheIndex := strings.LastIndex(script, apache)
 			cleanupIndex := strings.Index(script, cleanup)
 			if exposeIndex < 0 || apacheIndex < 0 || cleanupIndex < 0 {
 				t.Fatalf(
@@ -3088,7 +3306,7 @@ func TestVersionedTemplateBuildReloadsPersistedEnvironmentBeforePipxPackages(t *
 			configureEnvironment := `bash "$upstream_build/configure-environment.sh"`
 			reloadEnvironment := `. "$HELPER_SCRIPTS/etc-environment.sh"
   reload_etc_environment`
-			installPipx := `bash "$upstream_build/install-pipx-packages.sh"`
+			installPipx := `run_upstream_installer "$upstream_build/install-pipx-packages.sh"`
 			configureIndex := strings.Index(script, configureEnvironment)
 			reloadIndex := strings.Index(script, reloadEnvironment)
 			pipxIndex := strings.Index(script, installPipx)
@@ -3136,7 +3354,7 @@ func TestVersionedTemplateBuildUsesDiskBoundedToolset(t *testing.T) {
 			if start < 0 {
 				t.Fatal("cannot find versioned installer branch")
 			}
-			end := strings.Index(script[start:], "\nfi\n\ninstall_docker_for_sandbox")
+			end := strings.Index(script[start:], "\nfi\n\nif phase_selected runtime; then")
 			if end < 0 {
 				t.Fatalf("cannot isolate versioned installer branch: start=%d end=%d", start, end)
 			}
@@ -3488,6 +3706,26 @@ func TestRunnerTemplateBuildUsesBoundedHTTPSAptSources(t *testing.T) {
 			} {
 				if !strings.Contains(script, required) {
 					t.Fatalf("apt source hardening missing %q", required)
+				}
+			}
+			if image == "ubuntu-26.04" {
+				kernelMirror := strings.Index(script, "https://mirrors.edge.kernel.org/ubuntu/\tpriority:1")
+				tunaFallback := strings.Index(script, "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/\tpriority:2")
+				if kernelMirror < 0 || tunaFallback < 0 || kernelMirror > tunaFallback {
+					t.Fatalf(
+						"Ubuntu 26.04 must prefer the promptly synchronized kernel.org archive and retain TUNA as a fallback: kernel=%d tuna=%d",
+						kernelMirror,
+						tunaFallback,
+					)
+				}
+				for _, directMirrorRewrite := range []string{
+					`'s|http://mirrors.tuna.tsinghua.edu.cn/ubuntu|mirror+file:/etc/apt/apt-mirrors.txt|g'`,
+					`'s|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|mirror+file:/etc/apt/apt-mirrors.txt|g'`,
+					`'s|https://mirrors.edge.kernel.org/ubuntu|mirror+file:/etc/apt/apt-mirrors.txt|g'`,
+				} {
+					if !strings.Contains(script, directMirrorRewrite) {
+						t.Fatalf("Ubuntu 26.04 must normalize direct mirror sources through the bounded mirror list; missing %q", directMirrorRewrite)
+					}
 				}
 			}
 		})

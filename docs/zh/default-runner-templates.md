@@ -108,12 +108,22 @@ task template-check-all
 然后使用 qshell 构建真正的 Sandbox 模板。每个任务都会等待 qshell 输出终态
 `Status: ready`；如果进程退出码为 0，却没有出现该状态，任务仍会判定构建失败。
 
+源码门槛会拒绝低于 `2.336.0` 的 Actions Runner。运行时 conformance 还会检查
+固定的 Runner 和 Azure CLI 精确版本，因此 Dockerfile 中的版本、官方校验和与
+compatibility verification 必须同步更新。Python 和 pipx 安装会对软件包索引的
+瞬时失败执行有限重试；其他上游安装器可能不具备幂等性，因此不会自动重试。
+
 ```bash
 task template-build-ubuntu-slim
 task template-build-ubuntu-22-04
 task template-build-ubuntu-24-04
 task template-build-ubuntu-26-04
 ```
+
+Dockerfile 将 `bootstrap`、`platform`、`toolchain` 和 `runtime` 保留为独立的
+qshell 兼容缓存层。如果远程构建在已有阶段完成后触及服务时限，请保留默认缓存并
+重跑同一命令，不要强制使用 `--no-cache`。发布门槛仍然是某一次构建最终达到
+`Status: ready`。
 
 4 个构建全部 ready 后再发布：
 

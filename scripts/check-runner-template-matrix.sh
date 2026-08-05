@@ -4,10 +4,25 @@ set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository_root"
 templates_readme="${RUNNER_TEMPLATES_README:-templates/README.md}"
+minimum_runner_version="${MINIMUM_ACTIONS_RUNNER_VERSION:-2.336.0}"
 
 fail() {
   echo "runner template matrix: $*" >&2
   exit 1
+}
+
+version_at_least() {
+  awk -v actual="$1" -v minimum="$2" '
+    BEGIN {
+      split(actual, actual_parts, ".")
+      split(minimum, minimum_parts, ".")
+      for (part = 1; part <= 3; part++) {
+        if ((actual_parts[part] + 0) > (minimum_parts[part] + 0)) exit 0
+        if ((actual_parts[part] + 0) < (minimum_parts[part] + 0)) exit 1
+      }
+      exit 0
+    }
+  '
 }
 
 test -f "$templates_readme" || fail "missing templates README $templates_readme"
@@ -59,6 +74,11 @@ for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
     test -f "$directory/$required_file" || fail "missing $directory/$required_file"
   done
 
+  runner_version="$(awk -F= '$1 == "ARG RUNNER_VERSION" {print $2; exit}' "$directory/Dockerfile")"
+  test -n "$runner_version" || fail "$image_key does not pin RUNNER_VERSION"
+  version_at_least "$runner_version" "$minimum_runner_version" ||
+    fail "$image_key Actions Runner $runner_version is below required $minimum_runner_version"
+
   template_name="$(
     awk -F= '/^[[:space:]]*name[[:space:]]*=/ {
       value=$2
@@ -100,6 +120,25 @@ for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
   fi
   grep -Eq '^[[:space:]]*RUN[[:space:]]+TEMPLATE_FLAVOR=' "$directory/Dockerfile" ||
     fail "$image_key setup must use a plain qshell-compatible RUN instruction"
+  template_flavor=versioned
+  if [ "$image_key" = ubuntu-slim ]; then
+    template_flavor=slim
+  fi
+  phases="bootstrap platform toolchain runtime"
+  if [ "$image_key" != ubuntu-slim ]; then
+    phases="bootstrap platform node toolchain runtime"
+  fi
+  phase_count=0
+  for phase in $phases; do
+    grep -Fq \
+      "RUN TEMPLATE_FLAVOR=$template_flavor RUNNER_TEMPLATE_PHASE=$phase bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh" \
+      "$directory/Dockerfile" ||
+      fail "$image_key is missing cacheable setup phase $phase"
+    phase_count=$((phase_count + 1))
+  done
+  actual_phase_count="$(grep -Ec '^[[:space:]]*RUN[[:space:]]+TEMPLATE_FLAVOR=' "$directory/Dockerfile")"
+  test "$actual_phase_count" -eq "$phase_count" ||
+    fail "$image_key has $actual_phase_count setup phases, want $phase_count"
   if grep -Fq 'Acquire::https::Verify-Peer=false' "$directory/scripts/setup-template.sh"; then
     fail "$image_key setup must not disable apt HTTPS peer verification"
   fi
@@ -112,6 +151,9 @@ for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
       fail "$image_key must provide the deb822 path expected by upstream setup"
   fi
   if [ "$image_key" != ubuntu-slim ]; then
+    grep -Fq 'install-nvm.sh | install-nodejs.sh)' \
+      "$directory/scripts/setup-template.sh" ||
+      fail "$image_key must isolate Node installation in its cacheable node phase"
     for required_installer in \
       install-apt-common.sh \
       install-apache.sh \
