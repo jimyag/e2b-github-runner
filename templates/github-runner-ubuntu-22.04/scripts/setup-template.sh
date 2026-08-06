@@ -1,6 +1,35 @@
 #!/usr/bin/env bash
 set -euxo pipefail
 
+runner_template_phase="${RUNNER_TEMPLATE_PHASE:-all}"
+case "$runner_template_phase" in
+  all | bootstrap | platform | node | toolchain | runtime) ;;
+  *)
+    echo "unsupported runner template phase: $runner_template_phase" >&2
+    exit 64
+    ;;
+esac
+
+phase_selected() {
+  [ "$runner_template_phase" = all ] || [ "$runner_template_phase" = "$1" ]
+}
+
+installer_phase() {
+  case "$1" in
+    configure-apt-sources.sh | configure-apt.sh | install-apt-vital.sh | install-ms-repos.sh | configure-image-data-file.sh | configure-environment.sh | install-apt-common.sh | install-azure-cli.sh | install-bicep.sh | install-apache.sh | install-aws-tools.sh | install-container-tools.sh | install-git.sh | install-git-lfs.sh | install-github-cli.sh | install-google-cloud-cli.sh)
+      echo platform
+      ;;
+    install-nvm.sh | install-nodejs.sh)
+      echo node
+      ;;
+    *) echo toolchain ;;
+  esac
+}
+
+should_run_installer() {
+  phase_selected "$(installer_phase "$1")"
+}
+
 : "${RUNNER_IMAGES_REV:?RUNNER_IMAGES_REV is required}"
 : "${RUNNER_IMAGES_ARCHIVE_SHA256:?RUNNER_IMAGES_ARCHIVE_SHA256 is required}"
 : "${RUNNER_VERSION:?RUNNER_VERSION is required}"
@@ -14,6 +43,7 @@ set -euxo pipefail
 : "${AZURE_DEVOPS_EXTENSION_SHA256:?AZURE_DEVOPS_EXTENSION_SHA256 is required}"
 : "${BICEP_VERSION:?BICEP_VERSION is required}"
 : "${BICEP_NUGET_SHA256:?BICEP_NUGET_SHA256 is required}"
+: "${PESTER_NUPKG_SHA256:?PESTER_NUPKG_SHA256 is required}"
 : "${GOOGLE_CLOUD_CLI_VERSION:?GOOGLE_CLOUD_CLI_VERSION is required}"
 : "${GOOGLE_CLOUD_CLI_ARCHIVE_SHA256:?GOOGLE_CLOUD_CLI_ARCHIVE_SHA256 is required}"
 : "${NVM_VERSION:?NVM_VERSION is required}"
@@ -42,6 +72,7 @@ download_checked() {
   local expected_sha256="$3"
   local attempts="${RUNNER_TEMPLATE_DOWNLOAD_ATTEMPTS:-20}"
   local retry_delay="${RUNNER_TEMPLATE_DOWNLOAD_RETRY_DELAY:-2}"
+  local retry_max_delay="${RUNNER_TEMPLATE_DOWNLOAD_RETRY_MAX_DELAY:-30}"
   local attempt
   local curl_status
 
@@ -72,6 +103,12 @@ download_checked() {
       echo "download interrupted; resuming (${attempt}/${attempts})" >&2
       if [ "$retry_delay" != 0 ]; then
         sleep "$retry_delay"
+        if [ "$retry_delay" -lt "$retry_max_delay" ]; then
+          retry_delay=$((retry_delay * 2))
+          if [ "$retry_delay" -gt "$retry_max_delay" ]; then
+            retry_delay="$retry_max_delay"
+          fi
+        fi
       fi
     fi
   done
@@ -300,10 +337,38 @@ install_ninja_from_checked_archive() {
   run_upstream_tests_if_available "Tools" "Ninja"
 }
 
+run_retryable_upstream_installer() {
+  local installer_path="$1"
+  local installer_name="${installer_path##*/}"
+  local attempts="${RUNNER_TEMPLATE_UPSTREAM_INSTALL_ATTEMPTS:-3}"
+  local retry_delay="${RUNNER_TEMPLATE_UPSTREAM_INSTALL_RETRY_DELAY:-2}"
+  local attempt
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    if PIP_DEFAULT_TIMEOUT="${PIP_DEFAULT_TIMEOUT:-120}" \
+      PIP_RETRIES="${PIP_RETRIES:-10}" \
+      bash "$installer_path"; then
+      return 0
+    fi
+    if [ "$attempt" -lt "$attempts" ]; then
+      echo "upstream installer interrupted; retrying $installer_name (${attempt}/${attempts})" >&2
+      if [ "$retry_delay" != 0 ]; then
+        sleep "$retry_delay"
+      fi
+    fi
+  done
+  echo "upstream installer failed after ${attempts} attempts: $installer_name" >&2
+  return 1
+}
+
 run_upstream_installer() {
   local installer_path="$1"
   local installer_name="${installer_path##*/}"
   case "$installer_name" in
+    install-azure-cli.sh)
+      install_azure_cli_from_microsoft_package
+      return
+      ;;
     install-aws-tools.sh)
       install_aws_tools_from_checked_archives
       return
@@ -344,15 +409,16 @@ run_upstream_installer() {
       install_ninja_from_checked_archive
       return
       ;;
+    install-python.sh | install-pipx-packages.sh)
+      if run_retryable_upstream_installer "$installer_path"; then
+        return 0
+      fi
+      return 1
+      ;;
   esac
 
   if bash "$installer_path"; then
     return 0
-  fi
-  if [ "$installer_name" = install-azure-cli.sh ]; then
-    echo "upstream Azure CLI installer unavailable; using checked Microsoft package" >&2
-    install_azure_cli_from_microsoft_package
-    return
   fi
   if [ "$installer_name" = install-docker-cli.sh ]; then
     echo "upstream Docker CLI installer unavailable; deferring to sandbox-aware installer" >&2
@@ -437,6 +503,21 @@ configure_docker_apt_repository() {
   apt-cache show docker-ce >/dev/null 2>&1
 }
 
+remove_official_docker_packages() {
+  local official_docker_packages=(
+    containerd.io
+    docker-buildx-plugin
+    docker-ce
+    docker-ce-cli
+    docker-ce-rootless-extras
+    docker-compose-plugin
+  )
+  if ! apt-get purge -y "${official_docker_packages[@]}"; then
+    dpkg --purge --force-depends "${official_docker_packages[@]}" || true
+  fi
+  apt-get -f install -y
+}
+
 install_docker_for_sandbox() {
   if configure_docker_apt_repository && \
     apt-get install -y --no-install-recommends \
@@ -444,6 +525,7 @@ install_docker_for_sandbox() {
     echo "installed Docker packages from the official Docker repository"
   else
     echo "official Docker packages unavailable; using Ubuntu archive packages" >&2
+    remove_official_docker_packages
     rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg
     apt-get update
     apt-get install -y --no-install-recommends docker.io docker-buildx docker-compose-v2
@@ -467,6 +549,8 @@ install_runner() {
 
 install_pester_for_upstream_tests() {
   local pester_version
+  local package
+  local module_dir
   pester_version="$(
     jq -er '
       .powershellModules[]
@@ -474,10 +558,17 @@ install_pester_for_upstream_tests() {
       | .versions[]
     ' "$INSTALLER_SCRIPT_FOLDER/toolset.json"
   )"
+  package="/tmp/Pester.${pester_version}.nupkg"
+  module_dir="/usr/local/share/powershell/Modules/Pester/${pester_version}"
+  download_checked \
+    "https://www.powershellgallery.com/api/v2/package/Pester/${pester_version}" \
+    "$package" \
+    "$PESTER_NUPKG_SHA256"
+  install -d -m 0755 "$module_dir"
+  unzip -q "$package" -d "$module_dir"
+  rm -f "$package"
   PESTER_VERSION="$pester_version" pwsh -NoLogo -NoProfile -Command '
     $ErrorActionPreference = "Stop"
-    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-    Install-Module -Name Pester -RequiredVersion $env:PESTER_VERSION -Scope AllUsers -SkipPublisherCheck -Force
     Import-Module Pester -RequiredVersion $env:PESTER_VERSION -Force
     if ((Get-Module Pester).Version.ToString() -ne $env:PESTER_VERSION) { exit 1 }
   '
@@ -504,6 +595,7 @@ stop_validated_service() {
   fi
 }
 
+if phase_selected bootstrap; then
 apt-get update
 apt-get install -y --no-install-recommends ca-certificates
 configure_reliable_apt_sources
@@ -524,22 +616,26 @@ install -d -o runner -g runner \
   /home/runner/_runnerd-hooks \
   /opt/actions-runner
 
-download_checked \
-  "https://codeload.github.com/actions/runner-images/tar.gz/${RUNNER_IMAGES_REV}" \
-  /tmp/runner-images.tar.gz \
-  "$RUNNER_IMAGES_ARCHIVE_SHA256"
-mkdir -p /tmp/runner-images
-tar -xzf /tmp/runner-images.tar.gz -C /tmp/runner-images --strip-components=1
+  download_checked \
+    "https://codeload.github.com/actions/runner-images/tar.gz/${RUNNER_IMAGES_REV}" \
+    /tmp/runner-images.tar.gz \
+    "$RUNNER_IMAGES_ARCHIVE_SHA256"
+  mkdir -p /opt/qiniu-runner-images
+  tar -xzf /tmp/runner-images.tar.gz -C /opt/qiniu-runner-images --strip-components=1
+fi
+test -d /opt/qiniu-runner-images
 
 export DEBIAN_FRONTEND=noninteractive
-export HELPER_SCRIPTS=/tmp/runner-images/images/ubuntu-slim/scripts/helpers
-export INSTALLER_SCRIPT_FOLDER=/tmp/runner-images/images/ubuntu-slim/toolsets
+export HELPER_SCRIPTS=/opt/qiniu-runner-images/images/ubuntu-slim/scripts/helpers
+export INSTALLER_SCRIPT_FOLDER=/opt/qiniu-runner-images/images/ubuntu-slim/toolsets
 export IMAGE_VERSION="${IMAGE_VERSION:-${ImageVersion:-local}}"
 export IMAGE_OS=ubuntu24
 
 if [ "${TEMPLATE_FLAVOR:-}" = slim ]; then
-  upstream_build=/tmp/runner-images/images/ubuntu-slim/scripts/build
-  install_azcopy_from_microsoft_package
+  upstream_build=/opt/qiniu-runner-images/images/ubuntu-slim/scripts/build
+  if phase_selected platform; then
+    install_azcopy_from_microsoft_package
+  fi
   for installer in \
     configure-apt-sources.sh \
     configure-apt.sh \
@@ -565,15 +661,19 @@ if [ "${TEMPLATE_FLAVOR:-}" = slim ]; then
     install-pipx-packages.sh \
     install-docker-cli.sh \
     configure-system.sh; do
+    should_run_installer "$installer" || continue
     run_upstream_installer "$upstream_build/$installer"
     if [ "$installer" = install-azure-cli.sh ]; then
       install_azure_devops_extension
     fi
   done
-  ln -s /etc/skel/.nvm /home/runner/.nvm
+  if phase_selected toolchain; then
+    ln -sfn /etc/skel/.nvm /home/runner/.nvm
+  fi
 else
   . /etc/os-release
   export IMAGE_OS="ubuntu${VERSION_ID/.}"
+  if phase_selected bootstrap; then
   install -d -m 0755 /tmp/qiniu-runner-build-tools
   cat >/tmp/qiniu-runner-build-tools/systemctl <<'SYSTEMCTL'
 #!/bin/sh
@@ -765,7 +865,6 @@ exit 0
 SYSTEMCTL
   chmod 0755 /tmp/qiniu-runner-build-tools/systemctl
   ln -s /tmp/qiniu-runner-build-tools/systemctl /usr/local/bin/systemctl
-  export PATH="/tmp/qiniu-runner-build-tools:$PATH"
   echo 'APT::Get::Assume-Yes "true";' >/etc/apt/apt.conf.d/90assumeyes
   install -d -m 0755 /etc/cloud/templates
   cat >/etc/waagent.conf <<'WAAGENT'
@@ -773,11 +872,14 @@ ResourceDisk.Format=n
 ResourceDisk.EnableSwap=n
 ResourceDisk.SwapSizeMB=0
 WAAGENT
+  fi
+  export PATH="/tmp/qiniu-runner-build-tools:$PATH"
   release_digits="${VERSION_ID/.}"
-  upstream_build=/tmp/runner-images/images/ubuntu/scripts/build
-  export HELPER_SCRIPTS=/tmp/runner-images/images/ubuntu/scripts/helpers
-  export INSTALLER_SCRIPT_FOLDER=/tmp/runner-images/images/ubuntu/scripts/build
-  cp "/tmp/runner-images/images/ubuntu/toolsets/toolset-${release_digits}.json" \
+  upstream_build=/opt/qiniu-runner-images/images/ubuntu/scripts/build
+  export HELPER_SCRIPTS=/opt/qiniu-runner-images/images/ubuntu/scripts/helpers
+  export INSTALLER_SCRIPT_FOLDER=/opt/qiniu-runner-images/images/ubuntu/scripts/build
+  if phase_selected bootstrap; then
+  cp "/opt/qiniu-runner-images/images/ubuntu/toolsets/toolset-${release_digits}.json" \
     "$INSTALLER_SCRIPT_FOLDER/toolset.json"
   install -d -m 0755 /imagegeneration
   cp -a "$HELPER_SCRIPTS" /imagegeneration/helpers
@@ -815,6 +917,7 @@ WAAGENT
   bash "$upstream_build/install-powershell.sh"
   install_pester_for_upstream_tests
   bash "$HELPER_SCRIPTS/invoke-tests.sh" Tools azcopy
+  fi
 
   for installer in \
     install-apt-common.sh \
@@ -834,6 +937,7 @@ WAAGENT
     install-python.sh \
     install-zstd.sh \
     install-ninja.sh; do
+    should_run_installer "$installer" || continue
     run_upstream_installer "$upstream_build/$installer"
     case "$installer" in
       install-azure-cli.sh)
@@ -843,11 +947,14 @@ WAAGENT
       install-apache.sh) stop_validated_service apache2 ;;
     esac
   done
+  if phase_selected toolchain; then
   . "$HELPER_SCRIPTS/etc-environment.sh"
   reload_etc_environment
-  bash "$upstream_build/install-pipx-packages.sh"
+  run_upstream_installer "$upstream_build/install-pipx-packages.sh"
+  fi
 fi
 
+if phase_selected runtime; then
 install_docker_for_sandbox
 install_runner
 install -m 0755 \
@@ -862,8 +969,8 @@ chmod -R a+rX /opt/actions-runner /opt/hostedtoolcache
 
 apt-get clean
 find /var/lib/apt/lists -mindepth 1 -delete
-find /tmp/runner-images -mindepth 1 -delete
-find /tmp/runner-images -depth -type d -empty -delete
+find /opt/qiniu-runner-images -mindepth 1 -delete
+find /opt/qiniu-runner-images -depth -type d -empty -delete
 if [ -d /imagegeneration ]; then
   find /imagegeneration -mindepth 1 -delete
   rmdir /imagegeneration
@@ -872,3 +979,4 @@ rm -f /usr/local/bin/systemctl
 find /tmp/qiniu-runner-build-tools -mindepth 1 -delete 2>/dev/null || true
 rmdir /tmp/qiniu-runner-build-tools 2>/dev/null || true
 rm -f /tmp/actions-runner.tar.gz /tmp/docker.gpg /tmp/runner-images.tar.gz
+fi

@@ -2,11 +2,10 @@
 ARG BASE_PLATFORM=linux/amd64
 FROM --platform=$BASE_PLATFORM public.ecr.aws/ubuntu/ubuntu:26.04@sha256:a5da6f6b18c3a4b8dcc73244592f7096f417d2667966d0e33460e9e308f25f67
 
-ARG TEMPLATE_VERSION=20260727.1
 ARG RUNNER_IMAGES_REV=e986db797519f06a2e5e53701a715cfa4c1545e8
 ARG RUNNER_IMAGES_ARCHIVE_SHA256=e87ede55bbdee21ee92113124a598e64d23a21e322f65f45e3a874c563f9f4cb
-ARG RUNNER_VERSION=2.334.0
-ARG RUNNER_ARCHIVE_SHA256=048024cd2c848eb6f14d5646d56c13a4def2ae7ee3ad12122bee960c56f3d271
+ARG RUNNER_VERSION=2.336.0
+ARG RUNNER_ARCHIVE_SHA256=04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d
 ARG AZCOPY_VERSION=10.32.6
 ARG AZCOPY_DEB_SHA256=1a5078a8260ba7524a4400c602519d36905e592cd87a1db91a30af0da528fc86
 ARG AZURE_CLI_VERSION=2.88.0
@@ -16,6 +15,7 @@ ARG AZURE_DEVOPS_EXTENSION_VERSION=1.0.6
 ARG AZURE_DEVOPS_EXTENSION_SHA256=fa779e1fd6e6e1b726c3656b6a1968537c208041c6af54d2a7476772d896b34b
 ARG BICEP_VERSION=0.45.15
 ARG BICEP_NUGET_SHA256=2055d8e4b2b984591d06b8c054dfb6db3b68f2bf236309ae185f06a161ae714a
+ARG PESTER_NUPKG_SHA256=5a0fd80b361600bf4bbd4c307c1fd01b17f11668bab19e657add41b00ad22ab9
 ARG GOOGLE_CLOUD_CLI_VERSION=577.0.0
 ARG GOOGLE_CLOUD_CLI_ARCHIVE_SHA256=0b32d330446ce7b0f57f253e7efab4636c18fb1f87a3ac31c6c3f2a2a697525e
 ARG NVM_VERSION=0.40.6
@@ -26,6 +26,7 @@ ARG AWS_SESSION_MANAGER_PLUGIN_VERSION=1.2.835.0
 ARG AWS_SESSION_MANAGER_PLUGIN_DEB_SHA256=7c6dcad12518571cc7959a713e6a8ae1bdf6ed66fd9bee37dc189e39ca58ae03
 ARG AWS_SAM_CLI_VERSION=1.163.0
 ARG AWS_SAM_CLI_ARCHIVE_SHA256=3f12863f45da82bc2ad1fb837444cca57450bd07fef73449b917362ef2f5ab70
+ARG AWS_SAM_CLI_ARCHIVE_SIZE=93672108
 ARG GITHUB_CLI_VERSION=2.96.0
 ARG GITHUB_CLI_DEB_SHA256=11a731f4e0ca8c3db96ef6d2cc404dcab3d78247ce0e07c53e07117e7627d6a1
 ARG YQ_VERSION=4.53.3
@@ -41,8 +42,6 @@ ARG DOCKER_GPG_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 
 ENV DEBIAN_FRONTEND=noninteractive \
     ImageOS=ubuntu26 \
-    ImageVersion=$TEMPLATE_VERSION \
-    IMAGE_VERSION=$TEMPLATE_VERSION \
     IMAGE_TEMPLATE=github-runner-ubuntu-26-04 \
     RUNNER_TOOL_CACHE=/opt/hostedtoolcache \
     AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache \
@@ -52,9 +51,166 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 COPY scripts/setup-template.sh /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 COPY scripts/ensure-docker /usr/local/share/qiniu-sandbox-runner-template/ensure-docker
+COPY scripts/download-checked-range /usr/local/share/qiniu-sandbox-runner-template/download-checked-range
 COPY scripts/curl /usr/local/share/qiniu-sandbox-runner-template/curl
 
-RUN TEMPLATE_FLAVOR=versioned bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=bootstrap bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[0:7][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[7:8][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[8:14][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[14:15][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[15:18][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[18:21][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[21:22][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[22:23][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[23:24][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[24:27][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[27:28][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[28:30][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[30:32][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[32:33][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    patched_toolset="${toolset}.patched"; \
+    jq '(.apt.common_packages, .apt.cmd_packages) |= map(if . == "netcat" then "netcat-openbsd" else . end)' \
+      "$toolset" >"$patched_toolset"; \
+    mv "$patched_toolset" "$toolset"; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[33:45][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[45:56][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[56:57][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]] | .[57:][]' "$toolset")"; \
+    test -n "$packages"; \
+    apt-get install -y --no-install-recommends $packages
+RUN set -eux; \
+    toolset=/opt/qiniu-runner-images/images/ubuntu/scripts/build/toolset.json; \
+    patched_toolset="${toolset}.patched"; \
+    jq '(.apt.common_packages, .apt.cmd_packages) |= map(if . == "netcat-openbsd" then "netcat" else . end)' \
+      "$toolset" >"$patched_toolset"; \
+    mv "$patched_toolset" "$toolset"; \
+    installer=/opt/qiniu-runner-images/images/ubuntu/scripts/build/install-apt-common.sh; \
+    test "$(grep -Fxc '    apt-get install --no-install-recommends $package' "$installer")" -eq 1; \
+    sed -i 's|    apt-get install --no-install-recommends \$package|    apt-get install --no-install-recommends ${package/netcat/netcat-openbsd}|' "$installer"; \
+    test "$(grep -Fxc '    apt-get install --no-install-recommends ${package/netcat/netcat-openbsd}' "$installer")" -eq 1
+RUN install -d -m 0755 /opt/qiniu-runner-build-cache
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-00 0 16777215
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-01 16777216 33554431
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-02 33554432 50331647
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-03 50331648 67108863
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-04 67108864 83886079
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-05 83886080 93672107
+RUN set -eux; \
+    cat /opt/qiniu-runner-build-cache/aws-sam-cli.part-* > /tmp/qiniu-aws-sam-cli.zip; \
+    test "$(wc -c </tmp/qiniu-aws-sam-cli.zip | tr -d '[:space:]')" -eq "$AWS_SAM_CLI_ARCHIVE_SIZE"; \
+    echo "$AWS_SAM_CLI_ARCHIVE_SHA256  /tmp/qiniu-aws-sam-cli.zip" | sha256sum --check -; \
+    rm -f /opt/qiniu-runner-build-cache/aws-sam-cli.part-*; \
+    rmdir /opt/qiniu-runner-build-cache; \
+    TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=platform bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=node bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=toolchain bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN set -eux; \
+    rm -rf /home/runner/.nvm; \
+    cp -a /etc/skel/.nvm /home/runner/.nvm; \
+    chown -R runner:runner /home/runner/.nvm
+RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=runtime bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+
+ARG TEMPLATE_VERSION=20260805.6
+ENV ImageVersion=$TEMPLATE_VERSION \
+    IMAGE_VERSION=$TEMPLATE_VERSION
+
+RUN set -eux; \
+    environment_file=/etc/environment; \
+    touch "$environment_file"; \
+    sed -i -e '/^ImageOS=/d' -e '/^ImageVersion=/d' -e '/^IMAGE_VERSION=/d' \
+      -e '/^IMAGE_TEMPLATE=/d' -e '/^RUNNER_TOOL_CACHE=/d' \
+      -e '/^AGENT_TOOLSDIRECTORY=/d' "$environment_file"; \
+    printf '%s\n' \
+      "ImageOS=\"$ImageOS\"" \
+      "ImageVersion=\"$TEMPLATE_VERSION\"" \
+      "IMAGE_VERSION=\"$TEMPLATE_VERSION\"" \
+      "IMAGE_TEMPLATE=\"$IMAGE_TEMPLATE\"" \
+      "RUNNER_TOOL_CACHE=\"$RUNNER_TOOL_CACHE\"" \
+      "AGENT_TOOLSDIRECTORY=\"$AGENT_TOOLSDIRECTORY\"" \
+      >>"$environment_file"
 
 USER runner
 WORKDIR /home/runner/work

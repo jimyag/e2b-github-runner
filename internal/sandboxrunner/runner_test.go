@@ -1,6 +1,7 @@
 package sandboxrunner
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -12,6 +13,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -1164,7 +1167,7 @@ esac
 	}
 }
 
-func TestTemplateReleaseSmokeRunsOnlyUsabilityContract(t *testing.T) {
+func TestTemplateReleaseSmokeRunsUsabilityAndIdentityContract(t *testing.T) {
 	fixture := t.TempDir()
 	binDir := filepath.Join(fixture, "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
@@ -1253,12 +1256,30 @@ esac
 	if !result.Passed ||
 		result.SupportChannel != "preview" ||
 		!result.Cleanup.Passed ||
-		len(result.Results) != 6 {
-		t.Fatalf("release smoke result = %#v, want six passing usability checks and cleanup", result)
+		len(result.Results) != 8 {
+		t.Fatalf("release smoke result = %#v, want eight passing usability and identity checks plus cleanup", result)
 	}
+	runnerVersionChecked := false
+	runtimeMetadataChecked := false
+	nvmHomeChecked := false
 	for _, check := range result.Results {
 		if check.Category != "Release smoke" {
 			t.Fatalf("release smoke unexpectedly ran full inventory check %#v", check)
+		}
+		if check.Name == "preinstalled Actions runner" {
+			runnerVersionChecked = strings.Contains(check.Command, "Runner.Listener --version") &&
+				strings.Contains(check.Command, `= "2.336.0"`)
+		}
+		if check.Name == "runtime image metadata" {
+			runtimeMetadataChecked = strings.Contains(check.Command, `"$IMAGE_TEMPLATE" = "github-runner-ubuntu-26-04"`) &&
+				strings.Contains(check.Command, `"$ImageVersion" = "20260805.6"`) &&
+				strings.Contains(check.Command, `"$IMAGE_VERSION" = "20260805.6"`)
+		}
+		if check.Name == "runner writable NVM home" {
+			nvmHomeChecked = strings.Contains(check.Command, "sudo -H -u runner") &&
+				strings.Contains(check.Command, `test -s "$HOME/.nvm/nvm.sh"`) &&
+				strings.Contains(check.Command, `test -w "$HOME/.nvm"`) &&
+				strings.Contains(check.Command, `nvm --version`)
 		}
 		if check.Name == "Docker daemon" {
 			if !strings.Contains(check.Command, "sudo -H -u runner") {
@@ -1271,6 +1292,15 @@ esac
 				t.Fatalf("Docker daemon smoke must execute a local container without a registry pull: %#v", check)
 			}
 		}
+	}
+	if !runnerVersionChecked {
+		t.Fatalf("release smoke did not pin the Actions runner version: %#v", result.Results)
+	}
+	if !runtimeMetadataChecked {
+		t.Fatalf("release smoke did not pin runtime template metadata: %#v", result.Results)
+	}
+	if !nvmHomeChecked {
+		t.Fatalf("release smoke did not verify the runner-owned NVM home: %#v", result.Results)
 	}
 }
 
@@ -2084,6 +2114,185 @@ func TestRunnerTemplateDockerfilesUseQshellCompatibleRunInstructions(t *testing.
 	}
 }
 
+func TestRunnerTemplateDockerfilesSplitSetupIntoCacheablePhases(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			templateRoot := filepath.Join(root, "templates", "github-runner-"+image)
+			dockerfileBytes, err := os.ReadFile(filepath.Join(templateRoot, "Dockerfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			flavor := "versioned"
+			if image == "ubuntu-slim" {
+				flavor = "slim"
+			}
+			phases := []string{"bootstrap", "platform", "toolchain", "runtime"}
+			if image != "ubuntu-slim" {
+				phases = []string{"bootstrap", "platform", "node", "toolchain", "runtime"}
+			}
+			previous := -1
+			for _, phase := range phases {
+				instruction := "TEMPLATE_FLAVOR=" + flavor +
+					" RUNNER_TEMPLATE_PHASE=" + phase +
+					" bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh"
+				index := strings.Index(dockerfile, instruction)
+				if index < 0 {
+					t.Fatalf("template must expose a cacheable %s setup layer", phase)
+				}
+				if index <= previous {
+					t.Fatalf("template setup phases must preserve order; %s index=%d previous=%d", phase, index, previous)
+				}
+				previous = index
+			}
+			if strings.Count(dockerfile, "RUNNER_TEMPLATE_PHASE=") != len(phases) {
+				t.Fatalf("template must have exactly %d cacheable setup layers; got %d", len(phases), strings.Count(dockerfile, "RUNNER_TEMPLATE_PHASE="))
+			}
+
+			scriptBytes, err := os.ReadFile(filepath.Join(templateRoot, "scripts", "setup-template.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			if strings.Contains(script, "/tmp/runner-images/") ||
+				strings.Contains(script, "mkdir -p /tmp/runner-images") ||
+				strings.Contains(script, "test -d /tmp/runner-images") {
+				t.Fatal("runner-images source must survive qshell cache layers outside /tmp")
+			}
+			if !strings.Contains(script, "mkdir -p /opt/qiniu-runner-images") ||
+				!strings.Contains(script, "test -d /opt/qiniu-runner-images") {
+				t.Fatal("runner-images source must use the durable cross-phase directory /opt/qiniu-runner-images")
+			}
+			required := []string{
+				`runner_template_phase="${RUNNER_TEMPLATE_PHASE:-all}"`,
+				`phase_selected() {`,
+				`if phase_selected runtime; then`,
+			}
+			if image == "ubuntu-slim" {
+				required = append(required, `all | bootstrap | platform | toolchain | runtime)`)
+			} else {
+				required = append(
+					required,
+					`all | bootstrap | platform | node | toolchain | runtime)`,
+					`install-nvm.sh | install-nodejs.sh)`,
+					`echo node`,
+				)
+			}
+			for _, required := range required {
+				if !strings.Contains(script, required) {
+					t.Fatalf("phase-aware setup is missing %q", required)
+				}
+			}
+		})
+	}
+}
+
+func TestUbuntu2604DockerfilePreinstallsAptCommonInCacheableChunks(t *testing.T) {
+	dockerfileBytes, err := os.ReadFile(filepath.Join(
+		repositoryRoot(t),
+		"templates",
+		"github-runner-ubuntu-26.04",
+		"Dockerfile",
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dockerfile := string(dockerfileBytes)
+	bootstrap := strings.Index(
+		dockerfile,
+		"RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=bootstrap ",
+	)
+	platform := strings.Index(
+		dockerfile,
+		"TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=platform ",
+	)
+	if bootstrap < 0 || platform < 0 || bootstrap >= platform {
+		t.Fatalf("Ubuntu 26.04 setup phases are not ordered: bootstrap=%d platform=%d", bootstrap, platform)
+	}
+
+	previous := bootstrap
+	for _, packageRange := range []string{
+		"0:7",
+		"7:8",
+		"8:14",
+		"14:15",
+		"15:18",
+		"18:21",
+		"21:22",
+		"22:23",
+		"23:24",
+		"24:27",
+		"27:28",
+		"28:30",
+		"30:32",
+		"32:33",
+		"33:45",
+		"45:56",
+		"56:57",
+		"57:",
+	} {
+		chunk := "[.apt.common_packages[], .apt.cmd_packages[]] | .[" +
+			packageRange + "][]"
+		index := strings.Index(dockerfile, chunk)
+		if index < 0 {
+			t.Fatalf("Ubuntu 26.04 Dockerfile must preinstall apt package chunk %s", packageRange)
+		}
+		if index <= previous || index >= platform {
+			t.Fatalf(
+				"Ubuntu 26.04 apt package chunk %s must be cacheable between bootstrap and platform: index=%d previous=%d platform=%d",
+				packageRange,
+				index,
+				previous,
+				platform,
+			)
+		}
+		previous = index
+	}
+	if count := strings.Count(
+		dockerfile,
+		`packages="$(jq -r '[.apt.common_packages[], .apt.cmd_packages[]]`,
+	); count != 18 {
+		t.Fatalf("Ubuntu 26.04 must expose exactly 18 cacheable apt package chunks; got %d", count)
+	}
+
+	if !strings.Contains(
+		dockerfile,
+		`map(if . == "netcat" then "netcat-openbsd" else . end)`,
+	) {
+		t.Fatal("Ubuntu 26.04 apt preinstall must resolve the virtual netcat package to netcat-openbsd")
+	}
+	restoreVirtualPackage := strings.Index(
+		dockerfile,
+		`map(if . == "netcat-openbsd" then "netcat" else . end)`,
+	)
+	patchUpstreamInstaller := strings.Index(
+		dockerfile,
+		`${package/netcat/netcat-openbsd}`,
+	)
+	if restoreVirtualPackage <= previous || restoreVirtualPackage >= platform {
+		t.Fatalf(
+			"Ubuntu 26.04 must restore netcat for the upstream command test after preinstalling every package: restore=%d last_chunk=%d platform=%d",
+			restoreVirtualPackage,
+			previous,
+			platform,
+		)
+	}
+	if patchUpstreamInstaller <= restoreVirtualPackage || patchUpstreamInstaller >= platform {
+		t.Fatalf(
+			"Ubuntu 26.04 must map netcat only for the upstream apt install before platform tests: patch=%d restore=%d platform=%d",
+			patchUpstreamInstaller,
+			restoreVirtualPackage,
+			platform,
+		)
+	}
+}
+
 func TestVersionedTemplateBuildStagesPinnedUpstreamTests(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
@@ -2229,7 +2438,60 @@ func TestPublicTemplatesUsePinnedMicrosoftAzCopyWithoutActionPrewarm(t *testing.
 	}
 }
 
-func TestPublicTemplatesFallBackToCheckedAzureCLIPackage(t *testing.T) {
+func TestVersionedTemplatesInstallPinnedPesterPackage(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			templateRoot := filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+			)
+			dockerfileBytes, err := os.ReadFile(filepath.Join(templateRoot, "Dockerfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(dockerfileBytes), "ARG PESTER_NUPKG_SHA256=5a0fd80b361600bf4bbd4c307c1fd01b17f11668bab19e657add41b00ad22ab9") {
+				t.Fatal("Dockerfile must pin the Pester 5.9.0 package checksum")
+			}
+
+			scriptBytes, err := os.ReadFile(filepath.Join(templateRoot, "scripts", "setup-template.sh"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			functionStart := strings.Index(script, "install_pester_for_upstream_tests() {")
+			if functionStart < 0 {
+				t.Fatal("setup must define the Pester installation helper")
+			}
+			functionEnd := strings.Index(script[functionStart:], "\n}\n\nstop_validated_service()")
+			if functionEnd < 0 {
+				t.Fatal("setup must define the Pester installation helper")
+			}
+			functionBody := script[functionStart : functionStart+functionEnd]
+			for _, required := range []string{
+				`"https://www.powershellgallery.com/api/v2/package/Pester/${pester_version}"`,
+				`"$PESTER_NUPKG_SHA256"`,
+				`/usr/local/share/powershell/Modules/Pester/${pester_version}`,
+				`unzip -q "$package" -d "$module_dir"`,
+				"Import-Module Pester -RequiredVersion $env:PESTER_VERSION -Force",
+			} {
+				if !strings.Contains(functionBody, required) {
+					t.Fatalf("Pester installation must use the pinned package with %q", required)
+				}
+			}
+			if strings.Contains(functionBody, "Register-PSRepository") || strings.Contains(functionBody, "Install-Module") {
+				t.Fatal("Pester installation must not depend on PowerShellGet repository registration")
+			}
+		})
+	}
+}
+
+func TestPublicTemplatesInstallPinnedAzureCLIPackage(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
 		"ubuntu-slim",
@@ -2265,13 +2527,17 @@ func TestPublicTemplatesFallBackToCheckedAzureCLIPackage(t *testing.T) {
 				`azure-cli_${AZURE_CLI_VERSION}-1~${suite}_amd64.deb`,
 				`expected_sha256="$AZURE_CLI_JAMMY_DEB_SHA256"`,
 				`expected_sha256="$AZURE_CLI_NOBLE_DEB_SHA256"`,
-				`upstream Azure CLI installer unavailable; using checked Microsoft package`,
+				`install-azure-cli.sh)`,
+				`install_azure_cli_from_microsoft_package`,
 				`test "$(az version --query '"azure-cli"' --output tsv)" = "$AZURE_CLI_VERSION"`,
 				`run_upstream_tests_if_available "CLI.Tools" "Azure CLI"`,
 			} {
 				if !strings.Contains(script, required) {
-					t.Fatalf("setup must retain the checked Azure CLI fallback with %q", required)
+					t.Fatalf("setup must install the checked Azure CLI package with %q", required)
 				}
+			}
+			if strings.Contains(script, `upstream Azure CLI installer unavailable`) {
+				t.Fatal("setup must not install a floating Azure CLI before falling back to the pinned package")
 			}
 		})
 	}
@@ -2415,7 +2681,7 @@ func TestPublicTemplatesPinFloatingCompatibilityTools(t *testing.T) {
 
 func TestPublicTemplateCheckedDownloadsResumeAcrossTransientFailures(t *testing.T) {
 	root := repositoryRoot(t)
-	var downloadChecked string
+	downloadCheckedByImage := make(map[string]string)
 	for _, image := range []string{
 		"ubuntu-slim",
 		"ubuntu-22.04",
@@ -2439,7 +2705,8 @@ func TestPublicTemplateCheckedDownloadsResumeAcrossTransientFailures(t *testing.
 			if functionStart < 0 || functionEnd < functionStart {
 				t.Fatal("setup must define download_checked before the upstream test helper")
 			}
-			downloadChecked = script[functionStart:functionEnd]
+			downloadChecked := script[functionStart:functionEnd]
+			downloadCheckedByImage[image] = downloadChecked
 			for _, required := range []string{
 				`RUNNER_TEMPLATE_DOWNLOAD_ATTEMPTS:-20`,
 				`RUNNER_TEMPLATE_DOWNLOAD_RETRY_DELAY:-2`,
@@ -2452,6 +2719,46 @@ func TestPublicTemplateCheckedDownloadsResumeAcrossTransientFailures(t *testing.
 			}
 			if strings.Contains(downloadChecked, `--retry 5`) {
 				t.Fatal("download_checked must use an explicit resume loop instead of curl retries that discard partial output")
+			}
+		})
+	}
+
+	for image, downloadChecked := range downloadCheckedByImage {
+		t.Run(image+"-bounded-backoff", func(t *testing.T) {
+			failureServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "transient failure", http.StatusServiceUnavailable)
+			}))
+			defer failureServer.Close()
+
+			fixture := t.TempDir()
+			fakeBin := filepath.Join(fixture, "bin")
+			if err := os.MkdirAll(fakeBin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			delayLog := filepath.Join(fixture, "delays")
+			writeExecutable(t, filepath.Join(fakeBin, "sleep"), "#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' \"$1\" >> \"$DELAY_LOG\"\n")
+			testScript := filepath.Join(fixture, "download-checked.sh")
+			writeExecutable(t, testScript, "#!/usr/bin/env bash\nset -euo pipefail\n"+
+				downloadChecked+"\ndownload_checked \"$1\" \"$2\" \"$3\"\n")
+			output, err := runCommand(
+				t,
+				"bash",
+				[]string{testScript, failureServer.URL, filepath.Join(fixture, "artifact"), strings.Repeat("0", 64)},
+				"PATH="+fakeBin+":"+os.Getenv("PATH"),
+				"DELAY_LOG="+delayLog,
+				"RUNNER_TEMPLATE_DOWNLOAD_ATTEMPTS=5",
+				"RUNNER_TEMPLATE_DOWNLOAD_RETRY_DELAY=1",
+				"RUNNER_TEMPLATE_DOWNLOAD_RETRY_MAX_DELAY=3",
+			)
+			if err == nil {
+				t.Fatalf("download unexpectedly succeeded:\n%s", output)
+			}
+			delays, readErr := os.ReadFile(delayLog)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if got, want := strings.Fields(string(delays)), []string{"1", "2", "3", "3"}; !slices.Equal(got, want) {
+				t.Fatalf("retry delays = %v, want bounded exponential backoff %v", got, want)
 			}
 		})
 	}
@@ -2492,7 +2799,7 @@ func TestPublicTemplateCheckedDownloadsResumeAcrossTransientFailures(t *testing.
 
 	testScript := filepath.Join(t.TempDir(), "download-checked.sh")
 	writeExecutable(t, testScript, "#!/usr/bin/env bash\nset -euo pipefail\n"+
-		downloadChecked+"\ndownload_checked \"$1\" \"$2\" \"$3\"\n")
+		downloadCheckedByImage["ubuntu-slim"]+"\ndownload_checked \"$1\" \"$2\" \"$3\"\n")
 	destination := filepath.Join(t.TempDir(), "artifact")
 	expectedSHA := fmt.Sprintf("%x", sha256.Sum256(payload))
 	output, err := runCommand(
@@ -2517,6 +2824,88 @@ func TestPublicTemplateCheckedDownloadsResumeAcrossTransientFailures(t *testing.
 	}
 	if got, _ := resumedRange.Load().(string); got != fmt.Sprintf("bytes=%d-", partialLength) {
 		t.Fatalf("resumed Range = %q", got)
+	}
+}
+
+func TestPublicTemplatesRetryPythonInstallersAfterTransientNetworkFailures(t *testing.T) {
+	root := repositoryRoot(t)
+	var retryInstaller string
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			scriptBytes, err := os.ReadFile(filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"scripts",
+				"setup-template.sh",
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			functionStart := strings.Index(script, "run_retryable_upstream_installer() {")
+			functionEnd := strings.Index(script, "\nrun_upstream_installer() {")
+			if functionStart < 0 || functionEnd < functionStart {
+				t.Fatal("setup must define a retryable upstream installer helper")
+			}
+			retryInstaller = script[functionStart:functionEnd]
+			for _, required := range []string{
+				`RUNNER_TEMPLATE_UPSTREAM_INSTALL_ATTEMPTS:-3`,
+				`RUNNER_TEMPLATE_UPSTREAM_INSTALL_RETRY_DELAY:-2`,
+				`PIP_DEFAULT_TIMEOUT="${PIP_DEFAULT_TIMEOUT:-120}"`,
+				`PIP_RETRIES="${PIP_RETRIES:-10}"`,
+				`install-python.sh | install-pipx-packages.sh)`,
+			} {
+				if !strings.Contains(script, required) {
+					t.Fatalf("setup must retry Python installers with %q", required)
+				}
+			}
+			if !strings.Contains(script, `run_upstream_installer "$upstream_build/install-pipx-packages.sh"`) {
+				t.Fatal("standalone pipx package installation must use the retryable installer wrapper")
+			}
+		})
+	}
+
+	tempDir := t.TempDir()
+	attemptFile := filepath.Join(tempDir, "attempts")
+	installer := filepath.Join(tempDir, "install-python.sh")
+	writeExecutable(t, installer, `#!/usr/bin/env bash
+set -euo pipefail
+attempt=0
+if [ -f "$ATTEMPT_FILE" ]; then
+  attempt="$(cat "$ATTEMPT_FILE")"
+fi
+attempt=$((attempt + 1))
+printf '%s\n' "$attempt" >"$ATTEMPT_FILE"
+test "$PIP_DEFAULT_TIMEOUT" = 120
+test "$PIP_RETRIES" = 10
+test "$attempt" -ge 2
+`)
+	testScript := filepath.Join(tempDir, "retry-installer.sh")
+	writeExecutable(t, testScript, "#!/usr/bin/env bash\nset -euo pipefail\n"+
+		retryInstaller+"\nrun_retryable_upstream_installer \"$1\"\n")
+	output, err := runCommand(
+		t,
+		"bash",
+		[]string{testScript, installer},
+		"ATTEMPT_FILE="+attemptFile,
+		"RUNNER_TEMPLATE_UPSTREAM_INSTALL_ATTEMPTS=3",
+		"RUNNER_TEMPLATE_UPSTREAM_INSTALL_RETRY_DELAY=0",
+	)
+	if err != nil {
+		t.Fatalf("retryable installer failed: %v\n%s", err, output)
+	}
+	attempts, err := os.ReadFile(attemptFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(attempts)); got != "2" {
+		t.Fatalf("installer attempts = %s, want 2", got)
 	}
 }
 
@@ -2676,7 +3065,7 @@ func TestVersionedTemplatesInstallNetcatProviderBeforeAptCommon(t *testing.T) {
 			}
 			script := string(scriptBytes)
 			netcatIndex := strings.Index(script, "netcat-openbsd")
-			aptCommonIndex := strings.Index(script, "install-apt-common.sh")
+			aptCommonIndex := strings.LastIndex(script, "install-apt-common.sh")
 			if netcatIndex < 0 || aptCommonIndex < 0 {
 				t.Fatalf(
 					"setup must install a concrete netcat provider before apt-common: netcat=%d apt-common=%d",
@@ -2739,6 +3128,87 @@ func TestCompatibilityGeneratorVerifiesConcreteNetcatProvider(t *testing.T) {
 	}
 }
 
+func TestCompatibilityGeneratorUsesCanonicalSystemdExecutable(t *testing.T) {
+	fixture := t.TempDir()
+	reportDir := filepath.Join(fixture, "reports")
+	if err := os.MkdirAll(reportDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	report := []byte(`# Fixture
+- OS Version: 26.04
+- Systemd version: 259.5-0ubuntu3
+`)
+	reports := map[string]string{
+		"ubuntu-slim":  "ubuntu-slim-Readme.md",
+		"ubuntu-22.04": "Ubuntu2204-Readme.md",
+		"ubuntu-24.04": "Ubuntu2404-Readme.md",
+		"ubuntu-26.04": "Ubuntu2604-Readme.md",
+	}
+	reportChecksums := make(map[string]string, len(reports))
+	for image, name := range reports {
+		if err := os.WriteFile(filepath.Join(reportDir, name), report, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		reportChecksums[image] = fmt.Sprintf("%x", sha256.Sum256(report))
+	}
+	lockBytes, err := json.Marshal(map[string]any{
+		"repository":    "actions/runner-images",
+		"commit":        "fixture",
+		"reports":       reports,
+		"report_sha256": reportChecksums,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(fixture, "lock.json")
+	if err := os.WriteFile(lockPath, lockBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(fixture, "compatibility.json")
+	output, err := runCommand(
+		t,
+		"node",
+		[]string{"scripts/generate-runner-image-compatibility.mjs"},
+		"RUNNER_IMAGES_REPORT_DIR="+reportDir,
+		"RUNNER_IMAGES_LOCK="+lockPath,
+		"RUNNER_IMAGES_MANIFEST="+manifestPath,
+	)
+	if err != nil {
+		t.Fatalf("generate compatibility manifest: %v\n%s", err, output)
+	}
+	manifestBytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Images map[string]struct {
+			Entries []struct {
+				UpstreamName string `json:"upstream_name"`
+				Verification string `json:"verification"`
+			} `json:"entries"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	const verification = "test -x /usr/lib/systemd/systemd && /usr/lib/systemd/systemd --version >/dev/null"
+	for _, image := range []string{"ubuntu-slim", "ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04"} {
+		found := false
+		for _, entry := range manifest.Images[image].Entries {
+			if entry.UpstreamName != "Systemd version" {
+				continue
+			}
+			found = true
+			if entry.Verification != verification {
+				t.Fatalf("%s systemd verification = %q, want %q", image, entry.Verification, verification)
+			}
+		}
+		if !found {
+			t.Fatalf("%s has no Systemd version compatibility entry", image)
+		}
+	}
+}
+
 func TestVersionedTemplateBuildDefersOnlyPodmanNetworkingToRuntimeConformance(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
@@ -2773,7 +3243,7 @@ func TestVersionedTemplateBuildDefersOnlyPodmanNetworkingToRuntimeConformance(t 
 					t.Fatalf("setup must contain exactly one %q guard/patch, got %d", required, strings.Count(script, required))
 				}
 			}
-			if strings.Contains(script, `/tmp/runner-images/images/ubuntu/scripts/tests/Tools.Tests.ps1`) {
+			if strings.Contains(script, `/opt/qiniu-runner-images/images/ubuntu/scripts/tests/Tools.Tests.ps1`) {
 				t.Fatal("setup must not modify the pinned upstream source tree")
 			}
 		})
@@ -2900,7 +3370,7 @@ func TestVersionedTemplateBuildMakesSystemctlShimVisibleToSudoAndCleansIt(t *tes
 			apache := `install-apache.sh`
 			cleanup := `rm -f /usr/local/bin/systemctl`
 			exposeIndex := strings.Index(script, expose)
-			apacheIndex := strings.Index(script, apache)
+			apacheIndex := strings.LastIndex(script, apache)
 			cleanupIndex := strings.Index(script, cleanup)
 			if exposeIndex < 0 || apacheIndex < 0 || cleanupIndex < 0 {
 				t.Fatalf(
@@ -3088,7 +3558,7 @@ func TestVersionedTemplateBuildReloadsPersistedEnvironmentBeforePipxPackages(t *
 			configureEnvironment := `bash "$upstream_build/configure-environment.sh"`
 			reloadEnvironment := `. "$HELPER_SCRIPTS/etc-environment.sh"
   reload_etc_environment`
-			installPipx := `bash "$upstream_build/install-pipx-packages.sh"`
+			installPipx := `run_upstream_installer "$upstream_build/install-pipx-packages.sh"`
 			configureIndex := strings.Index(script, configureEnvironment)
 			reloadIndex := strings.Index(script, reloadEnvironment)
 			pipxIndex := strings.Index(script, installPipx)
@@ -3136,7 +3606,7 @@ func TestVersionedTemplateBuildUsesDiskBoundedToolset(t *testing.T) {
 			if start < 0 {
 				t.Fatal("cannot find versioned installer branch")
 			}
-			end := strings.Index(script[start:], "\nfi\n\ninstall_docker_for_sandbox")
+			end := strings.Index(script[start:], "\nfi\n\nif phase_selected runtime; then")
 			if end < 0 {
 				t.Fatalf("cannot isolate versioned installer branch: start=%d end=%d", start, end)
 			}
@@ -3300,6 +3770,235 @@ func TestRunnerTemplatePinsNVMArchive(t *testing.T) {
 	}
 }
 
+func TestRunnerTemplatesMaterializeWritableNVMHome(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			dockerfileBytes, err := os.ReadFile(filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"Dockerfile",
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			for _, required := range []string{
+				"rm -rf /home/runner/.nvm",
+				"cp -a /etc/skel/.nvm /home/runner/.nvm",
+				"chown -R runner:runner /home/runner/.nvm",
+			} {
+				if !strings.Contains(dockerfile, required) {
+					t.Fatalf("template must materialize a runner-owned NVM home; missing %q", required)
+				}
+			}
+			toolchainIndex := strings.Index(dockerfile, "RUNNER_TEMPLATE_PHASE=toolchain")
+			nvmHomeIndex := strings.Index(dockerfile, "rm -rf /home/runner/.nvm")
+			runtimeIndex := strings.Index(dockerfile, "RUNNER_TEMPLATE_PHASE=runtime")
+			if toolchainIndex < 0 || nvmHomeIndex < toolchainIndex || runtimeIndex < nvmHomeIndex {
+				t.Fatal("template must materialize the NVM home in a cacheable layer between toolchain and runtime")
+			}
+		})
+	}
+}
+
+func TestRunnerTemplateRangeDownloaderFetchesExactBytes(t *testing.T) {
+	payload := []byte(strings.Repeat("0123456789abcdef", 8192))
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		match := regexp.MustCompile(`^bytes=(\d+)-(\d+)$`).FindStringSubmatch(request.Header.Get("Range"))
+		if len(match) != 3 {
+			http.Error(response, "range required", http.StatusBadRequest)
+			return
+		}
+		start, startErr := strconv.Atoi(match[1])
+		end, endErr := strconv.Atoi(match[2])
+		if startErr != nil || endErr != nil || start < 0 || end < start || end >= len(payload) {
+			http.Error(response, "invalid range", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		response.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(payload)))
+		response.WriteHeader(http.StatusPartialContent)
+		_, _ = response.Write(payload[start : end+1])
+	}))
+	defer server.Close()
+
+	root := repositoryRoot(t)
+	for _, imageKey := range []string{"ubuntu-slim", "ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04"} {
+		t.Run(imageKey, func(t *testing.T) {
+			helper := filepath.Join(root, "templates", "github-runner-"+imageKey, "scripts", "download-checked-range")
+			destination := filepath.Join(t.TempDir(), "chunk")
+			const start = 173
+			const end = 65572
+			output, err := runCommand(t, "bash", []string{helper, server.URL, destination, strconv.Itoa(start), strconv.Itoa(end)})
+			if err != nil {
+				t.Fatalf("range downloader failed: %v\n%s", err, output)
+			}
+			chunk, err := os.ReadFile(destination)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(chunk, payload[start:end+1]) {
+				t.Fatalf("downloaded range differs: got %d bytes, want %d", len(chunk), end-start+1)
+			}
+		})
+	}
+}
+
+func TestRunnerTemplatesCacheLargeAWSSAMArchiveInCheckedRanges(t *testing.T) {
+	tests := []struct {
+		imageKey    string
+		archiveSize int64
+	}{
+		{imageKey: "ubuntu-slim", archiveSize: 207357695},
+		{imageKey: "ubuntu-22.04", archiveSize: 93672108},
+		{imageKey: "ubuntu-24.04", archiveSize: 93672108},
+		{imageKey: "ubuntu-26.04", archiveSize: 93672108},
+	}
+	root := repositoryRoot(t)
+	rangePattern := regexp.MustCompile(`(?m)^RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \\\n+    "https://github.com/aws/aws-sam-cli/releases/download/v\$\{AWS_SAM_CLI_VERSION\}/aws-sam-cli-linux-x86_64\.zip" \\\n+    /opt/qiniu-runner-build-cache/aws-sam-cli\.part-(\d{2}) (\d+) (\d+)$`)
+
+	for _, tc := range tests {
+		t.Run(tc.imageKey, func(t *testing.T) {
+			templateRoot := filepath.Join(root, "templates", "github-runner-"+tc.imageKey)
+			dockerfileBytes, err := os.ReadFile(filepath.Join(templateRoot, "Dockerfile"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			matches := rangePattern.FindAllStringSubmatch(dockerfile, -1)
+			if len(matches) < 2 {
+				t.Fatalf("Dockerfile must split the AWS SAM archive across cacheable RUN layers:\n%s", dockerfile)
+			}
+			var nextStart int64
+			for index, match := range matches {
+				if match[1] != fmt.Sprintf("%02d", index) {
+					t.Fatalf("range part %d uses suffix %q", index, match[1])
+				}
+				start, startErr := strconv.ParseInt(match[2], 10, 64)
+				end, endErr := strconv.ParseInt(match[3], 10, 64)
+				if startErr != nil || endErr != nil || start != nextStart || end < start {
+					t.Fatalf("range part %d is not contiguous: %q-%q after %d", index, match[2], match[3], nextStart)
+				}
+				if end-start+1 > 16*1024*1024 {
+					t.Fatalf("range part %d is too large for the observed slow network: %d bytes", index, end-start+1)
+				}
+				nextStart = end + 1
+			}
+			if nextStart != tc.archiveSize {
+				t.Fatalf("cached ranges cover %d bytes, want %d", nextStart, tc.archiveSize)
+			}
+			platformCommand := "TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=platform bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh"
+			if tc.imageKey == "ubuntu-slim" {
+				platformCommand = "TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=platform bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh"
+			}
+			bootstrap := strings.Index(dockerfile, "RUN TEMPLATE_FLAVOR=")
+			cacheDirectory := strings.Index(dockerfile, "RUN install -d -m 0755 /opt/qiniu-runner-build-cache")
+			firstRange := strings.Index(dockerfile, "RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range")
+			platform := strings.Index(dockerfile, platformCommand)
+			if bootstrap < 0 || cacheDirectory < bootstrap || firstRange < cacheDirectory || platform < firstRange {
+				t.Fatalf("AWS SAM ranges must be cached between bootstrap and platform provisioning")
+			}
+			for _, want := range []string{
+				"COPY scripts/download-checked-range /usr/local/share/qiniu-sandbox-runner-template/download-checked-range",
+				"cat /opt/qiniu-runner-build-cache/aws-sam-cli.part-* > /tmp/qiniu-aws-sam-cli.zip",
+				`echo "$AWS_SAM_CLI_ARCHIVE_SHA256  /tmp/qiniu-aws-sam-cli.zip" | sha256sum --check -`,
+				"rm -f /opt/qiniu-runner-build-cache/aws-sam-cli.part-*",
+				"rmdir /opt/qiniu-runner-build-cache",
+			} {
+				if !strings.Contains(dockerfile, want) {
+					t.Fatalf("Dockerfile missing checked range assembly %q", want)
+				}
+			}
+			assemblyStart := strings.Index(dockerfile, "RUN set -eux; \\\n    cat /opt/qiniu-runner-build-cache/aws-sam-cli.part-*")
+			if assemblyStart < 0 {
+				t.Fatal("Dockerfile is missing the checked AWS SAM assembly layer")
+			}
+			assemblyEnd := strings.Index(dockerfile[assemblyStart:], "\nRUN ")
+			if assemblyEnd < 0 {
+				assemblyEnd = len(dockerfile) - assemblyStart
+			}
+			assemblyLayer := dockerfile[assemblyStart : assemblyStart+assemblyEnd]
+			if !strings.Contains(assemblyLayer, platformCommand) {
+				t.Fatal("Dockerfile must install AWS SAM in the same RUN that assembles the oversized archive")
+			}
+			if strings.Contains(dockerfile, "\nRUN "+platformCommand) {
+				t.Fatal("platform provisioning must not start in a later layer after assembling the oversized AWS SAM archive")
+			}
+		})
+	}
+}
+
+func TestRunnerTemplatesPreferTsinghuaUbuntuMirror(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, imageKey := range []string{"ubuntu-slim", "ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04"} {
+		t.Run(imageKey, func(t *testing.T) {
+			scriptBytes, err := os.ReadFile(filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+imageKey,
+				"scripts",
+				"setup-template.sh",
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			script := string(scriptBytes)
+			functionStart := strings.Index(script, "configure_reliable_apt_sources() {")
+			if functionStart < 0 {
+				t.Fatal("setup script is missing configure_reliable_apt_sources")
+			}
+			functionEnd := strings.Index(script[functionStart:], "\n}")
+			if functionEnd < 0 {
+				t.Fatal("setup script is missing configure_reliable_apt_sources")
+			}
+			functionBody := script[functionStart : functionStart+functionEnd]
+			tsinghua := strings.Index(functionBody, "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/")
+			kernel := strings.Index(functionBody, "https://mirrors.edge.kernel.org/ubuntu/")
+			if tsinghua < 0 || kernel < 0 || tsinghua > kernel {
+				t.Fatal("Tsinghua must be the first Ubuntu mirror for the Sandbox build network")
+			}
+		})
+	}
+}
+
+func TestRunnerTemplateVersionMetadataDoesNotInvalidateProvisioningLayers(t *testing.T) {
+	root := repositoryRoot(t)
+	for _, image := range []string{
+		"ubuntu-slim",
+		"ubuntu-22.04",
+		"ubuntu-24.04",
+		"ubuntu-26.04",
+	} {
+		t.Run(image, func(t *testing.T) {
+			dockerfileBytes, err := os.ReadFile(filepath.Join(
+				root,
+				"templates",
+				"github-runner-"+image,
+				"Dockerfile",
+			))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dockerfile := string(dockerfileBytes)
+			runtimeIndex := strings.Index(dockerfile, "RUNNER_TEMPLATE_PHASE=runtime")
+			versionIndex := strings.Index(dockerfile, "ARG TEMPLATE_VERSION=")
+			metadataIndex := strings.Index(dockerfile, "ENV ImageVersion=$TEMPLATE_VERSION")
+			if runtimeIndex < 0 || versionIndex < runtimeIndex || metadataIndex < versionIndex {
+				t.Fatal("template version metadata must be applied after provisioning so version bumps retain heavy layer caches")
+			}
+			if strings.Contains(dockerfile[:runtimeIndex], "TEMPLATE_VERSION") {
+				t.Fatal("provisioning layers must not depend on template version metadata")
+			}
+		})
+	}
+}
+
 func TestRunnerTemplateFallsBackToUbuntuDockerPackages(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{
@@ -3322,10 +4021,14 @@ func TestRunnerTemplateFallsBackToUbuntuDockerPackages(t *testing.T) {
 			script := string(scriptBytes)
 			for _, required := range []string{
 				"configure_docker_apt_repository() {",
+				"remove_official_docker_packages() {",
 				`download_checked https://download.docker.com/linux/ubuntu/gpg /tmp/docker.gpg "$DOCKER_GPG_SHA256" || return 1`,
 				`if [ "$installer_name" = install-docker-cli.sh ]; then`,
 				"upstream Docker CLI installer unavailable; deferring to sandbox-aware installer",
 				"official Docker packages unavailable; using Ubuntu archive packages",
+				"apt-get purge -y \"${official_docker_packages[@]}\"",
+				"dpkg --purge --force-depends \"${official_docker_packages[@]}\"",
+				"apt-get -f install -y",
 				"rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg",
 				"apt-get install -y --no-install-recommends docker.io docker-buildx docker-compose-v2",
 				"docker --version",
@@ -3488,6 +4191,26 @@ func TestRunnerTemplateBuildUsesBoundedHTTPSAptSources(t *testing.T) {
 			} {
 				if !strings.Contains(script, required) {
 					t.Fatalf("apt source hardening missing %q", required)
+				}
+			}
+			if image == "ubuntu-26.04" {
+				tunaMirror := strings.Index(script, "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/\tpriority:1")
+				kernelFallback := strings.Index(script, "https://mirrors.edge.kernel.org/ubuntu/\tpriority:2")
+				if tunaMirror < 0 || kernelFallback < 0 || tunaMirror > kernelFallback {
+					t.Fatalf(
+						"Ubuntu 26.04 must prefer TUNA on the Sandbox build network and retain kernel.org as a fallback: tuna=%d kernel=%d",
+						tunaMirror,
+						kernelFallback,
+					)
+				}
+				for _, directMirrorRewrite := range []string{
+					`'s|http://mirrors.tuna.tsinghua.edu.cn/ubuntu|mirror+file:/etc/apt/apt-mirrors.txt|g'`,
+					`'s|https://mirrors.tuna.tsinghua.edu.cn/ubuntu|mirror+file:/etc/apt/apt-mirrors.txt|g'`,
+					`'s|https://mirrors.edge.kernel.org/ubuntu|mirror+file:/etc/apt/apt-mirrors.txt|g'`,
+				} {
+					if !strings.Contains(script, directMirrorRewrite) {
+						t.Fatalf("Ubuntu 26.04 must normalize direct mirror sources through the bounded mirror list; missing %q", directMirrorRewrite)
+					}
 				}
 			}
 		})

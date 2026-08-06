@@ -62,10 +62,9 @@ a promise that the executable is absent.
 
 All four templates install checksum-pinned AzCopy 10.32.6 from Microsoft's
 official Ubuntu package pool instead of the upstream floating `aka.ms`
-archive. Azure CLI remains upstream-first; if the upstream installer cannot
-reach Microsoft's repository, the build falls back to the official,
-checksum-pinned Azure CLI 2.88.0 package for Jammy or Noble and verifies the
-installed version. They intentionally do not prewarm the GitHub action
+archive. They also install the official, checksum-pinned Azure CLI 2.88.0
+package for Jammy or Noble directly and verify the installed version. They
+intentionally do not prewarm the GitHub action
 archive cache;
 the runner resolves actions through the normal job-time GitHub protocol, so
 this changes build size and network exposure rather than workflow semantics.
@@ -94,9 +93,16 @@ failures and silent version drift between the compatibility manifest and the
 built template.
 
 Checksum-pinned downloads retain partial output and resume it across up to 20
-bounded attempts. A completed artifact is accepted only after its SHA-256
-digest matches; a digest mismatch or a server that rejects ranges restarts the
-transfer from byte zero.
+bounded attempts. The large AWS SAM archive is additionally split into
+independent 16 MiB-or-smaller Range-download layers before `platform`
+provisioning, allowing successful chunks to survive the remote builder's
+per-build time limit. The Dockerfile verifies the assembled byte count and
+full SHA-256 digest, then continues into `platform` provisioning in the same
+`RUN` so the installer consumes the checked archive immediately. Only the
+bounded chunks under `/opt/qiniu-runner-build-cache` cross cache-layer
+boundaries because qshell does not restore cached `/tmp` outputs; one oversized
+temporary file never becomes a cache output. A digest mismatch or a server
+that ignores the requested ranges therefore fails closed.
 
 The curl compatibility wrapper remains available to unmodified upstream
 installers that resolve a fixed release through the GitHub API. It caches
@@ -112,6 +118,9 @@ the installed Git LFS CLI directly.
 All four templates install NVM 0.40.6 from the checksum-pinned official tag
 archive instead of cloning the repository during the build. The resulting
 profile setup and system-Node default match the pinned upstream installer.
+The build copies that skeleton into `/home/runner/.nvm` with runner ownership;
+release smoke sources it as the runner user and verifies that the directory is
+writable before the template can be promoted.
 
 Google Cloud CLI is installed from Google's official versioned x86_64 archive.
 The common version and SHA-256 digest are pinned in each Dockerfile, avoiding
@@ -164,10 +173,40 @@ task template-smoke IMAGE_KEY=ubuntu-24.04 TEMPLATE_ID=<published-template-id>
 
 The formal template gate is a qshell build reaching terminal `Status: ready`,
 followed by release smoke inside a real Sandbox created from that template.
-Release smoke checks the OS, architecture, preinstalled Actions runner,
-outbound HTTPS, Docker, writable work/tool-cache paths, and cleanup. Full
+The Slim Dockerfile divides setup into four cacheable qshell-compatible phases:
+`bootstrap`, `platform`, `toolchain`, and `runtime`. The versioned templates add
+a dedicated `node` phase between `platform` and `toolchain`, keeping their large
+Node/npm toolset within the remote builder's per-layer time limit. Ubuntu 26.04
+also preinstalls the pinned runner-images apt package list in eighteen cacheable
+batches before the upstream platform installer rechecks every package and runs
+its Pester contract. Large emoji-font, ICU, RPM, Tk, Xvfb, binutils, and
+`systemd-coredump` dependency sets are isolated, and the final batch is
+open-ended so appended pinned packages are not skipped; this keeps slow
+Resolute mirrors from trapping the whole package set in one non-cacheable
+timeout. If the remote builder hits its hard
+time limit after one or more phases finish, rerun the same
+`template-build-*` task with cache enabled; completed phases are reused. Do not
+use `--no-cache` for that recovery, and do not publish until one build reaches
+terminal `Status: ready`.
+Template version metadata and the runner-owned NVM copy are applied only after
+the heavy provisioning layers, so a release identity bump or NVM ownership fix
+does not invalidate otherwise reusable installer caches.
+The checksum-pinned AWS SAM Range layers sit between `bootstrap` and
+`platform`; rerunning the identical source reuses every completed chunk rather
+than restarting the whole archive. The platform installer runs in the same
+layer as reassembly instead of depending on a cached oversized archive.
+Release smoke checks the OS, architecture, the exact Dockerfile-pinned Actions
+Runner version, persisted runtime template name/version metadata, outbound
+HTTPS, Docker, a runner-owned writable NVM home, writable work/tool-cache
+paths, and cleanup. Full
 per-inventory runtime conformance and local Docker builds remain optional
 diagnostics; neither is a substitute for the remote usability gate.
+The source gate rejects an Actions Runner version below `2.336.0`, while the
+compatibility contract checks the exact version pinned by each Dockerfile.
+Update the runner version, official archive checksum, and compatibility
+verification together. Python and pipx upstream installers use bounded retries
+and longer pip read timeouts because remote template builds must tolerate
+transient package-index failures without retrying unrelated installers.
 The Docker check imports a minimal root filesystem from the Sandbox itself and
 runs it with networking disabled. This verifies daemon, socket, image-import,
 and container execution behavior without conflating template correctness with

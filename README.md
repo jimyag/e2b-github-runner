@@ -271,6 +271,7 @@ loading.
 Run `task template-check-all`, then use the four
 `task template-build-ubuntu-*` targets for real qshell Sandbox builds. See
 [Public Runner Templates](docs/default-runner-templates.md) for publication and
+cache-resume guidance after a remote build time limit, plus publication and
 smoke commands. The qbox-kodo base image remains a separate
 `task qbox-kodo-base-build` workflow.
 

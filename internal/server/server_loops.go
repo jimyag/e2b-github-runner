@@ -149,6 +149,17 @@ func (s *Server) sweepOnce(ctx context.Context) {
 		if _, ok := stoppedRunning[st.ID]; ok {
 			continue
 		}
+		queued, err := s.originalWorkflowJobQueued(ctx, st)
+		if err != nil {
+			s.logger.Warn("sweeper skipped idle runner stop because workflow job status could not be verified", "id", st.ID, "workflow_job_id", st.WorkflowJobID, "error", err)
+			s.store.AppendLog(st.ID, "control.log", []byte("sweeper skipped idle stop because workflow job status could not be verified: "+err.Error()+"\n"))
+			continue
+		}
+		if queued {
+			s.logger.Info("sweeper keeping idle-timed-out runner because workflow job is still queued", "id", st.ID, "workflow_job_id", st.WorkflowJobID)
+			s.store.AppendLog(st.ID, "control.log", []byte("sweeper kept idle runner because workflow job is still queued\n"))
+			continue
+		}
 		busy, err := s.githubRunnerBusy(ctx, st)
 		if err != nil {
 			s.logger.Warn("sweeper skipped idle runner stop because github runner status could not be verified", "id", st.ID, "runner_name", st.RunnerName, "error", err)

@@ -6992,6 +6992,76 @@ func TestSweeperStopsIdleRunnerThatNeverAcceptedJob(t *testing.T) {
 	}
 }
 
+func TestSweeperIdleRunnerRespectsWorkflowJobState(t *testing.T) {
+	tests := []struct {
+		name       string
+		jobStatus  int
+		jobPayload string
+		wantStops  int
+		wantStatus string
+	}{
+		{name: "still queued", jobStatus: http.StatusOK, jobPayload: `{"id":1001,"name":"test","status":"queued"}`, wantStatus: state.StatusRunning},
+		{name: "status cannot be verified", jobStatus: http.StatusInternalServerError, jobPayload: `{"message":"server error"}`, wantStatus: state.StatusRunning},
+		{name: "completed", jobStatus: http.StatusOK, jobPayload: `{"id":1001,"name":"test","status":"completed"}`, wantStops: 1, wantStatus: state.StatusCompleted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/jobs/1001":
+					w.WriteHeader(tt.jobStatus)
+					w.Write([]byte(tt.jobPayload))
+				case r.Method == http.MethodGet && (r.URL.Path == "/repos/o/r/actions/runners" || r.URL.Path == "/orgs/o/actions/runners"):
+					w.Write([]byte(`{"runners":[{"id":99,"name":"e2b-pending-job","status":"online","busy":false}]}`))
+				case r.Method == http.MethodDelete && (r.URL.Path == "/repos/o/r/actions/runners/99" || r.URL.Path == "/orgs/o/actions/runners/99"):
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+				}
+			}))
+			defer ghServer.Close()
+
+			store := state.New(t.TempDir())
+			if _, st, err := store.CreateRequest(state.RunnerRequest{
+				ID:                 "pending-job",
+				Source:             "test",
+				RepositoryFullName: "o/r",
+				JobID:              1001,
+				Labels:             []string{"self-hosted", "e2b"},
+				ProfileName:        "default",
+				RunnerGroup:        "default",
+				RunnerName:         "e2b-pending-job",
+			}, nil); err != nil {
+				t.Fatal(err)
+			} else {
+				st.Status = state.StatusRunning
+				st.SandboxID = "sb-pending-job"
+				st.ProcessPID = 42
+				st.RunningAt = time.Now().Add(-10 * time.Minute).UTC()
+				if err := store.WriteState(st); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			fake := &fakeSandbox{}
+			srv := newTestServerWithLimit(t, store, ghServer.URL, fake, 10)
+			srv.cfg.RunnerIdleTimeout = time.Minute
+			srv.sweepOnce(t.Context())
+			if fake.stoppedCount() != tt.wantStops {
+				t.Fatalf("sandbox stops = %d, want %d", fake.stoppedCount(), tt.wantStops)
+			}
+			got, err := store.ReadState("pending-job")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != tt.wantStatus {
+				t.Fatalf("runner status = %s, want %s", got.Status, tt.wantStatus)
+			}
+		})
+	}
+}
+
 func TestSweeperKeepsIdleTimedOutRunnerWhenGitHubRunnerIsBusy(t *testing.T) {
 	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

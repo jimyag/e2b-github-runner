@@ -108,12 +108,39 @@ task template-check-all
 然后使用 qshell 构建真正的 Sandbox 模板。每个任务都会等待 qshell 输出终态
 `Status: ready`；如果进程退出码为 0，却没有出现该状态，任务仍会判定构建失败。
 
+源码门槛会拒绝低于 `2.336.0` 的 Actions Runner。Release smoke 会检查
+Dockerfile 固定的 Runner 精确版本，以及持久化到 Sandbox 运行时环境中的模板名和
+模板版本。它还会以 `runner` 用户加载 NVM，并要求 `/home/runner/.nvm` 可写，
+防止 root 所有的构建 skeleton 错误通过发布门禁。完整 runtime conformance 还会
+检查固定的 Azure CLI 精确版本，因此 Dockerfile 中的版本、官方校验和与
+compatibility verification 必须同步更新。Python 和 pipx 安装会对软件包索引的
+瞬时失败执行有限重试；其他上游安装器可能不具备幂等性，因此不会自动重试。
+
 ```bash
 task template-build-ubuntu-slim
 task template-build-ubuntu-22-04
 task template-build-ubuntu-24-04
 task template-build-ubuntu-26-04
 ```
+
+Dockerfile 会按需将 `bootstrap`、`platform`、`node`、`toolchain` 和
+`runtime` 工作保留为独立的 qshell 兼容缓存层。模板版本元数据会在预置工作
+结束后才写入，runner 所有的 NVM 副本则独立放在 `toolchain` 与 `runtime` 之间，
+因此两类变更都不会让重型安装层的缓存失效。
+在 `platform` 之前，每个 Dockerfile 还会将固定校验和的 AWS SAM 归档拆成
+不超过 16 MiB 的独立 Range 下载层。服务超时后可复用已经完成的分块；
+这些分块保存在 `/opt/qiniu-runner-build-cache`，因为 qshell 不会恢复缓存层中
+写入 `/tmp` 的输出。Dockerfile 会校验拼接后的精确字节数和完整 SHA-256，
+但不会把单个大归档作为缓存层输出保留；校验通过后会在同一个 `RUN` 中继续
+执行 `platform` 安装，立即消费该归档。
+Ubuntu 26.04 还会先将固定的
+runner-images apt 软件包列表拆成 18 个可缓存批次安装，再由上游 platform 安装器
+逐包确认并运行 Pester 契约。大体积的 emoji 字体、ICU、RPM、Tk、Xvfb、
+binutils 和 `systemd-coredump` 依赖集分别独立成层，最后一批使用开放区间，
+避免遗漏固定列表后续新增项。如果远程构建
+在已有阶段完成后触及服务时限，请保留
+默认缓存并重跑同一命令，不要强制使用 `--no-cache`。发布门槛仍然是某一次构建
+最终达到 `Status: ready`。
 
 4 个构建全部 ready 后再发布：
 
