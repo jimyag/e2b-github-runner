@@ -186,7 +186,7 @@ function verificationFor(imageKey, item) {
       return 'test -n "${ImageVersion:-}" && test -n "${IMAGE_VERSION:-}"';
     }
     if (name === "Systemd version") {
-      return "systemd --version >/dev/null";
+      return "test -x /usr/lib/systemd/systemd && /usr/lib/systemd/systemd --version >/dev/null";
     }
   }
   if (category === "Installed apt packages") {

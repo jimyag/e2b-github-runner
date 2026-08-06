@@ -3128,6 +3128,87 @@ func TestCompatibilityGeneratorVerifiesConcreteNetcatProvider(t *testing.T) {
 	}
 }
 
+func TestCompatibilityGeneratorUsesCanonicalSystemdExecutable(t *testing.T) {
+	fixture := t.TempDir()
+	reportDir := filepath.Join(fixture, "reports")
+	if err := os.MkdirAll(reportDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	report := []byte(`# Fixture
+- OS Version: 26.04
+- Systemd version: 259.5-0ubuntu3
+`)
+	reports := map[string]string{
+		"ubuntu-slim":  "ubuntu-slim-Readme.md",
+		"ubuntu-22.04": "Ubuntu2204-Readme.md",
+		"ubuntu-24.04": "Ubuntu2404-Readme.md",
+		"ubuntu-26.04": "Ubuntu2604-Readme.md",
+	}
+	reportChecksums := make(map[string]string, len(reports))
+	for image, name := range reports {
+		if err := os.WriteFile(filepath.Join(reportDir, name), report, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		reportChecksums[image] = fmt.Sprintf("%x", sha256.Sum256(report))
+	}
+	lockBytes, err := json.Marshal(map[string]any{
+		"repository":    "actions/runner-images",
+		"commit":        "fixture",
+		"reports":       reports,
+		"report_sha256": reportChecksums,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(fixture, "lock.json")
+	if err := os.WriteFile(lockPath, lockBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(fixture, "compatibility.json")
+	output, err := runCommand(
+		t,
+		"node",
+		[]string{"scripts/generate-runner-image-compatibility.mjs"},
+		"RUNNER_IMAGES_REPORT_DIR="+reportDir,
+		"RUNNER_IMAGES_LOCK="+lockPath,
+		"RUNNER_IMAGES_MANIFEST="+manifestPath,
+	)
+	if err != nil {
+		t.Fatalf("generate compatibility manifest: %v\n%s", err, output)
+	}
+	manifestBytes, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Images map[string]struct {
+			Entries []struct {
+				UpstreamName string `json:"upstream_name"`
+				Verification string `json:"verification"`
+			} `json:"entries"`
+		} `json:"images"`
+	}
+	if err := json.Unmarshal(manifestBytes, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	const verification = "test -x /usr/lib/systemd/systemd && /usr/lib/systemd/systemd --version >/dev/null"
+	for _, image := range []string{"ubuntu-slim", "ubuntu-22.04", "ubuntu-24.04", "ubuntu-26.04"} {
+		found := false
+		for _, entry := range manifest.Images[image].Entries {
+			if entry.UpstreamName != "Systemd version" {
+				continue
+			}
+			found = true
+			if entry.Verification != verification {
+				t.Fatalf("%s systemd verification = %q, want %q", image, entry.Verification, verification)
+			}
+		}
+		if !found {
+			t.Fatalf("%s has no Systemd version compatibility entry", image)
+		}
+	}
+}
+
 func TestVersionedTemplateBuildDefersOnlyPodmanNetworkingToRuntimeConformance(t *testing.T) {
 	root := repositoryRoot(t)
 	for _, image := range []string{

@@ -30,7 +30,7 @@
           "upstream_name": "Systemd version",
           "upstream_value": "255.4-1ubuntu8.12",
           "status": "provided",
-          "verification": "systemd --version >/dev/null"
+          "verification": "test -x /usr/lib/systemd/systemd && /usr/lib/systemd/systemd --version >/dev/null"
         },
         {
           "category": "Language and Runtime",
@@ -934,7 +934,7 @@
           "upstream_name": "Systemd version",
           "upstream_value": "249.11-0ubuntu3.21",
           "status": "provided",
-          "verification": "systemd --version >/dev/null"
+          "verification": "test -x /usr/lib/systemd/systemd && /usr/lib/systemd/systemd --version >/dev/null"
         },
         {
           "category": "Language and Runtime",
@@ -3347,7 +3347,7 @@
           "upstream_name": "Systemd version",
           "upstream_value": "255.4-1ubuntu8.16",
           "status": "provided",
-          "verification": "systemd --version >/dev/null"
+          "verification": "test -x /usr/lib/systemd/systemd && /usr/lib/systemd/systemd --version >/dev/null"
         },
         {
           "category": "Language and Runtime",
@@ -5363,7 +5363,7 @@
           "upstream_name": "Systemd version",
           "upstream_value": "259.5-0ubuntu3",
           "status": "provided",
-          "verification": "systemd --version >/dev/null"
+          "verification": "test -x /usr/lib/systemd/systemd && /usr/lib/systemd/systemd --version >/dev/null"
         },
         {
           "category": "Language and Runtime",
