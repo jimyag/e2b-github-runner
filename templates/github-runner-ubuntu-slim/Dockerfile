@@ -2,7 +2,6 @@
 ARG BASE_PLATFORM=linux/amd64
 FROM --platform=$BASE_PLATFORM public.ecr.aws/ubuntu/ubuntu:24.04@sha256:be20a0347f238b7d373edddc55923443b21dd9a60277bf8a93e43458cd0bf2fc
 
-ARG TEMPLATE_VERSION=20260805.1
 ARG RUNNER_IMAGES_REV=e986db797519f06a2e5e53701a715cfa4c1545e8
 ARG RUNNER_IMAGES_ARCHIVE_SHA256=e87ede55bbdee21ee92113124a598e64d23a21e322f65f45e3a874c563f9f4cb
 ARG RUNNER_VERSION=2.336.0
@@ -26,6 +25,7 @@ ARG AWS_SESSION_MANAGER_PLUGIN_VERSION=1.2.764.0
 ARG AWS_SESSION_MANAGER_PLUGIN_DEB_SHA256=beed4c95c42afd29756d9ecea59c3fcbf937b2c35b9ef84d12b93ac6e74726ba
 ARG AWS_SAM_CLI_VERSION=1.151.0
 ARG AWS_SAM_CLI_ARCHIVE_SHA256=679c54a86512e0f73616856d460b81b438fd5b9b004de5dcb624892dddfbb584
+ARG AWS_SAM_CLI_ARCHIVE_SIZE=207357695
 ARG GITHUB_CLI_VERSION=2.85.0
 ARG GITHUB_CLI_DEB_SHA256=4ed5ff89ef53da00af9d93ac1beaa5665694f18cee8cc8d644a201541d43148c
 ARG YQ_VERSION=4.50.1
@@ -37,8 +37,6 @@ ARG DOCKER_GPG_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 
 ENV DEBIAN_FRONTEND=noninteractive \
     ImageOS=ubuntu24 \
-    ImageVersion=$TEMPLATE_VERSION \
-    IMAGE_VERSION=$TEMPLATE_VERSION \
     IMAGE_TEMPLATE=github-runner-ubuntu-slim \
     RUNNER_TOOL_CACHE=/opt/hostedtoolcache \
     AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache \
@@ -49,12 +47,67 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 COPY scripts/setup-template.sh /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 COPY scripts/ensure-docker /usr/local/share/qiniu-sandbox-runner-template/ensure-docker
+COPY scripts/download-checked-range /usr/local/share/qiniu-sandbox-runner-template/download-checked-range
 COPY scripts/curl /usr/local/share/qiniu-sandbox-runner-template/curl
 
 RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=bootstrap bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
-RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=platform bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN install -d -m 0755 /opt/qiniu-runner-build-cache
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-00 0 16777215
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-01 16777216 33554431
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-02 33554432 50331647
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-03 50331648 67108863
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-04 67108864 83886079
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-05 83886080 100663295
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-06 100663296 117440511
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-07 117440512 134217727
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-08 134217728 150994943
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-09 150994944 167772159
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-10 167772160 184549375
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-11 184549376 201326591
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-12 201326592 207357694
+RUN set -eux; \
+    cat /opt/qiniu-runner-build-cache/aws-sam-cli.part-* > /tmp/qiniu-aws-sam-cli.zip; \
+    test "$(wc -c </tmp/qiniu-aws-sam-cli.zip | tr -d '[:space:]')" -eq "$AWS_SAM_CLI_ARCHIVE_SIZE"; \
+    echo "$AWS_SAM_CLI_ARCHIVE_SHA256  /tmp/qiniu-aws-sam-cli.zip" | sha256sum --check -; \
+    rm -f /opt/qiniu-runner-build-cache/aws-sam-cli.part-*; \
+    rmdir /opt/qiniu-runner-build-cache; \
+    TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=platform bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=toolchain bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN set -eux; \
+    rm -rf /home/runner/.nvm; \
+    cp -a /etc/skel/.nvm /home/runner/.nvm; \
+    chown -R runner:runner /home/runner/.nvm
 RUN TEMPLATE_FLAVOR=slim RUNNER_TEMPLATE_PHASE=runtime bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+
+ARG TEMPLATE_VERSION=20260805.6
+ENV ImageVersion=$TEMPLATE_VERSION \
+    IMAGE_VERSION=$TEMPLATE_VERSION
 
 RUN set -eux; \
     environment_file=/etc/environment; \

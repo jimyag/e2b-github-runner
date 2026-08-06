@@ -2,7 +2,6 @@
 ARG BASE_PLATFORM=linux/amd64
 FROM --platform=$BASE_PLATFORM public.ecr.aws/ubuntu/ubuntu:22.04@sha256:0bc16241504efa4cf92fcc8c8039dac604c6bb832b3d8fcc24097c6b05b60b7c
 
-ARG TEMPLATE_VERSION=20260805.1
 ARG RUNNER_IMAGES_REV=e986db797519f06a2e5e53701a715cfa4c1545e8
 ARG RUNNER_IMAGES_ARCHIVE_SHA256=e87ede55bbdee21ee92113124a598e64d23a21e322f65f45e3a874c563f9f4cb
 ARG RUNNER_VERSION=2.336.0
@@ -27,6 +26,7 @@ ARG AWS_SESSION_MANAGER_PLUGIN_VERSION=1.2.835.0
 ARG AWS_SESSION_MANAGER_PLUGIN_DEB_SHA256=7c6dcad12518571cc7959a713e6a8ae1bdf6ed66fd9bee37dc189e39ca58ae03
 ARG AWS_SAM_CLI_VERSION=1.163.0
 ARG AWS_SAM_CLI_ARCHIVE_SHA256=3f12863f45da82bc2ad1fb837444cca57450bd07fef73449b917362ef2f5ab70
+ARG AWS_SAM_CLI_ARCHIVE_SIZE=93672108
 ARG GITHUB_CLI_VERSION=2.96.0
 ARG GITHUB_CLI_DEB_SHA256=11a731f4e0ca8c3db96ef6d2cc404dcab3d78247ce0e07c53e07117e7627d6a1
 ARG YQ_VERSION=4.53.3
@@ -40,8 +40,6 @@ ARG DOCKER_GPG_FINGERPRINT=9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 
 ENV DEBIAN_FRONTEND=noninteractive \
     ImageOS=ubuntu22 \
-    ImageVersion=$TEMPLATE_VERSION \
-    IMAGE_VERSION=$TEMPLATE_VERSION \
     IMAGE_TEMPLATE=github-runner-ubuntu-22-04 \
     RUNNER_TOOL_CACHE=/opt/hostedtoolcache \
     AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache \
@@ -51,14 +49,48 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 COPY scripts/setup-template.sh /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 COPY scripts/ensure-docker /usr/local/share/qiniu-sandbox-runner-template/ensure-docker
+COPY scripts/download-checked-range /usr/local/share/qiniu-sandbox-runner-template/download-checked-range
 COPY scripts/curl /usr/local/share/qiniu-sandbox-runner-template/curl
 COPY scripts/wget /usr/local/share/qiniu-sandbox-runner-template/wget
 
 RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=bootstrap bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
-RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=platform bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN install -d -m 0755 /opt/qiniu-runner-build-cache
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-00 0 16777215
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-01 16777216 33554431
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-02 33554432 50331647
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-03 50331648 67108863
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-04 67108864 83886079
+RUN bash /usr/local/share/qiniu-sandbox-runner-template/download-checked-range \
+    "https://github.com/aws/aws-sam-cli/releases/download/v${AWS_SAM_CLI_VERSION}/aws-sam-cli-linux-x86_64.zip" \
+    /opt/qiniu-runner-build-cache/aws-sam-cli.part-05 83886080 93672107
+RUN set -eux; \
+    cat /opt/qiniu-runner-build-cache/aws-sam-cli.part-* > /tmp/qiniu-aws-sam-cli.zip; \
+    test "$(wc -c </tmp/qiniu-aws-sam-cli.zip | tr -d '[:space:]')" -eq "$AWS_SAM_CLI_ARCHIVE_SIZE"; \
+    echo "$AWS_SAM_CLI_ARCHIVE_SHA256  /tmp/qiniu-aws-sam-cli.zip" | sha256sum --check -; \
+    rm -f /opt/qiniu-runner-build-cache/aws-sam-cli.part-*; \
+    rmdir /opt/qiniu-runner-build-cache; \
+    TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=platform bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=node bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=toolchain bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+RUN set -eux; \
+    rm -rf /home/runner/.nvm; \
+    cp -a /etc/skel/.nvm /home/runner/.nvm; \
+    chown -R runner:runner /home/runner/.nvm
 RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=runtime bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
+
+ARG TEMPLATE_VERSION=20260805.6
+ENV ImageVersion=$TEMPLATE_VERSION \
+    IMAGE_VERSION=$TEMPLATE_VERSION
 
 RUN set -eux; \
     environment_file=/etc/environment; \

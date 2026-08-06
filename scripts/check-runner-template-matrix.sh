@@ -70,7 +70,7 @@ trap cleanup EXIT
 for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
   directory="templates/github-runner-${image_key}"
   test -d "$directory" || fail "missing directory $directory"
-  for required_file in Dockerfile qshell.sandbox.toml README.md software-diff.md scripts/setup-template.sh scripts/ensure-docker; do
+  for required_file in Dockerfile qshell.sandbox.toml README.md software-diff.md scripts/setup-template.sh scripts/ensure-docker scripts/download-checked-range; do
     test -f "$directory/$required_file" || fail "missing $directory/$required_file"
   done
 
@@ -131,12 +131,12 @@ for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
   phase_count=0
   for phase in $phases; do
     grep -Fq \
-      "RUN TEMPLATE_FLAVOR=$template_flavor RUNNER_TEMPLATE_PHASE=$phase bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh" \
+      "TEMPLATE_FLAVOR=$template_flavor RUNNER_TEMPLATE_PHASE=$phase bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh" \
       "$directory/Dockerfile" ||
       fail "$image_key is missing cacheable setup phase $phase"
     phase_count=$((phase_count + 1))
   done
-  actual_phase_count="$(grep -Ec '^[[:space:]]*RUN[[:space:]]+TEMPLATE_FLAVOR=' "$directory/Dockerfile")"
+  actual_phase_count="$(grep -Ec 'TEMPLATE_FLAVOR=(slim|versioned)[[:space:]]+RUNNER_TEMPLATE_PHASE=' "$directory/Dockerfile")"
   test "$actual_phase_count" -eq "$phase_count" ||
     fail "$image_key has $actual_phase_count setup phases, want $phase_count"
   if grep -Fq 'Acquire::https::Verify-Peer=false' "$directory/scripts/setup-template.sh"; then

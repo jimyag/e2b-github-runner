@@ -112,12 +112,26 @@ sudo -H -u runner -- bash -lc '
 DOCKER_SMOKE
 )"
 
+nvm_smoke_command="$(
+  cat <<'NVM_SMOKE' | tr '\n' ' '
+sudo -H -u runner -- bash -lc '
+  set -euo pipefail;
+  test -s "$HOME/.nvm/nvm.sh";
+  test -w "$HOME/.nvm";
+  export NVM_DIR="$HOME/.nvm";
+  . "$NVM_DIR/nvm.sh";
+  nvm --version >/dev/null;
+'
+NVM_SMOKE
+)"
+
 jq \
   --arg image "$image_key" \
   --arg expected_release "$expected_release" \
   --arg expected_runner_version "$expected_runner_version" \
   --arg expected_template_version "$expected_template_version" \
   --arg template_name "$template_name" \
+  --arg nvm_smoke_command "$nvm_smoke_command" \
   --arg docker_smoke_command "$docker_smoke_command" \
   '
     .images[$image].entries = [
@@ -154,6 +168,12 @@ jq \
           + "test \"$ImageVersion\" = \"" + $expected_template_version + "\" && "
           + "test \"$IMAGE_VERSION\" = \"" + $expected_template_version + "\""
         )
+      },
+      {
+        category: "Release smoke",
+        upstream_name: "runner writable NVM home",
+        status: "provided",
+        verification: $nvm_smoke_command
       },
       {
         category: "Release smoke",
