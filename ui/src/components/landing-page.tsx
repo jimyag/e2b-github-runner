@@ -21,6 +21,7 @@ import { useTranslation } from "react-i18next"
 
 import { LanguageSwitcher } from "@/components/language-switcher"
 import { RunnerLifecyclePreview } from "@/components/landing-lifecycle-preview"
+import { deploymentRequirementItems, landingChecklistItems } from "@/components/landing-content-utils"
 import { QiniuRunnerLogo } from "@/components/qiniu-runner-logo"
 
 const repositoryURL = "https://github.com/qiniu/ci-runner"
@@ -160,14 +161,10 @@ export function LandingPage() {
             </div>
 
             <div className="mt-9 flex flex-wrap gap-x-6 gap-y-3 text-xs text-white/55 sm:text-sm">
-              {[
-                t("landing.checklist.orchestration"),
-                t("landing.checklist.policy"),
-                t("landing.checklist.cleanup"),
-              ].map((item) => (
-                <span key={item} className="inline-flex items-center gap-2">
+              {landingChecklistItems(t).map((item) => (
+                <span key={item.id} className="inline-flex items-center gap-2">
                   <Check className="h-3.5 w-3.5 text-[#27c5f5]" />
-                  {item}
+                  {item.label}
                 </span>
               ))}
             </div>
@@ -394,10 +391,10 @@ export function LandingPage() {
               {t("landing.deploymentLabel")}
             </p>
             <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-sm text-[#073149]">
-              {(t("landing.deploymentRequirements", { returnObjects: true }) as unknown as string[]).map((item) => (
-                <span key={item} className="inline-flex items-center gap-2">
+              {deploymentRequirementItems(t).map((item) => (
+                <span key={item.id} className="inline-flex items-center gap-2">
                   <CircleDot className="h-3.5 w-3.5" />
-                  {item}
+                  {item.label}
                 </span>
               ))}
             </div>

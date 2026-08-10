@@ -511,6 +511,7 @@ export const zh = {
     runnerLogFailed: "无法加载 Runner 日志",
     loadingGitHubLog: "正在加载 GitHub 日志...",
     githubLogEmpty: "GitHub 日志为空",
+    githubLogFailed: "无法加载 GitHub 日志",
     connectingConsole: "正在连接 Sandbox Web 控制台...",
     consoleDisconnected: "Web 控制台流已断开",
     consoleConnectFailed: "无法连接 Web 控制台",

@@ -511,6 +511,7 @@ export const en = {
     runnerLogFailed: "Failed to load runner log",
     loadingGitHubLog: "Loading GitHub log...",
     githubLogEmpty: "GitHub log is empty",
+    githubLogFailed: "Failed to load GitHub log",
     connectingConsole: "Connecting to sandbox web console...",
     consoleDisconnected: "Web console stream disconnected",
     consoleConnectFailed: "Failed to connect web console",

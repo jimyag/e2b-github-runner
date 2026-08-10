@@ -23,6 +23,7 @@ import { logNames } from "@/admin-types"
 import { formatRunnerDuration, formatTime, runnerStatusLabel } from "@/admin-format"
 import { userRunnerHistoryWindow } from "@/app-load-policy"
 import { AccountMenu } from "@/components/account-menu"
+import { githubLogFailureMessage } from "@/components/github-log-utils"
 import { RepositoryReadinessPage } from "@/components/repository-readiness-page"
 import { UserOnboardingTour } from "@/components/user-onboarding-tour"
 import {
@@ -1528,7 +1529,7 @@ function githubLogResponseState(text: unknown, emptyMessage: string): GitHubLogS
 }
 
 function githubLogErrorState(error: unknown, t: TFunction): GitHubLogState {
-  const raw = error instanceof Error ? error.message : t("user.runnerLogFailed")
+  const raw = githubLogFailureMessage(error, t)
   return isGitHubLogUnavailable(raw) ? { kind: "unavailable", detail: raw } : { kind: "log", text: raw }
 }
 

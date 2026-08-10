@@ -73,6 +73,7 @@ When changing state records, GORM tags, indexes, or migration helpers, run `go t
 - `.agents/rules/development-workflow.md`: detailed workflow, generated-file boundaries, and documentation sync rules.
 - `.agents/rules/project-architecture.md`: durable architecture and implementation boundaries for runnerd.
 - `.agents/rules/testing-and-verification.md`: verification matrix for docs, state schema, UI, dev startup, Docker, release, and deployment smoke work.
+- `.agents/rules/frontend-internationalization.md`: i18n boundaries, language-switcher placement, stable identifier rules, and UI verification.
 - `.agents/skills/runnerd-state-schema/SKILL.md`: use for state records, GORM tags, indexes, and migration compatibility work.
 - `.agents/skills/runnerd-dev-smoke/SKILL.md`: use for `task dev`, Vite proxy, smee forwarding, and local startup verification.
 

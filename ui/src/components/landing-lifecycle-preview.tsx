@@ -1,5 +1,7 @@
-import { BookOpen, CheckCircle2, Clock3, Code2, Github, Layers3, ShieldCheck } from "lucide-react"
+import { BookOpen, CheckCircle2, ShieldCheck } from "lucide-react"
 import { useTranslation } from "react-i18next"
+
+import { runnerLifecycleItems, runnerPolicyItems } from "@/components/landing-lifecycle-preview-utils"
 
 export function RunnerLifecyclePreview() {
   const { t } = useTranslation()
@@ -35,14 +37,10 @@ export function RunnerLifecyclePreview() {
 
             <div className="mt-8 font-mono text-[10px] uppercase tracking-[0.16em] text-white/60">{t("landing.preview.runnerPolicy")}</div>
             <div className="mt-3 space-y-3">
-              {[
-                [t("landing.preview.repository"), "qiniu/ci-runner"],
-                [t("landing.preview.runnerSpec"), "ubuntu-24.04"],
-                [t("landing.preview.isolation"), t("landing.preview.isolationValue")],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <div className="text-[11px] text-white/60">{label}</div>
-                  <div className="mt-1 truncate font-mono text-xs text-white/75">{value}</div>
+              {runnerPolicyItems(t).map((item) => (
+                <div key={item.id}>
+                  <div className="text-[11px] text-white/60">{item.label}</div>
+                  <div className="mt-1 truncate font-mono text-xs text-white/75">{item.value}</div>
                 </div>
               ))}
             </div>
@@ -71,13 +69,8 @@ export function RunnerLifecyclePreview() {
 
             <div className="relative mt-8">
               <div className="absolute bottom-5 left-[17px] top-5 w-px bg-gradient-to-b from-[#00aae7] via-[#00aae7]/40 to-white/10" />
-              {[
-                { icon: Github, title: t("landing.preview.githubAccepted"), detail: "workflow_job · queued", state: "complete" },
-                { icon: Layers3, title: t("landing.preview.sandboxCreated"), detail: "us-south-1 · 8.4s", state: "complete" },
-                { icon: Code2, title: t("landing.preview.runnerRegistered"), detail: "ephemeral · online", state: "complete" },
-                { icon: Clock3, title: t("landing.preview.jobExecuting"), detail: "tests · 01:42", state: "active" },
-              ].map(({ icon: Icon, title, detail, state }) => (
-                <div key={title} className="relative grid grid-cols-[36px_1fr_auto] items-center gap-3 py-3">
+              {runnerLifecycleItems(t).map(({ icon: Icon, title, detail, state, id }) => (
+                <div key={id} className="relative grid grid-cols-[36px_1fr_auto] items-center gap-3 py-3">
                   <div
                     className={[
                       "relative z-10 flex h-9 w-9 items-center justify-center rounded-full border",

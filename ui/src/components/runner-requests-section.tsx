@@ -400,7 +400,7 @@ export function RunnerRequestsSection({
               <Detail label={t("user.commit")} value={selected.head_sha || "-"} />
               <Detail label={t("common.created")} value={formatTime(selected.created_at, i18n.resolvedLanguage)} />
               <Detail label={t("common.updated")} value={formatTime(selected.updated_at, i18n.resolvedLanguage)} />
-              <Detail label={t("common.statusCompleted")} value={formatTime(selected.completed_at, i18n.resolvedLanguage)} />
+              <Detail label={t("user.finished")} value={formatTime(selected.completed_at, i18n.resolvedLanguage)} />
               <Detail label={t("user.retryCount")} value={selected.retry_count || "-"} />
               <Detail label={t("user.nextRetry")} value={formatTime(selected.next_retry_at, i18n.resolvedLanguage)} />
               <Detail label={t("user.requestedLabels")} value={selected.requested_labels?.join(", ") || "-"} />

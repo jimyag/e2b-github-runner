@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { runnerJobDetailRows, workflowRunLink } from "@/components/runner-job-detail-rows"
+import { githubLogFailureMessage } from "@/components/github-log-utils"
 import { useSandboxTerminal } from "@/hooks/use-sandbox-terminal"
 import { cn } from "@/lib/utils"
 
@@ -99,7 +100,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
       }
     } catch (error) {
       if (active.current) {
-        setGithubLogText(error instanceof Error ? error.message : t("user.runnerLogFailed"))
+        setGithubLogText(githubLogFailureMessage(error, t))
       }
     } finally {
       if (active.current) {
