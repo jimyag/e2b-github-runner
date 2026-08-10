@@ -15,7 +15,10 @@ import (
 )
 
 // defaultCacheSTSAPI is the fallback Qiniu IAM federation token endpoint.
-const defaultCacheSTSAPI = "https://sts.qiniuapi.com"
+const (
+	defaultCacheSTSAPI = "https://sts-ov.qiniuapi.com"
+	cacheSTSHeadroom   = 5 * time.Minute
+)
 
 // CacheSTSCredentials represents temporary S3 credentials generated for a sandbox.
 type CacheSTSCredentials struct {
@@ -25,8 +28,8 @@ type CacheSTSCredentials struct {
 	Expiration      time.Time `json:"expiration"`
 }
 
-// qiniuSTSRequest mirrors the Qiniu IAM STS request body. The Policy field is a
-// JSON-encoded string (double encoding), see my/test_sts.go.
+// qiniuSTSRequest mirrors the Qiniu IAM STS request body. The Policy field is
+// a JSON-encoded string (double encoding).
 type qiniuSTSRequest struct {
 	Name            string `json:"name"`
 	DurationSeconds int    `json:"duration_seconds"`
@@ -61,10 +64,10 @@ type cacheSTSClient interface {
 // Qiniu IAM federation token API. The session policy uses resource-level
 // prefix isolation: bucket-level actions (list) are scoped to the bucket,
 // while object-level actions (upload/get/delete) are restricted to
-// qrn:kodo:::bucket/<bucket>/<cachePrefix>/*. Verified by test_sts_compare.go:
-// writes outside the prefix return 403 Access Denied. The credential is valid
-// for the configured runner lifetime (clamped to the STS provider maximum of
-// 1 hour) so it does not expire before a long-running job can save its cache.
+// qrn:kodo:::bucket/<bucket>/<cachePrefix>/*. Resource wildcards in the
+// configured prefix are rejected so they cannot broaden this pattern. The
+// credential duration is supplied by the caller as the sandbox lifecycle plus
+// post-job headroom.
 func generateCacheSTS(ctx context.Context, config cacheS3Config, cachePrefix, endpoint string, durationSeconds int) (CacheSTSCredentials, error) {
 	return generateCacheSTSWithClient(ctx, config, cachePrefix, endpoint, durationSeconds, &http.Client{Timeout: 30 * time.Second})
 }
@@ -76,8 +79,8 @@ func generateCacheSTSWithClient(ctx context.Context, config cacheS3Config, cache
 	}
 	cachePrefix = strings.TrimPrefix(strings.TrimSpace(cachePrefix), "/")
 	cachePrefix = strings.TrimSuffix(cachePrefix, "/")
-	if cachePrefix == "" {
-		return CacheSTSCredentials{}, fmt.Errorf("cache prefix is required for STS prefix isolation")
+	if err := validateCachePrefix(cachePrefix); err != nil {
+		return CacheSTSCredentials{}, err
 	}
 
 	// The GetFederationToken endpoint accepts only Qiniu-native kodo actions
@@ -120,11 +123,8 @@ func generateCacheSTSWithClient(ctx context.Context, config cacheS3Config, cache
 	if err != nil {
 		return CacheSTSCredentials{}, fmt.Errorf("marshal STS policy: %w", err)
 	}
-	// Clamp to the STS provider maximum of 1 hour. The sandbox timeout may be
-	// shorter (e.g. 1 hour) or longer, but we cannot request a token that
-	// outlives the provider maximum.
-	if durationSeconds <= 0 || durationSeconds > 3600 {
-		durationSeconds = 3600
+	if durationSeconds <= 0 {
+		return CacheSTSCredentials{}, fmt.Errorf("STS duration must be positive")
 	}
 	body, err := json.Marshal(qiniuSTSRequest{
 		Name:            "runnerd-cache",
@@ -191,4 +191,29 @@ func generateCacheSTSWithClient(ctx context.Context, config cacheS3Config, cache
 		SessionToken:    creds.SessionToken,
 		Expiration:      expiration,
 	}, nil
+}
+
+// cacheSTSDurationSeconds covers the complete sandbox lifecycle and adds
+// five minutes for runs-on/cache's post-job save step. There is no refresh
+// flow from the sandbox yet, so the credential must outlive the timeout.
+func cacheSTSDurationSeconds(sandboxTimeout time.Duration) int {
+	if sandboxTimeout <= 0 {
+		sandboxTimeout = time.Hour
+	}
+	return int((sandboxTimeout + cacheSTSHeadroom).Seconds())
+}
+
+func validateCachePrefix(prefix string) error {
+	if prefix == "" {
+		return fmt.Errorf("cache prefix is required for STS prefix isolation")
+	}
+	for _, component := range strings.Split(prefix, "/") {
+		if component == "" || component == "." || component == ".." {
+			return fmt.Errorf("cache prefix contains an invalid path component")
+		}
+		if strings.ContainsAny(component, "*?") {
+			return fmt.Errorf("cache prefix contains a resource wildcard")
+		}
+	}
+	return nil
 }

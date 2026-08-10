@@ -294,7 +294,7 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 				stsCreds, err := generateCacheSTS(createCtx, cacheS3Config{
 					Region: storage.region, Bucket: storage.bucket, Prefix: cachePrefix, Endpoint: storage.endpoint,
 					AccessKeyID: storage.accessKeyID, SecretAccessKey: storage.secretKey,
-				}, cachePrefix, s.cfg.CacheSTSEndpoint, int(s.cfg.SandboxTimeout.Seconds()))
+				}, cachePrefix, s.cfg.CacheSTSEndpoint, cacheSTSDurationSeconds(s.cfg.SandboxTimeout))
 				if err != nil {
 					s.logger.Warn("failed to generate cache STS", "id", id, "error", err)
 				} else {
