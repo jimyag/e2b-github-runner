@@ -1,5 +1,6 @@
 import { type Dispatch, type FormEvent, type SetStateAction } from "react"
 import { Plus, RefreshCw, Trash2 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { formatTime } from "@/admin-format"
 import { type RunnerGroup, type RunnerPolicy, type RunnerSpec } from "@/admin-types"
@@ -75,18 +76,19 @@ export function RunnerPoliciesSection({
   onEditRunnerPolicy: (policy: RunnerPolicy) => void
   onDeleteRunnerPolicy: (id: number) => void
 }) {
+  const { t, i18n } = useTranslation()
   return (
     <div className="grid gap-4">
       <Card className="min-w-0">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <CardTitle>Runner policies</CardTitle>
-            <CardDescription>Click a policy row to edit it.</CardDescription>
+            <CardTitle>{t("sidebar.runnerPolicies")}</CardTitle>
+            <CardDescription>{t("admin.policiesDescription")}</CardDescription>
           </div>
           <div className="flex gap-2">
             <Button type="button" onClick={onCreateRunnerPolicy}>
               <Plus />
-              Create
+              {t("admin.createPolicy")}
             </Button>
             <Button
               type="button"
@@ -94,7 +96,7 @@ export function RunnerPoliciesSection({
               size="icon"
               onClick={onRefresh}
               disabled={loading}
-              title="Refresh"
+              title={t("common.refresh")}
             >
               <RefreshCw className={cn(loading && "animate-spin")} />
             </Button>
@@ -104,10 +106,10 @@ export function RunnerPoliciesSection({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Repository</TableHead>
-                <TableHead>Target</TableHead>
-                <TableHead>Enabled</TableHead>
-                <TableHead>Created</TableHead>
+                <TableHead>{t("common.repository")}</TableHead>
+                <TableHead>{t("admin.target")}</TableHead>
+                <TableHead>{t("common.enabled")}</TableHead>
+                <TableHead>{t("common.created")}</TableHead>
                 <TableHead className="w-24" />
               </TableRow>
             </TableHeader>
@@ -122,8 +124,8 @@ export function RunnerPoliciesSection({
                         : `spec:${policy.runner_spec_name || "-"}`}
                     </div>
                   </TableCell>
-                  <TableCell>{policy.enabled ? "yes" : "no"}</TableCell>
-                  <TableCell>{formatTime(policy.created_at)}</TableCell>
+                  <TableCell>{policy.enabled ? t("common.yes") : t("common.no")}</TableCell>
+                  <TableCell>{formatTime(policy.created_at, i18n.resolvedLanguage)}</TableCell>
                   <TableCell>
                     <Button
                       type="button"
@@ -135,7 +137,7 @@ export function RunnerPoliciesSection({
                       }}
                     >
                       <Trash2 />
-                      Delete
+                      {t("common.delete")}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -147,8 +149,8 @@ export function RunnerPoliciesSection({
       <Dialog open={runnerPolicyOpen} onOpenChange={onRunnerPolicyOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{runnerPolicyForm.id > 0 ? "Edit runner policy" : "Create runner policy"}</DialogTitle>
-            <DialogDescription>Bind a repository pattern to an allowed runner spec or group.</DialogDescription>
+            <DialogTitle>{runnerPolicyForm.id > 0 ? t("admin.editPolicy") : t("admin.createPolicy")}</DialogTitle>
+            <DialogDescription>{t("admin.policyDialogDescription")}</DialogDescription>
           </DialogHeader>
           <form className="grid gap-3" onSubmit={onSubmitRunnerPolicy}>
             <Input
@@ -163,17 +165,17 @@ export function RunnerPoliciesSection({
               onValueChange={(value) => onRunnerPolicyFormChange((current) => ({ ...current, target_type: value }))}
             >
               <SelectTrigger className="w-full">
-                <SelectValue placeholder="target type" />
+                <SelectValue placeholder={t("admin.targetTypePlaceholder")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="group">Runner group</SelectItem>
-                <SelectItem value="spec">Runner spec</SelectItem>
+                <SelectItem value="group">{t("admin.runnerGroup")}</SelectItem>
+                <SelectItem value="spec">{t("common.runnerSpec")}</SelectItem>
               </SelectContent>
             </Select>
             {runnerPolicyForm.target_type === "group" ? (
               runnerGroups.length === 0 ? (
                 <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                  Create a runner group before adding group policies.
+                  {t("admin.createGroupBeforePolicy")}
                 </div>
               ) : (
                 <Select
@@ -183,7 +185,7 @@ export function RunnerPoliciesSection({
                   }
                 >
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="runner group" />
+                    <SelectValue placeholder={t("admin.runnerGroupPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
                     {runnerGroups.map((group) => (
@@ -196,7 +198,7 @@ export function RunnerPoliciesSection({
               )
             ) : runnerSpecs.length === 0 ? (
               <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                Create a runner spec before adding runner policies.
+                {t("admin.createSpecBeforePolicy")}
               </div>
             ) : (
               <Select
@@ -206,7 +208,7 @@ export function RunnerPoliciesSection({
                 }
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="runner spec" />
+                  <SelectValue placeholder={t("admin.runnerSpecPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   {runnerSpecs.map((runnerSpec) => (
@@ -225,13 +227,13 @@ export function RunnerPoliciesSection({
                   onRunnerPolicyFormChange((current) => ({ ...current, enabled: event.target.checked }))
                 }
               />
-              enabled
+              {t("common.enabled")}
             </label>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onRunnerPolicyOpenChange(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
-              <Button type="submit">Save policy</Button>
+              <Button type="submit">{t("admin.savePolicy")}</Button>
             </DialogFooter>
           </form>
         </DialogContent>

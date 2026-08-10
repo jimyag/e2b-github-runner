@@ -1,10 +1,10 @@
 import { type FormEvent } from "react"
 import { Copy, ExternalLink, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
-import { formatTime } from "@/admin-format"
+import { formatTime, runnerStatusLabel } from "@/admin-format"
 import { activeStatuses, logNames, type RunnerState, type RunnerStatus } from "@/admin-types"
 import { Detail, StatusBadge } from "@/components/admin-shared"
-import { sandboxConfigSourceLabel } from "@/components/sandbox-service-default-utils"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -115,6 +115,7 @@ export function RunnerRequestsSection({
   onLoadLog: (id: string, name: LogName) => void
   onSelectedLogChange: (name: LogName) => void
 }) {
+  const { t, i18n } = useTranslation()
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(520px,640px)]">
       <Card className="min-w-0 gap-0 py-0">
@@ -122,9 +123,9 @@ export function RunnerRequestsSection({
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <CardTitle>Runner Requests</CardTitle>
+                <CardTitle>{t("sidebar.runnerRequests")}</CardTitle>
                 <CardDescription>
-                  Webhook and manual requests with matched runner policy context.
+                  {t("admin.requestsDescription")}
                 </CardDescription>
               </div>
               <div className="flex gap-2">
@@ -137,7 +138,7 @@ export function RunnerRequestsSection({
                   disabled={!hasAccess}
                 >
                   <Plus />
-                  Create
+                  {t("admin.createRunnerRequest")}
                 </Button>
                 <Button
                   type="button"
@@ -145,7 +146,7 @@ export function RunnerRequestsSection({
                   size="icon"
                   onClick={onRefresh}
                   disabled={loading}
-                  title="Refresh"
+                  title={t("common.refresh")}
                 >
                   <RefreshCw className={cn(loading && "animate-spin")} />
                 </Button>
@@ -154,16 +155,16 @@ export function RunnerRequestsSection({
             <Dialog open={createRunnerOpen} onOpenChange={onCreateRunnerOpenChange}>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Create runner request</DialogTitle>
+                  <DialogTitle>{t("admin.createRunnerRequest")}</DialogTitle>
                   <DialogDescription>
-                    Manually enqueue a one-off runner request.
+                    {t("admin.createRunnerRequestDescription")}
                   </DialogDescription>
                 </DialogHeader>
                 <form className="grid gap-3" onSubmit={onCreateRunnerSubmit}>
                   <Input
                     value={createID}
                     onChange={(event) => onCreateIDChange(event.target.value)}
-                    placeholder="optional id"
+                    placeholder={t("admin.optionalID")}
                   />
                   <Input
                     value={createRepository}
@@ -174,7 +175,7 @@ export function RunnerRequestsSection({
                   <Input
                     value={createRunnerSpec}
                     onChange={(event) => onCreateRunnerSpecChange(event.target.value)}
-                    placeholder="optional runner spec"
+                    placeholder={t("admin.optionalRunnerSpec")}
                   />
                   <Input
                     value={createLabels}
@@ -183,10 +184,10 @@ export function RunnerRequestsSection({
                   />
                   <DialogFooter>
                     <Button type="button" variant="outline" onClick={() => onCreateRunnerOpenChange(false)}>
-                      Cancel
+                      {t("common.cancel")}
                     </Button>
                     <Button type="submit" disabled={!hasAccess}>
-                      Create
+                      {t("admin.createRunnerRequest")}
                     </Button>
                   </DialogFooter>
                 </form>
@@ -195,23 +196,23 @@ export function RunnerRequestsSection({
             <div className="grid gap-2 md:grid-cols-[minmax(160px,220px)_minmax(180px,1fr)_minmax(180px,1fr)]">
               <Select value={runnerStatusFilter} onValueChange={(value) => onStatusFilterChange(value as RunnerStatus | "all")}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder={t("common.status")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="all">{t("admin.allStatuses")}</SelectItem>
                   {(["queued", "creating", "running", "stopping", "completed", "failed"] as RunnerStatus[]).map((status) => (
                     <SelectItem key={status} value={status}>
-                      {status}
+                      {runnerStatusLabel(status)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <Select value={runnerRepositoryFilter} onValueChange={onRepositoryFilterChange}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Repository" />
+                  <SelectValue placeholder={t("common.repository")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All repositories</SelectItem>
+                  <SelectItem value="all">{t("admin.allRepositories")}</SelectItem>
                   {runnerRepositories.map((repository) => (
                     <SelectItem key={repository} value={repository}>
                       {repository}
@@ -221,10 +222,10 @@ export function RunnerRequestsSection({
               </Select>
               <Select value={runnerSpecFilter} onValueChange={onRunnerSpecFilterChange}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Runner spec" />
+                  <SelectValue placeholder={t("common.runnerSpec")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All runner specs</SelectItem>
+                  <SelectItem value="all">{t("admin.allRunnerSpecs")}</SelectItem>
                   {runnerSpecNames.map((runnerSpecName) => (
                     <SelectItem key={runnerSpecName} value={runnerSpecName}>
                       {runnerSpecName}
@@ -234,7 +235,7 @@ export function RunnerRequestsSection({
               </Select>
             </div>
             <div className="text-xs text-muted-foreground">
-              Showing {filteredRunners.length} of {runners.length} runner requests.
+              {t("admin.requestsShown", { filtered: filteredRunners.length, total: runners.length })}
             </div>
           </div>
         </CardHeader>
@@ -242,13 +243,13 @@ export function RunnerRequestsSection({
           <Table>
             <TableHeader className="sticky top-0 z-10 bg-background">
               <TableRow>
-                <TableHead>Status</TableHead>
-                <TableHead>Repository</TableHead>
-                <TableHead>Runner spec</TableHead>
-                <TableHead>Runner</TableHead>
-                <TableHead>Sandbox</TableHead>
-                <TableHead>GitHub</TableHead>
-                <TableHead>Updated</TableHead>
+                <TableHead>{t("common.status")}</TableHead>
+                <TableHead>{t("common.repository")}</TableHead>
+                <TableHead>{t("common.runnerSpec")}</TableHead>
+                <TableHead>{t("common.runner")}</TableHead>
+                <TableHead>{t("common.sandbox")}</TableHead>
+                <TableHead>{t("common.github")}</TableHead>
+                <TableHead>{t("common.updated")}</TableHead>
                 <TableHead className="w-36" />
               </TableRow>
             </TableHeader>
@@ -256,7 +257,7 @@ export function RunnerRequestsSection({
               {filteredRunners.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="h-24 text-center text-muted-foreground">
-                    No runner requests found
+                    {t("admin.noRequestsFound")}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -299,7 +300,7 @@ export function RunnerRequestsSection({
                         <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
-                    <TableCell>{formatTime(runner.updated_at)}</TableCell>
+                    <TableCell>{formatTime(runner.updated_at, i18n.resolvedLanguage)}</TableCell>
                     <TableCell>
                       <div className="flex gap-2">
                         {runner.status === "failed" ? (
@@ -313,7 +314,7 @@ export function RunnerRequestsSection({
                             }}
                           >
                             <RefreshCw />
-                            Retry
+                            {t("admin.retry")}
                           </Button>
                         ) : null}
                         {activeStatuses.has(runner.status) ? (
@@ -327,7 +328,7 @@ export function RunnerRequestsSection({
                             }}
                           >
                             <Trash2 />
-                            Stop
+                            {t("admin.stop")}
                           </Button>
                         ) : null}
                       </div>
@@ -344,8 +345,8 @@ export function RunnerRequestsSection({
         <CardHeader className="border-b px-5 py-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <CardTitle>Request details</CardTitle>
-              <CardDescription>{selected?.runner_name || "Select a request"}</CardDescription>
+              <CardTitle>{t("admin.requestDetails")}</CardTitle>
+              <CardDescription>{selected?.runner_name || t("admin.selectRequest")}</CardDescription>
             </div>
             <Button
               type="button"
@@ -353,7 +354,7 @@ export function RunnerRequestsSection({
               size="icon"
               onClick={onCopySelectedID}
               disabled={!selected}
-              title="Copy runner ID"
+              title={t("admin.copyRunnerID")}
             >
               <Copy />
             </Button>
@@ -363,18 +364,18 @@ export function RunnerRequestsSection({
           <CardContent className="grid gap-5 p-5">
             <div className="space-y-2">
               <Detail label="ID" value={selected.id} />
-              <Detail label="Status" value={selected.status} />
-              <Detail label="Repository" value={selected.repository_full_name || "-"} />
-              <Detail label="Runner spec" value={selected.runner_spec_name || "-"} />
-              <Detail label="Sandbox" value={selected.sandbox_id || "-"} />
-              <Detail label="Sandbox config" value={sandboxConfigSourceLabel(selected.sandbox_config_source)} />
+              <Detail label={t("common.status")} value={runnerStatusLabel(selected.status)} />
+              <Detail label={t("common.repository")} value={selected.repository_full_name || "-"} />
+              <Detail label={t("common.runnerSpec")} value={selected.runner_spec_name || "-"} />
+              <Detail label={t("common.sandbox")} value={selected.sandbox_id || "-"} />
+              <Detail label={t("admin.sandboxConfig")} value={sandboxConfigSourceDisplay(selected.sandbox_config_source, t)} />
               <Detail label="PID" value={selected.process_pid || "-"} />
               <Detail
-                label="Job"
+                label={t("user.jobName")}
                 value={selected.assigned_job_name || selected.assigned_job_id || "-"}
               />
               <Detail
-                label="GitHub job"
+                label={t("admin.githubJob")}
                 value={
                   selected.github_job_url ? (
                     <a
@@ -383,7 +384,7 @@ export function RunnerRequestsSection({
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Open job
+                      {t("admin.openJob")}
                       <ExternalLink className="size-3.5" />
                     </a>
                   ) : (
@@ -391,33 +392,33 @@ export function RunnerRequestsSection({
                   )
                 }
               />
-              <Detail label="Workflow run" value={selected.workflow_run_id || "-"} />
-              <Detail label="Workflow" value={selected.workflow_name || "-"} />
-              <Detail label="Workflow attempt" value={selected.workflow_run_attempt || "-"} />
-              <Detail label="Pull request" value={selected.pull_request_number || "-"} />
-              <Detail label="Branch" value={selected.head_branch || "-"} />
-              <Detail label="Commit" value={selected.head_sha || "-"} />
-              <Detail label="Created" value={formatTime(selected.created_at)} />
-              <Detail label="Updated" value={formatTime(selected.updated_at)} />
-              <Detail label="Completed" value={formatTime(selected.completed_at)} />
-              <Detail label="Retry count" value={selected.retry_count || "-"} />
-              <Detail label="Next retry" value={formatTime(selected.next_retry_at)} />
-              <Detail label="Requested labels" value={selected.requested_labels?.join(", ") || "-"} />
-              <Detail label="Failure" value={selected.failure_reason || "-"} />
-              <Detail label="Last error code" value={selected.last_error_code || "-"} />
-              <Detail label="Error" value={selected.error || "-"} />
+              <Detail label={t("user.workflowRun")} value={selected.workflow_run_id || "-"} />
+              <Detail label={t("user.workflow")} value={selected.workflow_name || "-"} />
+              <Detail label={t("user.workflowAttempt")} value={selected.workflow_run_attempt || "-"} />
+              <Detail label={t("user.pullRequest")} value={selected.pull_request_number || "-"} />
+              <Detail label={t("user.branch")} value={selected.head_branch || "-"} />
+              <Detail label={t("user.commit")} value={selected.head_sha || "-"} />
+              <Detail label={t("common.created")} value={formatTime(selected.created_at, i18n.resolvedLanguage)} />
+              <Detail label={t("common.updated")} value={formatTime(selected.updated_at, i18n.resolvedLanguage)} />
+              <Detail label={t("common.statusCompleted")} value={formatTime(selected.completed_at, i18n.resolvedLanguage)} />
+              <Detail label={t("user.retryCount")} value={selected.retry_count || "-"} />
+              <Detail label={t("user.nextRetry")} value={formatTime(selected.next_retry_at, i18n.resolvedLanguage)} />
+              <Detail label={t("user.requestedLabels")} value={selected.requested_labels?.join(", ") || "-"} />
+              <Detail label={t("user.failure")} value={selected.failure_reason || "-"} />
+              <Detail label={t("admin.lastErrorCode")} value={selected.last_error_code || "-"} />
+              <Detail label={t("admin.error")} value={selected.error || "-"} />
             </div>
             {selected.status === "failed" ? (
               <Button type="button" variant="outline" onClick={() => onRetryRunner(selected.id)}>
                 <RefreshCw />
-                Retry request
+                {t("admin.retryRequest")}
               </Button>
             ) : null}
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm font-medium">Logs</div>
-                  <div className="text-xs text-muted-foreground">control, stdout, and stderr captured by runnerd.</div>
+                  <div className="text-sm font-medium">{t("common.logs")}</div>
+                  <div className="text-xs text-muted-foreground">{t("admin.logsDescription")}</div>
                 </div>
                 <Button
                   type="button"
@@ -426,7 +427,7 @@ export function RunnerRequestsSection({
                   onClick={() => onLoadLog(selected.id, selectedLog)}
                 >
                   <RefreshCw />
-                  Refresh
+                  {t("common.refresh")}
                 </Button>
               </div>
               <Tabs
@@ -448,10 +449,21 @@ export function RunnerRequestsSection({
           </CardContent>
         ) : (
           <CardContent className="p-8 text-sm text-muted-foreground">
-            No runner request selected
+            {t("admin.noRequestSelected")}
           </CardContent>
         )}
       </Card>
     </div>
   )
+}
+
+function sandboxConfigSourceDisplay(source: string | undefined, t: ReturnType<typeof useTranslation>["t"]) {
+  switch (source) {
+    case "installation": return t("admin.configInstallation")
+    case "account": return t("admin.configAccount")
+    case "inherited_account": return t("admin.configInheritedAccount")
+    case "admin_default": return t("admin.configAdminDefault")
+    case "request_snapshot": return t("admin.configRequestSnapshot")
+    default: return "-"
+  }
 }

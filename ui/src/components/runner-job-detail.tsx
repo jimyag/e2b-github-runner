@@ -1,13 +1,15 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
 import { ArrowLeft, CheckCircle2, Clock3, ExternalLink, Loader2, Play, RefreshCw, SquareTerminal, XCircle } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import type { RunnerJobGroup, RunnerState } from "@/admin-types"
 import { logNames } from "@/admin-types"
-import { formatRunnerDuration, formatTime } from "@/admin-format"
+import { formatRunnerDuration, formatTime, runnerStatusLabel } from "@/admin-format"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { runnerJobDetailRows, workflowRunLink } from "@/components/runner-job-detail-rows"
 import { useSandboxTerminal } from "@/hooks/use-sandbox-terminal"
 import { cn } from "@/lib/utils"
 
@@ -26,12 +28,14 @@ type ActiveGuard = {
 }
 
 export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: RunnerJobDetailProps) {
+  const { t, i18n } = useTranslation()
+  const locale = i18n.resolvedLanguage
   const [job, setJob] = useState<RunnerState | null>(null)
   const [jobGroup, setJobGroup] = useState<RunnerJobGroup | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedLog, setSelectedLog] = useState<LogName>("control.log")
-  const [logText, setLogText] = useState("Loading log...")
-  const [githubLogText, setGithubLogText] = useState("Loading GitHub log...")
+  const [logText, setLogText] = useState(() => t("user.loadingRunnerLog"))
+  const [githubLogText, setGithubLogText] = useState(() => t("user.loadingGitHubLog"))
   const [githubLogLoading, setGithubLogLoading] = useState(false)
   const endpoint = useMemo(() => `${apiBase}/${encodeURIComponent(id)}`, [apiBase, id])
   const terminalAvailable = job ? isTerminalAvailable(job) : false
@@ -39,9 +43,9 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
     endpoint,
     available: terminalAvailable,
     request,
-    connectingMessage: "Connecting to sandbox terminal...",
-    streamDisconnectedMessage: "Terminal stream disconnected",
-    connectErrorMessage: "Failed to connect terminal",
+    connectingMessage: t("user.connectingTerminal"),
+    streamDisconnectedMessage: t("user.terminalDisconnected"),
+    connectErrorMessage: t("user.terminalConnectFailed"),
   })
 
   const loadJob = useCallback(async (active: ActiveGuard = { current: true }) => {
@@ -72,37 +76,37 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
   }, [endpoint, request])
 
   const loadLog = useCallback(async (name = selectedLog, active: ActiveGuard = { current: true }) => {
-    setLogText("Loading log...")
+    setLogText(t("user.loadingRunnerLog"))
     try {
       const text = await request(`${endpoint}/logs/${encodeURIComponent(name)}`)
       if (active.current) {
-        setLogText(typeof text === "string" ? text || "Log is empty" : JSON.stringify(text, null, 2))
+        setLogText(typeof text === "string" ? text || t("user.runnerLogEmpty") : JSON.stringify(text, null, 2))
       }
     } catch (error) {
       if (active.current) {
-        setLogText(error instanceof Error ? error.message : "Failed to load log")
+        setLogText(error instanceof Error ? error.message : t("user.runnerLogFailed"))
       }
     }
-  }, [endpoint, request, selectedLog])
+  }, [endpoint, request, selectedLog, t])
 
   const loadGithubLog = useCallback(async (active: ActiveGuard = { current: true }) => {
     setGithubLogLoading(true)
-    setGithubLogText("Loading GitHub log...")
+    setGithubLogText(t("user.loadingGitHubLog"))
     try {
       const text = await request(`${endpoint}/github-log`)
       if (active.current) {
-        setGithubLogText(typeof text === "string" ? text || "GitHub log is empty" : JSON.stringify(text, null, 2))
+        setGithubLogText(typeof text === "string" ? text || t("user.githubLogEmpty") : JSON.stringify(text, null, 2))
       }
     } catch (error) {
       if (active.current) {
-        setGithubLogText(error instanceof Error ? error.message : "Failed to load GitHub log")
+        setGithubLogText(error instanceof Error ? error.message : t("user.runnerLogFailed"))
       }
     } finally {
       if (active.current) {
         setGithubLogLoading(false)
       }
     }
-  }, [endpoint, request])
+  }, [endpoint, request, t])
 
   useEffect(() => {
     const active = { current: true }
@@ -150,16 +154,16 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
       <header className="border-b bg-background/95 px-4 py-3 lg:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
-            <Button type="button" variant="outline" size="icon" onClick={onBack} title="Back to jobs">
+            <Button type="button" variant="outline" size="icon" onClick={onBack} title={t("auth.jobs")}>
               <ArrowLeft />
             </Button>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="truncate text-xl font-semibold">{job ? runnerJobTitle(job) : id}</h1>
-                {job ? <Badge className={statusClass(job.status)}>{job.status}</Badge> : null}
+                {job ? <Badge className={statusClass(job.status)}>{runnerStatusLabel(job.status)}</Badge> : null}
               </div>
               <p className="truncate text-sm text-muted-foreground">
-                {job?.repository_full_name || "runner request"} {job?.workflow_name ? ` / ${job.workflow_name}` : ""}
+                {job?.repository_full_name || t("user.runnerRequest")} {job?.workflow_name ? ` / ${job.workflow_name}` : ""}
               </p>
             </div>
           </div>
@@ -174,7 +178,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
             ) : null}
             <Button type="button" variant="outline" onClick={refreshPage} disabled={loading}>
               <RefreshCw className={cn(loading && "animate-spin")} />
-              Refresh
+              {t("common.refresh")}
             </Button>
           </div>
         </div>
@@ -185,10 +189,10 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
           <div className="border-b px-4 py-4">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <h2 className="truncate text-sm font-semibold">{jobGroupTitle(jobGroup)}</h2>
-                <p className="text-xs text-muted-foreground">{jobGroup?.jobs.length || (job ? 1 : 0)} jobs</p>
+                <h2 className="truncate text-sm font-semibold">{jobGroupTitle(jobGroup, t)}</h2>
+                <p className="text-xs text-muted-foreground">{t("user.jobCount", { count: jobGroup?.jobs.length || (job ? 1 : 0) })}</p>
               </div>
-              <Button type="button" variant="outline" size="icon" onClick={() => void loadJobGroup()} title="Refresh jobs">
+              <Button type="button" variant="outline" size="icon" onClick={() => void loadJobGroup()} title={t("user.refresh")}>
                 <RefreshCw />
               </Button>
             </div>
@@ -204,34 +208,34 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
           <div className="mb-4 grid gap-3 border-b pb-4 md:grid-cols-3 xl:grid-cols-5">
             {job ? (
               <>
-                <SummaryMetric label="Runner spec" value={job.runner_spec_name || "matched by labels"} />
-                <SummaryMetric label="Workflow run" value={workflowRunLink(job)} />
-                <SummaryMetric label="Queued" value={formatTime(job.created_at)} />
-                <SummaryMetric label="Started" value={formatTime(job.running_at)} />
-                <SummaryMetric label="Finished" value={formatTime(job.completed_at || job.failed_at)} />
+                <SummaryMetric label={t("common.runnerSpec")} value={job.runner_spec_name || t("user.matchedByLabels")} />
+                <SummaryMetric label={t("user.workflowRun")} value={workflowRunLink(job)} />
+                <SummaryMetric label={t("user.queued")} value={formatTime(job.created_at, locale)} />
+                <SummaryMetric label={t("common.started")} value={formatTime(job.running_at, locale)} />
+                <SummaryMetric label={t("user.finished")} value={formatTime(job.completed_at || job.failed_at, locale)} />
               </>
             ) : (
-              <div className="text-sm text-muted-foreground">Loading...</div>
+              <div className="text-sm text-muted-foreground">{t("common.loading")}</div>
             )}
           </div>
           <Tabs defaultValue="github-logs" className="h-full">
             <TabsList>
-              <TabsTrigger value="github-logs">GitHub logs</TabsTrigger>
-              <TabsTrigger value="logs">Runner logs</TabsTrigger>
-              <TabsTrigger value="terminal">Terminal</TabsTrigger>
-              <TabsTrigger value="details">Details</TabsTrigger>
+              <TabsTrigger value="github-logs">{t("user.githubLogs")}</TabsTrigger>
+              <TabsTrigger value="logs">{t("user.runnerLogs")}</TabsTrigger>
+              <TabsTrigger value="terminal">{t("common.terminal")}</TabsTrigger>
+              <TabsTrigger value="details">{t("common.details")}</TabsTrigger>
             </TabsList>
             <TabsContent value="logs" className="mt-4">
               <Card className="gap-0 py-0">
                 <CardHeader className="sticky top-0 z-10 border-b bg-card px-5 py-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <CardTitle>Runner logs</CardTitle>
-                      <CardDescription>Runner lifecycle, sandbox stdout, and stderr captured by runnerd.</CardDescription>
+                      <CardTitle>{t("user.runnerLogs")}</CardTitle>
+                      <CardDescription>{t("user.runnerLifecycleLogs")}</CardDescription>
                     </div>
                     <Button type="button" variant="outline" size="sm" onClick={() => void loadLog()}>
                       <RefreshCw />
-                      Refresh
+                      {t("common.refresh")}
                     </Button>
                   </div>
                 </CardHeader>
@@ -256,12 +260,12 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
                 <CardHeader className="sticky top-0 z-10 border-b bg-card px-5 py-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <CardTitle>GitHub logs</CardTitle>
-                      <CardDescription>Workflow job output downloaded from GitHub Actions.</CardDescription>
+                      <CardTitle>{t("user.githubLogs")}</CardTitle>
+                      <CardDescription>{t("user.githubLogSource")}</CardDescription>
                     </div>
                     <Button type="button" variant="outline" size="sm" onClick={() => void loadGithubLog()} disabled={githubLogLoading}>
                       <RefreshCw className={cn(githubLogLoading && "animate-spin")} />
-                      Refresh
+                      {t("common.refresh")}
                     </Button>
                   </div>
                 </CardHeader>
@@ -277,12 +281,12 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
                 <CardHeader className="border-b px-5 py-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <CardTitle>Sandbox terminal</CardTitle>
-                      <CardDescription>{job?.sandbox_id || "No active sandbox"}</CardDescription>
+                      <CardTitle>{t("common.terminal")}</CardTitle>
+                      <CardDescription>{job?.sandbox_id || t("user.noActiveSandbox")}</CardDescription>
                     </div>
                     <Button type="button" onClick={() => void connectTerminal()} disabled={!terminalAvailable || terminalConnecting || Boolean(terminalSession)}>
                       <SquareTerminal />
-                      {terminalSession ? "Connected" : terminalConnecting ? "Connecting" : "Connect"}
+                      {terminalSession ? t("common.connected") : terminalConnecting ? t("common.connecting") : t("common.connect")}
                     </Button>
                   </div>
                 </CardHeader>
@@ -291,7 +295,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
                     <div ref={terminalEl} className="h-[500px] overflow-hidden rounded-md" />
                     {!terminalSession ? (
                       <div className="absolute inset-2 flex items-center justify-center rounded-md border border-white/10 bg-[#111318] text-sm text-slate-300">
-                        {terminalAvailable ? "Connect when you need an interactive shell." : "Terminal is available only while the sandbox job is active."}
+                        {terminalAvailable ? t("user.connectInteractiveShell") : t("user.terminalActiveOnly")}
                       </div>
                     ) : null}
                   </div>
@@ -302,10 +306,14 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
             <TabsContent value="details" className="mt-4">
               <Card>
                 <CardHeader>
-                  <CardTitle>Details</CardTitle>
+                  <CardTitle>{t("common.details")}</CardTitle>
                 </CardHeader>
                 <CardContent className="grid gap-2 text-sm">
-                  {job ? detailRows(job).map(([label, value]) => <Detail key={label} label={label} value={value} />) : "Loading..."}
+                  {job
+                    ? runnerJobDetailRows(job, t, locale).map((row) => (
+                        <Detail key={row.id} label={row.label} value={row.value} />
+                      ))
+                    : t("common.loading")}
                 </CardContent>
               </Card>
             </TabsContent>
@@ -347,26 +355,6 @@ function SummaryMetric({ label, value }: { label: string; value: ReactNode }) {
   )
 }
 
-function workflowRunLink(job: RunnerState) {
-  if (!job.workflow_run_id) return "-"
-  const url = workflowRunURL(job)
-  if (!url) return job.workflow_run_id
-  return (
-    <a className="inline-flex items-center gap-1 text-primary hover:underline" href={url} target="_blank" rel="noreferrer">
-      {job.workflow_run_id}
-      <ExternalLink className="h-3 w-3" />
-    </a>
-  )
-}
-
-function workflowRunURL(job: RunnerState) {
-  if (!job.github_job_url || !job.workflow_run_id) return ""
-  const marker = `/actions/runs/${job.workflow_run_id}`
-  const index = job.github_job_url.indexOf(marker)
-  if (index === -1) return ""
-  return job.github_job_url.slice(0, index + marker.length)
-}
-
 function Detail({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="grid grid-cols-[140px_minmax(0,1fr)] gap-3 border-b py-2 last:border-b-0">
@@ -374,34 +362,6 @@ function Detail({ label, value }: { label: string; value: ReactNode }) {
       <span className="min-w-0 break-words font-medium">{value || "-"}</span>
     </div>
   )
-}
-
-function detailRows(job: RunnerState): Array<[string, ReactNode]> {
-  return [
-    ["ID", job.id],
-    ["Status", job.status],
-    ["Repository", job.repository_full_name],
-    ["Runner spec", job.runner_spec_name || "matched by labels"],
-    ["Runner group", job.runner_group],
-    ["Sandbox", job.sandbox_id],
-    ["PID", job.process_pid],
-    ["Job", job.assigned_job_name || job.assigned_job_id || job.workflow_job_id],
-    ["Workflow", job.workflow_name],
-    ["Workflow run", job.workflow_run_id],
-    ["Workflow attempt", job.workflow_run_attempt],
-    ["Pull request", job.pull_request_number],
-    ["Branch", job.head_branch],
-    ["Commit", job.head_sha],
-    ["Created", formatTime(job.created_at)],
-    ["Updated", formatTime(job.updated_at)],
-    ["Completed", formatTime(job.completed_at)],
-    ["Failed", formatTime(job.failed_at)],
-    ["Retry count", job.retry_count],
-    ["Next retry", formatTime(job.next_retry_at)],
-    ["Requested labels", job.requested_labels?.join(", ")],
-    ["Failure", job.failure_reason],
-    ["Last error", job.last_error_message || job.error],
-  ]
 }
 
 function runnerJobTitle(job: RunnerState) {
@@ -413,9 +373,9 @@ function isTerminalAvailable(job: RunnerState) {
   return Boolean(job.sandbox_id && ["creating", "running", "stopping"].includes(job.status))
 }
 
-function jobGroupTitle(group: RunnerJobGroup | null) {
-  if (!group) return "Workflow jobs"
-  return group.title ? `${group.title} jobs` : "Workflow jobs"
+function jobGroupTitle(group: RunnerJobGroup | null, t: ReturnType<typeof useTranslation>["t"]) {
+  if (!group) return t("user.workflowJobs")
+  return group.title ? t("user.namedJobs", { name: group.title }) : t("user.workflowJobs")
 }
 
 function jobStatusIcon(status: RunnerState["status"]) {

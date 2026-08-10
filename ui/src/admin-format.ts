@@ -1,8 +1,16 @@
-export function formatTime(value?: string) {
+import type { RunnerStatus } from "@/admin-types"
+import i18n from "@/i18n"
+
+export function runnerStatusLabel(status: RunnerStatus) {
+  const key = `common.status${status[0].toUpperCase()}${status.slice(1)}`
+  return i18n.t(key)
+}
+
+export function formatTime(value?: string, locale?: string) {
   if (!value) return "-"
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
+  return date.toLocaleString(locale)
 }
 
 export function formatRunnerDuration(job: {

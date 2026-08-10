@@ -11,6 +11,7 @@ import {
   UserRoundCog,
 } from "lucide-react"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import {
   type AccountRole,
@@ -18,6 +19,7 @@ import {
   type AdminAccountStats,
   type AdminAccountsResponse,
 } from "@/admin-types"
+import i18n from "@/i18n"
 import { formatTime } from "@/admin-format"
 import {
   accountAvatarImageURL,
@@ -119,6 +121,7 @@ export function AccountRoleChangeDialog({
   onClose: () => void
   onConfirm: () => void
 }) {
+  const t = i18n.t
   return (
     <Dialog
       open={pendingRoleChange !== null}
@@ -128,13 +131,13 @@ export function AccountRoleChangeDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Change account role?</DialogTitle>
+          <DialogTitle>{t("admin.changeRole")}</DialogTitle>
           <DialogDescription>
-            @{pendingLogin} will {pendingRoleChange?.role === "admin" ? "gain access to all runner management APIs" : "lose access to the admin console"}. This change takes effect immediately and is recorded in the audit log.
+            {t(pendingRoleChange?.role === "admin" ? "admin.roleChangeGrantDescription" : "admin.roleChangeRevokeDescription", { login: pendingLogin })}
           </DialogDescription>
         </DialogHeader>
         <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3 text-sm">
-          <span className="text-muted-foreground">Role change</span>
+          <span className="text-muted-foreground">{t("admin.roleChange")}</span>
           <span className="inline-flex items-center gap-2 font-medium">
             {pendingRoleChange?.account.role}
             <ChevronRight className="size-3.5 text-muted-foreground" />
@@ -148,11 +151,11 @@ export function AccountRoleChangeDialog({
         ) : null}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="button" onClick={onConfirm} disabled={saving}>
             {saving ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
-            Confirm role change
+            {t("admin.confirmRoleChange")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -161,6 +164,7 @@ export function AccountRoleChangeDialog({
 }
 
 export function AccountsSection({ request }: { request: RequestFunction }) {
+  const { t, i18n } = useTranslation()
   const [accounts, setAccounts] = useState<AdminAccount[]>([])
   const [currentAccountID, setCurrentAccountID] = useState(0)
   const [stats, setStats] = useState<AdminAccountStats>(emptyAccountStats)
@@ -198,11 +202,11 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
       setTotal(data.total)
     } catch (cause) {
       if (version !== loadVersion.current) return
-      setError(cause instanceof Error ? cause.message : "Failed to load accounts")
+      setError(cause instanceof Error ? cause.message : t("admin.loadAccountsFailed"))
     } finally {
       if (version === loadVersion.current) setLoading(false)
     }
-  }, [limit, offset, query, request, role])
+  }, [limit, offset, query, request, role, t])
 
   useEffect(() => {
     void load()
@@ -251,10 +255,10 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
         body: JSON.stringify({ role: nextRole }),
       })
       closeRoleChangeDialog()
-      toast.success(`@${pendingLogin} is now ${nextRole}`)
+      toast.success(t("admin.roleUpdated", { login: pendingLogin, role: nextRole === "admin" ? t("common.admin") : t("common.user") }))
       await load()
     } catch (cause) {
-      setRoleError(cause instanceof Error ? cause.message : "Failed to update account role")
+      setRoleError(cause instanceof Error ? cause.message : t("admin.updateAccountRoleFailed"))
     } finally {
       setSavingAccountID(0)
     }
@@ -264,10 +268,10 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
     <>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
-          { label: "Accounts", value: stats.total_accounts, description: "local access principals" },
-          { label: "Administrators", value: stats.admin_accounts, description: "full management access" },
-          { label: "Users", value: stats.user_accounts, description: "standard account access" },
-          { label: "Linked identities", value: stats.oauth_identities, description: "OAuth provider bindings" },
+          { label: t("admin.accountsMetric"), value: stats.total_accounts, description: t("admin.accountsMetricDescription") },
+          { label: t("admin.administratorsMetric"), value: stats.admin_accounts, description: t("admin.administratorsMetricDescription") },
+          { label: t("admin.users"), value: stats.user_accounts, description: t("admin.usersMetricDescription") },
+          { label: t("admin.linkedIdentities"), value: stats.oauth_identities, description: t("admin.identitiesMetricDescription") },
         ].map((metric) => (
           <Card key={metric.label} className="gap-3 py-5">
             <CardHeader className="px-5">
@@ -287,15 +291,15 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
             <div className="min-w-0">
               <CardTitle className="flex items-center gap-2 text-base">
                 <UserRoundCog className="size-4 text-primary" />
-                Accounts
+                {t("sidebar.accounts")}
               </CardTitle>
               <CardDescription className="mt-1">
-                Search linked identities and control access to the runner management plane.
+                {t("admin.accountsDescription")}
               </CardDescription>
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="font-mono tabular-nums">
-                {total} {total === 1 ? "account" : "accounts"}
+                {t("admin.accountCount", { count: total })}
               </Badge>
               <Button
                 type="button"
@@ -303,8 +307,8 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                 size="icon"
                 onClick={() => void load()}
                 disabled={loading}
-                aria-label="Refresh accounts"
-                title="Refresh accounts"
+                aria-label={t("admin.refreshAccounts")}
+                title={t("admin.refreshAccounts")}
               >
                 <RefreshCw className={loading ? "animate-spin" : ""} />
               </Button>
@@ -321,12 +325,12 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                   value={draftQuery}
                   onChange={(event) => setDraftQuery(event.target.value)}
                   className="pl-9"
-                  placeholder="Login, provider, or stable subject"
-                  aria-label="Search accounts"
+                  placeholder={t("admin.searchAccountsPlaceholder")}
+                  aria-label={t("admin.searchAccounts")}
                 />
               </div>
               <Button type="submit" variant="secondary">
-                Search
+                {t("admin.search")}
               </Button>
             </form>
             <div className="flex flex-wrap items-center gap-2">
@@ -337,18 +341,18 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                   setOffset(0)
                 }}
               >
-                <SelectTrigger className="w-[150px]" aria-label="Filter by role">
+                <SelectTrigger className="w-[150px]" aria-label={t("admin.filterByRole")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All roles</SelectItem>
-                  <SelectItem value="admin">Admins</SelectItem>
-                  <SelectItem value="user">Users</SelectItem>
+                  <SelectItem value="all">{t("admin.allRoles")}</SelectItem>
+                  <SelectItem value="admin">{t("admin.admins")}</SelectItem>
+                  <SelectItem value="user">{t("admin.users")}</SelectItem>
                 </SelectContent>
               </Select>
               {query || role !== "all" ? (
                 <Button type="button" variant="ghost" onClick={clearFilters}>
-                  Clear
+                  {t("admin.clear")}
                 </Button>
               ) : null}
             </div>
@@ -363,11 +367,11 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
           <Table>
             <TableHeader>
               <TableRow className="bg-muted/10">
-                <TableHead className="pl-5">Account</TableHead>
-                <TableHead>Linked identities</TableHead>
-                <TableHead>Created</TableHead>
-                <TableHead>Updated</TableHead>
-                <TableHead className="pr-5 text-right">Role</TableHead>
+                <TableHead className="pl-5">{t("admin.account")}</TableHead>
+                <TableHead>{t("admin.linkedIdentities")}</TableHead>
+                <TableHead>{t("common.created")}</TableHead>
+                <TableHead>{t("common.updated")}</TableHead>
+                <TableHead className="pr-5 text-right">{t("admin.role")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -376,7 +380,7 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                   <TableCell colSpan={5} className="h-36 text-center text-muted-foreground">
                     <span className="inline-flex items-center gap-2">
                       <Loader2 className="size-4 animate-spin" />
-                      Loading accounts…
+                      {t("admin.loadingAccounts")}
                     </span>
                   </TableCell>
                 </TableRow>
@@ -384,9 +388,9 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                 <TableRow>
                   <TableCell colSpan={5} className="h-36 text-center">
                     <div className="mx-auto grid max-w-sm gap-2">
-                      <div className="font-medium">No accounts found</div>
+                      <div className="font-medium">{t("admin.noAccountsFound")}</div>
                       <div className="text-sm text-muted-foreground">
-                        Try another identity search or remove the role filter.
+                        {t("admin.noAccountsDescription")}
                       </div>
                     </div>
                   </TableCell>
@@ -406,7 +410,7 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="max-w-48 truncate font-medium">@{displayLogin}</span>
-                              {isCurrent ? <Badge variant="secondary">You</Badge> : null}
+                              {isCurrent ? <Badge variant="secondary">{t("admin.you")}</Badge> : null}
                             </div>
                             <div className="font-mono text-xs text-muted-foreground">account #{account.id}</div>
                           </div>
@@ -429,8 +433,8 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                           ))}
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{formatTime(account.created_at)}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{formatTime(account.updated_at)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{formatTime(account.created_at, i18n.resolvedLanguage)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{formatTime(account.updated_at, i18n.resolvedLanguage)}</TableCell>
                       <TableCell className="pr-5">
                         <div className="flex justify-end">
                           <Select
@@ -446,15 +450,15 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                             <SelectTrigger
                               size="sm"
                               className="w-[116px] font-medium"
-                              aria-label={`Role for ${displayLogin}`}
-                              title={isCurrent ? "You cannot change your own role" : "Change account role"}
+                              aria-label={t("admin.roleFor", { login: displayLogin })}
+                              title={isCurrent ? t("admin.cannotChangeOwnRole") : t("admin.changeAccountRole")}
                             >
                               {isSaving ? <Loader2 className="animate-spin" /> : account.role === "admin" ? <ShieldCheck /> : <KeyRound />}
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent align="end">
-                              <SelectItem value="admin">Admin</SelectItem>
-                              <SelectItem value="user">User</SelectItem>
+                              <SelectItem value="admin">{t("common.admin")}</SelectItem>
+                              <SelectItem value="user">{t("common.user")}</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -468,7 +472,7 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
 
           <div className="flex flex-col gap-3 border-t bg-muted/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs text-muted-foreground tabular-nums">
-              {total === 0 ? "No matching accounts" : `${resultStart}–${resultEnd} of ${total}`}
+              {total === 0 ? t("admin.noMatchingAccounts") : t("admin.resultRange", { start: resultStart, end: resultEnd, total })}
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
               <Select
@@ -478,17 +482,17 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                   setOffset(0)
                 }}
               >
-                <SelectTrigger size="sm" className="min-w-32 shrink-0" aria-label="Accounts per page">
+                <SelectTrigger size="sm" className="min-w-32 shrink-0" aria-label={t("admin.accountsPerPage")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent align="end">
-                  <SelectItem value="10">10 / page</SelectItem>
-                  <SelectItem value="20">20 / page</SelectItem>
-                  <SelectItem value="50">50 / page</SelectItem>
+                  <SelectItem value="10">{t("admin.perPage", { count: 10 })}</SelectItem>
+                  <SelectItem value="20">{t("admin.perPage", { count: 20 })}</SelectItem>
+                  <SelectItem value="50">{t("admin.perPage", { count: 50 })}</SelectItem>
                 </SelectContent>
               </Select>
               <span className="min-w-24 text-center text-xs font-medium tabular-nums">
-                Page {page.page} of {page.pages}
+                {t("admin.pageOf", { page: page.page, pages: page.pages })}
               </span>
               <Button
                 type="button"
@@ -496,7 +500,7 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                 size="icon"
                 disabled={!page.canPrevious || loading}
                 onClick={() => setOffset(Math.max(0, offset - limit))}
-                aria-label="Previous account page"
+                aria-label={t("admin.previousAccountPage")}
               >
                 <ChevronLeft />
               </Button>
@@ -506,7 +510,7 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                 size="icon"
                 disabled={!page.canNext || loading}
                 onClick={() => setOffset(offset + limit)}
-                aria-label="Next account page"
+                aria-label={t("admin.nextAccountPage")}
               >
                 <ChevronRight />
               </Button>

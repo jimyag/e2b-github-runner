@@ -13,6 +13,7 @@ import {
   useMemo,
   useState,
 } from "react"
+import { useTranslation } from "react-i18next"
 
 import type {
   GitHubAppConfig,
@@ -63,6 +64,7 @@ export function RepositoryReadinessPage({
   onSyncGitHubInstallations: () => void
   onSelectAccount: (accountLogin: string | undefined) => void
 }) {
+  const { t } = useTranslation()
   const installations = githubApp?.installations ?? []
   const selected = selectRepositoryInstallation(
     installations,
@@ -94,15 +96,15 @@ export function RepositoryReadinessPage({
     ? "/account/preferences"
     : `/organizations/${encodeURIComponent(selectedLogin)}/preferences`
   const sandboxProvider = readiness.source === "admin_default"
-    ? "Provided by the platform."
+    ? t("repositories.platformProvider")
     : personalScope
       ? readiness.source === "inherited"
-        ? "Inherited from a connected account."
-        : "Provided by your account."
-      : `Provided by the ${selectedLogin} organization.`
+        ? t("repositories.inheritedProvider")
+        : t("repositories.accountProvider")
+      : t("repositories.organizationProvider", { login: selectedLogin })
   const missingSandboxDescription = personalScope
-    ? "Your account has not configured a Sandbox service."
-    : `The ${selectedLogin} organization has not configured a Sandbox service.`
+    ? t("repositories.missingAccountService")
+    : t("repositories.missingOrganizationService", { login: selectedLogin })
   const repositoryAccessURL = repositoryOnlyAccess
     ? `https://github.com/${encodeURIComponent(selected?.account_login ?? "")}`
     : `https://github.com/settings/installations/${selected?.installation_id ?? ""}`
@@ -132,9 +134,9 @@ export function RepositoryReadinessPage({
       >
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-semibold">Repositories</h1>
+            <h1 className="text-xl font-semibold">{t("repositories.title")}</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              Connect GitHub repositories and confirm the Sandbox service they need to run.
+              {t("repositories.description")}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -151,7 +153,7 @@ export function RepositoryReadinessPage({
                   ) : (
                     <Github />
                   )}
-                  {syncingGitHubInstallations ? "Syncing..." : "Sync installations"}
+                  {syncingGitHubInstallations ? t("repositories.syncing") : t("repositories.syncInstallations")}
                 </Button>
                 <Button type="button" asChild>
                   <a
@@ -160,12 +162,12 @@ export function RepositoryReadinessPage({
                     rel="noopener noreferrer"
                   >
                     <Github />
-                    Install GitHub App
+                    {t("repositories.installApp")}
                   </a>
                 </Button>
               </>
             ) : (
-              <Badge variant="outline">GitHub App installation is unavailable</Badge>
+              <Badge variant="outline">{t("repositories.installationUnavailable")}</Badge>
             )}
           </div>
         </div>
@@ -201,7 +203,7 @@ export function RepositoryReadinessPage({
               ))
             ) : (
               <div className="space-y-3 p-4 text-sm text-muted-foreground">
-                <p>Install the GitHub App or sync an existing installation to get started.</p>
+                <p>{t("repositories.installOrSync")}</p>
                 {githubApp?.install_url ? (
                   <Button type="button" size="sm" asChild>
                     <a
@@ -210,7 +212,7 @@ export function RepositoryReadinessPage({
                       rel="noopener noreferrer"
                     >
                       <Github />
-                      Install GitHub App
+                      {t("repositories.installApp")}
                     </a>
                   </Button>
                 ) : null}
@@ -236,7 +238,7 @@ export function RepositoryReadinessPage({
 
               <div>
                 <h3 className="text-sm font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                  Runner readiness
+                  {t("repositories.runnerReadiness")}
                 </h3>
                 <div className="mt-3 grid gap-3 xl:grid-cols-2">
                   <Card className="gap-4 rounded-lg py-5">
@@ -247,28 +249,28 @@ export function RepositoryReadinessPage({
                             <BookOpen className="h-4 w-4" />
                           </div>
                           <div className="min-w-0">
-                            <CardTitle className="text-base">Repository access</CardTitle>
+                            <CardTitle className="text-base">{t("repositories.repositoryAccess")}</CardTitle>
                             <CardDescription className="mt-1">
-                              Repositories available to both you and this GitHub App installation.
+                              {t("repositories.repositoryAccessDescription")}
                             </CardDescription>
                           </div>
                         </div>
                         {repositoryError ? (
                           <Badge variant="destructive">
                             <CircleAlert />
-                            Access unavailable
+                            {t("repositories.accessUnavailable")}
                           </Badge>
                         ) : loadingRepositoriesFor === selected.id || authorized === undefined ? (
-                          <Badge variant="outline">Checking access</Badge>
+                          <Badge variant="outline">{t("repositories.checkingAccess")}</Badge>
                         ) : authorized.length ? (
                           <Badge variant="success">
                             <Check />
-                            Connected
+                            {t("repositories.connected")}
                           </Badge>
                         ) : (
                           <Badge variant="warning">
                             <CircleAlert />
-                            Choose repositories
+                            {t("repositories.chooseRepositories")}
                           </Badge>
                         )}
                       </div>
@@ -276,10 +278,10 @@ export function RepositoryReadinessPage({
                     <CardContent className="flex flex-wrap items-center justify-between gap-3 px-5">
                       <div className="text-sm text-muted-foreground">
                         {repositoryError
-                          ? "Unable to load repository authorization from GitHub."
+                          ? t("repositories.authorizationUnavailable")
                           : authorized === undefined
-                          ? "Loading authorization from GitHub."
-                          : `${authorized.length} authorized · ${repositoriesWithJobs} with jobs`}
+                          ? t("repositories.loadingAuthorization")
+                          : t("repositories.authorizationSummary", { authorized: authorized.length, withJobs: repositoriesWithJobs })}
                       </div>
                       <Button type="button" variant="outline" size="sm" asChild>
                         <a
@@ -288,7 +290,7 @@ export function RepositoryReadinessPage({
                           rel="noopener noreferrer"
                         >
                           <Github />
-                          {repositoryOnlyAccess ? "View on GitHub" : "Manage on GitHub"}
+                          {repositoryOnlyAccess ? t("repositories.viewGitHub") : t("repositories.manageGitHub")}
                         </a>
                       </Button>
                     </CardContent>
@@ -310,10 +312,10 @@ export function RepositoryReadinessPage({
                             <KeyRound className="h-4 w-4" />
                           </div>
                           <div className="min-w-0">
-                            <CardTitle className="text-base">Sandbox service</CardTitle>
+                            <CardTitle className="text-base">{t("repositories.sandboxService")}</CardTitle>
                             <CardDescription className="mt-1">
                               {readiness.loading
-                                ? "Checking the effective Sandbox service for this account."
+                                ? t("repositories.checkingService")
                                 : readiness.ready
                                   ? sandboxProvider
                                   : missingSandboxDescription}
@@ -335,24 +337,24 @@ export function RepositoryReadinessPage({
                               ? <Loader2 className="animate-spin" />
                               : <CircleAlert />}
                           {readiness.loading
-                            ? "Checking"
+                            ? t("repositories.checking")
                             : readiness.ready
-                              ? "Ready"
+                              ? t("repositories.ready")
                               : sandboxManageable
-                                ? "Setup required"
-                                : "Unavailable"}
+                                ? t("repositories.setupRequired")
+                                : t("repositories.unavailable")}
                         </Badge>
                       </div>
                     </CardHeader>
                     <CardContent className="flex flex-wrap items-center justify-between gap-3 px-5">
                       <div className="text-sm text-muted-foreground">
                         {readiness.ready
-                          ? "Runner jobs can use this Sandbox service."
+                          ? t("repositories.readyDescription")
                           : readiness.loading
-                            ? "Checking account and platform configuration."
+                            ? t("repositories.checkingDescription")
                             : sandboxManageable
-                              ? "Runner jobs cannot start until Sandbox is configured."
-                              : "Ask an organization member to configure Sandbox."}
+                              ? t("repositories.setupDescription")
+                              : t("repositories.askMember")}
                       </div>
                       {!readiness.loading && sandboxManageable ? (
                         <Button
@@ -363,7 +365,7 @@ export function RepositoryReadinessPage({
                         >
                           <a href={sandboxSettingsURL}>
                             <KeyRound />
-                            {readiness.ready ? "Sandbox settings" : "Configure Sandbox"}
+                            {readiness.ready ? t("repositories.sandboxSettings") : t("repositories.configureSandbox")}
                           </a>
                         </Button>
                       ) : null}
@@ -376,13 +378,13 @@ export function RepositoryReadinessPage({
                 <CardHeader className="gap-3 px-5">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <CardTitle className="text-base">Authorized repositories</CardTitle>
+                      <CardTitle className="text-base">{t("repositories.authorizedRepositories")}</CardTitle>
                       <CardDescription className="mt-1">
-                        Job activity is shown without hiding repositories that have not run yet.
+                        {t("repositories.authorizedRepositoriesDescription")}
                       </CardDescription>
                     </div>
                     <Badge variant="secondary">
-                      {authorized === undefined ? "Loading" : `${authorized.length} repositories`}
+                      {authorized === undefined ? t("repositories.loading") : t("repositories.repositoriesCount", { count: authorized.length })}
                     </Badge>
                   </div>
                 </CardHeader>
@@ -391,7 +393,7 @@ export function RepositoryReadinessPage({
                     <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
                       className="pl-9"
-                      placeholder="Filter repositories"
+                      placeholder={t("repositories.filter")}
                       value={filter}
                       onChange={(event) => setFilter(event.target.value)}
                     />
@@ -399,7 +401,7 @@ export function RepositoryReadinessPage({
                       {repositoryError ? (
                         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-3">
                           <div className="min-w-0">
-                            <div className="text-sm font-medium">Unable to load repositories</div>
+                            <div className="text-sm font-medium">{t("repositories.loadFailed")}</div>
                             <div className="mt-1 break-words text-sm text-muted-foreground">
                               {repositoryError}
                             </div>
@@ -410,12 +412,12 @@ export function RepositoryReadinessPage({
                             size="sm"
                             onClick={() => onLoadAuthorizedRepositories(selected.id)}
                           >
-                            Retry
+                            {t("repositories.retry")}
                           </Button>
                         </div>
                       ) : loadingRepositoriesFor === selected.id || authorized === undefined ? (
                     <div className="rounded-md border bg-muted/25 px-3 py-3 text-sm text-muted-foreground">
-                      Loading repositories from GitHub...
+                      {t("repositories.loadingRepositories")}
                     </div>
                   ) : filteredRows.length ? (
                     <div className="divide-y rounded-md border">
@@ -428,7 +430,7 @@ export function RepositoryReadinessPage({
                             {repository.name}
                           </div>
                           <Badge variant={repository.hasJobs ? "success" : "outline"}>
-                            {repository.hasJobs ? "Has jobs" : "No jobs yet"}
+                            {repository.hasJobs ? t("repositories.hasJobs") : t("repositories.noJobs")}
                           </Badge>
                         </div>
                       ))}
@@ -436,8 +438,8 @@ export function RepositoryReadinessPage({
                   ) : (
                     <div className="rounded-md border bg-muted/25 px-3 py-3 text-sm text-muted-foreground">
                       {authorized.length
-                        ? "No repositories match this filter."
-                        : "No repositories are authorized. Choose repositories on GitHub to continue."}
+                        ? t("repositories.noFilterMatches")
+                        : t("repositories.noneAuthorized")}
                     </div>
                   )}
                 </CardContent>
@@ -445,9 +447,9 @@ export function RepositoryReadinessPage({
             </div>
           ) : (
             <div className="rounded-lg border bg-muted/30 p-6">
-              <h2 className="text-base font-semibold">Connect a GitHub account or organization</h2>
+              <h2 className="text-base font-semibold">{t("repositories.connectAccount")}</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Install the GitHub App, then return here to finish repository and Sandbox setup.
+                {t("repositories.connectAccountDescription")}
               </p>
             </div>
           )}

@@ -3,10 +3,29 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
 import * as authPages from "./auth-pages"
+import i18n from "../i18n"
 
 const { AccessDeniedPage, NotFoundPage, SessionLoadingPage, SignInPage } = authPages
 
 describe("authentication route pages", () => {
+  test("renders protected-route guidance in Chinese", async () => {
+    await i18n.changeLanguage("zh")
+    try {
+      const html = renderToStaticMarkup(
+        createElement(SignInPage, {
+          oauthEnabled: true,
+          returnTo: "/repositories",
+        }),
+      )
+
+      expect(html).toContain("登录后继续")
+      expect(html).toContain("使用 GitHub 继续")
+      expect(html).toContain("返回首页")
+    } finally {
+      await i18n.changeLanguage("en")
+    }
+  })
+
   test("preserves the protected destination through GitHub sign-in", () => {
     const html = renderToStaticMarkup(
       createElement(SignInPage, {

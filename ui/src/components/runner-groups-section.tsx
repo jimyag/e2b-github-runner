@@ -1,5 +1,6 @@
 import { type Dispatch, type FormEvent, type SetStateAction } from "react"
 import { Plus, RefreshCw, Trash2 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { formatTime } from "@/admin-format"
 import { type RunnerGroup, type RunnerSpec } from "@/admin-types"
@@ -64,13 +65,14 @@ export function RunnerGroupsSection({
   onEditRunnerGroup: (group: RunnerGroup) => void
   onDeleteRunnerGroup: (name: string) => void
 }) {
+  const { t, i18n } = useTranslation()
   return (
     <div className="grid gap-4">
       <Card className="min-w-0">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <CardTitle>Runner groups</CardTitle>
-            <CardDescription>Click a group row to edit its runner specs.</CardDescription>
+            <CardTitle>{t("sidebar.runnerGroups")}</CardTitle>
+            <CardDescription>{t("admin.groupsDescription")}</CardDescription>
           </div>
           <div className="flex gap-2">
             <Button
@@ -81,9 +83,9 @@ export function RunnerGroupsSection({
               }}
             >
               <Plus />
-              Create
+              {t("admin.createRunnerGroup")}
             </Button>
-            <Button type="button" variant="outline" size="icon" onClick={onRefresh} disabled={loading} title="Refresh">
+            <Button type="button" variant="outline" size="icon" onClick={onRefresh} disabled={loading} title={t("common.refresh")}>
               <RefreshCw className={cn(loading && "animate-spin")} />
             </Button>
           </div>
@@ -92,10 +94,10 @@ export function RunnerGroupsSection({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Specs</TableHead>
-                <TableHead>Enabled</TableHead>
-                <TableHead>Updated</TableHead>
+                <TableHead>{t("common.name")}</TableHead>
+                <TableHead>{t("admin.specs")}</TableHead>
+                <TableHead>{t("common.enabled")}</TableHead>
+                <TableHead>{t("common.updated")}</TableHead>
                 <TableHead className="w-24" />
               </TableRow>
             </TableHeader>
@@ -104,8 +106,8 @@ export function RunnerGroupsSection({
                 <TableRow key={group.name} className="cursor-pointer" onClick={() => onEditRunnerGroup(group)}>
                   <TableCell><div className="max-w-[220px] truncate">{group.name}</div></TableCell>
                   <TableCell><div className="max-w-[420px] truncate">{group.spec_names.join(", ") || "-"}</div></TableCell>
-                  <TableCell>{group.enabled ? "yes" : "no"}</TableCell>
-                  <TableCell>{formatTime(group.updated_at)}</TableCell>
+                  <TableCell>{group.enabled ? t("common.yes") : t("common.no")}</TableCell>
+                  <TableCell>{formatTime(group.updated_at, i18n.resolvedLanguage)}</TableCell>
                   <TableCell>
                     <Button
                       type="button"
@@ -117,7 +119,7 @@ export function RunnerGroupsSection({
                       }}
                     >
                       <Trash2 />
-                      Delete
+                      {t("common.delete")}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -129,23 +131,23 @@ export function RunnerGroupsSection({
       <Dialog open={runnerGroupOpen} onOpenChange={onRunnerGroupOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{runnerGroupForm.name ? "Edit runner group" : "Create runner group"}</DialogTitle>
-            <DialogDescription>Group runner specs so repositories can allow a named set.</DialogDescription>
+            <DialogTitle>{runnerGroupForm.name ? t("admin.editRunnerGroup") : t("admin.createRunnerGroup")}</DialogTitle>
+            <DialogDescription>{t("admin.groupDialogDescription")}</DialogDescription>
           </DialogHeader>
           <form className="grid gap-3" onSubmit={onSubmitRunnerGroup}>
             <Input
               value={runnerGroupForm.name}
               onChange={(event) => onRunnerGroupFormChange((current) => ({ ...current, name: event.target.value }))}
-              placeholder="runner group name"
+              placeholder={t("admin.runnerGroupNamePlaceholder")}
             />
             <Input
               value={runnerGroupForm.description}
               onChange={(event) => onRunnerGroupFormChange((current) => ({ ...current, description: event.target.value }))}
-              placeholder="description"
+              placeholder={t("admin.descriptionPlaceholder")}
             />
             <div className="grid gap-2 rounded-md border p-3">
               {runnerSpecs.length === 0 ? (
-                <div className="text-sm text-muted-foreground">Create a runner spec before adding specs to a group.</div>
+                <div className="text-sm text-muted-foreground">{t("admin.noSpecsForGroup")}</div>
               ) : (
                 runnerSpecs.map((runnerSpec) => (
                   <label key={runnerSpec.name} className="flex items-center gap-2 text-sm">
@@ -172,13 +174,13 @@ export function RunnerGroupsSection({
                 checked={runnerGroupForm.enabled}
                 onChange={(event) => onRunnerGroupFormChange((current) => ({ ...current, enabled: event.target.checked }))}
               />
-              enabled
+              {t("common.enabled")}
             </label>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onRunnerGroupOpenChange(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
-              <Button type="submit">Save runner group</Button>
+              <Button type="submit">{t("admin.saveRunnerGroup")}</Button>
             </DialogFooter>
           </form>
         </DialogContent>

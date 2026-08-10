@@ -1,7 +1,9 @@
 import { CircleHelp, LogOut, Monitor, Moon, Settings, ShieldCheck, Sun } from "lucide-react"
 import { useTheme } from "next-themes"
+import { useTranslation } from "react-i18next"
 
 import type { AuthSession } from "@/admin-types"
+import { LanguageSwitcher } from "@/components/language-switcher"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -24,6 +26,7 @@ export function AccountMenu({
   onSignOut: () => void
 }) {
   const { setTheme, theme } = useTheme()
+  const { t } = useTranslation()
   const avatarURL = userAvatarURL(authSession)
   const login = authSession.login || "github"
 
@@ -35,7 +38,7 @@ export function AccountMenu({
           variant="ghost"
           size="icon"
           className="rounded-full"
-          aria-label="Account menu"
+          aria-label={t("common.accountMenu")}
           data-onboarding="account-menu"
         >
           {avatarURL ? (
@@ -58,29 +61,31 @@ export function AccountMenu({
         <DropdownMenuItem asChild>
           <a href="/account/preferences">
             <Settings className="h-4 w-4" />
-            Settings
+            {t("common.settings")}
           </a>
         </DropdownMenuItem>
         {onReplayProductTour ? (
           <DropdownMenuItem onClick={onReplayProductTour}>
             <CircleHelp className="h-4 w-4" />
-            Replay product tour
+            {t("common.replayProductTour")}
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">Theme</DropdownMenuLabel>
+        <LanguageSwitcher variant="menu" />
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">{t("common.theme")}</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={theme || "system"} onValueChange={setTheme}>
           <DropdownMenuRadioItem value="light">
             <Sun className="h-4 w-4" />
-            Light
+            {t("common.light")}
           </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="dark">
             <Moon className="h-4 w-4" />
-            Dark
+            {t("common.dark")}
           </DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="system">
             <Monitor className="h-4 w-4" />
-            System
+            {t("common.system")}
           </DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
@@ -89,7 +94,7 @@ export function AccountMenu({
             <DropdownMenuItem asChild>
               <a href="/admin/">
                 <ShieldCheck className="h-4 w-4" />
-                Admin
+                {t("common.admin")}
               </a>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
@@ -97,7 +102,7 @@ export function AccountMenu({
         ) : null}
         <DropdownMenuItem onClick={onSignOut}>
           <LogOut className="h-4 w-4" />
-          Sign out
+          {t("common.signOut")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

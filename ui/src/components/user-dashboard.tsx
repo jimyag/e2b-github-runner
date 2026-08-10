@@ -15,10 +15,12 @@ import {
   X,
 } from "lucide-react"
 import { type CSSProperties, type FormEvent, type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
+import type { TFunction } from "i18next"
 
 import type { AuthSession, GitHubAppConfig, ProductTourOnboarding, RunnerJobGroup, RunnerState, UserPreferences } from "@/admin-types"
 import { logNames } from "@/admin-types"
-import { formatRunnerDuration, formatTime } from "@/admin-format"
+import { formatRunnerDuration, formatTime, runnerStatusLabel } from "@/admin-format"
 import { userRunnerHistoryWindow } from "@/app-load-policy"
 import { AccountMenu } from "@/components/account-menu"
 import { RepositoryReadinessPage } from "@/components/repository-readiness-page"
@@ -163,7 +165,8 @@ export function UserDashboard({
   onSelectKey: (key: string) => void
   onSignOut: () => void
 }) {
-  const groups = useMemo(() => groupRunnersByBuildContext(runners), [runners])
+  const { t } = useTranslation()
+  const groups = useMemo(() => groupRunnersByBuildContext(runners, t), [runners, t])
   const selected = groups.find((group) => group.key === selectedKey) || (selectedKey ? undefined : groups[0])
   const [loadedJobGroup, setLoadedJobGroup] = useState<{ key: string; group: RunnerJobGroup } | null>(null)
   const selectedJobGroup = loadedJobGroup && selected && loadedJobGroup.key === selected.key ? loadedJobGroup.group : null
@@ -246,7 +249,7 @@ export function UserDashboard({
         <div>
           <div className="text-sm font-semibold tracking-wide">Qiniu Runner</div>
         </div>
-        <nav className="ml-3 hidden items-center gap-1 md:flex" aria-label="Workspace">
+        <nav className="ml-3 hidden items-center gap-1 md:flex" aria-label={t("user.workspace")}>
           <a
             href="/jobs"
             className={navItemClass(page === "home")}
@@ -254,7 +257,7 @@ export function UserDashboard({
             onClick={(event) => goToPage(event, "home")}
           >
             <Workflow className="h-4 w-4" />
-            Jobs
+            {t("user.jobs")}
           </a>
           <a
             href="/repositories"
@@ -263,7 +266,7 @@ export function UserDashboard({
             onClick={(event) => goToPage(event, "repositories")}
           >
             <BookOpen className="h-4 w-4" />
-            Repositories
+            {t("user.repositories")}
           </a>
         </nav>
         <div className="ml-auto flex items-center gap-2">
@@ -278,7 +281,7 @@ export function UserDashboard({
         </div>
       </header>
 
-      <nav className="flex items-center gap-1 border-b px-4 py-2 md:hidden" aria-label="Workspace">
+      <nav className="flex items-center gap-1 border-b px-4 py-2 md:hidden" aria-label={t("user.workspace")}>
         <a
           href="/jobs"
           className={navItemClass(page === "home")}
@@ -286,7 +289,7 @@ export function UserDashboard({
           onClick={(event) => goToPage(event, "home")}
         >
           <Workflow className="h-4 w-4" />
-          Jobs
+          {t("user.jobs")}
         </a>
         <a
           href="/repositories"
@@ -295,7 +298,7 @@ export function UserDashboard({
           onClick={(event) => goToPage(event, "repositories")}
         >
           <BookOpen className="h-4 w-4" />
-          Repositories
+          {t("user.repositories")}
         </a>
       </nav>
 
@@ -404,6 +407,7 @@ function AccountsPage({
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
   request: (url: string, options?: RequestInit) => Promise<unknown>
 }) {
+  const { t } = useTranslation()
   const manageableInstallations = manageableSettingsInstallations(installations, currentLogin)
   const normalizedCurrentLogin = currentLogin?.trim().toLowerCase()
   const currentAccountInstallation = manageableInstallations.find(
@@ -447,8 +451,8 @@ function AccountsPage({
     const login = route.accountLogin?.trim()
     toast.error(
       login
-        ? `You do not have permission to manage ${login} Sandbox settings.`
-        : "You do not have permission to manage these Sandbox settings.",
+        ? t("user.sandboxPermissionDeniedFor", { login })
+        : t("user.sandboxPermissionDenied"),
     )
     onNavigateAccountSettings(currentLogin, "preferences")
   }, [
@@ -456,6 +460,7 @@ function AccountsPage({
     onNavigateAccountSettings,
     route.accountLogin,
     scopeAccess,
+    t,
   ])
 
   return (
@@ -465,9 +470,9 @@ function AccountsPage({
         data-onboarding="settings-tabs"
       >
         <div>
-          <h1 className="text-xl font-semibold">Settings</h1>
+          <h1 className="text-xl font-semibold">{t("user.settings")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Manage Sandbox service credentials, templates, and instances for your account and organizations you manage.
+            {t("user.settingsDescription")}
           </p>
         </div>
       </section>
@@ -497,7 +502,7 @@ function AccountsPage({
                 ))
               ) : (
                 <div className="p-4 text-sm text-muted-foreground">
-                  Install the GitHub App or sync existing installations to link a user or organization.
+                  {t("user.installOrSync")}
                 </div>
               )}
             </div>
@@ -511,7 +516,7 @@ function AccountsPage({
               aria-live="polite"
             >
               <Loader2 className="h-4 w-4 animate-spin" />
-              Checking organization permissions...
+              {t("user.checkingPermissions")}
             </div>
           ) : scopeAccess === "forbidden" ? (
             <div
@@ -519,7 +524,7 @@ function AccountsPage({
               aria-live="polite"
             >
               <Loader2 className="h-4 w-4 animate-spin" />
-              Opening your account Settings...
+              {t("user.openingSettings")}
             </div>
           ) : selected ? (
             <div className="space-y-4">
@@ -541,19 +546,19 @@ function AccountsPage({
                     value="preferences"
                     className="h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
                   >
-                    Sandbox Service
+                    {t("user.sandboxService")}
                   </TabsTrigger>
                   <TabsTrigger
                     value="sandbox-templates"
                     className="ml-8 h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
                   >
-                    Sandbox Templates
+                    {t("user.sandboxTemplates")}
                   </TabsTrigger>
                   <TabsTrigger
                     value="sandbox-instances"
                     className="ml-8 h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
                   >
-                    Sandbox Instances
+                    {t("user.sandboxInstances")}
                   </TabsTrigger>
                 </TabsList>
 
@@ -586,8 +591,8 @@ function AccountsPage({
             route.tab === "preferences" ? (
               <div className="space-y-4">
                 <div>
-                  <h2 className="text-2xl font-semibold">Account preferences</h2>
-                  <div className="mt-1 text-sm text-muted-foreground">Settings for the signed-in account.</div>
+                  <h2 className="text-2xl font-semibold">{t("user.accountPreferences")}</h2>
+                  <div className="mt-1 text-sm text-muted-foreground">{t("user.accountPreferencesDescription")}</div>
                 </div>
                 <SandboxAPIKeyCard
                   preferences={userPreferences}
@@ -599,16 +604,16 @@ function AccountsPage({
             ) : route.tab === "sandbox-templates" ? (
               <div className="space-y-4">
                 <div>
-                  <h2 className="text-2xl font-semibold">Sandbox templates</h2>
-                  <div className="mt-1 text-sm text-muted-foreground">Templates available to the signed-in account.</div>
+                  <h2 className="text-2xl font-semibold">{t("user.sandboxTemplates")}</h2>
+                  <div className="mt-1 text-sm text-muted-foreground">{t("user.templatesDescription")}</div>
                 </div>
                 <SandboxTemplatesSection request={request} />
               </div>
             ) : route.tab === "sandbox-instances" ? (
               <div className="space-y-4">
                 <div>
-                  <h2 className="text-2xl font-semibold">Sandbox instances</h2>
-                  <div className="mt-1 text-sm text-muted-foreground">Runner-created instances for the signed-in account.</div>
+                  <h2 className="text-2xl font-semibold">{t("user.sandboxInstances")}</h2>
+                  <div className="mt-1 text-sm text-muted-foreground">{t("user.instancesDescription")}</div>
                 </div>
                 <SandboxesSection request={request} />
               </div>
@@ -616,13 +621,13 @@ function AccountsPage({
               <div className="rounded-lg border bg-muted/30 p-6">
                 <div className="flex flex-wrap items-center justify-between gap-4">
                   <div className="min-w-0">
-                    <h2 className="text-base font-semibold">Repository setup moved</h2>
+                    <h2 className="text-base font-semibold">{t("user.repositorySetupMoved")}</h2>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Manage GitHub App access and Runner readiness from Repositories.
+                      {t("user.repositorySetupMovedDescription")}
                     </p>
                   </div>
                   <Button type="button" asChild>
-                    <a href="/repositories">Open Repositories</a>
+                    <a href="/repositories">{t("user.openRepositories")}</a>
                   </Button>
                 </div>
               </div>
@@ -647,6 +652,7 @@ function SandboxAPIKeyCard({
   onSave: (apiURL: string, apiKey: string, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDelete: () => Promise<void>
 }) {
+  const { t, i18n } = useTranslation()
   const [apiURL, setAPIURL] = useState("")
   const [apiKey, setAPIKey] = useState("")
   const [credentialMode, setCredentialMode] = useState<"custom" | "inherit">("custom")
@@ -690,18 +696,18 @@ function SandboxAPIKeyCard({
         await onSave("", "", "inherit")
         setAPIKey("")
       } catch (error) {
-        setError(error instanceof Error ? error.message : "Failed to save Sandbox service settings.")
+        setError(error instanceof Error ? error.message : t("user.sandboxSaveFailed"))
       } finally {
         setSaving(false)
       }
       return
     }
     if (!nextAPIURL) {
-      setError("Sandbox service region is required.")
+      setError(t("user.sandboxRegionRequired"))
       return
     }
     if (!customConfigured && !nextAPIKey) {
-      setError("Sandbox API Key is required.")
+      setError(t("user.sandboxAPIKeyRequired"))
       return
     }
     setSaving(true)
@@ -710,7 +716,7 @@ function SandboxAPIKeyCard({
       await onSave(nextAPIURL, nextAPIKey, "custom")
       setAPIKey("")
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to save Sandbox service settings.")
+      setError(error instanceof Error ? error.message : t("user.sandboxSaveFailed"))
     } finally {
       setSaving(false)
     }
@@ -724,7 +730,7 @@ function SandboxAPIKeyCard({
       setAPIKey("")
       setRemoveConfirmOpen(false)
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to remove Sandbox API Key.")
+      setError(error instanceof Error ? error.message : t("user.sandboxRemoveFailed"))
     } finally {
       setDeleting(false)
     }
@@ -738,7 +744,7 @@ function SandboxAPIKeyCard({
       setAPIKey("")
       setReplaceSourceConfirmOpen(false)
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Failed to use your account credentials.")
+      setError(error instanceof Error ? error.message : t("user.sandboxUseAccountFailed"))
     } finally {
       setSaving(false)
     }
@@ -752,20 +758,20 @@ function SandboxAPIKeyCard({
             <div className="min-w-0">
               <CardTitle className="flex items-center gap-2 text-base">
                 <KeyRound className="h-4 w-4 shrink-0" />
-                <span>Sandbox service</span>
+                <span>{t("user.sandboxService")}</span>
               </CardTitle>
               <CardDescription className="mt-1">
-                Sandbox service is managed by this organization. Repository access does not grant configuration permission.
+                {t("user.organizationManagedDescription")}
               </CardDescription>
             </div>
-            <Badge variant="outline">Organization managed</Badge>
+            <Badge variant="outline">{t("user.organizationManaged")}</Badge>
           </div>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
             {effectiveReady
-              ? "The organization has an effective Sandbox service. No action is required from you."
-              : "No Sandbox service is available yet. An organization member must configure it."}
+              ? t("user.organizationReady")
+              : t("user.organizationMissing")}
           </p>
         </CardContent>
       </Card>
@@ -780,14 +786,14 @@ function SandboxAPIKeyCard({
             <div className="min-w-0">
               <CardTitle className="flex items-center gap-2 text-base">
                 <KeyRound className="h-4 w-4 shrink-0" />
-                <span>Sandbox service</span>
+                <span>{t("user.sandboxService")}</span>
               </CardTitle>
               <CardDescription className="mt-1">
-                Choose the account Sandbox service region and configure its encrypted API Key.
+                {t("user.sandboxConfigDescription")}
               </CardDescription>
             </div>
             <Badge variant={effectiveReady ? "success" : "warning"}>
-              {effectiveReady ? "Ready" : "Action required"}
+              {effectiveReady ? t("repositories.ready") : t("user.actionRequired")}
             </Badge>
           </div>
         </CardHeader>
@@ -796,23 +802,23 @@ function SandboxAPIKeyCard({
             <div className="flex flex-col gap-3 rounded-lg border border-primary/25 bg-primary/[0.04] p-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="outline">Setup step</Badge>
-                  <span className="text-sm font-semibold">Connect your Sandbox service</span>
+                  <Badge variant="outline">{t("user.setupStep")}</Badge>
+                  <span className="text-sm font-semibold">{t("user.connectSandbox")}</span>
                 </div>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                  Choose the nearest region, paste your Sandbox API Key, and save it. The key is encrypted before it is stored.
+                  {t("user.connectSandboxDescription")}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
                 <Button type="button" variant="outline" size="sm" asChild>
                   <a href="https://developer.qiniu.com/las/13283/sandbox-quickstart" target="_blank" rel="noreferrer">
-                    Quickstart
+                    {t("user.quickstart")}
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
                 </Button>
                 <Button type="button" size="sm" asChild>
                   <a href="https://portal.qiniu.com/developer/user/api-key" target="_blank" rel="noreferrer">
-                    Get API Key
+                    {t("user.getAPIKey")}
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
                 </Button>
@@ -836,29 +842,29 @@ function SandboxAPIKeyCard({
                 disabled={saving || deleting}
               />
               <Label htmlFor="sandbox-use-account-default" className="cursor-pointer text-sm font-medium">
-                Use account default credentials
+                {t("user.useAccountDefault")}
               </Label>
               <span className="text-sm text-muted-foreground">
                 {credentialMode !== "inherit"
-                  ? "This organization uses its own Sandbox service settings."
+                  ? t("user.organizationOwnSettings")
                   : !preferences?.sandbox?.inherited
-                    ? "Your account default credentials will be used after saving."
+                    ? t("user.accountDefaultAfterSave")
                   : !sourceAvailable
                     ? sourceAccountLogin
-                      ? `Credentials provided by @${sourceAccountLogin} are unavailable because that account is no longer connected to this organization.`
-                      : "The inherited credentials are unavailable because the source account is no longer connected to this organization."
+                      ? t("user.inheritedCredentialsUnavailableBy", { login: sourceAccountLogin })
+                      : t("user.inheritedCredentialsUnavailable")
                   : sourceIsCurrentAccount
-                    ? "Using Sandbox credentials provided by your account."
+                    ? t("user.usingAccountCredentials")
                     : sourceAccountLogin
-                      ? `Using Sandbox credentials provided by @${sourceAccountLogin}.`
-                      : "Using Sandbox credentials provided by another connected owner."}
+                      ? t("user.usingCredentialsBy", { login: sourceAccountLogin })
+                      : t("user.usingOtherOwnerCredentials")}
               </span>
             </div>
           ) : null}
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-end">
             <div className="grid min-w-0 gap-2">
-              <Label htmlFor="sandbox-api-region">Region</Label>
+              <Label htmlFor="sandbox-api-region">{t("common.region")}</Label>
               <Select
                 value={selectedRegion?.id ?? ""}
                 onValueChange={(regionID) => {
@@ -871,7 +877,7 @@ function SandboxAPIKeyCard({
                   {selectedRegion ? (
                     <span className="truncate">{selectedRegion.label}</span>
                   ) : (
-                    <SelectValue placeholder="Select Sandbox region" />
+                    <SelectValue placeholder={t("user.selectRegion")} />
                   )}
                 </SelectTrigger>
                 <SelectContent>
@@ -886,7 +892,7 @@ function SandboxAPIKeyCard({
             </div>
 
             <div className="grid min-w-0 gap-2">
-              <Label htmlFor="sandbox-api-key">API Key</Label>
+              <Label htmlFor="sandbox-api-key">{t("common.apiKey")}</Label>
               <Input
                 id="sandbox-api-key"
                 type="password"
@@ -894,7 +900,7 @@ function SandboxAPIKeyCard({
                 onChange={(event) => setAPIKey(event.target.value)}
                 autoComplete="off"
                 disabled={saving || deleting || credentialMode === "inherit"}
-                placeholder={customConfigured ? "Enter a new API Key to replace the saved one" : "Enter Sandbox API Key"}
+                placeholder={customConfigured ? t("user.apiKeyReplacementPlaceholder") : t("user.apiKeyPlaceholder")}
               />
             </div>
 
@@ -902,7 +908,7 @@ function SandboxAPIKeyCard({
               {!inherited ? (
                 <Button type="submit" disabled={saving || deleting || (credentialMode === "custom" && (!effectiveAPIURL.trim() || (!customConfigured && !apiKey.trim())))}>
                   <ShieldCheck className="h-4 w-4" />
-                  {saving ? "Saving" : configured ? "Save changes" : "Save settings"}
+                  {saving ? t("user.saving") : configured ? t("user.saveChanges") : t("user.saveSettings")}
                 </Button>
               ) : null}
               {inherited && !sourceIsCurrentAccount ? (
@@ -916,25 +922,25 @@ function SandboxAPIKeyCard({
                   disabled={saving || deleting}
                 >
                   <KeyRound className="h-4 w-4" />
-                  Use my account credentials
+                  {t("user.useMyAccountCredentials")}
                 </Button>
               ) : null}
               {customConfigured && credentialMode === "custom" ? (
                 <Button type="button" variant="outline" onClick={() => setRemoveConfirmOpen(true)} disabled={deleting || saving}>
                   <X className="h-4 w-4" />
-                  {deleting ? "Removing" : "Remove"}
+                  {deleting ? t("user.removing") : t("user.remove")}
                 </Button>
               ) : null}
             </div>
           </div>
 
           <div className="text-sm text-muted-foreground">
-            {configured && updatedAt ? `Last updated ${formatTime(updatedAt)}` : "No Sandbox API Key is saved."}
+            {configured && updatedAt ? t("user.updatedAt", { time: formatTime(updatedAt, i18n.resolvedLanguage) }) : t("user.noAPIKeySaved")}
           </div>
 
           {usingAdminDefault ? (
             <div className="rounded-md border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
-              Using the platform Sandbox service default.
+              {t("user.platformDefault")}
             </div>
           ) : null}
 
@@ -944,20 +950,20 @@ function SandboxAPIKeyCard({
       <Dialog open={removeConfirmOpen} onOpenChange={(open) => !deleting && setRemoveConfirmOpen(open)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remove Sandbox API Key?</DialogTitle>
+            <DialogTitle>{t("user.removeAPIKeyTitle")}</DialogTitle>
             <DialogDescription>
-              This removes the saved Sandbox API Key for this account. Runner jobs may use an eligible, complete platform default; otherwise they cannot start new Sandbox instances until a key is saved again.
+              {t("user.removeAPIKeyDescription")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={deleting}>
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             <Button type="button" variant="destructive" onClick={remove} disabled={deleting}>
               <X className="h-4 w-4" />
-              {deleting ? "Removing" : "Remove API Key"}
+              {deleting ? t("user.removing") : t("user.removeAPIKey")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -965,22 +971,23 @@ function SandboxAPIKeyCard({
       <Dialog open={replaceSourceConfirmOpen} onOpenChange={(open) => !saving && setReplaceSourceConfirmOpen(open)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Use your account credentials?</DialogTitle>
+            <DialogTitle>{t("user.useAccountCredentialsTitle")}</DialogTitle>
             <DialogDescription>
-              {sourceAccountLogin ? `This replaces the Sandbox credentials provided by @${sourceAccountLogin}. ` : "This replaces the current Sandbox credentials. "}
-              The change applies to all Runner jobs in this organization, and your account must have a complete Sandbox service configuration.
+              {sourceAccountLogin
+                ? t("user.replaceCredentialsDescriptionBy", { login: sourceAccountLogin })
+                : t("user.replaceCredentialsDescription")}
             </DialogDescription>
           </DialogHeader>
           {error ? <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
           <DialogFooter>
             <DialogClose asChild>
               <Button type="button" variant="outline" disabled={saving}>
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogClose>
             <Button type="button" onClick={replaceInheritedSource} disabled={saving}>
               <KeyRound className="h-4 w-4" />
-              {saving ? "Switching" : "Use my credentials"}
+              {saving ? t("user.switching") : t("user.useMyCredentials")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1022,12 +1029,13 @@ function PullRequestsPage({
   loadingRunnerHistory: boolean
   onLoadRunnerHistory: () => void
 }) {
+  const { t, i18n } = useTranslation()
   const currentJobs = selectedJobGroup?.current_jobs || (selected ? currentBuildJobs(selected) : [])
   const previousJobs = selectedJobGroup?.previous_jobs || (selected ? previousBuildJobs(selected, currentJobs) : [])
   const allJobs = [...currentJobs, ...previousJobs]
   const selectedJob = allJobs.find((job) => job.id === selectedJobID) || allJobs[0] || null
   const effectiveSelectedJobID = selectedJob?.id || ""
-  const workflows = workflowGroups(allJobs)
+  const workflows = workflowGroups(allJobs, t)
   const selectedStatus = selected ? buildGroupStatus(selected) : null
   const visibleHistoryTotal = Math.min(runnerTotal, userRunnerHistoryWindow)
   const olderRunnerCount = Math.max(0, visibleHistoryTotal - runnerCount)
@@ -1036,9 +1044,9 @@ function PullRequestsPage({
     <>
       <section className="border-b bg-muted/35 px-4 py-4 lg:px-6">
         <div>
-          <h1 className="text-xl font-semibold">Jobs</h1>
+          <h1 className="text-xl font-semibold">{t("user.jobs")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Review runner jobs grouped by repository, pull request, or workflow run.
+            {t("user.jobsDescription")}
           </p>
         </div>
       </section>
@@ -1080,7 +1088,7 @@ function PullRequestsPage({
                         type="button"
                         variant="outline"
                       >
-                        {loadingRunnerHistory ? "Loading older jobs..." : `Load ${olderRunnerCount} older jobs`}
+                        {loadingRunnerHistory ? t("user.loadingOlderJobs") : t("user.loadOlderJobs", { count: olderRunnerCount })}
                       </Button>
                     </div>
                   ) : null}
@@ -1088,9 +1096,9 @@ function PullRequestsPage({
               ) : (
                 <div className="p-4 text-sm text-muted-foreground">
                   {hasInstallations ? (
-                    "No jobs yet. Trigger a workflow in an installed repository, then refresh."
+                    t("user.noJobsYet")
                   ) : (
-                    "Sync existing GitHub App accounts to start tracking jobs."
+                    t("user.syncToTrackJobs")
                   )}
                 </div>
               )}
@@ -1113,9 +1121,9 @@ function PullRequestsPage({
                   <div className="mt-3 space-y-4 text-sm">
                     <section>
                       <div className="grid gap-3 sm:grid-cols-3">
-                        <JobField label="Branch" value={selectedJobGroup?.head_branch || selected.headBranch || selected.subtitle || "unknown"} />
-                        <JobField label="Commit" value={shortSHA(selectedJobGroup?.head_sha || selected.headSHA) || "unknown"} />
-                        <JobField label="Last updated" value={formatTime(selectedJobGroup?.updated_at || selected.updatedAt)} />
+                        <JobField label={t("user.branch")} value={selectedJobGroup?.head_branch || selected.headBranch || selected.subtitle || t("common.unknown")} />
+                        <JobField label={t("user.commit")} value={shortSHA(selectedJobGroup?.head_sha || selected.headSHA) || t("common.unknown")} />
+                        <JobField label={t("user.lastUpdated")} value={formatTime(selectedJobGroup?.updated_at || selected.updatedAt, i18n.resolvedLanguage)} />
                       </div>
                     </section>
                     <section>
@@ -1123,7 +1131,7 @@ function PullRequestsPage({
                         {selectedJob ? (
                           <>
                             <JobField
-                              label="Job Name"
+                              label={t("user.jobName")}
                               value={selectedJob.github_job_url ? (
                                 <a className={cn("inline-flex max-w-full min-w-0 items-center gap-1 hover:underline", jobStatusTextClass(selectedJob.status))} href={selectedJob.github_job_url} target="_blank" rel="noreferrer">
                                   <span className="truncate">{runnerJobTitle(selectedJob)}</span>
@@ -1134,20 +1142,20 @@ function PullRequestsPage({
                               )}
                             />
                             <JobField
-                              label="Workflow"
+                              label={t("user.workflow")}
                               value={workflowRunURL(selectedJob) ? (
                                 <a className="inline-flex max-w-full min-w-0 items-center gap-1 text-primary hover:underline" href={workflowRunURL(selectedJob)} target="_blank" rel="noreferrer">
-                                  <span className="truncate">{selectedJob.workflow_name || "Workflow"}</span>
+                                  <span className="truncate">{selectedJob.workflow_name || t("user.workflow")}</span>
                                   <ExternalLink className="h-3.5 w-3.5 shrink-0" />
                                 </a>
                               ) : (
-                                <span className="block truncate">{selectedJob.workflow_name || "Workflow"}</span>
+                                <span className="block truncate">{selectedJob.workflow_name || t("user.workflow")}</span>
                               )}
                             />
-                            <JobField label="Duration" value={formatRunnerDuration(selectedJob) || "-"} />
+                            <JobField label={t("user.duration")} value={formatRunnerDuration(selectedJob) || "-"} />
                           </>
                         ) : (
-                          <div className="text-muted-foreground">Select a job to inspect its logs.</div>
+                          <div className="text-muted-foreground">{t("user.selectJob")}</div>
                         )}
                       </div>
                     </section>
@@ -1155,7 +1163,7 @@ function PullRequestsPage({
                 </div>
                 {selectedJob ? <RunnerJobLogPanel job={selectedJob} request={request} /> : (
                   <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
-                    Select a job to inspect its logs.
+                    {t("user.selectJob")}
                   </div>
                 )}
               </div>
@@ -1164,28 +1172,28 @@ function PullRequestsPage({
             <div className="p-4 lg:p-6">
               {groups.length ? (
                 <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
-                  This job group was not found. It may have aged out of the local runner history or belongs to an account that is not connected.
+                  {t("user.groupNotFound")}
                 </div>
               ) : hasInstallations ? (
                 <div className="rounded-lg border bg-muted/30 p-6 text-sm text-muted-foreground">
-                  No runner jobs are available yet. Trigger a workflow in an installed repository to see jobs here.
+                  {t("user.noRunnerJobs")}
                 </div>
               ) : (
                 <div className="rounded-lg border bg-muted/30 p-6">
                   <div className="flex flex-wrap items-center justify-between gap-4">
                     <div className="min-w-0">
-                      <h2 className="text-base font-semibold">Sync existing GitHub App accounts</h2>
+                      <h2 className="text-base font-semibold">{t("user.syncExistingAccounts")}</h2>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {canSyncGitHubInstallations
-                          ? "Use this if the GitHub App is already installed but this runnerd instance has no local account record yet."
-                          : "Set up GitHub App auth before syncing local account records."}
+                          ? t("user.syncHelp")
+                          : t("user.setupAuth")}
                       </p>
                     </div>
                     {canSyncGitHubInstallations ? (
                       <SyncGitHubInstallationsButton
                         isSyncing={syncingGitHubInstallations}
-                        label="Sync accounts"
-                        loadingLabel="Syncing..."
+                        label={t("user.syncAccounts")}
+                        loadingLabel={t("user.syncing")}
                         onSync={onSyncGitHubInstallations}
                       />
                     ) : null}
@@ -1305,9 +1313,10 @@ function RunnerJobLogPanel({
   job: RunnerState
   request: (url: string, options?: RequestInit) => Promise<unknown>
 }) {
+  const { t, i18n } = useTranslation()
   const [selectedLog, setSelectedLog] = useState<(typeof logNames)[number]>("control.log")
-  const [runnerLogText, setRunnerLogText] = useState("Loading runner log...")
-  const [githubLog, setGithubLog] = useState<GitHubLogState>({ kind: "log", text: "Loading GitHub log..." })
+  const [runnerLogText, setRunnerLogText] = useState(() => t("user.loadingRunnerLog"))
+  const [githubLog, setGithubLog] = useState<GitHubLogState>(() => ({ kind: "log", text: t("user.loadingGitHubLog") }))
   const [githubLogLoading, setGithubLogLoading] = useState(false)
   const endpoint = `/user/runner_requests/${encodeURIComponent(job.id)}`
   const endpointRef = useRef(endpoint)
@@ -1316,9 +1325,9 @@ function RunnerJobLogPanel({
     endpoint,
     available: terminalAvailable,
     request,
-    connectingMessage: "Connecting to sandbox web console...",
-    streamDisconnectedMessage: "Web console stream disconnected",
-    connectErrorMessage: "Failed to connect web console",
+    connectingMessage: t("user.connectingConsole"),
+    streamDisconnectedMessage: t("user.consoleDisconnected"),
+    connectErrorMessage: t("user.consoleConnectFailed"),
   })
 
   useEffect(() => {
@@ -1329,42 +1338,42 @@ function RunnerJobLogPanel({
     let active = true
     queueMicrotask(() => {
       if (active) {
-        setRunnerLogText("Loading runner log...")
+        setRunnerLogText(t("user.loadingRunnerLog"))
       }
     })
     void request(`${endpoint}/logs/${encodeURIComponent(selectedLog)}`)
       .then((text) => {
         if (active) {
-          setRunnerLogText(logResponseText(text, "Log is empty"))
+          setRunnerLogText(logResponseText(text, t("user.runnerLogEmpty")))
         }
       })
       .catch((error) => {
         if (active) {
-          setRunnerLogText(error instanceof Error ? error.message : "Failed to load runner log")
+          setRunnerLogText(error instanceof Error ? error.message : t("user.runnerLogFailed"))
         }
       })
     return () => {
       active = false
     }
-  }, [endpoint, request, selectedLog])
+  }, [endpoint, request, selectedLog, t])
 
   useEffect(() => {
     let active = true
     queueMicrotask(() => {
       if (active) {
         setGithubLogLoading(true)
-        setGithubLog({ kind: "log", text: "Loading GitHub log..." })
+        setGithubLog({ kind: "log", text: t("user.loadingGitHubLog") })
       }
     })
     void request(`${endpoint}/github-log`)
       .then((text) => {
         if (active) {
-          setGithubLog(githubLogResponseState(text, "GitHub log is empty"))
+          setGithubLog(githubLogResponseState(text, t("user.githubLogEmpty")))
         }
       })
       .catch((error) => {
         if (active) {
-          setGithubLog(githubLogErrorState(error))
+          setGithubLog(githubLogErrorState(error, t))
         }
       })
       .finally(() => {
@@ -1375,21 +1384,21 @@ function RunnerJobLogPanel({
     return () => {
       active = false
     }
-  }, [endpoint, request])
+  }, [endpoint, request, t])
 
   const refreshGithubLog = () => {
     const refreshEndpoint = endpoint
     setGithubLogLoading(true)
-    setGithubLog({ kind: "log", text: "Loading GitHub log..." })
+    setGithubLog({ kind: "log", text: t("user.loadingGitHubLog") })
     void request(`${refreshEndpoint}/github-log`)
       .then((text) => {
         if (endpointRef.current === refreshEndpoint) {
-          setGithubLog(githubLogResponseState(text, "GitHub log is empty"))
+          setGithubLog(githubLogResponseState(text, t("user.githubLogEmpty")))
         }
       })
       .catch((error) => {
         if (endpointRef.current === refreshEndpoint) {
-          setGithubLog(githubLogErrorState(error))
+          setGithubLog(githubLogErrorState(error, t))
         }
       })
       .finally(() => {
@@ -1409,7 +1418,7 @@ function RunnerJobLogPanel({
       disabled={githubLogLoading}
     >
       <RefreshCw className={cn(githubLogLoading && "animate-spin")} />
-      Refresh
+      {t("user.refresh")}
     </Button>
   )
 
@@ -1417,10 +1426,10 @@ function RunnerJobLogPanel({
     <div className="flex min-h-0 flex-1 flex-col">
       <Tabs defaultValue="github-logs" className="flex min-h-0 flex-1 flex-col gap-0">
         <TabsList className={jobLogTabsListClassName}>
-          <TabsTrigger className={jobLogTabsTriggerClassName} value="github-logs">GitHub logs</TabsTrigger>
-          <TabsTrigger className={jobLogTabsTriggerClassName} value="runner-logs">Runner logs</TabsTrigger>
-          <TabsTrigger className={jobLogTabsTriggerClassName} value="web-console">Web Console</TabsTrigger>
-          <TabsTrigger className={jobLogTabsTriggerClassName} value="details">Details</TabsTrigger>
+          <TabsTrigger className={jobLogTabsTriggerClassName} value="github-logs">{t("user.githubLogs")}</TabsTrigger>
+          <TabsTrigger className={jobLogTabsTriggerClassName} value="runner-logs">{t("user.runnerLogs")}</TabsTrigger>
+          <TabsTrigger className={jobLogTabsTriggerClassName} value="web-console">{t("user.webConsole")}</TabsTrigger>
+          <TabsTrigger className={jobLogTabsTriggerClassName} value="details">{t("user.details")}</TabsTrigger>
         </TabsList>
         <TabsContent value="github-logs" className="m-0 pt-2">
           {githubLog.kind === "unavailable" ? (
@@ -1428,7 +1437,7 @@ function RunnerJobLogPanel({
           ) : (
             <LogOutput
               text={githubLog.text}
-              description="Workflow job output downloaded from GitHub Actions."
+              description={t("user.githubLogSource")}
               actions={githubLogActions}
             />
           )}
@@ -1436,9 +1445,9 @@ function RunnerJobLogPanel({
         <TabsContent value="runner-logs" className="m-0 pt-2">
           <LogOutput
             text={runnerLogText}
-            description={`Runner ${selectedLog.replace(".log", "")} output captured by runnerd.`}
+            description={t("user.runnerLogDescription", { log: selectedLog.replace(".log", "") })}
             leading={(
-              <div className="flex items-center gap-1 rounded-md border border-white/10 bg-white/5 p-1" aria-label="Runner log stream">
+              <div className="flex items-center gap-1 rounded-md border border-white/10 bg-white/5 p-1" aria-label={t("user.runnerLogStream")}>
                 {logNames.map((name) => {
                   const value = name.replace(".log", "")
                   return (
@@ -1464,7 +1473,7 @@ function RunnerJobLogPanel({
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-y border-emerald-500/15 bg-[#111318] text-slate-100 shadow-[inset_3px_0_0_theme(colors.emerald.500/0.35)]">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-900/95 px-4 py-3">
               <div className="min-w-0">
-                <div className="truncate text-xs text-slate-400">{job.sandbox_id || "No active sandbox"}</div>
+                <div className="truncate text-xs text-slate-400">{job.sandbox_id || t("user.noActiveSandbox")}</div>
               </div>
               <Button
                 type="button"
@@ -1475,7 +1484,7 @@ function RunnerJobLogPanel({
                 disabled={!terminalAvailable || terminalConnecting || Boolean(terminalSession)}
               >
                 <SquareTerminal />
-                {terminalSession ? "Connected" : terminalConnecting ? "Connecting" : "Connect"}
+                {terminalSession ? t("common.connected") : terminalConnecting ? t("common.connecting") : t("common.connect")}
               </Button>
             </div>
             {terminalError ? <WebConsoleError message={terminalError} /> : null}
@@ -1484,7 +1493,7 @@ function RunnerJobLogPanel({
                 <div ref={terminalEl} className="h-full min-h-0 overflow-hidden rounded-md" />
                 {!terminalSession ? (
                   <div className="absolute inset-2 flex items-center justify-center rounded-md bg-[#111318] text-sm text-slate-300">
-                    Connect when you need an interactive shell.
+                    {t("user.connectInteractiveShell")}
                   </div>
                 ) : null}
               </div>
@@ -1495,13 +1504,13 @@ function RunnerJobLogPanel({
         </TabsContent>
         <TabsContent value="details" className="m-0 py-5">
           <div className="grid gap-2 text-sm">
-            <JobField label="Status" value={job.status} />
-            <JobField label="Runner spec" value={job.runner_spec_name || "matched by labels"} />
-            <JobField label="Workflow run" value={workflowRunValue(job)} />
-            <JobField label="Queued" value={formatTime(job.created_at)} />
-            <JobField label="Started" value={job.running_at ? formatTime(job.running_at) : "-"} />
-            <JobField label="Finished" value={job.completed_at || job.failed_at ? formatTime(job.completed_at || job.failed_at) : "-"} />
-            <JobField label="Commit" value={job.head_sha || "-"} />
+            <JobField label={t("common.status")} value={runnerStatusLabel(job.status)} />
+            <JobField label={t("common.runnerSpec")} value={job.runner_spec_name || t("user.matchedByLabels")} />
+            <JobField label={t("user.workflowRun")} value={workflowRunValue(job, t)} />
+            <JobField label={t("user.queued")} value={formatTime(job.created_at, i18n.resolvedLanguage)} />
+            <JobField label={t("common.started")} value={job.running_at ? formatTime(job.running_at, i18n.resolvedLanguage) : "-"} />
+            <JobField label={t("user.finished")} value={job.completed_at || job.failed_at ? formatTime(job.completed_at || job.failed_at, i18n.resolvedLanguage) : "-"} />
+            <JobField label={t("user.commit")} value={job.head_sha || "-"} />
           </div>
         </TabsContent>
       </Tabs>
@@ -1518,8 +1527,8 @@ function githubLogResponseState(text: unknown, emptyMessage: string): GitHubLogS
   return { kind: "log", text: raw }
 }
 
-function githubLogErrorState(error: unknown): GitHubLogState {
-  const raw = error instanceof Error ? error.message : "Failed to load GitHub log"
+function githubLogErrorState(error: unknown, t: TFunction): GitHubLogState {
+  const raw = error instanceof Error ? error.message : t("user.runnerLogFailed")
   return isGitHubLogUnavailable(raw) ? { kind: "unavailable", detail: raw } : { kind: "log", text: raw }
 }
 
@@ -1533,10 +1542,11 @@ function isGitHubLogUnavailable(text: string) {
 }
 
 function GitHubLogsUnavailable({ detail, actions }: { detail: string; actions: ReactNode }) {
+  const { t } = useTranslation()
   return (
     <div className="overflow-hidden border-y border-emerald-500/15 bg-slate-950 text-slate-100 shadow-[inset_3px_0_0_theme(colors.emerald.500/0.35)]">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-slate-900/95 px-4 py-3">
-        <div className="text-xs text-slate-400">Workflow job output downloaded from GitHub Actions.</div>
+        <div className="text-xs text-slate-400">{t("user.githubLogSource")}</div>
         <div className="flex items-center gap-2">{actions}</div>
       </div>
       <div className="flex min-h-[260px] items-center justify-center px-4 py-12">
@@ -1544,13 +1554,13 @@ function GitHubLogsUnavailable({ detail, actions }: { detail: string; actions: R
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md border border-white/10 bg-white/5 text-amber-200">
             <AlertCircle className="h-5 w-5" />
           </div>
-          <h3 className="mt-4 text-sm font-semibold text-slate-100">GitHub logs are not available yet</h3>
+          <h3 className="mt-4 text-sm font-semibold text-slate-100">{t("user.githubLogsUnavailable")}</h3>
           <p className="mt-2 text-sm leading-6 text-slate-400">
-            GitHub may not have generated downloadable logs for this job. This can happen when a job never reached a runner, was cancelled before producing logs, or GitHub has not published the log archive yet.
+            {t("user.githubLogsUnavailableDescription")}
           </p>
           <details className="mt-5 rounded-md border border-white/10 bg-white/[0.03] text-left">
             <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-slate-300 hover:text-slate-100">
-              Show technical details
+              {t("user.showTechnicalDetails")}
             </summary>
             <pre className="max-h-48 overflow-auto border-t border-white/10 px-3 py-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-slate-400">
               {detail}
@@ -1563,12 +1573,13 @@ function GitHubLogsUnavailable({ detail, actions }: { detail: string; actions: R
 }
 
 function WebConsoleError({ message }: { message: string }) {
+  const { t } = useTranslation()
   return (
     <div className="border-b border-red-400/15 bg-red-500/10 px-4 py-3 text-sm text-red-100">
       <div className="flex min-w-0 items-start gap-2">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-200" />
         <div className="min-w-0">
-          <div className="font-medium">Web Console connection failed</div>
+          <div className="font-medium">{t("user.webConsoleFailed")}</div>
           <div className="mt-1 break-words font-mono text-xs leading-relaxed text-red-100/80">{message}</div>
         </div>
       </div>
@@ -1577,22 +1588,23 @@ function WebConsoleError({ message }: { message: string }) {
 }
 
 function WebConsoleUnavailable({ job }: { job: RunnerState }) {
+  const { t } = useTranslation()
   const reason = job.sandbox_id
-    ? "The sandbox is no longer accepting web console sessions for this job state."
-    : "The sandbox has already been cleaned up, so a web console session cannot be opened."
+    ? t("user.consoleStateUnavailable")
+    : t("user.consoleCleanedUp")
   return (
     <div className="flex min-h-[320px] items-center justify-center px-4 py-12">
       <div className="max-w-md text-center">
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-md border border-white/10 bg-white/5 text-emerald-200">
           <SquareTerminal className="h-5 w-5" />
         </div>
-        <h3 className="mt-4 text-sm font-semibold text-slate-100">Web Console unavailable</h3>
+        <h3 className="mt-4 text-sm font-semibold text-slate-100">{t("user.webConsoleUnavailable")}</h3>
         <p className="mt-2 text-sm leading-6 text-slate-400">
-          Web Console is available while a sandbox job is creating, running, or stopping. {reason}
+          {t("user.consoleAvailabilityDescription", { reason })}
         </p>
         <div className="mt-4 inline-flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300">
-          <span className="text-slate-500">Status</span>
-          <span className="font-medium text-slate-100">{job.status}</span>
+          <span className="text-slate-500">{t("user.status")}</span>
+          <span className="font-medium text-slate-100">{runnerStatusLabel(job.status)}</span>
         </div>
       </div>
     </div>
@@ -1737,8 +1749,8 @@ function parseLogLines(lines: string[], collapsedGroups: Set<number>): ParsedLog
   return visible
 }
 
-function workflowRunValue(job: RunnerState) {
-  const runID = job.workflow_run_id ? String(job.workflow_run_id) : "unknown"
+function workflowRunValue(job: RunnerState, t: TFunction) {
+  const runID = job.workflow_run_id ? String(job.workflow_run_id) : t("common.unknown")
   const jobID = job.workflow_job_id ? String(job.workflow_job_id) : job.id
   const runURL = workflowRunURL(job)
   const runValue = runURL ? (
@@ -1775,7 +1787,7 @@ function pullRequestHeading(group: BuildGroup, jobGroup: RunnerJobGroup | null) 
   return title ? `${label}: ${title}` : label
 }
 
-function workflowGroups(jobs: RunnerState[]) {
+function workflowGroups(jobs: RunnerState[], t: TFunction) {
   const groups = new Map<number | string, { id: number | string; name: string; jobs: RunnerState[] }>()
   for (const job of jobs) {
     const id = job.workflow_run_id || job.id
@@ -1786,7 +1798,7 @@ function workflowGroups(jobs: RunnerState[]) {
     }
     groups.set(id, {
       id,
-      name: job.workflow_name || "Workflow run",
+      name: job.workflow_name || t("user.workflowRun"),
       jobs: [job],
     })
   }
@@ -1808,6 +1820,7 @@ function BuildGroupListItem({
   selected: boolean
   onSelect: () => void
 }) {
+  const { t, i18n } = useTranslation()
   const status = buildGroupStatus(group)
   const statusClasses = buildGroupStatusClasses(status)
   const reference = buildGroupReference(group)
@@ -1840,15 +1853,15 @@ function BuildGroupListItem({
         <span className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1">
             <Workflow className="h-3.5 w-3.5" />
-            {group.jobs.length} jobs
+            {t("user.jobCount", { count: group.jobs.length })}
           </span>
           <span className="inline-flex items-center gap-1">
             <Play className="h-3.5 w-3.5" />
-            {group.workflowRunIDs.length || 1} runs
+            {t("user.runCount", { count: group.workflowRunIDs.length || 1 })}
           </span>
           <span className="inline-flex items-center gap-1">
             <CalendarDays className="h-3.5 w-3.5" />
-            {formatTime(group.updatedAt)}
+            {formatTime(group.updatedAt, i18n.resolvedLanguage)}
           </span>
         </span>
       </span>
@@ -1864,11 +1877,12 @@ function BuildGroupStatusIcon({ status }: { status: RunnerStatusSummary }) {
 }
 
 function BuildGroupStatusBadge({ group, status }: { group: BuildGroup; status: RunnerStatusSummary }) {
+  const { t } = useTranslation()
   if (status === "failed") {
     return (
       <Badge variant="danger" className="self-center">
         <X />
-        {buildGroupStatusLabel(group, "failed")}
+        {buildGroupStatusLabel(group, "failed", t)}
       </Badge>
     )
   }
@@ -1876,28 +1890,29 @@ function BuildGroupStatusBadge({ group, status }: { group: BuildGroup; status: R
     return (
       <Badge variant="warning" className="self-center">
         <Loader2 className="animate-spin" />
-        {buildGroupStatusLabel(group, "running")}
+        {buildGroupStatusLabel(group, "running", t)}
       </Badge>
     )
   }
   return (
     <Badge variant="success" className="self-center">
       <Check />
-      {buildGroupStatusLabel(group, "passed")}
+      {buildGroupStatusLabel(group, "passed", t)}
     </Badge>
   )
 }
 
-function buildGroupStatusLabel(group: BuildGroup, statusText: "failed" | "running" | "passed") {
+function buildGroupStatusLabel(group: BuildGroup, statusText: "failed" | "running" | "passed", t: TFunction) {
+  const status = t(`user.status${statusText[0].toUpperCase()}${statusText.slice(1)}`)
   switch (group.kind) {
     case "pull_request":
-      return `PR ${statusText}`
+      return t("user.pullRequestStatus", { status })
     case "workflow_run":
-      return `run ${statusText}`
+      return t("user.workflowRunStatus", { status })
     case "branch":
-      return `branch ${statusText}`
+      return t("user.branchStatus", { status })
     default:
-      return `job ${statusText}`
+      return t("user.jobStatus", { status })
   }
 }
 
@@ -1976,7 +1991,7 @@ function isTerminalAvailable(job: RunnerState) {
   return Boolean(job.sandbox_id && ["creating", "running", "stopping"].includes(job.status))
 }
 
-function groupRunnersByBuildContext(runners: RunnerState[]): BuildGroup[] {
+function groupRunnersByBuildContext(runners: RunnerState[], t: TFunction): BuildGroup[] {
   const visibleRunners = runners.filter(isUserVisibleRunnerJob)
   const prByRepositoryAndSHA = new Map<string, number>()
   for (const runner of runners) {
@@ -1989,7 +2004,7 @@ function groupRunnersByBuildContext(runners: RunnerState[]): BuildGroup[] {
   for (const runner of visibleRunners) {
     const repository = runner.repository_full_name || "unknown/repository"
     const inferredPR = runner.pull_request_number || (runner.head_sha ? prByRepositoryAndSHA.get(`${repository}:${runner.head_sha}`) : undefined)
-    const group = buildGroupSeed(runner, repository, inferredPR)
+    const group = buildGroupSeed(runner, repository, inferredPR, t)
     const key = group.key
     const current = groups.get(key)
     if (current) {
@@ -2025,7 +2040,7 @@ function isRunnerJobGroup(value: unknown): value is RunnerJobGroup {
   return Array.isArray(candidate.jobs) && Array.isArray(candidate.current_jobs) && Array.isArray(candidate.previous_jobs)
 }
 
-function buildGroupSeed(runner: RunnerState, repository: string, pullRequestNumber?: number): BuildGroup {
+function buildGroupSeed(runner: RunnerState, repository: string, pullRequestNumber: number | undefined, t: TFunction): BuildGroup {
   const workflowRunIDs = runner.workflow_run_id ? [runner.workflow_run_id] : []
   if (pullRequestNumber) {
     return {
@@ -2033,7 +2048,7 @@ function buildGroupSeed(runner: RunnerState, repository: string, pullRequestNumb
       kind: "pull_request",
       repository,
       title: `PR #${pullRequestNumber}`,
-      subtitle: runner.head_branch || shortSHA(runner.head_sha) || runner.workflow_name || "Pull request checks",
+      subtitle: runner.head_branch || shortSHA(runner.head_sha) || runner.workflow_name || t("user.pullRequestChecks"),
       updatedAt: runner.updated_at,
       jobs: [runner],
       workflowRunIDs,
@@ -2048,8 +2063,8 @@ function buildGroupSeed(runner: RunnerState, repository: string, pullRequestNumb
       key: `branch:${repository}:${branch}:${runner.head_sha}`,
       kind: "branch",
       repository,
-      title: runner.head_branch || `Commit ${shortSHA(runner.head_sha)}`,
-      subtitle: shortSHA(runner.head_sha) || runner.workflow_name || "Branch checks",
+      title: runner.head_branch || t("user.commitTitle", { sha: shortSHA(runner.head_sha) }),
+      subtitle: shortSHA(runner.head_sha) || runner.workflow_name || t("user.branchChecks"),
       updatedAt: runner.updated_at,
       jobs: [runner],
       workflowRunIDs,
@@ -2062,8 +2077,8 @@ function buildGroupSeed(runner: RunnerState, repository: string, pullRequestNumb
       key: `run:${repository}:${runner.workflow_run_id}`,
       kind: "workflow_run",
       repository,
-      title: runner.workflow_name || "Workflow run",
-      subtitle: `Run ${runner.workflow_run_id}`,
+      title: runner.workflow_name || t("user.workflowRun"),
+      subtitle: t("user.runTitle", { id: runner.workflow_run_id }),
       updatedAt: runner.updated_at,
       jobs: [runner],
       workflowRunIDs,
@@ -2073,7 +2088,7 @@ function buildGroupSeed(runner: RunnerState, repository: string, pullRequestNumb
     key: `manual:${repository}:${runner.id}`,
     kind: "manual",
     repository,
-    title: "Manual runner",
+    title: t("user.manualRunner"),
     subtitle: runner.runner_spec_name || runner.runner_name || runner.id,
     updatedAt: runner.updated_at,
     jobs: [runner],

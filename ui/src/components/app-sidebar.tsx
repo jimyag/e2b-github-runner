@@ -1,4 +1,5 @@
 import { Activity, ClipboardList, CloudCog, ListTree, Route, ScrollText, Server, Settings2, Stethoscope, UsersRound } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { QiniuRunnerLogo } from "@/components/qiniu-runner-logo"
 import {
@@ -21,17 +22,18 @@ export function AppSidebar({
   section,
   onSectionChange,
 }: AppSidebarProps) {
+  const { t } = useTranslation()
   const items = [
-    { id: "overview", label: "Overview", icon: Activity },
-    { id: "accounts", label: "Accounts", icon: UsersRound },
-    { id: "runner_requests", label: "Runner Requests", icon: ListTree },
-    { id: "runner_specs", label: "Runner Specs", icon: Settings2 },
-    { id: "runner_groups", label: "Runner Groups", icon: Server },
-    { id: "runner_policies", label: "Runner Policies", icon: Route },
-    { id: "sandbox_service", label: "Sandbox Service", icon: CloudCog },
-    { id: "match", label: "Match Test", icon: ClipboardList },
-    { id: "audit", label: "Audit", icon: ScrollText },
-    { id: "diagnostics", label: "Diagnostics", icon: Stethoscope },
+    { id: "overview", label: t("sidebar.overview"), icon: Activity },
+    { id: "accounts", label: t("sidebar.accounts"), icon: UsersRound },
+    { id: "runner_requests", label: t("sidebar.runnerRequests"), icon: ListTree },
+    { id: "runner_specs", label: t("sidebar.runnerSpecs"), icon: Settings2 },
+    { id: "runner_groups", label: t("sidebar.runnerGroups"), icon: Server },
+    { id: "runner_policies", label: t("sidebar.runnerPolicies"), icon: Route },
+    { id: "sandbox_service", label: t("sidebar.sandboxService"), icon: CloudCog },
+    { id: "match", label: t("sidebar.matchTest"), icon: ClipboardList },
+    { id: "audit", label: t("sidebar.audit"), icon: ScrollText },
+    { id: "diagnostics", label: t("sidebar.diagnostics"), icon: Stethoscope },
   ]
 
   return (
@@ -40,7 +42,7 @@ export function AppSidebar({
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild size="lg" className="data-[slot=sidebar-menu-button]:!p-1.5">
-              <a href="/" aria-label="Qiniu CI Runner home">
+              <a href="/" aria-label={t("common.productHome")}>
                 <QiniuRunnerLogo />
               </a>
             </SidebarMenuButton>
