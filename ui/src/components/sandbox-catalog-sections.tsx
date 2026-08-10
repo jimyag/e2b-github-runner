@@ -3,6 +3,7 @@ import { RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import type { SandboxInstance, SandboxTemplate } from "@/admin-types"
+import appI18n from "@/i18n"
 import {
   formatOptionalTime,
   loadSandboxInstances,
@@ -88,14 +89,14 @@ export function SandboxTemplatesSection({
       }
     } catch (cause) {
       if (generation === loadGeneration.current) {
-        setError(cause instanceof Error ? cause.message : t("user.loadSandboxTemplatesFailed"))
+        setError(cause instanceof Error ? cause.message : appI18n.t("user.loadSandboxTemplatesFailed"))
       }
     } finally {
       if (generation === loadGeneration.current) {
         setLoading(false)
       }
     }
-  }, [installationID, region, request, t])
+  }, [installationID, region, request])
 
   useEffect(() => {
     void load()
@@ -191,14 +192,14 @@ export function SandboxesSection({
       }
     } catch (cause) {
       if (generation === templateLoadGeneration.current) {
-        setTemplatesError(cause instanceof Error ? cause.message : t("user.loadSandboxTemplatesFailed"))
+        setTemplatesError(cause instanceof Error ? cause.message : appI18n.t("user.loadSandboxTemplatesFailed"))
       }
     } finally {
       if (generation === templateLoadGeneration.current) {
         setTemplatesLoading(false)
       }
     }
-  }, [installationID, region, request, t])
+  }, [installationID, region, request])
 
   const loadInstances = useCallback(async () => {
     const generation = ++instanceLoadGeneration.current
@@ -213,14 +214,14 @@ export function SandboxesSection({
       }
     } catch (cause) {
       if (generation === instanceLoadGeneration.current) {
-        setInstancesError(cause instanceof Error ? cause.message : t("user.loadSandboxesFailed"))
+        setInstancesError(cause instanceof Error ? cause.message : appI18n.t("user.loadSandboxesFailed"))
       }
     } finally {
       if (generation === instanceLoadGeneration.current) {
         setInstancesLoading(false)
       }
     }
-  }, [installationID, region, request, t, template])
+  }, [installationID, region, request, template])
 
   useEffect(() => {
     void loadTemplates()

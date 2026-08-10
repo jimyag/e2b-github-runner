@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import type { RunnerJobGroup, RunnerState } from "@/admin-types"
 import { logNames } from "@/admin-types"
 import { formatRunnerDuration, formatTime, runnerStatusLabel } from "@/admin-format"
+import appI18n from "@/i18n"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -77,37 +78,37 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
   }, [endpoint, request])
 
   const loadLog = useCallback(async (name = selectedLog, active: ActiveGuard = { current: true }) => {
-    setLogText(t("user.loadingRunnerLog"))
+    setLogText(appI18n.t("user.loadingRunnerLog"))
     try {
       const text = await request(`${endpoint}/logs/${encodeURIComponent(name)}`)
       if (active.current) {
-        setLogText(typeof text === "string" ? text || t("user.runnerLogEmpty") : JSON.stringify(text, null, 2))
+        setLogText(typeof text === "string" ? text || appI18n.t("user.runnerLogEmpty") : JSON.stringify(text, null, 2))
       }
     } catch (error) {
       if (active.current) {
-        setLogText(error instanceof Error ? error.message : t("user.runnerLogFailed"))
+        setLogText(error instanceof Error ? error.message : appI18n.t("user.runnerLogFailed"))
       }
     }
-  }, [endpoint, request, selectedLog, t])
+  }, [endpoint, request, selectedLog])
 
   const loadGithubLog = useCallback(async (active: ActiveGuard = { current: true }) => {
     setGithubLogLoading(true)
-    setGithubLogText(t("user.loadingGitHubLog"))
+    setGithubLogText(appI18n.t("user.loadingGitHubLog"))
     try {
       const text = await request(`${endpoint}/github-log`)
       if (active.current) {
-        setGithubLogText(typeof text === "string" ? text || t("user.githubLogEmpty") : JSON.stringify(text, null, 2))
+        setGithubLogText(typeof text === "string" ? text || appI18n.t("user.githubLogEmpty") : JSON.stringify(text, null, 2))
       }
     } catch (error) {
       if (active.current) {
-        setGithubLogText(githubLogFailureMessage(error, t))
+        setGithubLogText(githubLogFailureMessage(error, appI18n.t.bind(appI18n)))
       }
     } finally {
       if (active.current) {
         setGithubLogLoading(false)
       }
     }
-  }, [endpoint, request, t])
+  }, [endpoint, request])
 
   useEffect(() => {
     const active = { current: true }

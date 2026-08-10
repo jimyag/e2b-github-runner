@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 
 import { formatTime } from "@/admin-format"
 import type { SandboxServiceDefault } from "@/admin-types"
+import appI18n from "@/i18n"
 import { sandboxRegions } from "@/components/sandbox-catalog-utils"
 import {
   availableSandboxAudienceAccounts,
@@ -100,11 +101,11 @@ export function SandboxServiceDefaultSection({ request }: { request: Request }) 
     try {
       applyConfig((await request("/admin/api/sandbox-service-default")) as SandboxServiceDefault)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("admin.loadSandboxDefaultFailed"))
+      setError(cause instanceof Error ? cause.message : appI18n.t("admin.loadSandboxDefaultFailed"))
     } finally {
       setLoading(false)
     }
-  }, [applyConfig, request, t])
+  }, [applyConfig, request])
 
   useEffect(() => {
     void load()

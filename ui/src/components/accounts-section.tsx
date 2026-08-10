@@ -164,7 +164,7 @@ export function AccountRoleChangeDialog({
 }
 
 export function AccountsSection({ request }: { request: RequestFunction }) {
-  const { t, i18n } = useTranslation()
+  const { t, i18n: activeI18n } = useTranslation()
   const [accounts, setAccounts] = useState<AdminAccount[]>([])
   const [currentAccountID, setCurrentAccountID] = useState(0)
   const [stats, setStats] = useState<AdminAccountStats>(emptyAccountStats)
@@ -202,11 +202,11 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
       setTotal(data.total)
     } catch (cause) {
       if (version !== loadVersion.current) return
-      setError(cause instanceof Error ? cause.message : t("admin.loadAccountsFailed"))
+      setError(cause instanceof Error ? cause.message : i18n.t("admin.loadAccountsFailed"))
     } finally {
       if (version === loadVersion.current) setLoading(false)
     }
-  }, [limit, offset, query, request, role, t])
+  }, [limit, offset, query, request, role])
 
   useEffect(() => {
     void load()
@@ -433,8 +433,8 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                           ))}
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{formatTime(account.created_at, i18n.resolvedLanguage)}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{formatTime(account.updated_at, i18n.resolvedLanguage)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{formatTime(account.created_at, activeI18n.resolvedLanguage)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">{formatTime(account.updated_at, activeI18n.resolvedLanguage)}</TableCell>
                       <TableCell className="pr-5">
                         <div className="flex justify-end">
                           <Select

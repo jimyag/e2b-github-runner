@@ -66,6 +66,7 @@ import {
   type AuthSessionCheckStatus,
 } from "@/app-load-policy"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
+import appI18n from "@/i18n"
 import {
   repositoryAccountLogin,
   repositoryPath,
@@ -74,6 +75,7 @@ import {
   settingsPreferenceInstallationID,
 } from "@/repository-readiness"
 import { productTourVersion, shouldCompleteProductTour } from "@/user-onboarding"
+import { runnerLogTextForView } from "@/app-log-state"
 import {
   createGitHubReauthenticationGate,
   requiresGitHubReauthentication,
@@ -147,7 +149,7 @@ function App() {
   const [runnerPolicies, setRunnerPolicies] = useState<RunnerPolicy[]>([])
   const [selectedID, setSelectedID] = useState("")
   const [selectedLog, setSelectedLog] = useState<(typeof logNames)[number]>("control.log")
-  const [logText, setLogText] = useState(() => t("app.noRunnerSelected"))
+  const [logText, setLogText] = useState("")
   const [loading, setLoading] = useState(false)
   const [createID, setCreateID] = useState("")
   const [createRepository, setCreateRepository] = useState("")
@@ -387,20 +389,20 @@ function App() {
   const loadLog = useCallback(
     async (id: string, name: (typeof logNames)[number]) => {
       if (!hasAccess || !id) {
-        setLogText(t("app.noRunnerSelected"))
+        setLogText("")
         return
       }
-      setLogText(t("common.loading"))
+      setLogText(appI18n.t("common.loading"))
       try {
         const text = (await request(
           `/runner_requests/${encodeURIComponent(id)}/logs/${encodeURIComponent(name)}`
         )) as string
-        setLogText(text || t("user.runnerLogEmpty"))
+        setLogText(text || appI18n.t("user.runnerLogEmpty"))
       } catch (error) {
-        setLogText(error instanceof Error ? error.message : t("app.loadFailed"))
+        setLogText(error instanceof Error ? error.message : appI18n.t("app.loadFailed"))
       }
     },
-    [hasAccess, request, t]
+    [hasAccess, request]
   )
 
   const loadAll = useCallback(async (polling = false) => {
@@ -418,7 +420,7 @@ function App() {
             setRunners(nextRunners)
             setSelectedID((current) => {
               if (!current || nextRunners.some((runner) => runner.id === current)) return current
-              setLogText(t("app.noRunnerSelected"))
+              setLogText("")
               return ""
             })
           },
@@ -429,11 +431,11 @@ function App() {
         })
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("app.controlPlaneLoadFailed"))
+      toast.error(error instanceof Error ? error.message : appI18n.t("app.controlPlaneLoadFailed"))
     } finally {
       setLoading(false)
     }
-  }, [hasAccess, isAdminRoute, request, section, t])
+  }, [hasAccess, isAdminRoute, request, section])
 
   const loadUserAll = useCallback(async (polling = false) => {
     const loadID = userLoadGate.begin(`${authSession.login ?? ""}:${locationPath}`)
@@ -498,16 +500,16 @@ function App() {
       if (!userLoadGate.isCurrent(loadID)) return
       if (requiresGitHubReauthentication(error)) {
         if (beginGitHubReauthentication()) {
-          toast.message(t("app.refreshingGitHubSignIn"))
+          toast.message(appI18n.t("app.refreshingGitHubSignIn"))
           refreshGitHubOAuthLogin()
         }
         return
       }
-      toast.error(error instanceof Error ? error.message : t("app.workspaceLoadFailed"))
+      toast.error(error instanceof Error ? error.message : appI18n.t("app.workspaceLoadFailed"))
     } finally {
       if (userLoadGate.isCurrent(loadID)) setLoading(false)
     }
-  }, [authSession.authenticated, authSession.login, beginGitHubReauthentication, hasAccess, isAdminRoute, locationPath, refreshGitHubOAuthLogin, request, requestUserRunnerPage, t, userLoadGate])
+  }, [authSession.authenticated, authSession.login, beginGitHubReauthentication, hasAccess, isAdminRoute, locationPath, refreshGitHubOAuthLogin, request, requestUserRunnerPage, userLoadGate])
 
   const saveProductTourOnboarding = useCallback(async (state: ProductTourOnboarding) => {
     const saved = (await request("/user/onboarding/product-tour", {
@@ -528,16 +530,16 @@ function App() {
     } catch (error) {
       if (requiresGitHubReauthentication(error)) {
         if (beginGitHubReauthentication()) {
-          toast.message(t("app.refreshingGitHubSignIn"))
+          toast.message(appI18n.t("app.refreshingGitHubSignIn"))
           refreshGitHubOAuthLogin()
         }
         return
       }
-      toast.error(error instanceof Error ? error.message : t("app.olderJobsLoadFailed"))
+      toast.error(error instanceof Error ? error.message : appI18n.t("app.olderJobsLoadFailed"))
     } finally {
       setLoadingUserRunnerHistory(false)
     }
-  }, [authSession.authenticated, beginGitHubReauthentication, loadingUserRunnerHistory, refreshGitHubOAuthLogin, requestUserRunnerPage, t])
+  }, [authSession.authenticated, beginGitHubReauthentication, loadingUserRunnerHistory, refreshGitHubOAuthLogin, requestUserRunnerPage])
 
   const syncGitHubAppSetupFromURL = useCallback(async () => {
     if (
@@ -556,18 +558,18 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ installation_id: installationID, setup_state: setupState }),
       })) as GitHubInstallation
-      toast.success(t("app.accountSynced"))
+      toast.success(appI18n.t("app.accountSynced"))
       const nextPath = repositoryPath(installation.account_login, authSession.login)
       window.history.replaceState(null, "", nextPath)
       setLocationPath(window.location.pathname)
       setLocationSearch(window.location.search)
       await loadUserAll()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t("app.accountSyncFailed"))
+      toast.error(error instanceof Error ? error.message : appI18n.t("app.accountSyncFailed"))
     } finally {
       setLoading(false)
     }
-  }, [authSession.authenticated, authSession.login, hasAccess, isAdminRoute, loadUserAll, locationPath, request, t])
+  }, [authSession.authenticated, authSession.login, hasAccess, isAdminRoute, loadUserAll, locationPath, request])
 
   const loadAuthorizedRepositories = useCallback(async (id: number) => {
     setRepositoryErrors((current) => {
@@ -583,13 +585,13 @@ function App() {
       )) as AuthorizedRepositories
       setAuthorizedRepositories((current) => ({ ...current, [id]: data.repositories || [] }))
     } catch (error) {
-      const message = error instanceof Error ? error.message : t("app.repositoriesLoadFailed")
+      const message = error instanceof Error ? error.message : appI18n.t("app.repositoriesLoadFailed")
       setRepositoryErrors((current) => ({ ...current, [id]: message }))
       toast.error(message)
     } finally {
       setLoadingRepositoriesFor(null)
     }
-  }, [request, t])
+  }, [request])
 
   const syncGitHubInstallations = useCallback(async () => {
     if (syncingGitHubInstallations) return
@@ -598,14 +600,14 @@ function App() {
     try {
       const data = (await request("/user/github-app/installations/sync", { method: "POST" })) as SyncedGitHubInstallations
       const count = data.installations?.length ?? 0
-      toast.success(t("app.syncedGitHubAccounts", { count }))
+      toast.success(appI18n.t("app.syncedGitHubAccounts", { count }))
       await loadUserAll()
     } catch (error) {
       const requestError = error as RequestError
-      const message = error instanceof Error ? error.message : t("app.accountsSyncFailed")
+      const message = error instanceof Error ? error.message : appI18n.t("app.accountsSyncFailed")
       if (requiresGitHubReauthentication(requestError) || message === "sign in with GitHub again before syncing installations") {
         if (beginGitHubReauthentication()) {
-          toast.message(t("app.refreshingGitHubSignIn"))
+          toast.message(appI18n.t("app.refreshingGitHubSignIn"))
           refreshGitHubOAuthLogin()
         }
         return
@@ -615,7 +617,7 @@ function App() {
       setSyncingGitHubInstallations(false)
       setLoading(false)
     }
-  }, [beginGitHubReauthentication, loadUserAll, refreshGitHubOAuthLogin, request, syncingGitHubInstallations, t])
+  }, [beginGitHubReauthentication, loadUserAll, refreshGitHubOAuthLogin, request, syncingGitHubInstallations])
 
   const saveSandboxConfig = useCallback(async (
     apiURL: string,
@@ -631,8 +633,8 @@ function App() {
     })) as UserPreferences
     setUserPreferences(preferences)
     setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
-    toast.success(t("app.sandboxSaved"))
-  }, [request, t])
+    toast.success(appI18n.t("app.sandboxSaved"))
+  }, [request])
 
   const deleteSandboxAPIKey = useCallback(async (installationID?: number) => {
     const preferences = (await request(userPreferencesPath(installationID, "/user/preferences/sandbox-api-key"), {
@@ -640,8 +642,8 @@ function App() {
     })) as UserPreferences
     setUserPreferences(preferences)
     setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
-    toast.success(t("app.apiKeyRemoved"))
-  }, [request, t])
+    toast.success(appI18n.t("app.apiKeyRemoved"))
+  }, [request])
 
   const {
     runnerSpecOpen,
@@ -774,8 +776,8 @@ function App() {
     }).catch((error) => {
       toast.error(
         error instanceof Error
-          ? t("app.tourProgressUpdateFailedWithReason", { reason: error.message })
-          : t("app.tourProgressUpdateFailed"),
+          ? appI18n.t("app.tourProgressUpdateFailedWithReason", { reason: error.message })
+          : appI18n.t("app.tourProgressUpdateFailed"),
       )
     })
   }, [
@@ -788,7 +790,6 @@ function App() {
     selectedRepositoryPreferenceScope,
     userPreferences,
     userPreferencesScope,
-    t,
   ])
 
   useEffect(() => {
@@ -810,10 +811,10 @@ function App() {
         setDiagnostics(summary as DiagnosticsSummary)
         setDiagnosticsVars(typeof vars === "string" ? vars : JSON.stringify(vars, null, 2))
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : t("app.diagnosticsLoadFailed"))
+        toast.error(error instanceof Error ? error.message : appI18n.t("app.diagnosticsLoadFailed"))
       }
     })()
-  }, [hasAccess, request, section, t])
+  }, [hasAccess, request, section])
 
   const signOut = () => {
     void fetch("/auth/logout", { method: "POST", credentials: "same-origin" }).finally(() => {
@@ -832,7 +833,7 @@ function App() {
     setLoadingRepositoriesFor(null)
     setUserSelectedKey("")
     setSelectedID("")
-    setLogText(t("app.noRunnerSelected"))
+    setLogText("")
   }
 
   const resetCreateRunnerForm = () => {
@@ -1101,7 +1102,7 @@ function App() {
               selected={selected}
               selectedID={selectedID}
               selectedLog={selectedLog}
-              logText={logText}
+              logText={runnerLogTextForView(selectedID, logText, t)}
               createID={createID}
               createRepository={createRepository}
               createRunnerSpec={createRunnerSpec}

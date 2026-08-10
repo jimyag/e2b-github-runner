@@ -21,6 +21,7 @@ import type { TFunction } from "i18next"
 import type { AuthSession, GitHubAppConfig, ProductTourOnboarding, RunnerJobGroup, RunnerState, UserPreferences } from "@/admin-types"
 import { logNames } from "@/admin-types"
 import { formatRunnerDuration, formatTime, runnerStatusLabel } from "@/admin-format"
+import appI18n from "@/i18n"
 import { userRunnerHistoryWindow } from "@/app-load-policy"
 import { AccountMenu } from "@/components/account-menu"
 import { githubLogFailureMessage } from "@/components/github-log-utils"
@@ -452,8 +453,8 @@ function AccountsPage({
     const login = route.accountLogin?.trim()
     toast.error(
       login
-        ? t("user.sandboxPermissionDeniedFor", { login })
-        : t("user.sandboxPermissionDenied"),
+        ? appI18n.t("user.sandboxPermissionDeniedFor", { login })
+        : appI18n.t("user.sandboxPermissionDenied"),
     )
     onNavigateAccountSettings(currentLogin, "preferences")
   }, [
@@ -461,7 +462,6 @@ function AccountsPage({
     onNavigateAccountSettings,
     route.accountLogin,
     scopeAccess,
-    t,
   ])
 
   return (
@@ -1339,42 +1339,42 @@ function RunnerJobLogPanel({
     let active = true
     queueMicrotask(() => {
       if (active) {
-        setRunnerLogText(t("user.loadingRunnerLog"))
+        setRunnerLogText(appI18n.t("user.loadingRunnerLog"))
       }
     })
     void request(`${endpoint}/logs/${encodeURIComponent(selectedLog)}`)
       .then((text) => {
         if (active) {
-          setRunnerLogText(logResponseText(text, t("user.runnerLogEmpty")))
+          setRunnerLogText(logResponseText(text, appI18n.t("user.runnerLogEmpty")))
         }
       })
       .catch((error) => {
         if (active) {
-          setRunnerLogText(error instanceof Error ? error.message : t("user.runnerLogFailed"))
+          setRunnerLogText(error instanceof Error ? error.message : appI18n.t("user.runnerLogFailed"))
         }
       })
     return () => {
       active = false
     }
-  }, [endpoint, request, selectedLog, t])
+  }, [endpoint, request, selectedLog])
 
   useEffect(() => {
     let active = true
     queueMicrotask(() => {
       if (active) {
         setGithubLogLoading(true)
-        setGithubLog({ kind: "log", text: t("user.loadingGitHubLog") })
+        setGithubLog({ kind: "log", text: appI18n.t("user.loadingGitHubLog") })
       }
     })
     void request(`${endpoint}/github-log`)
       .then((text) => {
         if (active) {
-          setGithubLog(githubLogResponseState(text, t("user.githubLogEmpty")))
+          setGithubLog(githubLogResponseState(text, appI18n.t("user.githubLogEmpty")))
         }
       })
       .catch((error) => {
         if (active) {
-          setGithubLog(githubLogErrorState(error, t))
+          setGithubLog(githubLogErrorState(error, appI18n.t.bind(appI18n)))
         }
       })
       .finally(() => {
@@ -1385,7 +1385,7 @@ function RunnerJobLogPanel({
     return () => {
       active = false
     }
-  }, [endpoint, request, t])
+  }, [endpoint, request])
 
   const refreshGithubLog = () => {
     const refreshEndpoint = endpoint
