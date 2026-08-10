@@ -1223,14 +1223,15 @@ type WorkflowRunEvent struct {
 }
 
 type WorkflowJob struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	Status       string `json:"status"`
-	Conclusion   string `json:"conclusion"`
-	RunnerName   string `json:"runner_name"`
-	WorkflowName string `json:"workflow_name"`
-	HeadBranch   string `json:"head_branch"`
-	Labels       Labels `json:"labels"`
+	ID           int64         `json:"id"`
+	Name         string        `json:"name"`
+	Status       string        `json:"status"`
+	Conclusion   string        `json:"conclusion"`
+	RunnerName   string        `json:"runner_name"`
+	WorkflowName string        `json:"workflow_name"`
+	HeadBranch   string        `json:"head_branch"`
+	PullRequests []PullRequest `json:"pull_requests"`
+	Labels       Labels        `json:"labels"`
 }
 
 type PullRequest struct {

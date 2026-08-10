@@ -430,13 +430,19 @@ func (s *Server) handleUserSaveCacheConfig(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// Region and endpoint are server-owned. Resolve them from the effective
-	// Sandbox service region instead of trusting values supplied by the browser.
-	sandboxPreferences, err := s.accountPreferencesResponseBase(scope, account.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+	// Sandbox service region instead of trusting values supplied by the browser
+	// or reading only the scope's local preference (which may be empty when the
+	// service comes from inheritance or the admin default).
+	_, sandboxSnapshot, sandboxErr := s.sandboxServiceForScopeWithDefaultContext(r.Context(), scope)
+	if sandboxErr != nil {
+		if errors.Is(sandboxErr, errSandboxServiceNotConfigured) {
+			writeError(w, http.StatusBadRequest, "configure a Sandbox service before configuring Cache S3")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, sandboxErr.Error())
 		return
 	}
-	region, endpoint, ok := s.cacheS3SettingsForSandboxAPIURL(sandboxPreferences.Sandbox.APIURL)
+	region, endpoint, ok := s.cacheS3SettingsForSandboxAPIURL(sandboxSnapshot.APIURL)
 	if !ok || region == "" || endpoint == "" {
 		writeError(w, http.StatusBadRequest, "selected Sandbox service region has no cache S3 mapping")
 		return
@@ -444,6 +450,12 @@ func (s *Server) handleUserSaveCacheConfig(w http.ResponseWriter, r *http.Reques
 	value := accountCacheServicePreferenceValue{
 		Region: region, Bucket: strings.TrimSpace(input.Bucket),
 		Prefix: strings.Trim(strings.TrimSpace(input.Prefix), "/"), Endpoint: endpoint,
+	}
+	if value.Prefix != "" {
+		if err := validateCachePrefix(value.Prefix); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if value.Bucket == "" {
 		writeError(w, http.StatusBadRequest, "bucket is required")
@@ -619,7 +631,7 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		apiURL, supported := supportedSandboxRegionEndpoint(apiURL)
+		apiURL, supported := s.supportedSandboxRegionEndpoint(apiURL)
 		if !supported {
 			writeError(w, http.StatusBadRequest, "unsupported sandbox region")
 			return
@@ -781,9 +793,19 @@ func (s *Server) accountPreferencesResponseBase(scope accountPreferenceScope, vi
 }
 
 func (s *Server) fillCachePreferenceResponse(response accountPreferencesResponse, scope accountPreferenceScope) (accountPreferencesResponse, error) {
+	// Always expose the effective operator-owned mapping, even before a cache
+	// preference exists. This lets the UI configure Cache S3 when Sandbox is
+	// supplied by inheritance or the admin default.
+	region, endpoint := "", ""
+	if _, snapshot, snapshotErr := s.sandboxServiceForScopeWithDefault(scope); snapshotErr == nil {
+		region, endpoint, _ = s.cacheS3SettingsForSandboxAPIURL(snapshot.APIURL)
+	}
+
 	preference, err := s.store.GetAccountPreference(scope.Type, scope.ID, accountPreferenceNamespaceCache, accountPreferenceKeyCacheS3)
 	if err != nil {
 		if errors.Is(err, state.ErrNotFound) {
+			response.Cache.Region = region
+			response.Cache.Endpoint = endpoint
 			return response, nil
 		}
 		return accountPreferencesResponse{}, err
@@ -793,8 +815,10 @@ func (s *Server) fillCachePreferenceResponse(response accountPreferencesResponse
 		return accountPreferencesResponse{}, err
 	}
 	accessKey, accessErr := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeCacheAccessKeyID)
-	secretKey, secretErr := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeCacheSecretAccessKey)
+	_, secretErr := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeCacheSecretAccessKey)
 	if errors.Is(accessErr, state.ErrNotFound) || errors.Is(secretErr, state.ErrNotFound) {
+		response.Cache.Region = region
+		response.Cache.Endpoint = endpoint
 		return response, nil
 	}
 	if accessErr != nil {
@@ -803,11 +827,11 @@ func (s *Server) fillCachePreferenceResponse(response accountPreferencesResponse
 	if secretErr != nil {
 		return accountPreferencesResponse{}, secretErr
 	}
-	region := value.Region
-	endpoint := value.Endpoint
-	if mappedRegion, mappedEndpoint, ok := s.cacheS3SettingsForSandboxAPIURL(response.Sandbox.APIURL); ok {
-		region = mappedRegion
-		endpoint = mappedEndpoint
+	if region == "" {
+		region = value.Region
+	}
+	if endpoint == "" {
+		endpoint = value.Endpoint
 	}
 	response.Cache = accountCachePreference{
 		Configured: true,
@@ -817,7 +841,6 @@ func (s *Server) fillCachePreferenceResponse(response accountPreferencesResponse
 		Endpoint:   endpoint,
 		UpdatedAt:  accessKey.UpdatedAt.Format(time.RFC3339),
 	}
-	_ = secretKey
 	return response, nil
 }
 

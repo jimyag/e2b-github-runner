@@ -7,22 +7,21 @@ import (
 	"github.com/qiniu/ci-runner/internal/sandboxrunner"
 )
 
-func sandboxRegionEndpoint(region string) (string, bool) {
-	switch strings.TrimSpace(region) {
-	case "cn-yangzhou-1":
-		return "https://cn-yangzhou-1-sandbox.qiniuapi.com", true
-	case "us-south-1":
-		return "https://us-south-1-sandbox.qiniuapi.com", true
-	default:
-		return "", false
+func (s *Server) sandboxRegionEndpoint(regionID string) (string, bool) {
+	regionID = strings.TrimSpace(regionID)
+	for _, region := range s.cfg.SandboxRegions {
+		if strings.TrimSpace(region.ID) == regionID {
+			return strings.TrimRight(strings.TrimSpace(region.SandboxAPIURL), "/"), true
+		}
 	}
+	return "", false
 }
 
-func supportedSandboxRegionEndpoint(rawURL string) (string, bool) {
+func (s *Server) supportedSandboxRegionEndpoint(rawURL string) (string, bool) {
 	normalized := strings.TrimRight(strings.TrimSpace(rawURL), "/")
-	for _, region := range []string{"cn-yangzhou-1", "us-south-1"} {
-		endpoint, _ := sandboxRegionEndpoint(region)
-		if normalized == endpoint {
+	for _, region := range s.cfg.SandboxRegions {
+		endpoint := strings.TrimRight(strings.TrimSpace(region.SandboxAPIURL), "/")
+		if strings.EqualFold(normalized, endpoint) {
 			return endpoint, true
 		}
 	}
@@ -48,7 +47,7 @@ func (s *Server) sandboxCatalogForUser(w http.ResponseWriter, r *http.Request) (
 		writeError(w, http.StatusForbidden, "Sandbox resources for this GitHub account are managed by its owner")
 		return nil, false
 	}
-	endpoint, ok := sandboxRegionEndpoint(r.URL.Query().Get("region"))
+	endpoint, ok := s.sandboxRegionEndpoint(r.URL.Query().Get("region"))
 	if !ok {
 		writeError(w, http.StatusBadRequest, "unsupported sandbox region")
 		return nil, false

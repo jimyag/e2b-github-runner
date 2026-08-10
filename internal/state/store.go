@@ -32,6 +32,7 @@ type RunnerRequest struct {
 	ID                     string    `json:"id"`
 	Source                 string    `json:"source"`
 	JobID                  int64     `json:"job_id,omitempty"`
+	PullRequestNumber      int64     `json:"pull_request_number,omitempty"`
 	GitHubInstallationID   int64     `json:"github_installation_id,omitempty"`
 	RepositoryFullName     string    `json:"repository_full_name,omitempty"`
 	RequestedLabels        []string  `json:"requested_labels,omitempty"`

@@ -41,6 +41,7 @@ func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallatio
 		ID:                   id,
 		Source:               "github_webhook",
 		JobID:                job.ID,
+		PullRequestNumber:    workflowJobPullRequestNumber(job.PullRequests),
 		GitHubInstallationID: githubInstallationID,
 		RepositoryFullName:   repositoryFullName,
 		RequestedLabels:      append([]string(nil), job.Labels...),
@@ -286,8 +287,14 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 			},
 		}
 
-		// Try to generate cache STS for this repository.
-		if req.GitHubInstallationID > 0 {
+		// Do not expose repository-wide write/delete cache credentials to jobs
+		// originating from pull requests. The job can execute untrusted workflow
+		// code, and runs-on/cache does not currently expose a read-only mode.
+		// PullRequestNumber is extracted from the signed GitHub webhook payload;
+		// manual requests without that payload remain eligible for cache.
+		if st.PullRequestNumber > 0 {
+			s.logger.Info("cache STS skipped for pull request job", "id", id, "pull_request", st.PullRequestNumber)
+		} else if req.GitHubInstallationID > 0 {
 			if storage, err := s.cacheStorageForInstallation(req.GitHubInstallationID); err == nil {
 				// Cache prefix is <configured-prefix>/<owner>/<repo>.
 				cachePrefix := storage.prefix + "/" + req.RepositoryFullName

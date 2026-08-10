@@ -102,6 +102,9 @@ func (s *DBStore) CreateRequest(req RunnerRequest, payload []byte) (bool, Runner
 		RepositoryFullName: req.RepositoryFullName,
 		GitHubPayloadJSON:  string(payload),
 	})
+	if req.PullRequestNumber > 0 && payloadLinks.pullRequestNumber == 0 {
+		payloadLinks.pullRequestNumber = req.PullRequestNumber
+	}
 	record := runnerRequestRecord{
 		ID:                      req.ID,
 		Source:                  req.Source,

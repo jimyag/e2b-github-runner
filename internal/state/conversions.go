@@ -26,6 +26,7 @@ func recordToRequest(record runnerRequestRecord) (RunnerRequest, error) {
 		ID:                     record.ID,
 		Source:                 record.Source,
 		JobID:                  pointerToInt64(record.WorkflowJobID),
+		PullRequestNumber:      record.PullRequestNumber,
 		GitHubInstallationID:   record.GitHubInstallationID,
 		RepositoryFullName:     record.RepositoryFullName,
 		RequestedLabels:        requestedLabels,

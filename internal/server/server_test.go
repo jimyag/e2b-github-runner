@@ -7402,6 +7402,10 @@ func newTestServerWithLimit(t *testing.T, store state.Store, ghURL string, fake 
 		RetryMaxAttempts:        3,
 		MaxConcurrentRunners:    limit,
 		GitHubAPIBaseURL:        ghURL,
+		SandboxRegions: []config.SandboxRegionConfig{
+			{ID: "us-south-1", Label: "United States · Dallas 1", SandboxAPIURL: "https://us-south-1-sandbox.qiniuapi.com", S3Region: "us-north-1", S3Endpoint: "https://s3-us-north-1.qiniucs.com"},
+			{ID: "cn-yangzhou-1", Label: "China · Yangzhou 1", SandboxAPIURL: "https://cn-yangzhou-1-sandbox.qiniuapi.com", S3Region: "cn-east-1", S3Endpoint: "https://s3-cn-east-1.qiniucs.com"},
+		},
 	}
 	if _, err := store.UpsertProfile(state.RunnerProfile{
 		Name:           "default",

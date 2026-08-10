@@ -52,6 +52,16 @@ func TestGenerateCacheSTSUsesRequestedDuration(t *testing.T) {
 	}
 }
 
+func TestValidateCachePrefixRejectsInvalidComponents(t *testing.T) {
+	for _, prefix := range []string{"", "cache/../repo", "cache//repo", "cache/./repo"} {
+		t.Run(prefix, func(t *testing.T) {
+			if err := validateCachePrefix(prefix); err == nil {
+				t.Fatalf("validateCachePrefix(%q) should reject invalid prefix", prefix)
+			}
+		})
+	}
+}
+
 func TestGenerateCacheSTSRejectsResourceWildcards(t *testing.T) {
 	for _, prefix := range []string{"gh-actions/*/repo", "gh-actions/?/repo"} {
 		t.Run(prefix, func(t *testing.T) {
