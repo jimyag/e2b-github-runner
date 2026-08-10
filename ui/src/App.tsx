@@ -75,7 +75,7 @@ import {
   settingsPreferenceInstallationID,
 } from "@/repository-readiness"
 import { productTourVersion, shouldCompleteProductTour } from "@/user-onboarding"
-import { runnerLogTextForView } from "@/app-log-state"
+import { runnerLogTextForView, type LocalizedLogText } from "@/app-log-state"
 import {
   createGitHubReauthenticationGate,
   requiresGitHubReauthentication,
@@ -149,7 +149,7 @@ function App() {
   const [runnerPolicies, setRunnerPolicies] = useState<RunnerPolicy[]>([])
   const [selectedID, setSelectedID] = useState("")
   const [selectedLog, setSelectedLog] = useState<(typeof logNames)[number]>("control.log")
-  const [logText, setLogText] = useState("")
+  const [logText, setLogText] = useState<LocalizedLogText>({ kind: "text", text: "" })
   const [loading, setLoading] = useState(false)
   const [createID, setCreateID] = useState("")
   const [createRepository, setCreateRepository] = useState("")
@@ -389,17 +389,21 @@ function App() {
   const loadLog = useCallback(
     async (id: string, name: (typeof logNames)[number]) => {
       if (!hasAccess || !id) {
-        setLogText("")
+        setLogText({ kind: "text", text: "" })
         return
       }
-      setLogText(appI18n.t("common.loading"))
+      setLogText({ kind: "message", key: "common.loading" })
       try {
         const text = (await request(
           `/runner_requests/${encodeURIComponent(id)}/logs/${encodeURIComponent(name)}`
         )) as string
-        setLogText(text || appI18n.t("user.runnerLogEmpty"))
+        setLogText(text
+          ? { kind: "text", text }
+          : { kind: "message", key: "user.runnerLogEmpty" })
       } catch (error) {
-        setLogText(error instanceof Error ? error.message : appI18n.t("app.loadFailed"))
+        setLogText(error instanceof Error
+          ? { kind: "text", text: error.message }
+          : { kind: "message", key: "app.loadFailed" })
       }
     },
     [hasAccess, request]
@@ -420,7 +424,7 @@ function App() {
             setRunners(nextRunners)
             setSelectedID((current) => {
               if (!current || nextRunners.some((runner) => runner.id === current)) return current
-              setLogText("")
+              setLogText({ kind: "text", text: "" })
               return ""
             })
           },
@@ -833,7 +837,7 @@ function App() {
     setLoadingRepositoriesFor(null)
     setUserSelectedKey("")
     setSelectedID("")
-    setLogText("")
+    setLogText({ kind: "text", text: "" })
   }
 
   const resetCreateRunnerForm = () => {

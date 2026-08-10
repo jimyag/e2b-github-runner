@@ -1,5 +1,7 @@
-import type { TFunction } from "i18next"
+import type { LocalizedLogText } from "@/app-log-state"
 
-export function githubLogFailureMessage(error: unknown, t: TFunction) {
-  return error instanceof Error ? error.message : t("user.githubLogFailed")
+export function githubLogFailureState(error: unknown): LocalizedLogText {
+  return error instanceof Error
+    ? { kind: "text", text: error.message }
+    : { kind: "message", key: "user.githubLogFailed" }
 }

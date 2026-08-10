@@ -5,13 +5,13 @@ import { useTranslation } from "react-i18next"
 import type { RunnerJobGroup, RunnerState } from "@/admin-types"
 import { logNames } from "@/admin-types"
 import { formatRunnerDuration, formatTime, runnerStatusLabel } from "@/admin-format"
-import appI18n from "@/i18n"
+import { localizedLogTextForView, type LocalizedLogText } from "@/app-log-state"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { runnerJobDetailRows, workflowRunLink } from "@/components/runner-job-detail-rows"
-import { githubLogFailureMessage } from "@/components/github-log-utils"
+import { githubLogFailureState } from "@/components/github-log-utils"
 import { useSandboxTerminal } from "@/hooks/use-sandbox-terminal"
 import { cn } from "@/lib/utils"
 
@@ -36,8 +36,8 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
   const [jobGroup, setJobGroup] = useState<RunnerJobGroup | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedLog, setSelectedLog] = useState<LogName>("control.log")
-  const [logText, setLogText] = useState(() => t("user.loadingRunnerLog"))
-  const [githubLogText, setGithubLogText] = useState(() => t("user.loadingGitHubLog"))
+  const [logText, setLogText] = useState<LocalizedLogText>({ kind: "message", key: "user.loadingRunnerLog" })
+  const [githubLogText, setGithubLogText] = useState<LocalizedLogText>({ kind: "message", key: "user.loadingGitHubLog" })
   const [githubLogLoading, setGithubLogLoading] = useState(false)
   const endpoint = useMemo(() => `${apiBase}/${encodeURIComponent(id)}`, [apiBase, id])
   const terminalAvailable = job ? isTerminalAvailable(job) : false
@@ -78,30 +78,40 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
   }, [endpoint, request])
 
   const loadLog = useCallback(async (name = selectedLog, active: ActiveGuard = { current: true }) => {
-    setLogText(appI18n.t("user.loadingRunnerLog"))
+    setLogText({ kind: "message", key: "user.loadingRunnerLog" })
     try {
       const text = await request(`${endpoint}/logs/${encodeURIComponent(name)}`)
       if (active.current) {
-        setLogText(typeof text === "string" ? text || appI18n.t("user.runnerLogEmpty") : JSON.stringify(text, null, 2))
+        setLogText(typeof text === "string"
+          ? text
+            ? { kind: "text", text }
+            : { kind: "message", key: "user.runnerLogEmpty" }
+          : { kind: "text", text: JSON.stringify(text, null, 2) })
       }
     } catch (error) {
       if (active.current) {
-        setLogText(error instanceof Error ? error.message : appI18n.t("user.runnerLogFailed"))
+        setLogText(error instanceof Error
+          ? { kind: "text", text: error.message }
+          : { kind: "message", key: "user.runnerLogFailed" })
       }
     }
   }, [endpoint, request, selectedLog])
 
   const loadGithubLog = useCallback(async (active: ActiveGuard = { current: true }) => {
     setGithubLogLoading(true)
-    setGithubLogText(appI18n.t("user.loadingGitHubLog"))
+    setGithubLogText({ kind: "message", key: "user.loadingGitHubLog" })
     try {
       const text = await request(`${endpoint}/github-log`)
       if (active.current) {
-        setGithubLogText(typeof text === "string" ? text || appI18n.t("user.githubLogEmpty") : JSON.stringify(text, null, 2))
+        setGithubLogText(typeof text === "string"
+          ? text
+            ? { kind: "text", text }
+            : { kind: "message", key: "user.githubLogEmpty" }
+          : { kind: "text", text: JSON.stringify(text, null, 2) })
       }
     } catch (error) {
       if (active.current) {
-        setGithubLogText(githubLogFailureMessage(error, appI18n.t.bind(appI18n)))
+        setGithubLogText(githubLogFailureState(error))
       }
     } finally {
       if (active.current) {
@@ -252,7 +262,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
                     </TabsList>
                   </Tabs>
                   <pre className="mt-4 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
-                    {logText}
+                    {localizedLogTextForView(logText, t)}
                   </pre>
                 </CardContent>
               </Card>
@@ -273,7 +283,7 @@ export function RunnerJobDetail({ id, apiBase, onBack, onOpenJob, request }: Run
                 </CardHeader>
                 <CardContent className="p-5">
                   <pre className="font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
-                    {githubLogText}
+                    {localizedLogTextForView(githubLogText, t)}
                   </pre>
                 </CardContent>
               </Card>

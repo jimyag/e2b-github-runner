@@ -21,10 +21,11 @@ import type { TFunction } from "i18next"
 import type { AuthSession, GitHubAppConfig, ProductTourOnboarding, RunnerJobGroup, RunnerState, UserPreferences } from "@/admin-types"
 import { logNames } from "@/admin-types"
 import { formatRunnerDuration, formatTime, runnerStatusLabel } from "@/admin-format"
+import { localizedLogTextForView, type LocalizedLogMessageKey, type LocalizedLogText } from "@/app-log-state"
 import appI18n from "@/i18n"
 import { userRunnerHistoryWindow } from "@/app-load-policy"
 import { AccountMenu } from "@/components/account-menu"
-import { githubLogFailureMessage } from "@/components/github-log-utils"
+import { githubLogFailureState } from "@/components/github-log-utils"
 import { RepositoryReadinessPage } from "@/components/repository-readiness-page"
 import { UserOnboardingTour } from "@/components/user-onboarding-tour"
 import {
@@ -83,7 +84,7 @@ type AccountSettingsRoute = {
 }
 
 type GitHubLogState =
-  | { kind: "log"; text: string }
+  | { kind: "log"; text: LocalizedLogText }
   | { kind: "unavailable"; detail: string }
 
 const jobLogTabsListClassName = "h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0 text-muted-foreground"
@@ -1316,8 +1317,8 @@ function RunnerJobLogPanel({
 }) {
   const { t, i18n } = useTranslation()
   const [selectedLog, setSelectedLog] = useState<(typeof logNames)[number]>("control.log")
-  const [runnerLogText, setRunnerLogText] = useState(() => t("user.loadingRunnerLog"))
-  const [githubLog, setGithubLog] = useState<GitHubLogState>(() => ({ kind: "log", text: t("user.loadingGitHubLog") }))
+  const [runnerLogText, setRunnerLogText] = useState<LocalizedLogText>({ kind: "message", key: "user.loadingRunnerLog" })
+  const [githubLog, setGithubLog] = useState<GitHubLogState>({ kind: "log", text: { kind: "message", key: "user.loadingGitHubLog" } })
   const [githubLogLoading, setGithubLogLoading] = useState(false)
   const endpoint = `/user/runner_requests/${encodeURIComponent(job.id)}`
   const endpointRef = useRef(endpoint)
@@ -1339,18 +1340,20 @@ function RunnerJobLogPanel({
     let active = true
     queueMicrotask(() => {
       if (active) {
-        setRunnerLogText(appI18n.t("user.loadingRunnerLog"))
+        setRunnerLogText({ kind: "message", key: "user.loadingRunnerLog" })
       }
     })
     void request(`${endpoint}/logs/${encodeURIComponent(selectedLog)}`)
       .then((text) => {
         if (active) {
-          setRunnerLogText(logResponseText(text, appI18n.t("user.runnerLogEmpty")))
+          setRunnerLogText(logResponseText(text, "user.runnerLogEmpty"))
         }
       })
       .catch((error) => {
         if (active) {
-          setRunnerLogText(error instanceof Error ? error.message : appI18n.t("user.runnerLogFailed"))
+          setRunnerLogText(error instanceof Error
+            ? { kind: "text", text: error.message }
+            : { kind: "message", key: "user.runnerLogFailed" })
         }
       })
     return () => {
@@ -1363,18 +1366,18 @@ function RunnerJobLogPanel({
     queueMicrotask(() => {
       if (active) {
         setGithubLogLoading(true)
-        setGithubLog({ kind: "log", text: appI18n.t("user.loadingGitHubLog") })
+        setGithubLog({ kind: "log", text: { kind: "message", key: "user.loadingGitHubLog" } })
       }
     })
     void request(`${endpoint}/github-log`)
       .then((text) => {
         if (active) {
-          setGithubLog(githubLogResponseState(text, appI18n.t("user.githubLogEmpty")))
+          setGithubLog(githubLogResponseState(text, "user.githubLogEmpty"))
         }
       })
       .catch((error) => {
         if (active) {
-          setGithubLog(githubLogErrorState(error, appI18n.t.bind(appI18n)))
+          setGithubLog(githubLogErrorState(error))
         }
       })
       .finally(() => {
@@ -1390,16 +1393,16 @@ function RunnerJobLogPanel({
   const refreshGithubLog = () => {
     const refreshEndpoint = endpoint
     setGithubLogLoading(true)
-    setGithubLog({ kind: "log", text: t("user.loadingGitHubLog") })
+    setGithubLog({ kind: "log", text: { kind: "message", key: "user.loadingGitHubLog" } })
     void request(`${refreshEndpoint}/github-log`)
       .then((text) => {
         if (endpointRef.current === refreshEndpoint) {
-          setGithubLog(githubLogResponseState(text, t("user.githubLogEmpty")))
+          setGithubLog(githubLogResponseState(text, "user.githubLogEmpty"))
         }
       })
       .catch((error) => {
         if (endpointRef.current === refreshEndpoint) {
-          setGithubLog(githubLogErrorState(error, t))
+          setGithubLog(githubLogErrorState(error))
         }
       })
       .finally(() => {
@@ -1437,7 +1440,7 @@ function RunnerJobLogPanel({
             <GitHubLogsUnavailable detail={githubLog.detail} actions={githubLogActions} />
           ) : (
             <LogOutput
-              text={githubLog.text}
+              text={localizedLogTextForView(githubLog.text, t)}
               description={t("user.githubLogSource")}
               actions={githubLogActions}
             />
@@ -1445,7 +1448,7 @@ function RunnerJobLogPanel({
         </TabsContent>
         <TabsContent value="runner-logs" className="m-0 pt-2">
           <LogOutput
-            text={runnerLogText}
+            text={localizedLogTextForView(runnerLogText, t)}
             description={t("user.runnerLogDescription", { log: selectedLog.replace(".log", "") })}
             leading={(
               <div className="flex items-center gap-1 rounded-md border border-white/10 bg-white/5 p-1" aria-label={t("user.runnerLogStream")}>
@@ -1519,18 +1522,24 @@ function RunnerJobLogPanel({
   )
 }
 
-function logResponseText(text: unknown, emptyMessage: string) {
-  return typeof text === "string" ? text || emptyMessage : JSON.stringify(text, null, 2)
+function logResponseText(text: unknown, emptyMessageKey: LocalizedLogMessageKey): LocalizedLogText {
+  if (typeof text === "string") {
+    return text
+      ? { kind: "text", text }
+      : { kind: "message", key: emptyMessageKey }
+  }
+  return { kind: "text", text: JSON.stringify(text, null, 2) }
 }
 
-function githubLogResponseState(text: unknown, emptyMessage: string): GitHubLogState {
-  const raw = logResponseText(text, emptyMessage)
-  return { kind: "log", text: raw }
+function githubLogResponseState(text: unknown, emptyMessageKey: LocalizedLogMessageKey): GitHubLogState {
+  return { kind: "log", text: logResponseText(text, emptyMessageKey) }
 }
 
-function githubLogErrorState(error: unknown, t: TFunction): GitHubLogState {
-  const raw = githubLogFailureMessage(error, t)
-  return isGitHubLogUnavailable(raw) ? { kind: "unavailable", detail: raw } : { kind: "log", text: raw }
+function githubLogErrorState(error: unknown): GitHubLogState {
+  const failure = githubLogFailureState(error)
+  return failure.kind === "text" && isGitHubLogUnavailable(failure.text)
+    ? { kind: "unavailable", detail: failure.text }
+    : { kind: "log", text: failure }
 }
 
 function isGitHubLogUnavailable(text: string) {
