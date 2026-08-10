@@ -25,7 +25,6 @@ import {
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import {
-  activeStatuses,
   adminSections,
   logNames,
   sectionFromPath,
@@ -36,7 +35,6 @@ import {
   type DiagnosticsSummary,
   type GitHubAppConfig,
   type GitHubInstallation,
-  type Metric,
   type ProductTourOnboarding,
   type RunnerGroup,
   type RunnerPolicy,
@@ -66,6 +64,7 @@ import {
   type AuthSessionCheckStatus,
 } from "@/app-load-policy"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
+import { runnerMetrics } from "@/admin-format"
 import appI18n from "@/i18n"
 import {
   repositoryAccountLogin,
@@ -301,19 +300,10 @@ function App() {
       ? "settings"
       : "home"
 
-  const metrics = useMemo<Metric[]>(() => {
-    const count = (status: RunnerStatus) => runners.filter((runner) => runner.status === status).length
-    return [
-      {
-        label: t("admin.activeMetric"),
-        value: runners.filter((runner) => activeStatuses.has(runner.status)).length,
-        description: t("admin.activeMetricDescription"),
-      },
-      { label: t("admin.completedMetric"), value: count("completed"), description: t("admin.completedMetricDescription") },
-      { label: t("admin.failedMetric"), value: count("failed"), description: t("admin.failedMetricDescription") },
-      { label: t("sidebar.runnerSpecs"), value: runnerSpecs.length, description: t("admin.runnerSpecsMetricDescription") },
-    ]
-  }, [runnerSpecs.length, runners, t])
+  const metrics = useMemo(
+    () => runnerMetrics(runners, runnerSpecs.length, t),
+    [runnerSpecs.length, runners, t],
+  )
 
   const requestResponse = useCallback(
     async (url: string, options: RequestInit = {}) => {
@@ -1072,7 +1062,7 @@ function App() {
           {section === "overview" || section === "runner_requests" ? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {metrics.map((metric) => (
-                <Card key={metric.label} className="gap-3 py-5">
+                <Card key={metric.id} className="gap-3 py-5">
                   <CardHeader className="px-5">
                     <CardDescription>{metric.label}</CardDescription>
                     <CardTitle className="text-3xl">{metric.value}</CardTitle>
@@ -1229,6 +1219,7 @@ function UserJobRedirect({
   onResolved: (key: string) => void
   fallback: ReactNode
 }) {
+  const { t } = useTranslation()
   const [failedID, setFailedID] = useState("")
 
   useEffect(() => {
@@ -1254,7 +1245,7 @@ function UserJobRedirect({
   if (failedID === id) return <>{fallback}</>
   return (
     <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
-      Opening job in its build context...
+      {t("user.openingBuildContext")}
     </div>
   )
 }

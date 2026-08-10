@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "check:i18n": "bun scripts/check-i18n.ts && bun test scripts/check-i18n.test.ts && tsc -b",
     "lint": "eslint .",
     "test": "bun test",
     "test:production": "playwright test --config playwright.production.config.ts",

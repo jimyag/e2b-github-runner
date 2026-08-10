@@ -83,7 +83,7 @@ export function OverviewSection({
               >
                 <div className="truncate font-medium">{runnerSpec.name}</div>
                 <div className="truncate text-xs text-muted-foreground">
-                  {runnerSpec.labels.join(", ")} · template {runnerSpec.template_id}
+                  {runnerSpec.labels.join(", ")} · {t("admin.namedTemplate", { id: runnerSpec.template_id })}
                 </div>
               </div>
             ))}

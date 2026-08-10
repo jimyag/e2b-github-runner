@@ -163,7 +163,17 @@ function signInURLFromReturnTo(returnTo: string): string {
   return signInURL(parsed?.[1] || "/jobs", parsed?.[2] || "")
 }
 
-function protectedDestinationLabel(returnTo: string): string {
+type ProtectedDestinationKey =
+  | "auth.pullRequestJobs"
+  | "auth.workflowRunJobs"
+  | "auth.branchJobs"
+  | "auth.repositories"
+  | "auth.accountSettings"
+  | "auth.adminConsole"
+  | "auth.jobDetails"
+  | "auth.jobs"
+
+function protectedDestinationLabel(returnTo: string): ProtectedDestinationKey {
   if (returnTo.startsWith("/github/pulls/")) return "auth.pullRequestJobs"
   if (returnTo.startsWith("/github/runs/")) return "auth.workflowRunJobs"
   if (returnTo.startsWith("/github/branches/")) return "auth.branchJobs"

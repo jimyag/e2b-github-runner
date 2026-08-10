@@ -1,9 +1,9 @@
 import type { ReactNode } from "react"
 import { ExternalLink } from "lucide-react"
-import type { TFunction } from "i18next"
 
 import type { RunnerState } from "@/admin-types"
 import { formatTime } from "@/admin-format"
+import type { AppTFunction } from "@/i18n"
 
 export type RunnerJobDetailRow = {
   id: string
@@ -13,7 +13,7 @@ export type RunnerJobDetailRow = {
 
 export function runnerJobDetailRows(
   job: RunnerState,
-  t: TFunction,
+  t: AppTFunction,
   locale?: string,
 ): RunnerJobDetailRow[] {
   return [
@@ -63,6 +63,14 @@ function workflowRunURL(job: RunnerState) {
   return job.github_job_url.slice(0, index + marker.length)
 }
 
-function runnerStatusLabel(status: RunnerState["status"], t: TFunction) {
-  return t(`common.status${status[0].toUpperCase()}${status.slice(1)}`)
+function runnerStatusLabel(status: RunnerState["status"], t: AppTFunction) {
+  const keys = {
+    queued: "common.statusQueued",
+    creating: "common.statusCreating",
+    running: "common.statusRunning",
+    stopping: "common.statusStopping",
+    completed: "common.statusCompleted",
+    failed: "common.statusFailed",
+  } as const
+  return t(keys[status])
 }

@@ -466,6 +466,7 @@ function InstallationAvatar({
   installation: GitHubInstallation
   size?: "sm" | "lg"
 }) {
+  const { t } = useTranslation()
   const dimensions = size === "lg" ? "h-12 w-12 rounded-xl" : "h-8 w-8 rounded-lg"
   const label = installation.account_name || installation.account_login || "GitHub"
   if (installation.account_avatar) {
@@ -484,7 +485,7 @@ function InstallationAvatar({
         dimensions,
         "flex shrink-0 items-center justify-center border bg-muted text-xs font-semibold",
       )}
-      aria-label={`${label} avatar`}
+      aria-label={t("common.namedAvatar", { name: label })}
     >
       {label.slice(0, 2).toUpperCase()}
     </div>

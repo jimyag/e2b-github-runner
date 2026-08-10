@@ -9,6 +9,9 @@
   `document.documentElement.lang` synchronization.
 - Fixed product copy belongs in `ui/src/locales/en.ts` and
   `ui/src/locales/zh.ts`. Keep both resource trees aligned when adding a key.
+- `ui/src/i18next.d.ts` derives valid translation keys from the English
+  resource. Keep dynamic keys as literal unions or explicit lookup maps so
+  TypeScript can reject missing keys.
 - Use `useTranslation()` at rendering boundaries. Use the initialized `i18n`
   instance only in non-React helpers or generic primitives that cannot use a
   hook.
@@ -49,6 +52,9 @@
   stable identifiers when that behavior changes.
 - Confirm runtime identifiers and raw server data remain unchanged.
 - Search the changed surface for remaining fixed user-facing English copy.
+- Run `task ui-i18n-check`. Exact product names, technical identifiers, and
+  command examples may be added to the checker's narrow allowlist only after
+  confirming they should remain identical in both languages.
 - Edit only `ui/`; rebuild generated assets instead of editing
   `internal/server/ui/` by hand.
 
@@ -57,11 +63,19 @@
 For focused UI work, run:
 
 ```bash
-cd ui
-bun run test
-bun run lint
-bun run build
+task ui-i18n-check
+cd ui && bun run test
+cd ui && bun run lint
+cd ui && bun run build
 ```
+
+The i18n check rejects mismatched locale trees, missing or empty values, array
+length differences, interpolation-variable differences, invalid typed keys,
+and fixed literals in JSX text, selected visible attributes, and direct Sonner
+toast calls. It intentionally does not translate runtime data, logs, IDs,
+repository names, or raw server errors. The GitHub Actions `i18n` job runs the
+same gate, but it becomes merge-blocking only when repository branch protection
+or a ruleset requires that check.
 
 For changes to shared i18n resources, headers, routing, or production asset
 loading, also run:

@@ -293,7 +293,7 @@ export function RunnerRequestsSection({
                         >
                           <a href={runner.github_job_url} target="_blank" rel="noreferrer">
                             <ExternalLink />
-                            Job
+                            {t("common.job")}
                           </a>
                         </Button>
                       ) : (

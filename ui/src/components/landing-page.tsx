@@ -42,7 +42,7 @@ const capabilities = [
     id: "lifecycle",
     icon: ShieldCheck,
   },
-]
+] as const
 
 const workflowSteps = [
   {
@@ -65,7 +65,7 @@ const workflowSteps = [
     number: "04",
     icon: Trash2,
   },
-]
+] as const
 
 export function LandingPage() {
   const { t } = useTranslation()

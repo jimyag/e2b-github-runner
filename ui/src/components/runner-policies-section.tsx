@@ -120,8 +120,8 @@ export function RunnerPoliciesSection({
                   <TableCell>
                     <div className="max-w-[260px] truncate">
                       {policy.runner_group_name
-                        ? `group:${policy.runner_group_name}`
-                        : `spec:${policy.runner_spec_name || "-"}`}
+                        ? t("admin.groupTarget", { name: policy.runner_group_name })
+                        : t("admin.specTarget", { name: policy.runner_spec_name || "-" })}
                     </div>
                   </TableCell>
                   <TableCell>{policy.enabled ? t("common.yes") : t("common.no")}</TableCell>

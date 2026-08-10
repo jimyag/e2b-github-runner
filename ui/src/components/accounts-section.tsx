@@ -20,7 +20,7 @@ import {
   type AdminAccountsResponse,
 } from "@/admin-types"
 import i18n from "@/i18n"
-import { formatTime } from "@/admin-format"
+import { accountMetrics, formatTime } from "@/admin-format"
 import {
   accountAvatarImageURL,
   accountListQuery,
@@ -267,13 +267,8 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
   return (
     <>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          { label: t("admin.accountsMetric"), value: stats.total_accounts, description: t("admin.accountsMetricDescription") },
-          { label: t("admin.administratorsMetric"), value: stats.admin_accounts, description: t("admin.administratorsMetricDescription") },
-          { label: t("admin.users"), value: stats.user_accounts, description: t("admin.usersMetricDescription") },
-          { label: t("admin.linkedIdentities"), value: stats.oauth_identities, description: t("admin.identitiesMetricDescription") },
-        ].map((metric) => (
-          <Card key={metric.label} className="gap-3 py-5">
+        {accountMetrics(stats, t).map((metric) => (
+          <Card key={metric.id} className="gap-3 py-5">
             <CardHeader className="px-5">
               <CardDescription>{metric.label}</CardDescription>
               <CardTitle className="text-3xl tabular-nums">{metric.value}</CardTitle>
@@ -412,7 +407,9 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                               <span className="max-w-48 truncate font-medium">@{displayLogin}</span>
                               {isCurrent ? <Badge variant="secondary">{t("admin.you")}</Badge> : null}
                             </div>
-                            <div className="font-mono text-xs text-muted-foreground">account #{account.id}</div>
+                            <div className="font-mono text-xs text-muted-foreground">
+                              {t("admin.accountNumber", { id: account.id })}
+                            </div>
                           </div>
                         </div>
                       </TableCell>
@@ -422,7 +419,10 @@ export function AccountsSection({ request }: { request: RequestFunction }) {
                             <span
                               key={identity.id}
                               className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-1 text-xs shadow-xs"
-                              title={`${identity.oauth_provider} subject ${identity.oauth_subject}`}
+                              title={t("admin.identitySubject", {
+                                provider: identity.oauth_provider,
+                                subject: identity.oauth_subject,
+                              })}
                             >
                               <AtSign className="size-3 text-muted-foreground" />
                               <span className="font-medium">{identity.oauth_login}</span>

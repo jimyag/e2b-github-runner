@@ -137,9 +137,13 @@ export function SandboxTemplatesSection({
                       <div className="font-medium">{item.aliases?.[0] || item.template_id}</div>
                       <div className="max-w-[360px] truncate text-xs text-muted-foreground">{item.template_id}</div>
                     </TableCell>
-                    <TableCell>{item.build_status || "unknown"}</TableCell>
+                    <TableCell>{item.build_status || t("common.unknown")}</TableCell>
                     <TableCell>
-                      {item.cpu_count} CPU · {item.memory_mb} MB · {item.disk_size_mb} MB disk
+                      {t("user.catalogTemplateResources", {
+                        cpu: item.cpu_count,
+                        memory: item.memory_mb,
+                        disk: item.disk_size_mb,
+                      })}
                     </TableCell>
                     <TableCell>{item.public ? t("common.public") : t("common.private")}</TableCell>
                     <TableCell className="text-right tabular-nums">{item.spawn_count}</TableCell>
@@ -302,7 +306,10 @@ export function SandboxesSection({
                       <div className="max-w-[260px] truncate">{item.template_id}</div>
                     </TableCell>
                     <TableCell>
-                      {item.cpu_count} CPU · {item.memory_mb} MB
+                      {t("user.catalogInstanceResources", {
+                        cpu: item.cpu_count,
+                        memory: item.memory_mb,
+                      })}
                     </TableCell>
                     <TableCell>{formatOptionalTime(item.started_at, i18n.resolvedLanguage)}</TableCell>
                     <TableCell>{formatOptionalTime(item.expires_at, i18n.resolvedLanguage)}</TableCell>

@@ -343,7 +343,10 @@ export function SandboxServiceDefaultSection({ request }: { request: Request }) 
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-sm font-medium">{audience.account_login}</div>
                           <div className="truncate text-xs text-muted-foreground">
-                            {audience.account_type === "organization" ? t("admin.organization") : t("common.user")} · GitHub ID {audience.github_account_id}
+                            {t("admin.githubAccountID", {
+                              type: audience.account_type === "organization" ? t("admin.organization") : t("common.user"),
+                              id: audience.github_account_id,
+                            })}
                           </div>
                         </div>
                         <Tooltip>

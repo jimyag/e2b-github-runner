@@ -38,6 +38,7 @@ Use this guide for future Codex or agent work in this repository.
 ```bash
 task deps
 task ui-deps
+task ui-i18n-check
 task ui-production-smoke
 task dev
 task smee
@@ -63,6 +64,8 @@ usable. Release evidence requires qshell `Status: ready` followed by
 `task template-smoke` in both supported regions.
 
 Use `cd ui && bun run test` for focused UI tests. `task test` rebuilds the UI, runs the Bun UI tests, and then runs Go tests with race detection and coverage.
+
+Use `task ui-i18n-check` after changing UI copy or translation resources. It checks the English/Chinese resource contract, interpolation parity, typed i18next keys, and a narrow set of untranslated user-visible literals.
 
 Use `task ui-production-smoke` after changing UI dependencies, Vite/Rollup configuration, manual chunking, or production asset loading. It builds the production bundle, starts Vite preview on `RUNNERD_UI_SMOKE_PORT` (default `4173`), opens `/` in headless Chromium, and fails on browser errors, console errors, failed script/style requests, an empty root, or a missing landing-page heading. Because the local preview does not start `runnerd`, it fulfills only `/auth/session` with a signed-out response. Set `RUNNERD_UI_SMOKE_BASE_URL` to run the same browser canary against an already deployed origin; deployed canaries must use the real auth endpoint.
 

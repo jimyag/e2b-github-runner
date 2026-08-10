@@ -16,13 +16,12 @@ import {
 } from "lucide-react"
 import { type CSSProperties, type FormEvent, type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import type { TFunction } from "i18next"
 
 import type { AuthSession, GitHubAppConfig, ProductTourOnboarding, RunnerJobGroup, RunnerState, UserPreferences } from "@/admin-types"
 import { logNames } from "@/admin-types"
 import { formatRunnerDuration, formatTime, runnerStatusLabel } from "@/admin-format"
 import { localizedLogTextForView, type LocalizedLogMessageKey, type LocalizedLogText } from "@/app-log-state"
-import appI18n from "@/i18n"
+import appI18n, { type AppTFunction } from "@/i18n"
 import { userRunnerHistoryWindow } from "@/app-load-policy"
 import { AccountMenu } from "@/components/account-menu"
 import { githubLogFailureState } from "@/components/github-log-utils"
@@ -1632,6 +1631,7 @@ function LogOutput({
   actions?: ReactNode
   leading?: ReactNode
 }) {
+  const { t } = useTranslation()
   const logRef = useRef<HTMLDivElement | null>(null)
   const [collapseState, setCollapseState] = useState<{ text: string; groups: Set<number> }>(() => ({ text, groups: new Set() }))
   const collapsedGroups = useMemo(() => (collapseState.text === text ? collapseState.groups : new Set<number>()), [collapseState, text])
@@ -1671,7 +1671,7 @@ function LogOutput({
             className="border-white/15 bg-white/5 text-slate-100 hover:bg-white/10 hover:text-white"
             onClick={scrollToBottom}
           >
-            Scroll to Bottom
+            {t("user.scrollToBottom")}
           </Button>
           {actions}
         </div>
@@ -1759,7 +1759,7 @@ function parseLogLines(lines: string[], collapsedGroups: Set<number>): ParsedLog
   return visible
 }
 
-function workflowRunValue(job: RunnerState, t: TFunction) {
+function workflowRunValue(job: RunnerState, t: AppTFunction) {
   const runID = job.workflow_run_id ? String(job.workflow_run_id) : t("common.unknown")
   const jobID = job.workflow_job_id ? String(job.workflow_job_id) : job.id
   const runURL = workflowRunURL(job)
@@ -1797,7 +1797,7 @@ function pullRequestHeading(group: BuildGroup, jobGroup: RunnerJobGroup | null) 
   return title ? `${label}: ${title}` : label
 }
 
-function workflowGroups(jobs: RunnerState[], t: TFunction) {
+function workflowGroups(jobs: RunnerState[], t: AppTFunction) {
   const groups = new Map<number | string, { id: number | string; name: string; jobs: RunnerState[] }>()
   for (const job of jobs) {
     const id = job.workflow_run_id || job.id
@@ -1912,8 +1912,13 @@ function BuildGroupStatusBadge({ group, status }: { group: BuildGroup; status: R
   )
 }
 
-function buildGroupStatusLabel(group: BuildGroup, statusText: "failed" | "running" | "passed", t: TFunction) {
-  const status = t(`user.status${statusText[0].toUpperCase()}${statusText.slice(1)}`)
+function buildGroupStatusLabel(group: BuildGroup, statusText: "failed" | "running" | "passed", t: AppTFunction) {
+  const statusKeys = {
+    failed: "user.statusFailed",
+    running: "user.statusRunning",
+    passed: "user.statusPassed",
+  } as const
+  const status = t(statusKeys[statusText])
   switch (group.kind) {
     case "pull_request":
       return t("user.pullRequestStatus", { status })
@@ -2001,7 +2006,7 @@ function isTerminalAvailable(job: RunnerState) {
   return Boolean(job.sandbox_id && ["creating", "running", "stopping"].includes(job.status))
 }
 
-function groupRunnersByBuildContext(runners: RunnerState[], t: TFunction): BuildGroup[] {
+function groupRunnersByBuildContext(runners: RunnerState[], t: AppTFunction): BuildGroup[] {
   const visibleRunners = runners.filter(isUserVisibleRunnerJob)
   const prByRepositoryAndSHA = new Map<string, number>()
   for (const runner of runners) {
@@ -2050,7 +2055,7 @@ function isRunnerJobGroup(value: unknown): value is RunnerJobGroup {
   return Array.isArray(candidate.jobs) && Array.isArray(candidate.current_jobs) && Array.isArray(candidate.previous_jobs)
 }
 
-function buildGroupSeed(runner: RunnerState, repository: string, pullRequestNumber: number | undefined, t: TFunction): BuildGroup {
+function buildGroupSeed(runner: RunnerState, repository: string, pullRequestNumber: number | undefined, t: AppTFunction): BuildGroup {
   const workflowRunIDs = runner.workflow_run_id ? [runner.workflow_run_id] : []
   if (pullRequestNumber) {
     return {
@@ -2159,6 +2164,7 @@ function AccountAvatar({
   installation: NonNullable<GitHubAppConfig["installations"]>[number]
   size: "sm" | "lg"
 }) {
+  const { t } = useTranslation()
   const className =
     size === "lg"
       ? "flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-foreground text-sm font-semibold text-background"
@@ -2170,7 +2176,7 @@ function AccountAvatar({
       <img
         className={className}
         src={avatarURL}
-        alt={`${installation.account_login || "GitHub"} avatar`}
+        alt={t("common.namedAvatar", { name: installation.account_login || "GitHub" })}
       />
     )
   }

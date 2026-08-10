@@ -1,4 +1,4 @@
-import type { TFunction } from "i18next"
+import type { AppTFunction } from "@/i18n"
 
 const landingChecklistDefinitions = [
   { id: "orchestration", translationKey: "landing.checklist.orchestration" },
@@ -8,14 +8,14 @@ const landingChecklistDefinitions = [
 
 const deploymentRequirementIDs = ["github", "sandbox", "runner"] as const
 
-export function landingChecklistItems(t: TFunction) {
+export function landingChecklistItems(t: AppTFunction) {
   return landingChecklistDefinitions.map(({ id, translationKey }) => ({
     id,
     label: t(translationKey),
   }))
 }
 
-export function deploymentRequirementItems(t: TFunction) {
+export function deploymentRequirementItems(t: AppTFunction) {
   const labels = t("landing.deploymentRequirements", { returnObjects: true }) as unknown as string[]
   return deploymentRequirementIDs.map((id, index) => ({ id, label: labels[index] }))
 }

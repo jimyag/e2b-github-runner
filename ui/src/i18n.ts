@@ -1,4 +1,5 @@
 import i18n from "i18next"
+import type { TFunction } from "i18next"
 import { initReactI18next } from "react-i18next"
 
 import { en } from "./locales/en"
@@ -6,6 +7,7 @@ import { zh } from "./locales/zh"
 
 export const supportedLanguages = ["en", "zh"] as const
 export type SupportedLanguage = (typeof supportedLanguages)[number]
+export type AppTFunction = TFunction<"translation">
 export const languageStorageKey = "runnerd:language"
 
 type LanguageStorage = Pick<Storage, "getItem">

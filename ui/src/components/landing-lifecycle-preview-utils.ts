@@ -1,7 +1,7 @@
 import { Clock3, Code2, Github, Layers3 } from "lucide-react"
-import type { TFunction } from "i18next"
+import type { AppTFunction } from "@/i18n"
 
-export function runnerPolicyItems(t: TFunction) {
+export function runnerPolicyItems(t: AppTFunction) {
   return [
     { id: "repository", label: t("landing.preview.repository"), value: "qiniu/ci-runner" },
     { id: "runner-spec", label: t("landing.preview.runnerSpec"), value: "ubuntu-24.04" },
@@ -9,7 +9,7 @@ export function runnerPolicyItems(t: TFunction) {
   ]
 }
 
-export function runnerLifecycleItems(t: TFunction) {
+export function runnerLifecycleItems(t: AppTFunction) {
   return [
     { id: "github-accepted", icon: Github, title: t("landing.preview.githubAccepted"), detail: "workflow_job · queued", state: "complete" },
     { id: "sandbox-created", icon: Layers3, title: t("landing.preview.sandboxCreated"), detail: "us-south-1 · 8.4s", state: "complete" },
