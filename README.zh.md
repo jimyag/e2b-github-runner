@@ -118,7 +118,7 @@ unset secret_value
 
 ### Cache 与 S3
 
-用户需要在账户或 GitHub installation 的 Preferences 中配置 Cache S3 Bucket、可选 Prefix、AK 和 SK。S3 region 和 endpoint 由用户选择的 Sandbox service region 决定，并由运维人员在 `runnerd.yaml` 的 `sandbox.regions` 中配置。保存时 runnerd 使用用户凭据调用 `HeadBucket`；Bucket 不存在、无权限或返回区域与配置的 region 不一致都会拒绝保存。AK/SK 会加密保存在 scoped state，不会返回给浏览器或 Runner。
+用户需要在账户或 GitHub installation 的 Preferences 中配置 Cache S3 Bucket、可选 Prefix、AK 和 SK。S3 region 和 endpoint 由用户选择的 Sandbox service region 决定，并由运维人员在 `runnerd.yaml` 的 `sandbox.regions` 中配置。由于 endpoint 可能只在 Sandbox 内网可访问，runnerd 保存时只校验配置格式；Bucket 的可达性和权限由实际工作流在 Sandbox 中验证。AK/SK 会加密保存在 scoped state，不会返回给浏览器或 Runner。
 
 每次启动沙箱时，runnerd 将 GitHub 仓库解析到对应 installation/account scope，读取该 scope 的 S3 配置，并通过 `cache.sts_endpoint`（默认 `https://sts-ov.qiniuapi.com`）签发七牛 IAM 联邦凭证。凭证请求时长为配置的 Sandbox 生命周期加五分钟，用于覆盖任务结束后的缓存保存步骤；目前暂不提供刷新机制。随后在沙箱启动脚本中注入 `AWS_*` / `RUNS_ON_S3_*` 环境变量，使 `runs-on/cache` action 可以直接把缓存上传/恢复到用户 bucket，而无需经过 runnerd 转发字节。缓存对象 Key 以 `<配置前缀>/<owner>/<repo>/` 开头。
 
@@ -131,7 +131,7 @@ sandbox:
       label: "United States · Dallas 1"
       sandbox_api_url: https://us-south-1-sandbox.qiniuapi.com
       s3_region: us-north-1
-      s3_endpoint: https://s3-us-north-1.qiniucs.com
+      s3_endpoint: https://internal-s3-las-us-north-1-dal.qiniucs.com
 
 cache:
   sts_endpoint: https://sts-ov.qiniuapi.com

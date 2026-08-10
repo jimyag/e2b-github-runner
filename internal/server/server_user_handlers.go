@@ -488,14 +488,7 @@ func (s *Server) handleUserSaveCacheConfig(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-	storage, err := newCacheS3(cacheS3Config{Region: value.Region, Bucket: value.Bucket, Prefix: value.Prefix, Endpoint: value.Endpoint, AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	if err := validateCacheS3(ctx, storage); err != nil {
+	if _, err := newCacheS3(cacheS3Config{Region: value.Region, Bucket: value.Bucket, Prefix: value.Prefix, Endpoint: value.Endpoint, AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey}); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

@@ -1,23 +1,20 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/qiniu/ci-runner/internal/state"
 )
 
-// cacheS3 holds the S3-compatible client plus the raw long-term credentials
-// used to mint short-lived STS tokens for sandbox runners.
+// cacheS3 holds the S3 configuration and raw long-term credentials used to
+// mint short-lived STS tokens for sandbox runners. The S3 endpoint may be
+// reachable only from the Sandbox, so runnerd does not create an S3 client or
+// perform network validation against it.
 type cacheS3 struct {
-	client         *s3.Client
 	bucket, prefix string
 	region         string
 	endpoint       string
@@ -40,18 +37,11 @@ func newCacheS3(config cacheS3Config) (*cacheS3, error) {
 	if config.Region == "" || config.Bucket == "" || strings.TrimSpace(config.AccessKeyID) == "" || strings.TrimSpace(config.SecretAccessKey) == "" {
 		return nil, errors.New("cache S3 region, bucket, access key, and secret key are required")
 	}
-	awsCfg := aws.Config{Region: config.Region, Credentials: credentials.NewStaticCredentialsProvider(config.AccessKeyID, config.SecretAccessKey, "")}
-	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
-		o.UsePathStyle = strings.TrimSpace(config.Endpoint) != ""
-		if config.Endpoint != "" {
-			o.BaseEndpoint = aws.String(strings.TrimRight(strings.TrimSpace(config.Endpoint), "/"))
-		}
-	})
 	prefix := strings.Trim(strings.TrimSpace(config.Prefix), "/")
 	if prefix == "" {
 		prefix = "gh-actions-cache"
 	}
-	return &cacheS3{client: client, bucket: config.Bucket, prefix: prefix, region: config.Region, endpoint: config.Endpoint, accessKeyID: config.AccessKeyID, secretKey: config.SecretAccessKey}, nil
+	return &cacheS3{bucket: config.Bucket, prefix: prefix, region: config.Region, endpoint: config.Endpoint, accessKeyID: config.AccessKeyID, secretKey: config.SecretAccessKey}, nil
 }
 
 // cacheStorageForInstallation resolves the cache S3 configuration for a
@@ -142,20 +132,6 @@ func (s *Server) cacheS3SettingsForSandboxAPIURL(apiURL string) (string, string,
 		return strings.TrimSpace(region.S3Region), endpoint, true
 	}
 	return "", "", false
-}
-
-func validateCacheS3(ctx context.Context, storage *cacheS3) error {
-	out, err := storage.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(storage.bucket)})
-	if err != nil {
-		return fmt.Errorf("validate cache S3 bucket %q: %w", storage.bucket, err)
-	}
-	if out.BucketRegion == nil || strings.TrimSpace(*out.BucketRegion) == "" {
-		return fmt.Errorf("cache S3 bucket %q did not report its region", storage.bucket)
-	}
-	if strings.TrimSpace(*out.BucketRegion) != storage.region {
-		return fmt.Errorf("cache S3 bucket %q is in region %q, want %q", storage.bucket, *out.BucketRegion, storage.region)
-	}
-	return nil
 }
 
 // handleSandboxRegions returns the sandbox region catalog configured in

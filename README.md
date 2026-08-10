@@ -118,7 +118,7 @@ Supported fields: `database.dsn`, `auth.session_secret`, `auth.encryption_key`, 
 
 ### Cache and S3
 
-Each user configures a Cache S3 Bucket, optional Prefix, AK, and SK in account or GitHub installation Preferences. The S3 region and endpoint are derived from the selected Sandbox service region and are configured by the operator in `runnerd.yaml` under `sandbox.regions`. The save operation calls `HeadBucket` with the supplied credentials and rejects a missing/inaccessible bucket or a bucket whose reported region differs from the configured region. AK/SK are encrypted in scoped state and are never returned to the browser or runner.
+Each user configures a Cache S3 Bucket, optional Prefix, AK, and SK in account or GitHub installation Preferences. The S3 region and endpoint are derived from the selected Sandbox service region and are configured by the operator in `runnerd.yaml` under `sandbox.regions`. Because the configured endpoint may be private to the Sandbox network, runnerd only validates the configuration shape when saving it; bucket reachability and permissions are verified by the actual workflow in the Sandbox. AK/SK are encrypted in scoped state and are never returned to the browser or runner.
 
 On every sandbox start, runnerd resolves the GitHub repository to its installation/account scope, reads the scoped S3 configuration, and mints a Qiniu IAM federation token through the configured `cache.sts_endpoint` (default `https://sts-ov.qiniuapi.com`). Its requested lifetime is the configured Sandbox lifecycle plus five minutes for the post-job cache save step; no refresh mechanism is provided yet. It injects the token plus bucket/endpoint/prefix as `AWS_*` / `RUNS_ON_S3_*` environment variables in the Sandbox start script, so a `runs-on/cache` action can upload and restore caches directly to the user bucket without proxying bytes through runnerd. Cache object keys are prefixed with `<configured-prefix>/<owner>/<repo>/`.
 
@@ -131,7 +131,7 @@ sandbox:
       label: "United States · Dallas 1"
       sandbox_api_url: https://us-south-1-sandbox.qiniuapi.com
       s3_region: us-north-1
-      s3_endpoint: https://s3-us-north-1.qiniucs.com
+      s3_endpoint: https://internal-s3-las-us-north-1-dal.qiniucs.com
 
 cache:
   sts_endpoint: https://sts-ov.qiniuapi.com
