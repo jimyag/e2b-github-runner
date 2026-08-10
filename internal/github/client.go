@@ -1244,6 +1244,7 @@ type Issue struct {
 }
 
 type Repository struct {
+	ID       int64  `json:"id"`
 	FullName string `json:"full_name"`
 	Name     string `json:"name"`
 }

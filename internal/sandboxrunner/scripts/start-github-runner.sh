@@ -41,7 +41,7 @@ if [ "$(id -u)" -eq 0 ] && id -u "$runner_user" >/dev/null 2>&1 && [ "${RUNNERD_
     ENSURE_DOCKER="$ensure_docker" \
     RUNNER_ENVIRONMENT_FILE="$runner_environment_file" \
     HOME="$HOME" \
-    bash "$0"
+    bash "$0" "$@"
 fi
 if [ "$(id -u)" -eq 0 ]; then
   export RUNNER_ALLOW_RUNASROOT=1
@@ -85,7 +85,35 @@ runner_labels="$(printf '%%s' "%[4]s" | base64 -d)"
 runner_group="$(printf '%%s' "%[5]s" | base64 -d)"
 runner_request_id="$(printf '%%s' "%[6]s" | base64 -d)"
 sandbox_id="$(printf '%%s' "%[7]s" | base64 -d)"
+cache_s3_region="$(printf '%%s' "%[9]s" | base64 -d)"
+cache_s3_bucket="$(printf '%%s' "%[10]s" | base64 -d)"
+cache_s3_endpoint="$(printf '%%s' "%[11]s" | base64 -d)"
+cache_s3_prefix="$(printf '%%s' "%[12]s" | base64 -d)"
+cache_s3_access_key="$(printf '%%s' "%[13]s" | base64 -d)"
+cache_s3_secret_key="$(printf '%%s' "%[14]s" | base64 -d)"
+cache_s3_session_token="$(printf '%%s' "%[15]s" | base64 -d)"
 
+# Inject Cache S3 STS credentials for runs-on/cache
+if [ -n "$cache_s3_bucket" ]; then
+  export RUNS_ON_S3_BUCKET_CACHE="$cache_s3_bucket"
+  if [ -n "$cache_s3_endpoint" ]; then
+    export RUNS_ON_S3_BUCKET_ENDPOINT="$cache_s3_endpoint"
+  fi
+  export RUNS_ON_AWS_REGION="$cache_s3_region"
+  export RUNS_ON_S3_FORCE_PATH_STYLE="true"
+  export AWS_ACCESS_KEY_ID="$cache_s3_access_key"
+  export AWS_SECRET_ACCESS_KEY="$cache_s3_secret_key"
+  export AWS_SESSION_TOKEN="$cache_s3_session_token"
+  if [ -n "$cache_s3_prefix" ]; then
+    export RUNS_ON_S3_CACHE_REPO_PREFIX="$cache_s3_prefix"
+  fi
+  # Tune runs-on/cache upload/download concurrency for better throughput.
+  export UPLOAD_QUEUE_SIZE="${UPLOAD_QUEUE_SIZE:-16}"
+  export UPLOAD_PART_SIZE="${UPLOAD_PART_SIZE:-16}"
+  export DOWNLOAD_QUEUE_SIZE="${DOWNLOAD_QUEUE_SIZE:-16}"
+  export DOWNLOAD_PART_SIZE="${DOWNLOAD_PART_SIZE:-16}"
+  echo "injected cache S3 STS credentials for runs-on/cache (upload_queue=${UPLOAD_QUEUE_SIZE} upload_part=${UPLOAD_PART_SIZE}MiB download_queue=${DOWNLOAD_QUEUE_SIZE} download_part=${DOWNLOAD_PART_SIZE}MiB)"
+fi
 export RUNNERD_SANDBOX_ID="$sandbox_id"
 export RUNNERD_REQUEST_ID="$runner_request_id"
 export RUNNERD_RUNNER_NAME="$runner_name"

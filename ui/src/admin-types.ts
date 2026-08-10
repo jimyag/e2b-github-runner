@@ -181,6 +181,14 @@ export type GitHubAppConfig = {
 }
 
 export type UserPreferences = {
+  cache: {
+    configured: boolean
+    region?: string
+    bucket?: string
+    prefix?: string
+    endpoint?: string
+    updated_at?: string
+  }
   sandbox: {
     mode: "custom" | "inherit"
     resolved_source: "custom" | "inherited" | "admin_default" | "none"

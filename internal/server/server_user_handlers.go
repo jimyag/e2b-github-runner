@@ -28,6 +28,7 @@ type userGitHubInstallationResponse struct {
 
 type accountPreferencesResponse struct {
 	Sandbox accountSandboxPreference `json:"sandbox"`
+	Cache   accountCachePreference   `json:"cache"`
 }
 
 type accountSandboxPreference struct {
@@ -46,6 +47,31 @@ type accountSandboxPreference struct {
 type accountSandboxAPIKeyPreference struct {
 	Configured bool   `json:"configured"`
 	UpdatedAt  string `json:"updated_at,omitempty"`
+}
+
+type accountCachePreference struct {
+	Configured bool   `json:"configured"`
+	Region     string `json:"region,omitempty"`
+	Bucket     string `json:"bucket,omitempty"`
+	Prefix     string `json:"prefix,omitempty"`
+	Endpoint   string `json:"endpoint,omitempty"`
+	UpdatedAt  string `json:"updated_at,omitempty"`
+}
+
+type accountCacheServicePreferenceValue struct {
+	Region   string `json:"region"`
+	Bucket   string `json:"bucket"`
+	Prefix   string `json:"prefix,omitempty"`
+	Endpoint string `json:"endpoint,omitempty"`
+}
+
+type upsertCacheConfigRequest struct {
+	Region          string `json:"region"`
+	Bucket          string `json:"bucket"`
+	Prefix          string `json:"prefix"`
+	Endpoint        string `json:"endpoint"`
+	AccessKeyID     string `json:"access_key_id"`
+	SecretAccessKey string `json:"secret_access_key"`
 }
 
 type accountSandboxServicePreferenceValue struct {
@@ -69,6 +95,8 @@ type accountPreferenceScope struct {
 const (
 	accountPreferenceNamespaceSandbox  = "sandbox"
 	accountPreferenceKeySandboxService = "service"
+	accountPreferenceNamespaceCache    = "cache"
+	accountPreferenceKeyCacheS3        = "s3"
 )
 
 func (s *Server) handleGitHubAppInstallRedirect(w http.ResponseWriter, r *http.Request) {
@@ -377,6 +405,171 @@ func (s *Server) handleUserPreferences(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+func (s *Server) handleUserSaveCacheConfig(w http.ResponseWriter, r *http.Request) {
+	session, account, ok := s.requireUserSession(w, r)
+	if !ok {
+		return
+	}
+	scope, err := s.accountPreferenceScopeFromRequest(account.ID, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	manageable, err := s.accountPreferenceScopeManageable(r.Context(), account.ID, scope)
+	if err != nil {
+		s.writeUserRepositoryAuthorizationError(w, err)
+		return
+	}
+	if !manageable {
+		writeError(w, http.StatusForbidden, "Cache service for this GitHub account is managed by its owner")
+		return
+	}
+	var input upsertCacheConfigRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid cache config payload")
+		return
+	}
+	// Region and endpoint are server-owned. Resolve them from the effective
+	// Sandbox service region instead of trusting values supplied by the browser.
+	sandboxPreferences, err := s.accountPreferencesResponseBase(scope, account.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	region, endpoint, ok := s.cacheS3SettingsForSandboxAPIURL(sandboxPreferences.Sandbox.APIURL)
+	if !ok || region == "" || endpoint == "" {
+		writeError(w, http.StatusBadRequest, "selected Sandbox service region has no cache S3 mapping")
+		return
+	}
+	value := accountCacheServicePreferenceValue{
+		Region: region, Bucket: strings.TrimSpace(input.Bucket),
+		Prefix: strings.Trim(strings.TrimSpace(input.Prefix), "/"), Endpoint: endpoint,
+	}
+	if value.Bucket == "" {
+		writeError(w, http.StatusBadRequest, "bucket is required")
+		return
+	}
+	accessKeyID := strings.TrimSpace(input.AccessKeyID)
+	secretAccessKey := strings.TrimSpace(input.SecretAccessKey)
+	if accessKeyID == "" || secretAccessKey == "" {
+		if _, err := s.store.GetAccountPreference(scope.Type, scope.ID, accountPreferenceNamespaceCache, accountPreferenceKeyCacheS3); err != nil {
+			writeError(w, http.StatusBadRequest, "access_key_id and secret_access_key are required")
+			return
+		}
+		if accessKeyID == "" {
+			secret, secretErr := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeCacheAccessKeyID)
+			if secretErr != nil {
+				writeError(w, http.StatusBadRequest, "access_key_id is required")
+				return
+			}
+			accessKeyID, err = decryptSecret(secret.EncryptedValue, s.cfg.AuthEncryptionKey.Value())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+		if secretAccessKey == "" {
+			secret, secretErr := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeCacheSecretAccessKey)
+			if secretErr != nil {
+				writeError(w, http.StatusBadRequest, "secret_access_key is required")
+				return
+			}
+			secretAccessKey, err = decryptSecret(secret.EncryptedValue, s.cfg.AuthEncryptionKey.Value())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+	}
+	if value.Endpoint != "" {
+		value.Endpoint, err = normalizeHTTPURL(value.Endpoint)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "endpoint must be an absolute HTTP(S) URL")
+			return
+		}
+	}
+	storage, err := newCacheS3(cacheS3Config{Region: value.Region, Bucket: value.Bucket, Prefix: value.Prefix, Endpoint: value.Endpoint, AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	if err := validateCacheS3(ctx, storage); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	encryptedAccessKey, err := encryptSecret(accessKeyID, s.cfg.AuthEncryptionKey.Value())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	encryptedSecretKey, err := encryptSecret(secretAccessKey, s.cfg.AuthEncryptionKey.Value())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if _, err := s.store.UpsertAccountPreferenceAndSecrets(state.AccountPreference{ScopeType: scope.Type, ScopeID: scope.ID, Namespace: accountPreferenceNamespaceCache, Key: accountPreferenceKeyCacheS3, ValueJSON: string(valueJSON)},
+		state.AccountSecret{ScopeType: scope.Type, ScopeID: scope.ID, KeyType: state.AccountSecretTypeCacheAccessKeyID, EncryptedValue: encryptedAccessKey},
+		state.AccountSecret{ScopeType: scope.Type, ScopeID: scope.ID, KeyType: state.AccountSecretTypeCacheSecretAccessKey, EncryptedValue: encryptedSecretKey}); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.recordAudit("github:"+session.Subject, "cache.configure", scope.Type, strconv.FormatInt(scope.ID, 10), map[string]any{"region": value.Region, "bucket": value.Bucket, "endpoint": value.Endpoint})
+	response, err := s.accountPreferencesResponse(scope, account.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Sandbox.Manageable = true
+	response.Cache.Configured = true
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleUserDeleteCacheConfig(w http.ResponseWriter, r *http.Request) {
+	session, account, ok := s.requireUserSession(w, r)
+	if !ok {
+		return
+	}
+	scope, err := s.accountPreferenceScopeFromRequest(account.ID, r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	manageable, err := s.accountPreferenceScopeManageable(r.Context(), account.ID, scope)
+	if err != nil {
+		s.writeUserRepositoryAuthorizationError(w, err)
+		return
+	}
+	if !manageable {
+		writeError(w, http.StatusForbidden, "Cache service for this GitHub account is managed by its owner")
+		return
+	}
+	for _, key := range []string{state.AccountSecretTypeCacheAccessKeyID, state.AccountSecretTypeCacheSecretAccessKey} {
+		if err := s.store.DeleteAccountSecret(scope.Type, scope.ID, key); err != nil && !errors.Is(err, state.ErrNotFound) {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if err := s.store.DeleteAccountPreference(scope.Type, scope.ID, accountPreferenceNamespaceCache, accountPreferenceKeyCacheS3); err != nil && !errors.Is(err, state.ErrNotFound) {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.recordAudit("github:"+session.Subject, "cache.delete", scope.Type, strconv.FormatInt(scope.ID, 10), nil)
+	response, err := s.accountPreferencesResponse(scope, account.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Sandbox.Manageable = true
+	writeJSON(w, http.StatusOK, response)
+}
+
 func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Request) {
 	session, account, ok := s.requireUserSession(w, r)
 	if !ok {
@@ -539,6 +732,14 @@ func (s *Server) handleUserDeleteSandboxAPIKey(w http.ResponseWriter, r *http.Re
 }
 
 func (s *Server) accountPreferencesResponse(scope accountPreferenceScope, viewerAccountID int64) (accountPreferencesResponse, error) {
+	response, err := s.accountPreferencesResponseBase(scope, viewerAccountID)
+	if err != nil {
+		return accountPreferencesResponse{}, err
+	}
+	return s.fillCachePreferenceResponse(response, scope)
+}
+
+func (s *Server) accountPreferencesResponseBase(scope accountPreferenceScope, viewerAccountID int64) (accountPreferencesResponse, error) {
 	var response accountPreferencesResponse
 	preference, err := s.store.GetAccountPreference(scope.Type, scope.ID, accountPreferenceNamespaceSandbox, accountPreferenceKeySandboxService)
 	if err != nil {
@@ -584,6 +785,47 @@ func (s *Server) accountPreferencesResponse(scope accountPreferenceScope, viewer
 		return accountPreferencesResponse{}, err
 	}
 	return s.fillSandboxResolvedSource(response, scope)
+}
+
+func (s *Server) fillCachePreferenceResponse(response accountPreferencesResponse, scope accountPreferenceScope) (accountPreferencesResponse, error) {
+	preference, err := s.store.GetAccountPreference(scope.Type, scope.ID, accountPreferenceNamespaceCache, accountPreferenceKeyCacheS3)
+	if err != nil {
+		if errors.Is(err, state.ErrNotFound) {
+			return response, nil
+		}
+		return accountPreferencesResponse{}, err
+	}
+	var value accountCacheServicePreferenceValue
+	if err := json.Unmarshal([]byte(preference.ValueJSON), &value); err != nil {
+		return accountPreferencesResponse{}, err
+	}
+	accessKey, accessErr := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeCacheAccessKeyID)
+	secretKey, secretErr := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeCacheSecretAccessKey)
+	if errors.Is(accessErr, state.ErrNotFound) || errors.Is(secretErr, state.ErrNotFound) {
+		return response, nil
+	}
+	if accessErr != nil {
+		return accountPreferencesResponse{}, accessErr
+	}
+	if secretErr != nil {
+		return accountPreferencesResponse{}, secretErr
+	}
+	region := value.Region
+	endpoint := value.Endpoint
+	if mappedRegion, mappedEndpoint, ok := s.cacheS3SettingsForSandboxAPIURL(response.Sandbox.APIURL); ok {
+		region = mappedRegion
+		endpoint = mappedEndpoint
+	}
+	response.Cache = accountCachePreference{
+		Configured: true,
+		Region:     region,
+		Bucket:     value.Bucket,
+		Prefix:     value.Prefix,
+		Endpoint:   endpoint,
+		UpdatedAt:  accessKey.UpdatedAt.Format(time.RFC3339),
+	}
+	_ = secretKey
+	return response, nil
 }
 
 func (s *Server) fillSandboxResolvedSource(response accountPreferencesResponse, scope accountPreferenceScope) (accountPreferencesResponse, error) {

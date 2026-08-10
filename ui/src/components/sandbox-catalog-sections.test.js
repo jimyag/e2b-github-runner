@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test"
 
 import * as catalogUtils from "./sandbox-catalog-utils"
 
-const { formatOptionalTime } = catalogUtils
+const { formatOptionalTime, findSandboxRegionByAPIURL } = catalogUtils
 
 describe("sandbox regions", () => {
-  test("shares overseas-first region metadata", () => {
-    expect(catalogUtils.sandboxRegions).toEqual([
+  test("matches a known region by exact API URL", () => {
+    const regions = [
       {
         id: "us-south-1",
         label: "United States · Dallas 1",
@@ -17,7 +17,10 @@ describe("sandbox regions", () => {
         label: "China · Yangzhou 1",
         apiURL: "https://cn-yangzhou-1-sandbox.qiniuapi.com",
       },
-    ])
+    ]
+    expect(findSandboxRegionByAPIURL(regions, "https://us-south-1-sandbox.qiniuapi.com")?.id).toBe("us-south-1")
+    expect(findSandboxRegionByAPIURL(regions, "https://cn-yangzhou-1-sandbox.qiniuapi.com/")?.id).toBe("cn-yangzhou-1")
+    expect(findSandboxRegionByAPIURL(regions, "https://unknown.example.com")).toBeUndefined()
   })
 })
 

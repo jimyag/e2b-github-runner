@@ -116,6 +116,55 @@ unset secret_value
 
 > **注意：** 此功能仅防止直接查看配置时的明文泄漏，解码 key 内置在二进制中，不能抵御主机级别的攻击者。
 
+### Cache 与 S3
+
+用户需要在账户或 GitHub installation 的 Preferences 中配置 Cache S3 Bucket、可选 Prefix、AK 和 SK。S3 region 和 endpoint 由用户选择的 Sandbox service region 决定，并由运维人员在 `runnerd.yaml` 的 `sandbox.regions` 中配置。保存时 runnerd 使用用户凭据调用 `HeadBucket`；Bucket 不存在、无权限或返回区域与配置的 region 不一致都会拒绝保存。AK/SK 会加密保存在 scoped state，不会返回给浏览器或 Runner。
+
+每次启动沙箱时，runnerd 将 GitHub 仓库解析到对应 installation/account scope，读取该 scope 的 S3 配置，并通过 `cache.sts_endpoint`（默认 `https://sts-ov.qiniuapi.com`）签发短期（1 小时）的七牛 IAM 联邦凭证。随后在沙箱启动脚本中注入 `AWS_*` / `RUNS_ON_S3_*` 环境变量，使 `runs-on/cache` action 可以直接把缓存上传/恢复到用户 bucket，而无需经过 runnerd 转发字节。缓存对象 Key 以 `<配置前缀>/<owner>/<repo>/` 开头。
+
+#### 运维配置
+
+```yaml
+sandbox:
+  regions:
+    - id: us-south-1
+      label: "United States · Dallas 1"
+      sandbox_api_url: https://us-south-1-sandbox.qiniuapi.com
+      s3_region: us-north-1
+      s3_endpoint: https://s3-us-north-1.qiniucs.com
+
+cache:
+  sts_endpoint: https://sts-ov.qiniuapi.com
+```
+
+`sandbox.regions` 定义区域目录，通过 `GET /sandbox/regions` 暴露给前端。每个条目将 Sandbox API 端点映射到对应的 Kodo S3 region 和 endpoint。`cache.sts_endpoint` 是七牛 IAM 联邦凭证端点，用于签发短期凭证。
+
+#### 在 GitHub Actions 工作流中使用缓存
+
+使用 [`runs-on/cache`](https://github.com/runs-on/cache) 替代 `actions/cache`。工作流中无需额外配置，runnerd 会自动注入所有凭证和设置作为环境变量：
+
+```yaml
+steps:
+  - uses: runs-on/cache@v5
+    with:
+      path: |
+        ~/.cache/go-build
+        ~/go/pkg/mod
+      key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+      restore-keys: |
+        ${{ runner.os }}-go-
+```
+
+上传/下载并发可通过环境变量调优（以下为默认值）：
+
+```yaml
+env:
+  UPLOAD_QUEUE_SIZE: "16"    # 并发上传分片数
+  UPLOAD_PART_SIZE: "16"     # 分片大小，单位 MiB
+  DOWNLOAD_QUEUE_SIZE: "16"  # 并发下载请求数
+  DOWNLOAD_PART_SIZE: "16"   # 分片大小，单位 MiB
+```
+
 ## GitHub App 设置
 
 ### 所需权限

@@ -116,6 +116,55 @@ Supported fields: `database.dsn`, `auth.session_secret`, `auth.encryption_key`, 
 
 > **Note:** This hides plaintext from casual inspection only — the decoding key is embedded in the binary. It is not encryption against a host-level attacker.
 
+### Cache and S3
+
+Each user configures a Cache S3 Bucket, optional Prefix, AK, and SK in account or GitHub installation Preferences. The S3 region and endpoint are derived from the selected Sandbox service region and are configured by the operator in `runnerd.yaml` under `sandbox.regions`. The save operation calls `HeadBucket` with the supplied credentials and rejects a missing/inaccessible bucket or a bucket whose reported region differs from the configured region. AK/SK are encrypted in scoped state and are never returned to the browser or runner.
+
+On every sandbox start, runnerd resolves the GitHub repository to its installation/account scope, reads the scoped S3 configuration, and mints a short-lived (1 hour) Qiniu IAM federation token through the configured `cache.sts_endpoint` (default `https://sts-ov.qiniuapi.com`). It injects the token plus bucket/endpoint/prefix as `AWS_*` / `RUNS_ON_S3_*` environment variables in the Sandbox start script, so a `runs-on/cache` action can upload and restore caches directly to the user bucket without proxying bytes through runnerd. Cache object keys are prefixed with `<configured-prefix>/<owner>/<repo>/`.
+
+#### Operator configuration
+
+```yaml
+sandbox:
+  regions:
+    - id: us-south-1
+      label: "United States · Dallas 1"
+      sandbox_api_url: https://us-south-1-sandbox.qiniuapi.com
+      s3_region: us-north-1
+      s3_endpoint: https://s3-us-north-1.qiniucs.com
+
+cache:
+  sts_endpoint: https://sts-ov.qiniuapi.com
+```
+
+`sandbox.regions` defines the catalog exposed to the frontend via `GET /sandbox/regions`. Each entry maps a Sandbox API endpoint to its Kodo S3 region and endpoint. `cache.sts_endpoint` is the Qiniu IAM federation token endpoint used to mint short-lived credentials.
+
+#### Using cache in GitHub Actions workflows
+
+Use [`runs-on/cache`](https://github.com/runs-on/cache) instead of `actions/cache`. No additional configuration is needed in the workflow — runnerd injects all credentials and settings as environment variables:
+
+```yaml
+steps:
+  - uses: runs-on/cache@v5
+    with:
+      path: |
+        ~/.cache/go-build
+        ~/go/pkg/mod
+      key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+      restore-keys: |
+        ${{ runner.os }}-go-
+```
+
+The upload/download concurrency can be tuned via environment variables (defaults shown):
+
+```yaml
+env:
+  UPLOAD_QUEUE_SIZE: "16"    # concurrent multipart upload parts
+  UPLOAD_PART_SIZE: "16"     # part size in MiB
+  DOWNLOAD_QUEUE_SIZE: "16"  # concurrent range-request downloads
+  DOWNLOAD_PART_SIZE: "16"   # part size in MiB
+```
+
 ## GitHub App Setup
 
 ### Required Permissions

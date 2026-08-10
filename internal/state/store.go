@@ -25,6 +25,7 @@ var (
 	ErrNotFound                            = errors.New("state record not found")
 	ErrRetryNotAllowed                     = errors.New("retry not allowed for current state")
 	ErrSandboxServiceDefaultAPIKeyRequired = errors.New("sandbox service default api key is required")
+	ErrCacheServiceNotConfigured           = errors.New("cache service not configured")
 )
 
 type RunnerRequest struct {
@@ -229,10 +230,12 @@ type GitHubInstallationRepositoryAccess struct {
 }
 
 const (
-	AccountSecretTypeSandboxAPIKey    = "sandbox_api_key"
-	AccountSecretTypeGitHubOAuthToken = "github_oauth_token"
-	AccountScopeTypeAccount           = "account"
-	AccountScopeTypeGitHubInstall     = "github_installation"
+	AccountSecretTypeSandboxAPIKey        = "sandbox_api_key"
+	AccountSecretTypeGitHubOAuthToken     = "github_oauth_token"
+	AccountSecretTypeCacheAccessKeyID     = "cache_access_key_id"
+	AccountSecretTypeCacheSecretAccessKey = "cache_secret_access_key"
+	AccountScopeTypeAccount               = "account"
+	AccountScopeTypeGitHubInstall         = "github_installation"
 )
 
 // AccountSecret stores an encrypted named secret for one account.
@@ -339,6 +342,20 @@ type IdentityStore interface {
 	LinkOAuthIdentityToAccount(accountID int64, identity OAuthIdentity) (Account, OAuthIdentity, error)
 }
 
+type GitHubRepository struct {
+	ID             int64     `json:"id"`
+	FullName       string    `json:"full_name"`
+	InstallationID int64     `json:"installation_id"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type GitHubRepositoryStore interface {
+	GetGitHubRepository(id int64) (GitHubRepository, error)
+	GetGitHubRepositoryByName(fullName string) (GitHubRepository, error)
+	UpsertGitHubRepository(repository GitHubRepository) (GitHubRepository, error)
+}
+
 type GitHubInstallationStore interface {
 	ListGitHubInstallations(accountID int64) ([]GitHubInstallation, error)
 	ListGitHubInstallationAccounts() ([]GitHubInstallationAccount, error)
@@ -360,8 +377,10 @@ type AccountSecretStore interface {
 
 type AccountPreferenceStore interface {
 	GetAccountPreference(scopeType string, scopeID int64, namespace, key string) (AccountPreference, error)
+	DeleteAccountPreference(scopeType string, scopeID int64, namespace, key string) error
 	UpsertAccountPreference(preference AccountPreference) (AccountPreference, error)
 	UpsertAccountPreferenceAndSecret(preference AccountPreference, secret *AccountSecret) (AccountPreference, *AccountSecret, error)
+	UpsertAccountPreferenceAndSecrets(preference AccountPreference, secrets ...AccountSecret) (AccountPreference, error)
 	UpsertAccountPreferenceAndDeleteSecret(preference AccountPreference, secret AccountSecret) (AccountPreference, error)
 }
 
@@ -383,6 +402,7 @@ type AuditStore interface {
 
 type Store interface {
 	RunnerRequestStore
+	GitHubRepositoryStore
 	RunnerCatalogStore
 	IdentityStore
 	GitHubInstallationStore

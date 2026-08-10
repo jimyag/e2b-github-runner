@@ -265,7 +265,9 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 			startStage = "github_runner_url"
 			return sandboxrunner.StartResult{}, err
 		}
-		return sandboxService.StartRunner(createCtx, sandboxrunner.StartInput{
+
+		// Generate cache STS credentials for this repository if cache is configured.
+		input := sandboxrunner.StartInput{
 			RequestID:         req.ID,
 			RunnerName:        req.RunnerName,
 			RepositoryURL:     repositoryURL,
@@ -282,7 +284,32 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 				defer close(exitCh)
 				s.runnerExited(id, result, err)
 			},
-		})
+		}
+
+		// Try to generate cache STS for this repository.
+		if req.GitHubInstallationID > 0 {
+			if storage, err := s.cacheStorageForInstallation(req.GitHubInstallationID); err == nil {
+				// Cache prefix is <configured-prefix>/<owner>/<repo>.
+				cachePrefix := storage.prefix + "/" + req.RepositoryFullName
+				stsCreds, err := generateCacheSTS(createCtx, cacheS3Config{
+					Region: storage.region, Bucket: storage.bucket, Prefix: cachePrefix, Endpoint: storage.endpoint,
+					AccessKeyID: storage.accessKeyID, SecretAccessKey: storage.secretKey,
+				}, cachePrefix, s.cfg.CacheSTSEndpoint, int(s.cfg.SandboxTimeout.Seconds()))
+				if err != nil {
+					s.logger.Warn("failed to generate cache STS", "id", id, "error", err)
+				} else {
+					input.CacheS3Region = storage.region
+					input.CacheS3Bucket = storage.bucket
+					input.CacheS3Endpoint = storage.endpoint
+					input.CacheS3Prefix = cachePrefix
+					input.CacheS3AccessKeyID = stsCreds.AccessKeyID
+					input.CacheS3SecretKey = stsCreds.SecretAccessKey
+					input.CacheS3SessionToken = stsCreds.SessionToken
+				}
+			}
+		}
+
+		return sandboxService.StartRunner(createCtx, input)
 	}()
 	if err != nil {
 		s.failStart(id, st, startStage, err)

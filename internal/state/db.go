@@ -164,6 +164,7 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 		db.Migrator().HasTable(&runnerRequestRecord{})
 	models := []any{
 		&runnerEventRecord{},
+		&githubRepositoryRecord{},
 	}
 	if !existingSQLiteRunnerProfiles {
 		models = append(models, &runnerProfileRecord{})

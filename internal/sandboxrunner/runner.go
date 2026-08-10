@@ -16,19 +16,26 @@ import (
 )
 
 type StartInput struct {
-	RequestID         string
-	RunnerName        string
-	RepositoryURL     string
-	RegistrationToken string
-	Labels            []string
-	RunnerGroup       string
-	TemplateID        string
-	RequireDocker     bool
-	Timeout           time.Duration
-	CommandContext    context.Context
-	OnStdout          func([]byte)
-	OnStderr          func([]byte)
-	OnExit            func(ExitResult, error)
+	RequestID           string
+	RunnerName          string
+	RepositoryURL       string
+	RegistrationToken   string
+	Labels              []string
+	RunnerGroup         string
+	TemplateID          string
+	RequireDocker       bool
+	Timeout             time.Duration
+	CommandContext      context.Context
+	CacheS3Region       string
+	CacheS3Bucket       string
+	CacheS3Endpoint     string
+	CacheS3Prefix       string
+	CacheS3AccessKeyID  string
+	CacheS3SecretKey    string
+	CacheS3SessionToken string
+	OnStdout            func([]byte)
+	OnStderr            func([]byte)
+	OnExit              func(ExitResult, error)
 }
 
 type StartResult struct {
@@ -493,5 +500,12 @@ func startScript(input StartInput, sandboxID string) string {
 		base64.StdEncoding.EncodeToString([]byte(input.RequestID)),
 		base64.StdEncoding.EncodeToString([]byte(sandboxID)),
 		requireDocker,
+		base64.StdEncoding.EncodeToString([]byte(input.CacheS3Region)),
+		base64.StdEncoding.EncodeToString([]byte(input.CacheS3Bucket)),
+		base64.StdEncoding.EncodeToString([]byte(input.CacheS3Endpoint)),
+		base64.StdEncoding.EncodeToString([]byte(input.CacheS3Prefix)),
+		base64.StdEncoding.EncodeToString([]byte(input.CacheS3AccessKeyID)),
+		base64.StdEncoding.EncodeToString([]byte(input.CacheS3SecretKey)),
+		base64.StdEncoding.EncodeToString([]byte(input.CacheS3SessionToken)),
 	)
 }

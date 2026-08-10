@@ -3766,3 +3766,32 @@ func TestMigrateSQLiteRunnerRequestSnapshot(t *testing.T) {
 	}
 	t.Logf("runner request migration counts: before=%#v after=%#v", before, afterSecondStart)
 }
+
+func TestGitHubRepositoryIdentityIsScopedByRepositoryID(t *testing.T) {
+	store := New(t.TempDir())
+	want := GitHubRepository{ID: 12345, FullName: "owner/repo", InstallationID: 987}
+	got, err := store.UpsertGitHubRepository(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != want.ID || got.FullName != want.FullName || got.InstallationID != want.InstallationID {
+		t.Fatalf("saved repository = %#v, want %#v", got, want)
+	}
+	updated, err := store.UpsertGitHubRepository(GitHubRepository{ID: want.ID, FullName: "owner/renamed-repo", InstallationID: 654})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.FullName != "owner/renamed-repo" || updated.InstallationID != 654 {
+		t.Fatalf("updated repository = %#v", updated)
+	}
+	loaded, err := store.GetGitHubRepository(want.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.FullName != updated.FullName || loaded.InstallationID != updated.InstallationID {
+		t.Fatalf("loaded repository = %#v, want %#v", loaded, updated)
+	}
+	if _, err := store.GetGitHubRepository(99999); err != ErrNotFound {
+		t.Fatalf("missing repository error = %v, want ErrNotFound", err)
+	}
+}
