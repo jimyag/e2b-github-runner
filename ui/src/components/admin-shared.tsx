@@ -2,6 +2,7 @@ import { type ReactNode } from "react"
 import { AlertCircle, CheckCircle2, Clock3, Loader2, Play, Square } from "lucide-react"
 
 import { type RunnerStatus } from "@/admin-types"
+import { runnerStatusLabel } from "@/admin-format"
 import { Badge } from "@/components/ui/badge"
 
 export function StatusBadge({ status }: { status: RunnerStatus }) {
@@ -9,7 +10,7 @@ export function StatusBadge({ status }: { status: RunnerStatus }) {
     return (
       <Badge variant="success">
         <Play />
-        running
+        {runnerStatusLabel(status)}
       </Badge>
     )
   }
@@ -17,7 +18,7 @@ export function StatusBadge({ status }: { status: RunnerStatus }) {
     return (
       <Badge variant="danger">
         <AlertCircle />
-        failed
+        {runnerStatusLabel(status)}
       </Badge>
     )
   }
@@ -25,7 +26,7 @@ export function StatusBadge({ status }: { status: RunnerStatus }) {
     return (
       <Badge variant="outline">
         <Square />
-        completed
+        {runnerStatusLabel(status)}
       </Badge>
     )
   }
@@ -33,7 +34,7 @@ export function StatusBadge({ status }: { status: RunnerStatus }) {
     return (
       <Badge variant="warning">
         <Loader2 className="animate-spin" />
-        creating
+        {runnerStatusLabel(status)}
       </Badge>
     )
   }
@@ -41,14 +42,14 @@ export function StatusBadge({ status }: { status: RunnerStatus }) {
     return (
       <Badge variant="warning">
         <Clock3 />
-        stopping
+        {runnerStatusLabel(status)}
       </Badge>
     )
   }
   return (
     <Badge variant="secondary">
       <CheckCircle2 />
-      queued
+      {runnerStatusLabel(status)}
     </Badge>
   )
 }

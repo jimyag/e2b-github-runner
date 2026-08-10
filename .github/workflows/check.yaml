@@ -7,6 +7,17 @@ on:
     branches: ["main"]
 
 jobs:
+  i18n:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - uses: oven-sh/setup-bun@v2
+      - run: cd ui && bun install --frozen-lockfile
+      - name: Check UI internationalization
+        run: cd ui && bun run check:i18n
+
   staticcheck:
     runs-on: ubuntu-latest
     steps:

@@ -241,6 +241,7 @@ export type SyncedGitHubInstallations = {
 }
 
 export type Metric = {
+  id: string
   label: string
   value: number
   description: string

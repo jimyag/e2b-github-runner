@@ -1,4 +1,5 @@
 import { type Dispatch, type FormEvent, type SetStateAction, useCallback, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import { type RunnerGroupFormState } from "@/components/runner-groups-section"
@@ -87,6 +88,7 @@ export function useRunnerCatalog({
   setSection: (next: AdminSection) => void
   parseLabels: (value: string) => string[]
 }) {
+  const { t } = useTranslation()
   const [runnerSpecOpen, setRunnerSpecOpen] = useState(false)
   const [editingRunnerSpec, setEditingRunnerSpec] = useState<RunnerSpec | null>(null)
   const [runnerGroupOpen, setRunnerGroupOpen] = useState(false)
@@ -161,7 +163,7 @@ export function useRunnerCatalog({
 
   const createRunnerPolicy = () => {
     if (runnerSpecs.length === 0 && runnerGroups.length === 0) {
-      toast.error("Create a runner spec or runner group before adding policies")
+      toast.error(t("admin.createCatalogBeforePolicy"))
       setSection("runner_specs")
       return
     }
@@ -186,11 +188,11 @@ export function useRunnerCatalog({
         runnerSpecForm,
         parseLabels,
       })
-      toast.success(`Runner spec ${name} saved`)
+      toast.success(t("admin.runnerSpecSaved", { name }))
       setRunnerSpecOpen(false)
       await loadAll()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save runner spec")
+      toast.error(error instanceof Error ? error.message : t("admin.saveRunnerSpecFailed"))
     }
   }
 
@@ -218,13 +220,13 @@ export function useRunnerCatalog({
   const deleteRunnerSpec = async (name: string) => {
     try {
       await request(`/runner_specs/${encodeURIComponent(name)}`, { method: "DELETE" })
-      toast.success(`Runner spec ${name} deleted`)
+      toast.success(t("admin.runnerSpecDeleted", { name }))
       if (runnerSpecForm.name === name) {
         resetRunnerSpecForm()
       }
       await loadAll()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete runner spec")
+      toast.error(error instanceof Error ? error.message : t("admin.deleteRunnerSpecFailed"))
     }
   }
 
@@ -245,11 +247,11 @@ export function useRunnerCatalog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
-      toast.success(`Runner group ${payload.name} saved`)
+      toast.success(t("admin.runnerGroupSaved", { name: payload.name }))
       setRunnerGroupOpen(false)
       await loadAll()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save runner group")
+      toast.error(error instanceof Error ? error.message : t("admin.saveRunnerGroupFailed"))
     }
   }
 
@@ -267,11 +269,11 @@ export function useRunnerCatalog({
   const deleteRunnerGroup = async (name: string) => {
     try {
       await request(`/runner_groups/${encodeURIComponent(name)}`, { method: "DELETE" })
-      toast.success(`Runner group ${name} deleted`)
+      toast.success(t("admin.runnerGroupDeleted", { name }))
       if (runnerGroupForm.name === name) resetRunnerGroupForm()
       await loadAll()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete runner group")
+      toast.error(error instanceof Error ? error.message : t("admin.deleteRunnerGroupFailed"))
     }
   }
 
@@ -304,11 +306,11 @@ export function useRunnerCatalog({
         next[index] = saved
         return next
       })
-      toast.success(`Runner policy #${saved.id} saved`)
+      toast.success(t("admin.runnerPolicySaved", { id: saved.id }))
       setRunnerPolicyOpen(false)
       await loadAll()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save runner policy")
+      toast.error(error instanceof Error ? error.message : t("admin.saveRunnerPolicyFailed"))
     }
   }
 
@@ -328,13 +330,13 @@ export function useRunnerCatalog({
   const deletePolicy = async (id: number) => {
     try {
       await request(`/runner_policies/${id}`, { method: "DELETE" })
-      toast.success("Runner policy deleted")
+      toast.success(t("admin.runnerPolicyDeleted"))
       if (runnerPolicyForm.id === id) {
         resetRunnerPolicyForm()
       }
       await loadAll()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to delete runner policy")
+      toast.error(error instanceof Error ? error.message : t("admin.deleteRunnerPolicyFailed"))
     }
   }
 

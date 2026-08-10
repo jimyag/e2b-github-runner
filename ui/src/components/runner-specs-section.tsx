@@ -1,7 +1,9 @@
 import { type Dispatch, type FormEvent, type SetStateAction } from "react"
 import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import { type RunnerGroup, type RunnerSpec } from "@/admin-types"
+import i18n from "@/i18n"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -60,6 +62,7 @@ export function RunnerSpecDialogForm({
   onRunnerSpecOpenChange: (open: boolean) => void
   onSubmitRunnerSpec: (event: FormEvent<HTMLFormElement>) => void
 }) {
+  const { t } = useTranslation()
   const managed = Boolean(editingRunnerSpec?.managed_by?.trim())
 
   return (
@@ -69,27 +72,27 @@ export function RunnerSpecDialogForm({
           id="managed-runner-spec-note"
           className="flex items-start gap-3 rounded-md border bg-muted/35 px-3 py-2.5"
         >
-          <Badge variant="secondary" className="mt-0.5">Managed</Badge>
+          <Badge variant="secondary" className="mt-0.5">{t("admin.managed")}</Badge>
           <p className="text-sm leading-5 text-muted-foreground">
-            Catalog identity and routing fields are read-only. Capacity and availability remain operator controlled.
+            {t("admin.managedSpecDescription")}
           </p>
         </div>
       ) : null}
 
       <div className="grid gap-2">
-        <Label htmlFor="runner-spec-name">Name</Label>
+        <Label htmlFor="runner-spec-name">{t("common.name")}</Label>
         <Input
           id="runner-spec-name"
           value={runnerSpecForm.name}
           onChange={(event) => onRunnerSpecFormChange((current) => ({ ...current, name: event.target.value }))}
-          placeholder="runner spec name"
+          placeholder={t("admin.runnerSpecNamePlaceholder")}
           disabled={editingRunnerSpec !== null}
         />
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="grid gap-2">
-          <Label htmlFor="runner-spec-labels">Labels</Label>
+          <Label htmlFor="runner-spec-labels">{t("common.labels")}</Label>
           <Input
             id="runner-spec-labels"
             value={runnerSpecForm.labels}
@@ -99,7 +102,7 @@ export function RunnerSpecDialogForm({
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="runner-spec-required-labels">Required labels</Label>
+          <Label htmlFor="runner-spec-required-labels">{t("admin.requiredLabels")}</Label>
           <Input
             id="runner-spec-required-labels"
             value={runnerSpecForm.required_labels}
@@ -110,7 +113,7 @@ export function RunnerSpecDialogForm({
             disabled={managed}
           />
           {!managed ? (
-            <p className="text-xs text-muted-foreground">Every matching job must request these labels.</p>
+            <p className="text-xs text-muted-foreground">{t("admin.requiredLabelsDescription")}</p>
           ) : null}
         </div>
       </div>
@@ -118,7 +121,7 @@ export function RunnerSpecDialogForm({
       <div className="grid gap-2 sm:grid-cols-2">
         {managed ? (
           <div className="grid gap-2">
-            <Label htmlFor="runner-spec-default-template">Default template</Label>
+            <Label htmlFor="runner-spec-default-template">{t("admin.defaultTemplate")}</Label>
             <Input
               id="runner-spec-default-template"
               value={editingRunnerSpec?.default_template_name || ""}
@@ -127,35 +130,35 @@ export function RunnerSpecDialogForm({
           </div>
         ) : (
           <div className="grid gap-2">
-            <Label htmlFor="runner-spec-template-id">Template ID</Label>
+            <Label htmlFor="runner-spec-template-id">{t("admin.templateID")}</Label>
             <Input
               id="runner-spec-template-id"
               value={runnerSpecForm.template_id}
               onChange={(event) =>
                 onRunnerSpecFormChange((current) => ({ ...current, template_id: event.target.value }))
               }
-              placeholder="template id"
+              placeholder={t("admin.templateIDPlaceholder")}
             />
           </div>
         )}
         <div className="grid gap-2">
-          <Label htmlFor="runner-spec-github-group">GitHub runner group</Label>
+          <Label htmlFor="runner-spec-github-group">{t("admin.githubRunnerGroup")}</Label>
           <Input
             id="runner-spec-github-group"
             value={runnerSpecForm.runner_group}
             onChange={(event) =>
               onRunnerSpecFormChange((current) => ({ ...current, runner_group: event.target.value }))
             }
-            placeholder="optional GitHub runner group"
+            placeholder={t("admin.optionalGitHubRunnerGroup")}
             disabled={managed}
           />
         </div>
       </div>
 
       <fieldset className="grid gap-2 rounded-md border p-3" disabled={managed}>
-        <legend className="px-1 text-sm font-medium">Internal runner groups</legend>
+        <legend className="px-1 text-sm font-medium">{t("admin.internalRunnerGroups")}</legend>
         {runnerGroups.length === 0 ? (
-          <div className="text-sm text-muted-foreground">No internal runner groups configured.</div>
+          <div className="text-sm text-muted-foreground">{t("admin.noInternalGroups")}</div>
         ) : (
           runnerGroups.map((group) => (
             <label key={group.name} className="flex items-center gap-2 text-sm">
@@ -181,7 +184,7 @@ export function RunnerSpecDialogForm({
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="grid gap-2">
-          <Label htmlFor="runner-spec-max-concurrency">Max concurrency</Label>
+          <Label htmlFor="runner-spec-max-concurrency">{t("admin.maxConcurrency")}</Label>
           <Input
             id="runner-spec-max-concurrency"
             inputMode="numeric"
@@ -192,7 +195,7 @@ export function RunnerSpecDialogForm({
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="runner-spec-min-idle">Min idle</Label>
+          <Label htmlFor="runner-spec-min-idle">{t("admin.minIdle")}</Label>
           <Input
             id="runner-spec-min-idle"
             inputMode="numeric"
@@ -203,7 +206,7 @@ export function RunnerSpecDialogForm({
           />
         </div>
         <div className="grid gap-2">
-          <Label htmlFor="runner-spec-priority">Priority</Label>
+          <Label htmlFor="runner-spec-priority">{t("admin.priority")}</Label>
           <Input
             id="runner-spec-priority"
             inputMode="numeric"
@@ -226,7 +229,7 @@ export function RunnerSpecDialogForm({
               onRunnerSpecFormChange((current) => ({ ...current, enabled: event.target.checked }))
             }
           />
-          enabled
+          {t("common.enabled")}
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -238,15 +241,15 @@ export function RunnerSpecDialogForm({
             }
             disabled={managed}
           />
-          globally available by default
+          {t("admin.globallyAvailable")}
         </label>
       </div>
 
       <DialogFooter>
         <Button type="button" variant="outline" onClick={() => onRunnerSpecOpenChange(false)}>
-          Cancel
+          {t("common.cancel")}
         </Button>
-        <Button type="submit">Save runner spec</Button>
+        <Button type="submit">{t("admin.saveRunnerSpec")}</Button>
       </DialogFooter>
     </form>
   )
@@ -283,13 +286,14 @@ export function RunnerSpecsSection({
   onDeleteRunnerSpec: (name: string) => void
   groupNamesForSpec: (specName: string) => string[]
 }) {
+  const t = i18n.t
   return (
     <div className="grid gap-4">
       <Card className="min-w-0">
         <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <CardTitle>Runner specs</CardTitle>
-            <CardDescription>Click a runner spec row to edit it.</CardDescription>
+            <CardTitle>{t("sidebar.runnerSpecs")}</CardTitle>
+            <CardDescription>{t("admin.specsDescription")}</CardDescription>
           </div>
           <div className="flex gap-2">
             <Button
@@ -300,7 +304,7 @@ export function RunnerSpecsSection({
               }}
             >
               <Plus />
-              Create
+              {t("admin.createRunnerSpec")}
             </Button>
             <Button
               type="button"
@@ -308,7 +312,7 @@ export function RunnerSpecsSection({
               size="icon"
               onClick={onRefresh}
               disabled={loading}
-              title="Refresh"
+              title={t("common.refresh")}
             >
               <RefreshCw className={cn(loading && "animate-spin")} />
             </Button>
@@ -318,15 +322,15 @@ export function RunnerSpecsSection({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Labels</TableHead>
-                <TableHead>Template</TableHead>
-                <TableHead>GitHub group</TableHead>
-                <TableHead>Runner groups</TableHead>
-                <TableHead>Default</TableHead>
-                <TableHead>Limit</TableHead>
+                <TableHead>{t("common.name")}</TableHead>
+                <TableHead>{t("common.labels")}</TableHead>
+                <TableHead>{t("common.template")}</TableHead>
+                <TableHead>{t("admin.githubGroup")}</TableHead>
+                <TableHead>{t("sidebar.runnerGroups")}</TableHead>
+                <TableHead>{t("admin.default")}</TableHead>
+                <TableHead>{t("admin.limit")}</TableHead>
                 <TableHead className="w-44">
-                  <span className="sr-only">Actions</span>
+                  <span className="sr-only">{t("common.actions")}</span>
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -338,14 +342,14 @@ export function RunnerSpecsSection({
                   <TableCell>
                     <div className="flex max-w-[240px] items-center gap-2">
                       <span className="truncate">{runnerSpec.name}</span>
-                      {managed ? <Badge variant="secondary">Managed</Badge> : null}
+                      {managed ? <Badge variant="secondary">{t("admin.managed")}</Badge> : null}
                     </div>
                   </TableCell>
                   <TableCell><div className="max-w-[260px] truncate">{runnerSpec.labels.join(", ")}</div></TableCell>
                   <TableCell>
                     <div className="max-w-[240px]">
                       <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                        {managed ? "Default template" : "Template ID"}
+                        {managed ? t("admin.defaultTemplate") : t("admin.templateID")}
                       </div>
                       <div className="truncate">
                         {managed ? runnerSpec.default_template_name || "—" : runnerSpec.template_id}
@@ -354,7 +358,7 @@ export function RunnerSpecsSection({
                   </TableCell>
                   <TableCell><div className="max-w-[220px] truncate">{runnerSpec.runner_group || "-"}</div></TableCell>
                   <TableCell><div className="max-w-[260px] truncate">{groupNamesForSpec(runnerSpec.name).join(", ") || "-"}</div></TableCell>
-                  <TableCell>{runnerSpec.default_available ? "yes" : "no"}</TableCell>
+                  <TableCell>{runnerSpec.default_available ? t("common.yes") : t("common.no")}</TableCell>
                   <TableCell>{runnerSpec.max_concurrency}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-2">
@@ -362,14 +366,14 @@ export function RunnerSpecsSection({
                         type="button"
                         variant="outline"
                         size="sm"
-                        aria-label={`Edit ${runnerSpec.name}`}
+                        aria-label={t("admin.editNamedRunnerSpec", { name: runnerSpec.name })}
                         onClick={(event) => {
                           event.stopPropagation()
                           onEditRunnerSpec(runnerSpec)
                         }}
                       >
                         <Pencil />
-                        Edit
+                        {t("common.edit")}
                       </Button>
                       {!managed ? (
                         <Button
@@ -382,7 +386,7 @@ export function RunnerSpecsSection({
                           }}
                         >
                           <Trash2 />
-                          Delete
+                          {t("common.delete")}
                         </Button>
                       ) : null}
                     </div>
@@ -397,8 +401,8 @@ export function RunnerSpecsSection({
       <Dialog open={runnerSpecOpen} onOpenChange={onRunnerSpecOpenChange}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingRunnerSpec ? "Edit runner spec" : "Create runner spec"}</DialogTitle>
-            <DialogDescription>Define labels, template, group membership, and capacity.</DialogDescription>
+            <DialogTitle>{editingRunnerSpec ? t("admin.editRunnerSpec") : t("admin.createRunnerSpec")}</DialogTitle>
+            <DialogDescription>{t("admin.specDialogDescription")}</DialogDescription>
           </DialogHeader>
           <RunnerSpecDialogForm
             runnerGroups={runnerGroups}

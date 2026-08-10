@@ -67,6 +67,26 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
 - For Sandbox fallback changes, verify scoped override, enabled-default fallback, disabled/incomplete default rejection, catalog access, and config-source display without exposing endpoint/key or audience metadata to ordinary users.
 - For audience changes, verify `all`, selected match/miss, selected-empty, user/org stable identity, login rename tolerance, manual preconfiguration before sign-in/sync, GitHub 404 rejection, installation-owner lookup/cache behavior, audit events, and saved snapshot behavior.
 
+## UI Internationalization
+
+Run this after changing fixed UI copy, locale resources, translation-key
+construction, or language-aware formatting:
+
+```bash
+task ui-i18n-check
+```
+
+The task checks matching English/Chinese resource shapes, non-empty values,
+array lengths, interpolation-variable parity, typed i18next keys, and a narrow
+AST scan of JSX text, visible JSX attributes, and direct toast messages. Runtime
+data such as logs, repository names, IDs, and raw server errors remains outside
+the translation boundary. An exact technical literal may be allowlisted only
+when it is intentionally language-neutral.
+
+GitHub Actions runs the same command as an independent `i18n` job. Configure
+repository branch protection or a ruleset separately if that job must be a
+required merge check.
+
 ## Development Startup
 
 For `task dev`, Vite proxy, or smee startup changes, prefer a real startup smoke using temporary ports if defaults are occupied:

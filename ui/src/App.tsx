@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import { AppSidebar } from "@/components/app-sidebar"
@@ -24,7 +25,6 @@ import {
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import {
-  activeStatuses,
   adminSections,
   logNames,
   sectionFromPath,
@@ -35,7 +35,6 @@ import {
   type DiagnosticsSummary,
   type GitHubAppConfig,
   type GitHubInstallation,
-  type Metric,
   type ProductTourOnboarding,
   type RunnerGroup,
   type RunnerPolicy,
@@ -65,6 +64,8 @@ import {
   type AuthSessionCheckStatus,
 } from "@/app-load-policy"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
+import { runnerMetrics } from "@/admin-format"
+import appI18n from "@/i18n"
 import {
   repositoryAccountLogin,
   repositoryPath,
@@ -73,6 +74,7 @@ import {
   settingsPreferenceInstallationID,
 } from "@/repository-readiness"
 import { productTourVersion, shouldCompleteProductTour } from "@/user-onboarding"
+import { runnerLogTextForView, type LocalizedLogText } from "@/app-log-state"
 import {
   createGitHubReauthenticationGate,
   requiresGitHubReauthentication,
@@ -134,6 +136,7 @@ function updateAdminResource(
 }
 
 function App() {
+  const { t } = useTranslation()
   const [authSession, setAuthSession] = useState<AuthSession>({ authenticated: false, oauth_enabled: false })
   const [authSessionStatus, setAuthSessionStatus] = useState<AuthSessionCheckStatus>("checking")
   const [locationPath, setLocationPath] = useState(() => window.location.pathname)
@@ -145,7 +148,7 @@ function App() {
   const [runnerPolicies, setRunnerPolicies] = useState<RunnerPolicy[]>([])
   const [selectedID, setSelectedID] = useState("")
   const [selectedLog, setSelectedLog] = useState<(typeof logNames)[number]>("control.log")
-  const [logText, setLogText] = useState("No runner selected")
+  const [logText, setLogText] = useState<LocalizedLogText>({ kind: "text", text: "" })
   const [loading, setLoading] = useState(false)
   const [createID, setCreateID] = useState("")
   const [createRepository, setCreateRepository] = useState("")
@@ -297,19 +300,10 @@ function App() {
       ? "settings"
       : "home"
 
-  const metrics = useMemo<Metric[]>(() => {
-    const count = (status: RunnerStatus) => runners.filter((runner) => runner.status === status).length
-    return [
-      {
-        label: "Active",
-        value: runners.filter((runner) => activeStatuses.has(runner.status)).length,
-        description: "queued / creating / running / stopping",
-      },
-      { label: "Completed", value: count("completed"), description: "cleaned after exit" },
-      { label: "Failed", value: count("failed"), description: "needs inspection" },
-      { label: "Runner specs", value: runnerSpecs.length, description: "active control-plane runner specs" },
-    ]
-  }, [runnerSpecs.length, runners])
+  const metrics = useMemo(
+    () => runnerMetrics(runners, runnerSpecs.length, t),
+    [runnerSpecs.length, runners, t],
+  )
 
   const requestResponse = useCallback(
     async (url: string, options: RequestInit = {}) => {
@@ -385,17 +379,21 @@ function App() {
   const loadLog = useCallback(
     async (id: string, name: (typeof logNames)[number]) => {
       if (!hasAccess || !id) {
-        setLogText("No runner selected")
+        setLogText({ kind: "text", text: "" })
         return
       }
-      setLogText("Loading...")
+      setLogText({ kind: "message", key: "common.loading" })
       try {
         const text = (await request(
           `/runner_requests/${encodeURIComponent(id)}/logs/${encodeURIComponent(name)}`
         )) as string
-        setLogText(text || "Log is empty")
+        setLogText(text
+          ? { kind: "text", text }
+          : { kind: "message", key: "user.runnerLogEmpty" })
       } catch (error) {
-        setLogText(error instanceof Error ? error.message : "Failed to load log")
+        setLogText(error instanceof Error
+          ? { kind: "text", text: error.message }
+          : { kind: "message", key: "app.loadFailed" })
       }
     },
     [hasAccess, request]
@@ -416,7 +414,7 @@ function App() {
             setRunners(nextRunners)
             setSelectedID((current) => {
               if (!current || nextRunners.some((runner) => runner.id === current)) return current
-              setLogText("No runner selected")
+              setLogText({ kind: "text", text: "" })
               return ""
             })
           },
@@ -427,7 +425,7 @@ function App() {
         })
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load control plane data")
+      toast.error(error instanceof Error ? error.message : appI18n.t("app.controlPlaneLoadFailed"))
     } finally {
       setLoading(false)
     }
@@ -496,12 +494,12 @@ function App() {
       if (!userLoadGate.isCurrent(loadID)) return
       if (requiresGitHubReauthentication(error)) {
         if (beginGitHubReauthentication()) {
-          toast.message("Refreshing GitHub sign-in...")
+          toast.message(appI18n.t("app.refreshingGitHubSignIn"))
           refreshGitHubOAuthLogin()
         }
         return
       }
-      toast.error(error instanceof Error ? error.message : "Failed to load workspace data")
+      toast.error(error instanceof Error ? error.message : appI18n.t("app.workspaceLoadFailed"))
     } finally {
       if (userLoadGate.isCurrent(loadID)) setLoading(false)
     }
@@ -526,12 +524,12 @@ function App() {
     } catch (error) {
       if (requiresGitHubReauthentication(error)) {
         if (beginGitHubReauthentication()) {
-          toast.message("Refreshing GitHub sign-in...")
+          toast.message(appI18n.t("app.refreshingGitHubSignIn"))
           refreshGitHubOAuthLogin()
         }
         return
       }
-      toast.error(error instanceof Error ? error.message : "Failed to load older jobs")
+      toast.error(error instanceof Error ? error.message : appI18n.t("app.olderJobsLoadFailed"))
     } finally {
       setLoadingUserRunnerHistory(false)
     }
@@ -554,14 +552,14 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ installation_id: installationID, setup_state: setupState }),
       })) as GitHubInstallation
-      toast.success("GitHub App account synced")
+      toast.success(appI18n.t("app.accountSynced"))
       const nextPath = repositoryPath(installation.account_login, authSession.login)
       window.history.replaceState(null, "", nextPath)
       setLocationPath(window.location.pathname)
       setLocationSearch(window.location.search)
       await loadUserAll()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to sync GitHub App account")
+      toast.error(error instanceof Error ? error.message : appI18n.t("app.accountSyncFailed"))
     } finally {
       setLoading(false)
     }
@@ -581,7 +579,7 @@ function App() {
       )) as AuthorizedRepositories
       setAuthorizedRepositories((current) => ({ ...current, [id]: data.repositories || [] }))
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to load GitHub repositories"
+      const message = error instanceof Error ? error.message : appI18n.t("app.repositoriesLoadFailed")
       setRepositoryErrors((current) => ({ ...current, [id]: message }))
       toast.error(message)
     } finally {
@@ -596,14 +594,14 @@ function App() {
     try {
       const data = (await request("/user/github-app/installations/sync", { method: "POST" })) as SyncedGitHubInstallations
       const count = data.installations?.length ?? 0
-      toast.success(count === 1 ? "Synced 1 GitHub App account" : `Synced ${count} GitHub App accounts`)
+      toast.success(appI18n.t("app.syncedGitHubAccounts", { count }))
       await loadUserAll()
     } catch (error) {
       const requestError = error as RequestError
-      const message = error instanceof Error ? error.message : "Failed to sync GitHub App accounts"
+      const message = error instanceof Error ? error.message : appI18n.t("app.accountsSyncFailed")
       if (requiresGitHubReauthentication(requestError) || message === "sign in with GitHub again before syncing installations") {
         if (beginGitHubReauthentication()) {
-          toast.message("Refreshing GitHub sign-in...")
+          toast.message(appI18n.t("app.refreshingGitHubSignIn"))
           refreshGitHubOAuthLogin()
         }
         return
@@ -629,7 +627,7 @@ function App() {
     })) as UserPreferences
     setUserPreferences(preferences)
     setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
-    toast.success("Sandbox service settings saved")
+    toast.success(appI18n.t("app.sandboxSaved"))
   }, [request])
 
   const deleteSandboxAPIKey = useCallback(async (installationID?: number) => {
@@ -638,7 +636,7 @@ function App() {
     })) as UserPreferences
     setUserPreferences(preferences)
     setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
-    toast.success("Sandbox API Key removed")
+    toast.success(appI18n.t("app.apiKeyRemoved"))
   }, [request])
 
   const {
@@ -772,8 +770,8 @@ function App() {
     }).catch((error) => {
       toast.error(
         error instanceof Error
-          ? `Sandbox settings are saved, but product tour progress was not updated: ${error.message}`
-          : "Sandbox settings are saved, but product tour progress was not updated",
+          ? appI18n.t("app.tourProgressUpdateFailedWithReason", { reason: error.message })
+          : appI18n.t("app.tourProgressUpdateFailed"),
       )
     })
   }, [
@@ -807,7 +805,7 @@ function App() {
         setDiagnostics(summary as DiagnosticsSummary)
         setDiagnosticsVars(typeof vars === "string" ? vars : JSON.stringify(vars, null, 2))
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to load diagnostics")
+        toast.error(error instanceof Error ? error.message : appI18n.t("app.diagnosticsLoadFailed"))
       }
     })()
   }, [hasAccess, request, section])
@@ -829,7 +827,7 @@ function App() {
     setLoadingRepositoriesFor(null)
     setUserSelectedKey("")
     setSelectedID("")
-    setLogText("No runner selected")
+    setLogText({ kind: "text", text: "" })
   }
 
   const resetCreateRunnerForm = () => {
@@ -842,7 +840,7 @@ function App() {
   const createRunner = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!hasAccess) {
-      toast.error("Admin access required")
+      toast.error(t("app.adminRequired"))
       return
     }
     const body: {
@@ -853,7 +851,7 @@ function App() {
     } = {}
     const repository = createRepository.trim()
     if (!repository || repository.includes("*")) {
-      toast.error("repository_full_name must be owner/repo")
+      toast.error(t("app.repositoryFormatRequired"))
       return
     }
     if (createID.trim()) body.id = createID.trim()
@@ -870,10 +868,10 @@ function App() {
       resetCreateRunnerForm()
       setCreateRunnerOpen(false)
       setSelectedID(runner.id)
-      toast.success(`Runner ${runner.id} queued`)
+      toast.success(t("app.runnerQueued", { id: runner.id }))
       await loadAll()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to create runner")
+      toast.error(error instanceof Error ? error.message : t("app.createRunnerFailed"))
     }
   }
 
@@ -883,10 +881,10 @@ function App() {
         method: "DELETE",
       })) as RunnerState
       setSelectedID(runner.id)
-      toast.success(`Runner ${runner.id} completed`)
+      toast.success(t("app.runnerCompleted", { id: runner.id }))
       await loadAll()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to stop runner")
+      toast.error(error instanceof Error ? error.message : t("app.stopRunnerFailed"))
     }
   }
 
@@ -896,10 +894,10 @@ function App() {
         method: "POST",
       })) as RunnerState
       setSelectedID(runner.id)
-      toast.success(`Runner ${runner.id} requeued`)
+      toast.success(t("app.runnerRequeued", { id: runner.id }))
       await loadAll()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to retry runner")
+      toast.error(error instanceof Error ? error.message : t("app.retryRunnerFailed"))
     }
   }
 
@@ -916,14 +914,14 @@ function App() {
       })) as RunnerSpecMatch
       setMatchResult(result)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to run match test")
+      toast.error(error instanceof Error ? error.message : t("app.matchFailed"))
     }
   }
 
   const copySelectedID = async () => {
     if (!selected) return
     await navigator.clipboard.writeText(selected.id)
-    toast.success("Runner ID copied")
+    toast.success(t("app.runnerIDCopied"))
   }
 
   const openUserJob = (id: string) => {
@@ -1064,7 +1062,7 @@ function App() {
           {section === "overview" || section === "runner_requests" ? (
             <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {metrics.map((metric) => (
-                <Card key={metric.label} className="gap-3 py-5">
+                <Card key={metric.id} className="gap-3 py-5">
                   <CardHeader className="px-5">
                     <CardDescription>{metric.label}</CardDescription>
                     <CardTitle className="text-3xl">{metric.value}</CardTitle>
@@ -1098,7 +1096,7 @@ function App() {
               selected={selected}
               selectedID={selectedID}
               selectedLog={selectedLog}
-              logText={logText}
+              logText={runnerLogTextForView(selectedID, logText, t)}
               createID={createID}
               createRepository={createRepository}
               createRunnerSpec={createRunnerSpec}
@@ -1221,6 +1219,7 @@ function UserJobRedirect({
   onResolved: (key: string) => void
   fallback: ReactNode
 }) {
+  const { t } = useTranslation()
   const [failedID, setFailedID] = useState("")
 
   useEffect(() => {
@@ -1246,7 +1245,7 @@ function UserJobRedirect({
   if (failedID === id) return <>{fallback}</>
   return (
     <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
-      Opening job in its build context...
+      {t("user.openingBuildContext")}
     </div>
   )
 }

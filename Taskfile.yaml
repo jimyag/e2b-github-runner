@@ -55,6 +55,13 @@ tasks:
       - bun run lint
       - bun run build
 
+  ui-i18n-check:
+    desc: Validate UI translations, typed keys, and visible source literals
+    dir: ui
+    cmds:
+      - bun install --frozen-lockfile
+      - bun run check:i18n
+
   ui-production-smoke:
     desc: Run the production UI bundle in headless Chromium
     dir: ui

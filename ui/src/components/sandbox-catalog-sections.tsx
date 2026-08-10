@@ -1,7 +1,9 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { RefreshCw } from "lucide-react"
+import { useTranslation } from "react-i18next"
 
 import type { SandboxInstance, SandboxTemplate } from "@/admin-types"
+import appI18n from "@/i18n"
 import {
   formatOptionalTime,
   loadSandboxInstances,
@@ -32,6 +34,7 @@ function Header({
   onRefresh: () => void
   children?: ReactNode
 }) {
+  const { t } = useTranslation()
   return (
     <CardHeader className="flex flex-col gap-3 pb-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
       <div>
@@ -52,7 +55,7 @@ function Header({
           </SelectContent>
         </Select>
         {children}
-        <Button variant="outline" size="icon" onClick={onRefresh} disabled={loading} aria-label="Refresh">
+        <Button variant="outline" size="icon" onClick={onRefresh} disabled={loading} aria-label={t("common.refresh")}>
           <RefreshCw className={loading ? "animate-spin" : ""} />
         </Button>
       </div>
@@ -67,6 +70,7 @@ export function SandboxTemplatesSection({
   request: SandboxCatalogRequest
   installationID?: number
 }) {
+  const { t } = useTranslation()
   const [region, setRegion] = useState(sandboxRegions[0].id)
   const [items, setItems] = useState<SandboxTemplate[]>([])
   const [loading, setLoading] = useState(false)
@@ -85,7 +89,7 @@ export function SandboxTemplatesSection({
       }
     } catch (cause) {
       if (generation === loadGeneration.current) {
-        setError(cause instanceof Error ? cause.message : "Failed to load sandbox templates")
+        setError(cause instanceof Error ? cause.message : appI18n.t("user.loadSandboxTemplatesFailed"))
       }
     } finally {
       if (generation === loadGeneration.current) {
@@ -104,8 +108,8 @@ export function SandboxTemplatesSection({
   return (
     <Card className="rounded-lg">
       <Header
-        title="Sandbox templates"
-        description="Runnable images available to runner specs in the selected region."
+        title={t("user.sandboxTemplates")}
+        description={t("user.catalogTemplatesDescription")}
         region={region}
         loading={loading}
         onRegion={setRegion}
@@ -119,11 +123,11 @@ export function SandboxTemplatesSection({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Template</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Resources</TableHead>
-                  <TableHead>Visibility</TableHead>
-                  <TableHead className="text-right">Spawns</TableHead>
+                  <TableHead>{t("common.template")}</TableHead>
+                  <TableHead>{t("common.status")}</TableHead>
+                  <TableHead>{t("common.resources")}</TableHead>
+                  <TableHead>{t("common.visibility")}</TableHead>
+                  <TableHead className="text-right">{t("user.spawns")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -133,18 +137,22 @@ export function SandboxTemplatesSection({
                       <div className="font-medium">{item.aliases?.[0] || item.template_id}</div>
                       <div className="max-w-[360px] truncate text-xs text-muted-foreground">{item.template_id}</div>
                     </TableCell>
-                    <TableCell>{item.build_status || "unknown"}</TableCell>
+                    <TableCell>{item.build_status || t("common.unknown")}</TableCell>
                     <TableCell>
-                      {item.cpu_count} CPU · {item.memory_mb} MB · {item.disk_size_mb} MB disk
+                      {t("user.catalogTemplateResources", {
+                        cpu: item.cpu_count,
+                        memory: item.memory_mb,
+                        disk: item.disk_size_mb,
+                      })}
                     </TableCell>
-                    <TableCell>{item.public ? "Public" : "Private"}</TableCell>
+                    <TableCell>{item.public ? t("common.public") : t("common.private")}</TableCell>
                     <TableCell className="text-right tabular-nums">{item.spawn_count}</TableCell>
                   </TableRow>
                 ))}
                 {!loading && items.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
-                      No templates in this region.
+                      {t("user.noTemplatesInRegion")}
                     </TableCell>
                   </TableRow>
                 ) : null}
@@ -164,6 +172,7 @@ export function SandboxesSection({
   request: SandboxCatalogRequest
   installationID?: number
 }) {
+  const { t, i18n } = useTranslation()
   const [region, setRegion] = useState(sandboxRegions[0].id)
   const [template, setTemplate] = useState("all")
   const [templates, setTemplates] = useState<SandboxTemplate[]>([])
@@ -187,7 +196,7 @@ export function SandboxesSection({
       }
     } catch (cause) {
       if (generation === templateLoadGeneration.current) {
-        setTemplatesError(cause instanceof Error ? cause.message : "Failed to load sandbox templates")
+        setTemplatesError(cause instanceof Error ? cause.message : appI18n.t("user.loadSandboxTemplatesFailed"))
       }
     } finally {
       if (generation === templateLoadGeneration.current) {
@@ -209,7 +218,7 @@ export function SandboxesSection({
       }
     } catch (cause) {
       if (generation === instanceLoadGeneration.current) {
-        setInstancesError(cause instanceof Error ? cause.message : "Failed to load sandboxes")
+        setInstancesError(cause instanceof Error ? cause.message : appI18n.t("user.loadSandboxesFailed"))
       }
     } finally {
       if (generation === instanceLoadGeneration.current) {
@@ -242,8 +251,8 @@ export function SandboxesSection({
   return (
     <Card className="rounded-lg">
       <Header
-        title="Sandbox instances"
-        description="Live and recent sandbox capacity in the selected region."
+        title={t("user.sandboxInstances")}
+        description={t("user.catalogInstancesDescription")}
         region={region}
         loading={loading}
         onRegion={(value) => {
@@ -257,10 +266,10 @@ export function SandboxesSection({
       >
         <Select value={template} onValueChange={setTemplate} disabled={filterDisabled}>
           <SelectTrigger className="min-w-[200px] max-w-[280px]">
-            <SelectValue placeholder="Filter by template" />
+            <SelectValue placeholder={t("user.filterTemplate")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All templates</SelectItem>
+            <SelectItem value="all">{t("user.allTemplates")}</SelectItem>
             {templates.map((item) => (
               <SelectItem key={item.template_id} value={item.template_id}>
                 {item.aliases?.[0] || item.template_id}
@@ -277,12 +286,12 @@ export function SandboxesSection({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Sandbox</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead>Template</TableHead>
-                  <TableHead>Resources</TableHead>
-                  <TableHead>Started</TableHead>
-                  <TableHead>Expires</TableHead>
+                  <TableHead>{t("common.sandbox")}</TableHead>
+                  <TableHead>{t("user.state")}</TableHead>
+                  <TableHead>{t("common.template")}</TableHead>
+                  <TableHead>{t("common.resources")}</TableHead>
+                  <TableHead>{t("common.started")}</TableHead>
+                  <TableHead>{t("common.expires")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -297,16 +306,19 @@ export function SandboxesSection({
                       <div className="max-w-[260px] truncate">{item.template_id}</div>
                     </TableCell>
                     <TableCell>
-                      {item.cpu_count} CPU · {item.memory_mb} MB
+                      {t("user.catalogInstanceResources", {
+                        cpu: item.cpu_count,
+                        memory: item.memory_mb,
+                      })}
                     </TableCell>
-                    <TableCell>{formatOptionalTime(item.started_at)}</TableCell>
-                    <TableCell>{formatOptionalTime(item.expires_at)}</TableCell>
+                    <TableCell>{formatOptionalTime(item.started_at, i18n.resolvedLanguage)}</TableCell>
+                    <TableCell>{formatOptionalTime(item.expires_at, i18n.resolvedLanguage)}</TableCell>
                   </TableRow>
                 ))}
                 {!loading && items.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                      No sandboxes match these filters.
+                      {t("user.noSandboxesForFilters")}
                     </TableCell>
                   </TableRow>
                 ) : null}

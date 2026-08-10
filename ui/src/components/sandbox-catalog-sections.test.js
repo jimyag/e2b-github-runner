@@ -22,6 +22,14 @@ describe("sandbox regions", () => {
 })
 
 describe("formatOptionalTime", () => {
+  test("formats timestamps with the selected application locale", () => {
+    const timestamp = "2026-08-10T08:09:10Z"
+    const date = new Date(timestamp)
+
+    expect(formatOptionalTime(timestamp, "en")).toBe(date.toLocaleString("en"))
+    expect(formatOptionalTime(timestamp, "zh")).toBe(date.toLocaleString("zh"))
+  })
+
   test("renders invalid timestamps as unavailable", () => {
     expect(formatOptionalTime("not-a-date")).toBe("—")
   })

@@ -318,6 +318,19 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
 cd ui && bun run test
 ```
 
+修改固定 UI 文案、locale 资源、翻译 key 构造或 locale 格式化逻辑后，运行：
+
+```bash
+task ui-i18n-check
+```
+
+该检查会验证英文和中文资源树的类型与数组长度一致、值不为空，并使用相同的
+插值变量；同时通过 TypeScript 校验 i18next key，并扫描 JSX 文本、部分用户可见
+属性和直接 toast 调用中的未翻译固定字面量。运行时日志、仓库名、ID 和原始服务端
+错误不属于翻译范围；确实需要在两种语言中保持一致的技术字面量可以显式加入精确
+allowlist。GitHub Actions 会在独立的 `i18n` job 中运行同一检查；只有在仓库的
+branch protection 或 ruleset 中将它设为 required check 后，它才会阻止合并。
+
 修改 UI 依赖、Vite/Rollup 配置、manual chunk 或生产静态资源加载逻辑后，要在
 Chromium 中执行构建产物：
 

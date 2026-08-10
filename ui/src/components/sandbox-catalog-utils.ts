@@ -59,8 +59,8 @@ export function sandboxInstancesViewState({
   }
 }
 
-export function formatOptionalTime(value: string) {
+export function formatOptionalTime(value: string, locale?: string) {
   if (!value || value.startsWith("0001-01-01")) return "—"
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString()
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(locale)
 }

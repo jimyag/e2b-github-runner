@@ -3,8 +3,22 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
 import { LandingPage } from "./landing-page"
+import i18n from "../i18n"
 
 describe("LandingPage", () => {
+  test("renders the public experience in Chinese", async () => {
+    await i18n.changeLanguage("zh")
+    try {
+      const html = renderToStaticMarkup(createElement(LandingPage))
+
+      expect(html).toContain("由七牛 Sandbox 驱动的 GitHub Actions")
+      expect(html).toContain("任务来时算力出现，任务结束随即消失。")
+      expect(html).toContain('aria-label="语言: 中文"')
+    } finally {
+      await i18n.changeLanguage("en")
+    }
+  })
+
   test("uses the same Qiniu CI Runner logo as the admin interface", () => {
     const html = renderToStaticMarkup(
       createElement(LandingPage),
