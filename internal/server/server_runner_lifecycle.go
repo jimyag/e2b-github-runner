@@ -19,6 +19,54 @@ import (
 	"github.com/qiniu/ci-runner/internal/state"
 )
 
+func (s *Server) cacheScopesForWorkflow(ctx context.Context, repository string, st state.RunnerState, defaultScope string) (string, []string, string) {
+	readOnly := func(reason string) (string, []string, string) {
+		return "", []string{defaultScope}, reason
+	}
+	if st.WorkflowRunID <= 0 {
+		return readOnly("read_only_missing_workflow_run")
+	}
+	run, err := s.gh.GetWorkflowRun(ctx, repository, st.WorkflowRunID)
+	if err != nil {
+		s.logger.Warn("failed to resolve workflow run for cache scope", "workflow_run_id", st.WorkflowRunID, "repository", repository, "error", err)
+		return readOnly("read_only_workflow_run_lookup_failed")
+	}
+	event := strings.ToLower(strings.TrimSpace(run.Event))
+	if event == "pull_request" || event == "pull_request_target" {
+		if len(run.PullRequests) == 0 || run.PullRequests[0].Number <= 0 {
+			return readOnly("read_only_missing_pull_request_metadata")
+		}
+		headRepo := strings.TrimSpace(run.HeadRepository.FullName)
+		baseRepo := strings.TrimSpace(run.Repository.FullName)
+		if headRepo == "" || baseRepo == "" {
+			return readOnly("read_only_missing_repository_metadata")
+		}
+		if !strings.EqualFold(headRepo, baseRepo) {
+			return readOnly("read_only_fork_pull_request")
+		}
+		ownScope := scopeForPR(run.PullRequests[0].Number)
+		readScopes := []string{ownScope, defaultScope}
+		if branch := strings.TrimSpace(run.HeadBranch); branch != "" {
+			readScopes = append(readScopes, scopeForBranch(branch))
+		}
+		return ownScope, readScopes, "internal_pull_request"
+	}
+	// All non-PR events must still identify the same head and base repository.
+	// This covers push, schedule, workflow_dispatch, and similar trusted events
+	// without granting write access when GitHub omits repository metadata.
+	headRepo := strings.TrimSpace(run.HeadRepository.FullName)
+	baseRepo := strings.TrimSpace(run.Repository.FullName)
+	branch := strings.TrimSpace(run.HeadBranch)
+	if headRepo == "" || baseRepo == "" || !strings.EqualFold(headRepo, baseRepo) {
+		return readOnly("read_only_untrusted_repository_metadata")
+	}
+	if branch == "" {
+		return readOnly("read_only_missing_branch")
+	}
+	ownScope := scopeForBranch(branch)
+	return ownScope, []string{ownScope, defaultScope}, "branch"
+}
+
 func (s *Server) createAndStart(w http.ResponseWriter, r *http.Request, req state.RunnerRequest, payload []byte) {
 	st, created, err := s.enqueueRunnerRequest(req, payload)
 	if err != nil {
@@ -292,32 +340,8 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 				cacheBasePrefix := storage.prefix + "/" + req.RepositoryFullName
 				defaultScope := scopeForBranch("main")
 
-				var ownScope string
-				var readScopes []string
-				isFork := isForkPullRequestPayload(st.GitHubPayloadJSON)
-
-				if isFork {
-					// Fork PR gets read-only access (no write scope) to default scope and base scope
-					ownScope = ""
-					readScopes = []string{defaultScope}
-					s.logger.Info("cache STS generating read-only token for fork pull request", "id", id, "pull_request", st.PullRequestNumber)
-				} else if st.PullRequestNumber > 0 {
-					// Internal PR gets write access to its own PR scope, and read access to PR scope + default scope
-					ownScope = scopeForPR(st.PullRequestNumber)
-					readScopes = []string{ownScope, defaultScope}
-					if st.HeadBranch != "" {
-						readScopes = append(readScopes, scopeForBranch(st.HeadBranch))
-					}
-					s.logger.Info("cache STS generating scoped token for internal pull request", "id", id, "pull_request", st.PullRequestNumber, "own_scope", ownScope)
-				} else {
-					// Ordinary branch job gets write access to its branch scope, and read access to branch scope + default scope
-					branchName := st.HeadBranch
-					if branchName == "" {
-						branchName = "main"
-					}
-					ownScope = scopeForBranch(branchName)
-					readScopes = []string{ownScope, defaultScope}
-				}
+				ownScope, readScopes, decision := s.cacheScopesForWorkflow(createCtx, req.RepositoryFullName, st, defaultScope)
+				s.logger.Info("cache STS scope decision", "id", id, "decision", decision, "pull_request", st.PullRequestNumber, "own_scope", ownScope, "read_scopes", readScopes)
 
 				stsCreds, err := generateCacheSTS(createCtx, cacheS3Config{
 					Region: storage.region, Bucket: storage.bucket, Prefix: cacheBasePrefix, Endpoint: storage.endpoint,

@@ -125,6 +125,13 @@ func TestGenerateCacheSTSReadOnlyForkPR(t *testing.T) {
 	}
 }
 
+func TestGenerateCacheSTSRequiresReadScope(t *testing.T) {
+	_, err := generateCacheSTSWithClient(t.Context(), cacheS3Config{Bucket: "my-bucket"}, "gh-cache/org/repo", "", nil, "https://sts.example.test", 1800, &cacheSTSRecordingClient{})
+	if err == nil || !strings.Contains(err.Error(), "read scope") {
+		t.Fatalf("expected missing read scope error, got %v", err)
+	}
+}
+
 func TestIsForkPullRequestPayload(t *testing.T) {
 	forkPayload := `{
 		"workflow_run": {

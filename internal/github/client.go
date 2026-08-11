@@ -756,6 +756,43 @@ func (c *Client) ListWorkflowRunJobs(ctx context.Context, repositoryFullName str
 	return jobs, nil
 }
 
+func (c *Client) GetWorkflowRun(ctx context.Context, repositoryFullName string, runID int64) (WorkflowRun, error) {
+	startedAt := time.Now()
+	result := "error"
+	defer func() { metrics.RecordGitHubAPI("get_workflow_run", result, time.Since(startedAt)) }()
+	repositoryFullName = c.repositoryFullName(repositoryFullName)
+	if repositoryFullName == "" {
+		return WorkflowRun{}, fmt.Errorf("repository full name is required")
+	}
+	if runID <= 0 {
+		return WorkflowRun{}, fmt.Errorf("workflow run id is required")
+	}
+	url := fmt.Sprintf("%s/repos/%s/actions/runs/%d", c.baseURL, repositoryFullName, runID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return WorkflowRun{}, err
+	}
+	setGitHubHeaders(req)
+	resp, err := c.do(req, repositoryFullName)
+	if err != nil {
+		return WorkflowRun{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return WorkflowRun{}, fmt.Errorf("read github workflow run response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return WorkflowRun{}, fmt.Errorf("github workflow run: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var run WorkflowRun
+	if err := json.Unmarshal(body, &run); err != nil {
+		return WorkflowRun{}, err
+	}
+	result = "success"
+	return run, nil
+}
+
 func (c *Client) GetWorkflowJob(ctx context.Context, repositoryFullName string, jobID int64) (WorkflowJob, error) {
 	startedAt := time.Now()
 	result := "error"
@@ -1251,9 +1288,13 @@ type Repository struct {
 }
 
 type WorkflowRun struct {
-	ID         int64  `json:"id"`
-	Name       string `json:"name"`
-	HeadBranch string `json:"head_branch"`
+	ID             int64         `json:"id"`
+	Name           string        `json:"name"`
+	Event          string        `json:"event"`
+	HeadBranch     string        `json:"head_branch"`
+	HeadRepository Repository    `json:"head_repository"`
+	Repository     Repository    `json:"repository"`
+	PullRequests   []PullRequest `json:"pull_requests"`
 }
 
 type InstallationRef struct {

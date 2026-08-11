@@ -446,6 +446,26 @@ func TestListWorkflowRunJobsFollowsPagination(t *testing.T) {
 	}
 }
 
+func TestGetWorkflowRun(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/actions/runs/123" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":123,"name":"CI","event":"pull_request","head_branch":"feature","head_repository":{"full_name":"fork/r"},"repository":{"full_name":"o/r"},"pull_requests":[{"number":7}]}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, ts.Client())
+	run, err := client.GetWorkflowRun(t.Context(), "o/r", 123)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.ID != 123 || run.Event != "pull_request" || run.HeadRepository.FullName != "fork/r" || len(run.PullRequests) != 1 || run.PullRequests[0].Number != 7 {
+		t.Fatalf("unexpected workflow run: %#v", run)
+	}
+}
+
 func TestGetWorkflowJob(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/o/r/actions/jobs/1001" {

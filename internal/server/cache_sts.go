@@ -128,7 +128,7 @@ func generateCacheSTSWithClient(ctx context.Context, config cacheS3Config, cache
 		}
 	}
 	if len(readResources) == 0 {
-		readResources = []string{fmt.Sprintf("qrn:kodo:::bucket/%s/%s/*", bucket, cachePrefix)}
+		return CacheSTSCredentials{}, fmt.Errorf("at least one cache read scope is required")
 	}
 	statements = append(statements, map[string]any{
 		"effect":   "Allow",
