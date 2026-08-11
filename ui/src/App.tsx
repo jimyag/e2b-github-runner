@@ -646,14 +646,14 @@ function App() {
     })) as UserPreferences
     setUserPreferences(preferences)
     setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
-    toast.success("Cache S3 settings saved")
+    toast.success(t("user.cacheS3SettingsSaved"))
   }, [request])
 
   const deleteCacheConfig = useCallback(async (installationID?: number) => {
     const preferences = (await request(userPreferencesPath(installationID, "/user/preferences/cache"), { method: "DELETE" })) as UserPreferences
     setUserPreferences(preferences)
     setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
-    toast.success("Cache S3 settings removed")
+    toast.success(t("user.cacheS3SettingsRemoved"))
   }, [request])
 
   const deleteSandboxAPIKey = useCallback(async (installationID?: number) => {

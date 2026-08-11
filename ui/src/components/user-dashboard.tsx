@@ -657,6 +657,7 @@ function CacheS3Card({
   onDelete: (installationID?: number) => Promise<void>
 }) {
   const sandboxRegions = useSandboxRegions()
+  const { t } = useTranslation()
   // Cache preferences contain the effective operator-owned mapping. This also
   // works when Sandbox is supplied by inheritance or the admin default, where
   // there may be no local sandbox api_url in the response.
@@ -684,11 +685,11 @@ function CacheS3Card({
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!hasRegion) {
-      setError("Please select a Sandbox service region first.")
+      setError(t("user.cacheS3RegionRequired"))
       return
     }
     if (!bucket.trim() || (!configured && (!accessKeyID.trim() || !secretAccessKey.trim()))) {
-      setError("Bucket, AK, and SK are required for a new configuration.")
+      setError(t("user.cacheS3BucketRequired"))
       return
     }
     setSaving(true)
@@ -698,7 +699,7 @@ function CacheS3Card({
       setAccessKeyID("")
       setSecretAccessKey("")
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Failed to save Cache S3 settings.")
+      setError(cause instanceof Error ? cause.message : t("user.cacheS3SaveFailed"))
     } finally {
       setSaving(false)
     }
@@ -706,24 +707,24 @@ function CacheS3Card({
   return (
     <Card className="rounded-lg">
       <form onSubmit={submit}>
-        <CardHeader className="gap-2 pb-3"><CardTitle className="text-base">Cache S3</CardTitle><CardDescription>Configure the S3-compatible bucket for GitHub Actions cache storage. The region and endpoint are determined by the Sandbox service region selection above.</CardDescription></CardHeader>
+        <CardHeader className="gap-2 pb-3"><CardTitle className="text-base">{t("user.cacheS3")}</CardTitle><CardDescription>{t("user.cacheS3Description")}</CardDescription></CardHeader>
         <CardContent className="space-y-4">
           {hasRegion ? (
             <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">Region:</span> {s3Region} &nbsp;
-              <span className="font-medium text-foreground">Endpoint:</span> {s3Endpoint}
+              <span className="font-medium text-foreground">{t("user.cacheS3Region")}</span> {s3Region}{" "}
+              <span className="font-medium text-foreground">{t("user.cacheS3Endpoint")}</span> {s3Endpoint}
             </div>
           ) : (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">No S3 endpoint configured for the selected Sandbox service region. Please select a region or contact the administrator.</div>
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{t("user.cacheS3NoEndpoint")}</div>
           )}
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="grid gap-2"><Label htmlFor="cache-bucket">Bucket</Label><Input id="cache-bucket" value={bucket} onChange={(event) => setBucket(event.target.value)} placeholder="github-actions-cache" disabled={saving || removing} /></div>
-            <div className="grid gap-2"><Label htmlFor="cache-prefix">Prefix</Label><Input id="cache-prefix" value={prefix} onChange={(event) => setPrefix(event.target.value)} placeholder="gh-actions-cache" disabled={saving || removing} /></div>
-            <div className="grid gap-2"><Label htmlFor="cache-ak">Access Key ID</Label><Input id="cache-ak" type="password" value={accessKeyID} onChange={(event) => setAccessKeyID(event.target.value)} placeholder={configured ? "Enter a new AK to replace the saved one" : "Access Key ID"} disabled={saving || removing} /></div>
-            <div className="grid gap-2"><Label htmlFor="cache-sk">Secret Access Key</Label><Input id="cache-sk" type="password" value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value)} placeholder={configured ? "Enter a new SK to replace the saved one" : "Secret Access Key"} disabled={saving || removing} /></div>
+            <div className="grid gap-2"><Label htmlFor="cache-bucket">{t("user.cacheS3Bucket")}</Label><Input id="cache-bucket" value={bucket} onChange={(event) => setBucket(event.target.value)} placeholder={t("user.cacheS3BucketPlaceholder")} disabled={saving || removing} /></div>
+            <div className="grid gap-2"><Label htmlFor="cache-prefix">{t("user.cacheS3Prefix")}</Label><Input id="cache-prefix" value={prefix} onChange={(event) => setPrefix(event.target.value)} placeholder={t("user.cacheS3PrefixPlaceholder")} disabled={saving || removing} /></div>
+            <div className="grid gap-2"><Label htmlFor="cache-ak">{t("user.cacheS3AccessKeyID")}</Label><Input id="cache-ak" type="password" value={accessKeyID} onChange={(event) => setAccessKeyID(event.target.value)} placeholder={configured ? t("user.cacheS3AccessKeyIDPlaceholderNew") : t("user.cacheS3AccessKeyIDPlaceholder")} disabled={saving || removing} /></div>
+            <div className="grid gap-2"><Label htmlFor="cache-sk">{t("user.cacheS3SecretAccessKey")}</Label><Input id="cache-sk" type="password" value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value)} placeholder={configured ? t("user.cacheS3SecretAccessKeyPlaceholderNew") : t("user.cacheS3SecretAccessKeyPlaceholder")} disabled={saving || removing} /></div>
           </div>
-          <div className="flex items-center gap-2"><Button type="submit" disabled={saving || removing || !hasRegion}>{saving ? "Validating" : configured ? "Save changes" : "Save Cache S3"}</Button>{configured ? <Button type="button" variant="outline" disabled={saving || removing} onClick={async () => { setRemoving(true); setError(""); try { await onDelete(installationID) } catch (cause) { setError(cause instanceof Error ? cause.message : "Failed to remove Cache S3 settings.") } finally { setRemoving(false) } }}>Remove</Button> : null}</div>
-          <div className="text-sm text-muted-foreground">{configured ? `Configured${preferences?.cache?.updated_at ? ` · ${formatTime(preferences.cache.updated_at)}` : ""}` : "No Cache S3 configuration is saved."}</div>
+          <div className="flex items-center gap-2"><Button type="submit" disabled={saving || removing || !hasRegion}>{saving ? t("user.cacheS3Validating") : configured ? t("user.cacheS3SaveChanges") : t("user.cacheS3Save")}</Button>{configured ? <Button type="button" variant="outline" disabled={saving || removing} onClick={async () => { setRemoving(true); setError(""); try { await onDelete(installationID) } catch (cause) { setError(cause instanceof Error ? cause.message : t("user.cacheS3RemoveFailed")) } finally { setRemoving(false) } }}>{t("user.cacheS3Remove")}</Button> : null}</div>
+          <div className="text-sm text-muted-foreground">{configured ? `${t("user.cacheS3Configured")}${preferences?.cache?.updated_at ? ` · ${formatTime(preferences.cache.updated_at)}` : ""}` : t("user.cacheS3NotConfigured")}</div>
           {error ? <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
         </CardContent>
       </form>
