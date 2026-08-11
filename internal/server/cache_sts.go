@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -60,19 +61,34 @@ type cacheSTSClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// generateCacheSTS generates a temporary S3-compatible credential via the
-// Qiniu IAM federation token API. The session policy uses resource-level
-// prefix isolation: bucket-level actions (list) are scoped to the bucket,
-// while object-level actions (upload/get/delete) are restricted to
-// qrn:kodo:::bucket/<bucket>/<cachePrefix>/*. Resource wildcards in the
-// configured prefix are rejected so they cannot broaden this pattern. The
-// credential duration is supplied by the caller as the sandbox lifecycle plus
-// post-job headroom.
-func generateCacheSTS(ctx context.Context, config cacheS3Config, cachePrefix, endpoint string, durationSeconds int) (CacheSTSCredentials, error) {
-	return generateCacheSTSWithClient(ctx, config, cachePrefix, endpoint, durationSeconds, &http.Client{Timeout: 30 * time.Second})
+func scopeForBranch(branch string) string {
+	branch = strings.TrimSpace(branch)
+	branch = strings.TrimPrefix(branch, "refs/heads/")
+	if branch == "" {
+		branch = "default"
+	}
+	h := sha256.Sum256([]byte(branch))
+	return fmt.Sprintf("scopes/branch-%x", h[:16])
 }
 
-func generateCacheSTSWithClient(ctx context.Context, config cacheS3Config, cachePrefix, endpoint string, durationSeconds int, client cacheSTSClient) (CacheSTSCredentials, error) {
+func scopeForPR(prNumber int64) string {
+	if prNumber <= 0 {
+		return "scopes/pr-unknown"
+	}
+	return fmt.Sprintf("scopes/pr-%d", prNumber)
+}
+
+// generateCacheSTS generates a temporary S3-compatible credential via the
+// Qiniu IAM federation token API. The session policy uses resource-level
+// scope isolation: bucket-level actions (list) are scoped to the bucket,
+// object read actions (stat/get) cover all specified readScopes, and object
+// write actions (upload/delete/etc.) are strictly restricted to ownScope.
+// If ownScope is empty, write permissions are omitted (read-only mode).
+func generateCacheSTS(ctx context.Context, config cacheS3Config, cachePrefix, ownScope string, readScopes []string, endpoint string, durationSeconds int) (CacheSTSCredentials, error) {
+	return generateCacheSTSWithClient(ctx, config, cachePrefix, ownScope, readScopes, endpoint, durationSeconds, &http.Client{Timeout: 30 * time.Second})
+}
+
+func generateCacheSTSWithClient(ctx context.Context, config cacheS3Config, cachePrefix, ownScope string, readScopes []string, endpoint string, durationSeconds int, client cacheSTSClient) (CacheSTSCredentials, error) {
 	bucket := strings.TrimSpace(config.Bucket)
 	if bucket == "" {
 		return CacheSTSCredentials{}, fmt.Errorf("cache S3 bucket is required to generate STS")
@@ -83,41 +99,65 @@ func generateCacheSTSWithClient(ctx context.Context, config cacheS3Config, cache
 		return CacheSTSCredentials{}, err
 	}
 
-	// The GetFederationToken endpoint accepts only Qiniu-native kodo actions
-	// with qrn resources. Condition keys (kodo:prefix / s3:prefix) are not
-	// supported, but resource-level prefix isolation works: object-level
-	// actions restricted to qrn:kodo:::bucket/<bucket>/<prefix>/* are enforced
-	// by the storage backend (verified 403 on writes outside the prefix).
 	bucketResource := fmt.Sprintf("qrn:kodo:::bucket/%s", bucket)
-	prefixObjectResource := fmt.Sprintf("qrn:kodo:::bucket/%s/%s/*", bucket, cachePrefix)
-
-	// Bucket-level actions need bucket-level resource; list is needed by
-	// runs-on/cache to discover existing cache entries.
 	bucketActions := []string{"kodo/list", "kodo/listMultipartUploads"}
-	// Object-level actions restricted to the per-repository prefix.
-	objectActions := []string{
-		"kodo/upload",
-		"kodo/mkfile",
-		"kodo/listParts",
-		"kodo/abortMultipartUpload",
-		"kodo/stat",
-		"kodo/get",
-		"kodo/delete",
+
+	statements := []map[string]any{
+		{
+			"effect":   "Allow",
+			"action":   bucketActions,
+			"resource": []string{bucketResource},
+		},
+	}
+
+	readActions := []string{"kodo/stat", "kodo/get"}
+	var readResources []string
+	seenRead := make(map[string]bool)
+	for _, scope := range readScopes {
+		scope = strings.Trim(strings.TrimSpace(scope), "/")
+		if scope == "" {
+			continue
+		}
+		if err := validateCachePrefix(scope); err != nil {
+			return CacheSTSCredentials{}, fmt.Errorf("invalid read scope %q: %w", scope, err)
+		}
+		res := fmt.Sprintf("qrn:kodo:::bucket/%s/%s/%s/*", bucket, cachePrefix, scope)
+		if !seenRead[res] {
+			seenRead[res] = true
+			readResources = append(readResources, res)
+		}
+	}
+	if len(readResources) == 0 {
+		readResources = []string{fmt.Sprintf("qrn:kodo:::bucket/%s/%s/*", bucket, cachePrefix)}
+	}
+	statements = append(statements, map[string]any{
+		"effect":   "Allow",
+		"action":   readActions,
+		"resource": readResources,
+	})
+
+	ownScope = strings.Trim(strings.TrimSpace(ownScope), "/")
+	if ownScope != "" {
+		if err := validateCachePrefix(ownScope); err != nil {
+			return CacheSTSCredentials{}, fmt.Errorf("invalid own scope %q: %w", ownScope, err)
+		}
+		writeActions := []string{
+			"kodo/upload",
+			"kodo/mkfile",
+			"kodo/listParts",
+			"kodo/abortMultipartUpload",
+			"kodo/delete",
+		}
+		writeResource := fmt.Sprintf("qrn:kodo:::bucket/%s/%s/%s/*", bucket, cachePrefix, ownScope)
+		statements = append(statements, map[string]any{
+			"effect":   "Allow",
+			"action":   writeActions,
+			"resource": []string{writeResource},
+		})
 	}
 
 	policy := map[string]any{
-		"statement": []map[string]any{
-			{
-				"effect":   "Allow",
-				"action":   bucketActions,
-				"resource": []string{bucketResource},
-			},
-			{
-				"effect":   "Allow",
-				"action":   objectActions,
-				"resource": []string{prefixObjectResource},
-			},
-		},
+		"statement": statements,
 	}
 	policyJSON, err := json.Marshal(policy)
 	if err != nil {

@@ -68,6 +68,7 @@ type RunnerState struct {
 	HeadSHA                string    `json:"head_sha,omitempty"`
 	GitHubJobURL           string    `json:"github_job_url,omitempty"`
 	PullRequestNumber      int64     `json:"pull_request_number,omitempty"`
+	GitHubPayloadJSON      string    `json:"-"`
 	AssignedJobID          int64     `json:"assigned_job_id,omitempty"`
 	AssignedJobName        string    `json:"assigned_job_name,omitempty"`
 	Error                  string    `json:"error,omitempty"`

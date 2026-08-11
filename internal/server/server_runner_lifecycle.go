@@ -287,28 +287,53 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 			},
 		}
 
-		// Do not expose repository-wide write/delete cache credentials to jobs
-		// originating from pull requests. The job can execute untrusted workflow
-		// code, and runs-on/cache does not currently expose a read-only mode.
-		// PullRequestNumber is extracted from the signed GitHub webhook payload;
-		// manual requests without that payload remain eligible for cache.
-		if st.PullRequestNumber > 0 {
-			s.logger.Info("cache STS skipped for pull request job", "id", id, "pull_request", st.PullRequestNumber)
-		} else if req.GitHubInstallationID > 0 {
+		if req.GitHubInstallationID > 0 {
 			if storage, err := s.cacheStorageForInstallation(req.GitHubInstallationID); err == nil {
-				// Cache prefix is <configured-prefix>/<owner>/<repo>.
-				cachePrefix := storage.prefix + "/" + req.RepositoryFullName
+				cacheBasePrefix := storage.prefix + "/" + req.RepositoryFullName
+				defaultScope := scopeForBranch("main")
+
+				var ownScope string
+				var readScopes []string
+				isFork := isForkPullRequestPayload(st.GitHubPayloadJSON)
+
+				if isFork {
+					// Fork PR gets read-only access (no write scope) to default scope and base scope
+					ownScope = ""
+					readScopes = []string{defaultScope}
+					s.logger.Info("cache STS generating read-only token for fork pull request", "id", id, "pull_request", st.PullRequestNumber)
+				} else if st.PullRequestNumber > 0 {
+					// Internal PR gets write access to its own PR scope, and read access to PR scope + default scope
+					ownScope = scopeForPR(st.PullRequestNumber)
+					readScopes = []string{ownScope, defaultScope}
+					if st.HeadBranch != "" {
+						readScopes = append(readScopes, scopeForBranch(st.HeadBranch))
+					}
+					s.logger.Info("cache STS generating scoped token for internal pull request", "id", id, "pull_request", st.PullRequestNumber, "own_scope", ownScope)
+				} else {
+					// Ordinary branch job gets write access to its branch scope, and read access to branch scope + default scope
+					branchName := st.HeadBranch
+					if branchName == "" {
+						branchName = "main"
+					}
+					ownScope = scopeForBranch(branchName)
+					readScopes = []string{ownScope, defaultScope}
+				}
+
 				stsCreds, err := generateCacheSTS(createCtx, cacheS3Config{
-					Region: storage.region, Bucket: storage.bucket, Prefix: cachePrefix, Endpoint: storage.endpoint,
+					Region: storage.region, Bucket: storage.bucket, Prefix: cacheBasePrefix, Endpoint: storage.endpoint,
 					AccessKeyID: storage.accessKeyID, SecretAccessKey: storage.secretKey,
-				}, cachePrefix, s.cfg.CacheSTSEndpoint, cacheSTSDurationSeconds(s.cfg.SandboxTimeout))
+				}, cacheBasePrefix, ownScope, readScopes, s.cfg.CacheSTSEndpoint, cacheSTSDurationSeconds(s.cfg.SandboxTimeout))
 				if err != nil {
 					s.logger.Warn("failed to generate cache STS", "id", id, "error", err)
 				} else {
+					effectivePrefix := cacheBasePrefix + "/" + defaultScope
+					if ownScope != "" {
+						effectivePrefix = cacheBasePrefix + "/" + ownScope
+					}
 					input.CacheS3Region = storage.region
 					input.CacheS3Bucket = storage.bucket
 					input.CacheS3Endpoint = storage.endpoint
-					input.CacheS3Prefix = cachePrefix
+					input.CacheS3Prefix = effectivePrefix
 					input.CacheS3AccessKeyID = stsCreds.AccessKeyID
 					input.CacheS3SecretKey = stsCreds.SecretAccessKey
 					input.CacheS3SessionToken = stsCreds.SessionToken
@@ -1600,4 +1625,49 @@ func (s *Server) stopSandboxWithTimeout(ctx context.Context, id, sandboxID strin
 	}
 	s.logger.Info("sandbox stopped", "sandbox_id", sandboxID, "pid", pid)
 	return nil
+}
+
+type githubPayloadRepositoryCheck struct {
+	WorkflowRun struct {
+		HeadRepository struct {
+			FullName string `json:"full_name"`
+		} `json:"head_repository"`
+	} `json:"workflow_run"`
+	Repository struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+	PullRequest struct {
+		Head struct {
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"head"`
+		Base struct {
+			Repo struct {
+				FullName string `json:"full_name"`
+			} `json:"repo"`
+		} `json:"base"`
+	} `json:"pull_request"`
+}
+
+func isForkPullRequestPayload(payloadJSON string) bool {
+	if payloadJSON == "" {
+		return false
+	}
+	var check githubPayloadRepositoryCheck
+	if err := json.Unmarshal([]byte(payloadJSON), &check); err != nil {
+		return false
+	}
+	headRepo := check.WorkflowRun.HeadRepository.FullName
+	if headRepo == "" {
+		headRepo = check.PullRequest.Head.Repo.FullName
+	}
+	baseRepo := check.Repository.FullName
+	if baseRepo == "" {
+		baseRepo = check.PullRequest.Base.Repo.FullName
+	}
+	if headRepo != "" && baseRepo != "" && !strings.EqualFold(headRepo, baseRepo) {
+		return true
+	}
+	return false
 }
