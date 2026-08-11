@@ -2,6 +2,8 @@ import { describe, expect, mock, test } from "bun:test"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
+import i18n from "../i18n"
+
 mock.module("xterm", () => ({
   Terminal: class Terminal {},
 }))
@@ -228,5 +230,41 @@ describe("Sandbox service Settings", () => {
     expect(html).not.toContain("Organization managed")
     expect(html).not.toContain("The organization has an effective Sandbox service")
     expect(html).toContain("Action required")
+  })
+})
+
+describe("Jobs grouping", () => {
+  test("keeps a detached branch group selected across languages", async () => {
+    const headSHA = "deadbeefcafebabe"
+    const selectedKey = `branch:miclle/qiniu-ci-runner:detached:${headSHA}`
+    const runners = [{
+      id: "detached-job",
+      status: "completed",
+      repository_full_name: "miclle/qiniu-ci-runner",
+      head_sha: headSHA,
+      assigned_job_name: "detached build",
+      workflow_name: "CI",
+      created_at: "2026-08-10T00:00:00Z",
+      updated_at: "2026-08-10T00:01:00Z",
+      completed_at: "2026-08-10T00:01:00Z",
+    }]
+
+    try {
+      for (const language of ["en", "zh"]) {
+        await i18n.changeLanguage(language)
+        const html = renderDashboard({
+          locationPath: "/jobs",
+          page: "home",
+          runners,
+          runnerTotal: 1,
+          selectedKey,
+        })
+
+        expect(html).toContain('<h2 class="truncate text-2xl font-semibold">miclle/qiniu-ci-runner</h2>')
+        expect(html).not.toContain(i18n.t("user.groupNotFound"))
+      }
+    } finally {
+      await i18n.changeLanguage("en")
+    }
   })
 })

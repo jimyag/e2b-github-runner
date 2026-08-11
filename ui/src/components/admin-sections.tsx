@@ -1,4 +1,5 @@
 import { type FormEvent } from "react"
+import { useTranslation } from "react-i18next"
 
 import {
   type AuditEvent,
@@ -41,12 +42,13 @@ export function OverviewSection({
   onEditRunnerSpec: (runnerSpec: RunnerSpec) => void
   onEditPolicy: (policy: RunnerPolicy) => void
 }) {
+  const { t } = useTranslation()
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle>Recent runner requests</CardTitle>
-          <CardDescription>Newest requests and their matched runner specs.</CardDescription>
+          <CardTitle>{t("admin.recentRunnerRequests")}</CardTitle>
+          <CardDescription>{t("admin.recentRunnerRequestsDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {runners.slice(0, 8).map((runner) => (
@@ -61,18 +63,18 @@ export function OverviewSection({
             </div>
           ))}
           {runners.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No runner requests yet.</div>
+            <div className="text-sm text-muted-foreground">{t("admin.noRunnerRequests")}</div>
           ) : null}
         </CardContent>
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Runner specs and runner policies</CardTitle>
-          <CardDescription>Current seeded and runtime-managed routing rules.</CardDescription>
+          <CardTitle>{t("admin.runnerSpecsAndPolicies")}</CardTitle>
+          <CardDescription>{t("admin.routingRules")}</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-3">
-            <div className="text-sm font-medium">Runner specs</div>
+            <div className="text-sm font-medium">{t("admin.runnerSpecs")}</div>
             {runnerSpecs.map((runnerSpec) => (
               <div
                 key={runnerSpec.name}
@@ -81,13 +83,13 @@ export function OverviewSection({
               >
                 <div className="truncate font-medium">{runnerSpec.name}</div>
                 <div className="truncate text-xs text-muted-foreground">
-                  {runnerSpec.labels.join(", ")} · template {runnerSpec.template_id}
+                  {runnerSpec.labels.join(", ")} · {t("admin.namedTemplate", { id: runnerSpec.template_id })}
                 </div>
               </div>
             ))}
           </div>
           <div className="space-y-3">
-            <div className="text-sm font-medium">Runner policies</div>
+            <div className="text-sm font-medium">{t("admin.runnerPolicies")}</div>
             {runnerPolicies.map((policy) => (
               <div
                 key={policy.id}
@@ -120,12 +122,13 @@ export function MatchSection({
   onLabelsChange: (value: string) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }) {
+  const { t } = useTranslation()
   return (
     <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
       <Card>
         <CardHeader>
-          <CardTitle>Label matching test</CardTitle>
-          <CardDescription>Preview which runner spec a repository and label set would use.</CardDescription>
+          <CardTitle>{t("admin.labelMatchingTest")}</CardTitle>
+          <CardDescription>{t("admin.labelMatchingDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <form className="grid gap-3" onSubmit={onSubmit}>
@@ -139,25 +142,25 @@ export function MatchSection({
               onChange={(event) => onLabelsChange(event.target.value)}
               placeholder="self-hosted,e2b"
             />
-            <Button type="submit">Run match</Button>
+            <Button type="submit">{t("admin.runMatch")}</Button>
           </form>
         </CardContent>
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Match result</CardTitle>
-          <CardDescription>Runner policy + label coverage resolution.</CardDescription>
+          <CardTitle>{t("admin.matchResult")}</CardTitle>
+          <CardDescription>{t("admin.matchResultDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {matchResult ? (
             <>
-              <Detail label="Repository" value={matchResult.repository_full_name || "-"} />
-              <Detail label="Labels" value={matchResult.labels.join(", ") || "-"} />
-              <Detail label="Runner spec" value={matchResult.runner_spec?.name || "-"} />
-              <Detail label="Reason" value={matchResult.reason || "matched"} />
+              <Detail label={t("admin.repository")} value={matchResult.repository_full_name || "-"} />
+              <Detail label={t("admin.labels")} value={matchResult.labels.join(", ") || "-"} />
+              <Detail label={t("admin.runnerSpec")} value={matchResult.runner_spec?.name || "-"} />
+              <Detail label={t("admin.reason")} value={matchResult.reason || t("admin.matched")} />
             </>
           ) : (
-            <div className="text-sm text-muted-foreground">No match run yet.</div>
+            <div className="text-sm text-muted-foreground">{t("admin.noMatchRun")}</div>
           )}
         </CardContent>
       </Card>
@@ -166,34 +169,35 @@ export function MatchSection({
 }
 
 export function AuditSection({ auditEvents }: { auditEvents: AuditEvent[] }) {
+  const { t, i18n } = useTranslation()
   return (
     <Card className="min-w-0">
       <CardHeader>
-        <CardTitle>Audit events</CardTitle>
-        <CardDescription>Recent admin and recovery control-plane actions.</CardDescription>
+        <CardTitle>{t("admin.auditEvents")}</CardTitle>
+        <CardDescription>{t("admin.auditDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="p-0">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Time</TableHead>
-              <TableHead>Actor</TableHead>
-              <TableHead>Action</TableHead>
-              <TableHead>Resource</TableHead>
-              <TableHead>Payload</TableHead>
+              <TableHead>{t("admin.time")}</TableHead>
+              <TableHead>{t("admin.actor")}</TableHead>
+              <TableHead>{t("admin.action")}</TableHead>
+              <TableHead>{t("admin.resource")}</TableHead>
+              <TableHead>{t("admin.payload")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {auditEvents.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
-                  No audit events yet
+                  {t("admin.noAuditEvents")}
                 </TableCell>
               </TableRow>
             ) : (
               auditEvents.map((event) => (
                 <TableRow key={event.id}>
-                  <TableCell>{formatTime(event.created_at)}</TableCell>
+                  <TableCell>{formatTime(event.created_at, i18n.resolvedLanguage)}</TableCell>
                   <TableCell>{event.actor}</TableCell>
                   <TableCell>{event.action}</TableCell>
                   <TableCell>
@@ -219,21 +223,22 @@ export function DiagnosticsSection({
   diagnostics: DiagnosticsSummary | null
   diagnosticsVars: string
 }) {
+  const { t } = useTranslation()
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <Card>
         <CardHeader>
-          <CardTitle>Diagnostics summary</CardTitle>
-          <CardDescription>DB, GitHub auth, recent failures, and pprof discovery.</CardDescription>
+          <CardTitle>{t("admin.diagnosticsSummary")}</CardTitle>
+          <CardDescription>{t("admin.diagnosticsDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <Detail label="State backend" value={diagnostics?.state.backend || "-"} />
-          <Detail label="Database" value={diagnostics?.state.database || "-"} />
-          <Detail label="GitHub auth" value={diagnostics?.github.auth_mode || "-"} />
-          <Detail label="Installation" value={diagnostics?.github.installation_id || "-"} />
-          <Detail label="GitHub API" value={diagnostics?.github.api_base_url || "-"} />
+          <Detail label={t("admin.stateBackend")} value={diagnostics?.state.backend || "-"} />
+          <Detail label={t("admin.database")} value={diagnostics?.state.database || "-"} />
+          <Detail label={t("admin.githubAuth")} value={diagnostics?.github.auth_mode || "-"} />
+          <Detail label={t("admin.installation")} value={diagnostics?.github.installation_id || "-"} />
+          <Detail label={t("admin.githubAPI")} value={diagnostics?.github.api_base_url || "-"} />
           <div className="space-y-2">
-            <div className="text-sm font-medium">pprof endpoints</div>
+            <div className="text-sm font-medium">{t("admin.pprofEndpoints")}</div>
             {diagnostics?.pprof?.length ? (
               diagnostics.pprof.map((item) => (
                 <div key={item.address_file} className="rounded-md border p-3 text-xs">
@@ -243,15 +248,15 @@ export function DiagnosticsSection({
                 </div>
               ))
             ) : (
-              <div className="text-sm text-muted-foreground">No pprof artifact discovered yet.</div>
+              <div className="text-sm text-muted-foreground">{t("admin.noPprof")}</div>
             )}
           </div>
         </CardContent>
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Recent failures</CardTitle>
-          <CardDescription>Latest failed requests plus the current /debug/vars snapshot.</CardDescription>
+          <CardTitle>{t("admin.recentFailures")}</CardTitle>
+          <CardDescription>{t("admin.failuresDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
@@ -266,11 +271,11 @@ export function DiagnosticsSection({
                 </div>
               ))
             ) : (
-              <div className="text-sm text-muted-foreground">No recent failures.</div>
+              <div className="text-sm text-muted-foreground">{t("admin.noRecentFailures")}</div>
             )}
           </div>
           <pre className="max-h-[48vh] min-h-72 overflow-auto rounded-lg border bg-muted/50 p-3 text-xs leading-relaxed whitespace-pre-wrap">
-            {diagnosticsVars || "No /debug/vars data available"}
+            {diagnosticsVars || t("admin.noDebugVars")}
           </pre>
         </CardContent>
       </Card>

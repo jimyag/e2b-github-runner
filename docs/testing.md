@@ -322,6 +322,22 @@ For focused UI unit tests, run:
 cd ui && bun run test
 ```
 
+After changing fixed UI copy, locale resources, translation-key construction,
+or locale formatting, run:
+
+```bash
+task ui-i18n-check
+```
+
+This checks that the English and Chinese resource trees have matching types and
+array lengths, contain no empty values, and use the same interpolation
+variables. It also type-checks i18next keys and scans JSX text, selected visible
+attributes, and direct toast calls for untranslated fixed literals. Runtime
+logs, repository names, IDs, and raw server errors remain untranslated; exact
+language-neutral technical literals can be intentionally allowlisted. GitHub
+Actions runs the same gate in an independent `i18n` job. The job is
+merge-blocking only when repository branch protection or a ruleset requires it.
+
 After changing UI dependencies, Vite/Rollup configuration, manual chunking, or
 production asset loading, execute the built bundle in Chromium:
 

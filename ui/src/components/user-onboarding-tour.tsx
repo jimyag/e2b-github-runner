@@ -8,6 +8,7 @@ import {
   type TooltipRenderProps,
 } from "react-joyride"
 import { toast } from "sonner"
+import { useTranslation } from "react-i18next"
 
 import type { ProductTourOnboarding } from "@/admin-types"
 import { Button } from "@/components/ui/button"
@@ -32,33 +33,34 @@ export function UserOnboardingTour({
   onStatusChange: (state: ProductTourOnboarding) => Promise<void>
   replay: boolean
 }) {
+  const { t } = useTranslation()
   const started = useRef(false)
   const steps = useMemo<Step[]>(
     () => {
       const presentation: Record<ProductTourStepID, Omit<Step, "id" | "target">> = {
         welcome: {
-          title: "Welcome to Qiniu Runner",
-          content: "Here is a quick map of the workspace, followed by the one setup step that unlocks your own Sandbox service.",
+          title: t("tour.welcomeTitle"),
+          content: t("tour.welcomeContent"),
           placement: "bottom-start",
         },
         jobs: {
-          title: "Jobs",
-          content: "Track workflow jobs by pull request, branch, workflow run, or manual request, then open logs and terminals from one place.",
+          title: t("user.jobs"),
+          content: t("tour.jobsContent"),
           placement: "bottom",
         },
         repositories: {
-          title: "Repositories",
-          content: "Connect GitHub repositories and see whether each account or organization has the Sandbox service needed to run.",
+          title: t("repositories.title"),
+          content: t("tour.repositoriesContent"),
           placement: "bottom",
         },
         "account-menu": {
-          title: "Account menu",
-          content: "Open Settings, switch the theme, replay this tour, or sign out from here.",
+          title: t("common.accountMenu"),
+          content: t("tour.accountMenuContent"),
           placement: "bottom-end",
         },
         settings: {
-          title: "Runner readiness",
-          content: "Repository access and Sandbox service status are checked together for the selected account or organization.",
+          title: t("tour.readinessTitle"),
+          content: t("tour.readinessContent"),
           placement: "bottom-start",
           before: async () => {
             onNavigateRepositories()
@@ -66,17 +68,17 @@ export function UserOnboardingTour({
           },
         },
         "sandbox-service": {
-          title: "Sandbox readiness",
+          title: t("tour.sandboxReadiness"),
           content: (
             <span>
-              Ready accounts need no action. If setup is required, use Configure Sandbox to open Settings, then choose a region and get an API Key from the{" "}
+              {t("tour.sandboxContentBefore")} {" "}
               <a
                 href="https://portal.qiniu.com/developer/user/api-key"
                 target="_blank"
                 rel="noreferrer"
                 className="font-medium text-primary underline underline-offset-4"
               >
-                Qiniu portal
+                {t("tour.qiniuPortal")}
                 <ExternalLink className="ml-1 inline h-3.5 w-3.5" />
               </a>
               .
@@ -92,7 +94,7 @@ export function UserOnboardingTour({
         target: visibleOnboardingTarget(definition.target),
       }))
     },
-    [onNavigateRepositories],
+    [onNavigateRepositories, t],
   )
   const { controls, Tour } = useJoyride({
     continuous: true,
@@ -116,7 +118,7 @@ export function UserOnboardingTour({
       const nextState = productTourStateAfterEnd(onboarding, replay, data.status)
       if (!nextState) return
       void onStatusChange(nextState).catch((error) => {
-        toast.error(error instanceof Error ? error.message : "Failed to save product tour progress")
+        toast.error(error instanceof Error ? error.message : t("tour.saveFailed"))
       })
     },
   })
@@ -140,6 +142,7 @@ function ProductTourTooltip({
   step,
   tooltipProps,
 }: TooltipRenderProps) {
+  const { t } = useTranslation()
   return (
     <div
       {...tooltipProps}
@@ -148,7 +151,7 @@ function ProductTourTooltip({
       <div className="mb-4 flex items-center justify-between gap-4">
         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
           <Sparkles className="h-3.5 w-3.5 text-primary" />
-          Quick tour
+          {t("tour.quickTour")}
         </div>
         <div className="font-mono text-xs text-muted-foreground">
           {index + 1}/{size}
@@ -158,16 +161,16 @@ function ProductTourTooltip({
       <div className="mt-2 text-sm leading-6 text-muted-foreground">{step.content}</div>
       <div className="mt-5 flex items-center justify-between gap-3">
         <Button {...skipProps} type="button" variant="ghost" size="sm">
-          Skip tour
+          {t("tour.skip")}
         </Button>
         <div className="ml-auto flex items-center gap-2">
           {index > 0 ? (
             <Button {...backProps} type="button" variant="outline" size="sm">
-              Back
+              {t("tour.back")}
             </Button>
           ) : null}
           <Button {...primaryProps} type="button" size="sm">
-            {isLastStep ? "Configure API Key" : "Next"}
+            {isLastStep ? t("tour.configureAPIKey") : t("tour.next")}
           </Button>
         </div>
       </div>

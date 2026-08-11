@@ -14,6 +14,7 @@ Common commands:
 ```bash
 task deps
 task ui-deps
+task ui-i18n-check
 task dev
 task smee
 task lint
@@ -26,6 +27,7 @@ task release-check
 - `task dev` is the local development entrypoint. It defaults to `RUNNERD_CONFIG=runnerd.local.yaml`, starts Vite on the first available localhost port at or after `5173`, starts smee forwarding when `.smee-url` exists, and runs runnerd with the `development` build tag.
 - `task smee` reads `.smee-url` and defaults to `SMEE_TARGET=http://127.0.0.1:25500/webhooks/github`.
 - `task build` rebuilds production UI assets into `internal/server/ui/` before compiling `bin/runnerd`.
+- `task ui-i18n-check` validates the English/Chinese resource contract, typed i18next keys, and untranslated visible literals before UI copy changes are handed off.
 
 ## Documentation Sync
 

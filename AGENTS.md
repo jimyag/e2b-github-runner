@@ -38,6 +38,7 @@ Use this guide for future Codex or agent work in this repository.
 ```bash
 task deps
 task ui-deps
+task ui-i18n-check
 task ui-production-smoke
 task dev
 task smee
@@ -64,6 +65,8 @@ usable. Release evidence requires qshell `Status: ready` followed by
 
 Use `cd ui && bun run test` for focused UI tests. `task test` rebuilds the UI, runs the Bun UI tests, and then runs Go tests with race detection and coverage.
 
+Use `task ui-i18n-check` after changing UI copy or translation resources. It checks the English/Chinese resource contract, interpolation parity, typed i18next keys, and a narrow set of untranslated user-visible literals.
+
 Use `task ui-production-smoke` after changing UI dependencies, Vite/Rollup configuration, manual chunking, or production asset loading. It builds the production bundle, starts Vite preview on `RUNNERD_UI_SMOKE_PORT` (default `4173`), opens `/` in headless Chromium, and fails on browser errors, console errors, failed script/style requests, an empty root, or a missing landing-page heading. Because the local preview does not start `runnerd`, it fulfills only `/auth/session` with a signed-out response. Set `RUNNERD_UI_SMOKE_BASE_URL` to run the same browser canary against an already deployed origin; deployed canaries must use the real auth endpoint.
 
 When changing state records, GORM tags, indexes, or migration helpers, run `go test ./internal/state -count=1` first. Old sqlite schema upgrade tests are intentional compatibility coverage; do not remove them just because fresh database creation passes. When a production export is available, run `RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v`.
@@ -73,6 +76,7 @@ When changing state records, GORM tags, indexes, or migration helpers, run `go t
 - `.agents/rules/development-workflow.md`: detailed workflow, generated-file boundaries, and documentation sync rules.
 - `.agents/rules/project-architecture.md`: durable architecture and implementation boundaries for runnerd.
 - `.agents/rules/testing-and-verification.md`: verification matrix for docs, state schema, UI, dev startup, Docker, release, and deployment smoke work.
+- `.agents/rules/frontend-internationalization.md`: i18n boundaries, language-switcher placement, stable identifier rules, and UI verification.
 - `.agents/skills/runnerd-state-schema/SKILL.md`: use for state records, GORM tags, indexes, and migration compatibility work.
 - `.agents/skills/runnerd-dev-smoke/SKILL.md`: use for `task dev`, Vite proxy, smee forwarding, and local startup verification.
 

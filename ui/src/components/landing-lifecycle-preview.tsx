@@ -1,6 +1,10 @@
-import { BookOpen, CheckCircle2, Clock3, Code2, Github, Layers3, ShieldCheck } from "lucide-react"
+import { BookOpen, CheckCircle2, ShieldCheck } from "lucide-react"
+import { useTranslation } from "react-i18next"
+
+import { runnerLifecycleItems, runnerPolicyItems } from "@/components/landing-lifecycle-preview-utils"
 
 export function RunnerLifecyclePreview() {
+  const { t } = useTranslation()
   return (
     <div className="brand-reveal brand-reveal-delay relative mx-auto w-full max-w-[720px]">
       <div className="absolute -inset-10 -z-10 rounded-full bg-[#00aae7]/10 blur-3xl" />
@@ -12,14 +16,14 @@ export function RunnerLifecyclePreview() {
             <span className="h-2.5 w-2.5 rounded-full bg-[#00ca4e]" />
           </div>
           <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-white/60">
-            workflow / pull request #184
+            {t("landing.preview.workflow")}
           </div>
           <div className="h-2 w-10 rounded-full bg-white/10" />
         </div>
 
         <div className="grid min-h-[440px] sm:grid-cols-[0.38fr_0.62fr]">
           <div className="border-b border-white/10 p-4 sm:border-b-0 sm:border-r sm:p-5">
-            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/60">Requested labels</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/60">{t("landing.preview.requestedLabels")}</div>
             <div className="mt-3 flex flex-wrap gap-2">
               {["self-hosted", "qiniu", "ubuntu-24.04"].map((label) => (
                 <span
@@ -31,16 +35,12 @@ export function RunnerLifecyclePreview() {
               ))}
             </div>
 
-            <div className="mt-8 font-mono text-[10px] uppercase tracking-[0.16em] text-white/60">Runner policy</div>
+            <div className="mt-8 font-mono text-[10px] uppercase tracking-[0.16em] text-white/60">{t("landing.preview.runnerPolicy")}</div>
             <div className="mt-3 space-y-3">
-              {[
-                ["Repository", "qiniu/ci-runner"],
-                ["Runner spec", "ubuntu-24.04"],
-                ["Isolation", "one job / sandbox"],
-              ].map(([label, value]) => (
-                <div key={label}>
-                  <div className="text-[11px] text-white/60">{label}</div>
-                  <div className="mt-1 truncate font-mono text-xs text-white/75">{value}</div>
+              {runnerPolicyItems(t).map((item) => (
+                <div key={item.id}>
+                  <div className="text-[11px] text-white/60">{item.label}</div>
+                  <div className="mt-1 truncate font-mono text-xs text-white/75">{item.value}</div>
                 </div>
               ))}
             </div>
@@ -48,9 +48,9 @@ export function RunnerLifecyclePreview() {
             <div className="mt-8 rounded-lg border border-[#27c5f5]/15 bg-[#00aae7]/[0.06] p-3">
               <div className="flex items-center gap-2 text-xs font-semibold text-[#7ddcff]">
                 <ShieldCheck className="h-3.5 w-3.5" />
-                Policy matched
+                {t("landing.preview.policyMatched")}
               </div>
-              <div className="mt-2 text-[11px] leading-5 text-white/60">Capacity can be provisioned.</div>
+              <div className="mt-2 text-[11px] leading-5 text-white/60">{t("landing.preview.capacityReady")}</div>
             </div>
           </div>
 
@@ -58,24 +58,19 @@ export function RunnerLifecyclePreview() {
             <div className="absolute right-0 top-0 h-36 w-36 rounded-full bg-[#00aae7]/10 blur-3xl" />
             <div className="relative flex items-center justify-between">
               <div>
-                <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/60">Runner lifecycle</div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-white/60">{t("landing.preview.runnerLifecycle")}</div>
                 <div className="mt-1 text-sm font-semibold text-white">build-and-test</div>
               </div>
               <div className="flex items-center gap-2 rounded-full border border-[#27c5f5]/20 bg-[#00aae7]/10 px-2.5 py-1 font-mono text-[10px] text-[#7ddcff]">
                 <span className="brand-pulse h-1.5 w-1.5 rounded-full bg-[#27c5f5]" />
-                RUNNING
+                {t("landing.preview.running")}
               </div>
             </div>
 
             <div className="relative mt-8">
               <div className="absolute bottom-5 left-[17px] top-5 w-px bg-gradient-to-b from-[#00aae7] via-[#00aae7]/40 to-white/10" />
-              {[
-                { icon: Github, title: "GitHub job accepted", detail: "workflow_job · queued", state: "complete" },
-                { icon: Layers3, title: "Sandbox created", detail: "us-south-1 · 8.4s", state: "complete" },
-                { icon: Code2, title: "Runner registered", detail: "ephemeral · online", state: "complete" },
-                { icon: Clock3, title: "Job executing", detail: "tests · 01:42", state: "active" },
-              ].map(({ icon: Icon, title, detail, state }) => (
-                <div key={title} className="relative grid grid-cols-[36px_1fr_auto] items-center gap-3 py-3">
+              {runnerLifecycleItems(t).map(({ icon: Icon, title, detail, state, id }) => (
+                <div key={id} className="relative grid grid-cols-[36px_1fr_auto] items-center gap-3 py-3">
                   <div
                     className={[
                       "relative z-10 flex h-9 w-9 items-center justify-center rounded-full border",
@@ -102,10 +97,10 @@ export function RunnerLifecyclePreview() {
             <div className="mt-6 rounded-lg border border-white/10 bg-black/20 p-3 font-mono text-[10px] leading-5 text-white/65">
               <div className="flex items-center justify-between text-white/70">
                 <span>$ task test</span>
-                <span className="text-[#36d399]">in progress</span>
+                <span className="text-[#36d399]">{t("landing.preview.inProgress")}</span>
               </div>
-              <div className="mt-2">✓ UI tests passed</div>
-              <div>→ Go tests running with race detection</div>
+              <div className="mt-2">✓ {t("landing.preview.uiTestsPassed")}</div>
+              <div>→ {t("landing.preview.goTestsRunning")}</div>
             </div>
           </div>
         </div>
@@ -116,9 +111,9 @@ export function RunnerLifecyclePreview() {
           <CheckCircle2 className="h-4 w-4" />
         </div>
         <div>
-          <div className="text-xs font-semibold text-[#0a0d12]">Clean execution</div>
+          <div className="text-xs font-semibold text-[#0a0d12]">{t("landing.preview.cleanExecution")}</div>
           <div className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.12em] text-[#596b75]">
-            no shared workspace
+            {t("landing.preview.noSharedWorkspace")}
           </div>
         </div>
       </div>
@@ -128,7 +123,7 @@ export function RunnerLifecyclePreview() {
           <BookOpen className="h-3.5 w-3.5" />
         </div>
         <div>
-          <div className="font-mono text-[9px] uppercase tracking-[0.13em] text-white/60">runner spec</div>
+          <div className="font-mono text-[9px] uppercase tracking-[0.13em] text-white/60">{t("landing.preview.runnerSpec")}</div>
           <div className="mt-0.5 text-xs font-semibold text-white">ubuntu-24.04</div>
         </div>
       </div>
