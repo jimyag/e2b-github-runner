@@ -8,12 +8,7 @@ const postRenderObservationMs = 1_000
 test("boots the public landing page from the production bundle", async ({ page }) => {
   const diagnostics = observeBrowserDiagnostics(page)
 
-  const authSessionRoute = getLocalAuthSessionRoute(process.env.RUNNERD_UI_SMOKE_BASE_URL)
-  if (authSessionRoute) {
-    await page.route(authSessionRoute.pattern, async (route) => {
-      await route.fulfill({ json: authSessionRoute.json })
-    })
-  }
+  await routeLocalAnonymousSession(page)
 
   const response = await page.goto("/", { waitUntil: "networkidle" })
 
@@ -29,6 +24,7 @@ test("boots the public landing page from the production bundle", async ({ page }
 test("serves the hosted guide as a responsive public production route", async ({ page }) => {
   const diagnostics = observeBrowserDiagnostics(page)
 
+  await routeLocalAnonymousSession(page)
   await page.setViewportSize({ width: 390, height: 844 })
   const response = await page.goto("/docs/getting-started/hosted", { waitUntil: "networkidle" })
 
@@ -55,6 +51,7 @@ test("serves the hosted guide as a responsive public production route", async ({
 test("serves the custom template guide from the production bundle", async ({ page }) => {
   const diagnostics = observeBrowserDiagnostics(page)
 
+  await routeLocalAnonymousSession(page)
   await page.setViewportSize({ width: 390, height: 844 })
   const response = await page.goto("/docs/guides/custom-templates", { waitUntil: "networkidle" })
 
@@ -214,6 +211,15 @@ test("keeps the Jobs list independently scrollable beside the Web Console", asyn
   await page.waitForTimeout(postRenderObservationMs)
   diagnostics.expectClean()
 })
+
+async function routeLocalAnonymousSession(page: Page) {
+  const authSessionRoute = getLocalAuthSessionRoute(process.env.RUNNERD_UI_SMOKE_BASE_URL)
+  if (!authSessionRoute) return
+
+  await page.route(authSessionRoute.pattern, async (route) => {
+    await route.fulfill({ json: authSessionRoute.json })
+  })
+}
 
 function observeBrowserDiagnostics(page: Page) {
   const consoleErrors: string[] = []
