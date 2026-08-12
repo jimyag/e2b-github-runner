@@ -232,7 +232,12 @@ export function UserDashboard({
   }, [onLoadJobGroup, selected?.jobs.length, selected?.key, selected?.updatedAt])
 
   return (
-    <main className="flex min-h-screen flex-col bg-background text-foreground">
+    <main
+      className={cn(
+        "flex min-h-screen flex-col bg-background text-foreground",
+        page === "home" && "xl:h-dvh xl:min-h-0 xl:overflow-hidden",
+      )}
+    >
       <UserOnboardingTour
         key={productTourReplayRequest}
         locationPath={locationPath}
@@ -1052,7 +1057,7 @@ function PullRequestsPage({
         </div>
       </section>
 
-      <div className="grid min-h-0 flex-1 xl:grid-cols-[360px_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 xl:grid-cols-[360px_minmax(0,1fr)] xl:overflow-hidden">
         <aside className="min-h-0 border-r bg-muted/20">
           <div className="flex h-full flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto">

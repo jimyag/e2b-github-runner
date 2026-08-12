@@ -331,22 +331,24 @@ task ui-i18n-check
 allowlist。GitHub Actions 会在独立的 `i18n` job 中运行同一检查；只有在仓库的
 branch protection 或 ruleset 中将它设为 required check 后，它才会阻止合并。
 
-修改 UI 依赖、Vite/Rollup 配置、manual chunk 或生产静态资源加载逻辑后，要在
-Chromium 中执行构建产物：
+修改 UI 依赖、Vite/Rollup 配置、manual chunk、生产静态资源加载逻辑或 Jobs
+视口/滚动布局后，要在 Chromium 中执行构建产物：
 
 ```bash
 task ui-production-smoke
 ```
 
-该任务会安装匹配的 Chromium runtime，构建 `internal/server/ui/`，在 `4173`
-端口启动 Vite preview，并通过 Playwright 打开 `/`。如果页面出现 JavaScript
-异常、console error、script/stylesheet 加载失败、`#root` 为空，或没有渲染公开
-首页 heading，任务都会失败。端口 `4173` 被占用时可设置
-`RUNNERD_UI_SMOKE_PORT=<free-port>`。本地 preview 不会启动 `runnerd`，因此
-Playwright 只会为 `/auth/session` 返回未登录会话。设置
-`RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host>` 后，会针对部署环境的真实
-auth endpoint 执行 canary。该 production smoke 在 GitHub Actions 中是独立
-job，因为 Vite 构建成功并不能证明生成的 chunks 可以在浏览器中执行。
+该任务会安装匹配的 Chromium runtime，构建 `internal/server/ui/`，并在 `4173`
+端口启动 Vite preview。Playwright 会打开 `/`，检查 JavaScript 异常、console
+error、script/stylesheet 加载失败、空 `#root` 和缺失的公开首页 heading。本地
+preview 还会使用限定范围的已登录 API fixtures 打开 `/jobs`，验证桌面端长 Jobs
+列表滚动时 document 和 Web 控制台保持不动，同时确认窄屏仍保留正常的页面流。
+端口 `4173` 被占用时可设置 `RUNNERD_UI_SMOKE_PORT=<free-port>`。本地 preview
+不会启动 `runnerd`，因此这些响应均为测试 fixtures。设置
+`RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host>` 后，会使用部署环境的真实 auth
+endpoint 执行公开页面 canary，并跳过仅供本地使用的 Jobs fixture 回归。该
+production smoke 在 GitHub Actions 中是独立 job，因为 Vite 构建成功并不能证明
+生成的 chunks 可以在浏览器中执行。
 
 Vite 构建还会把 Rollup 的 `CIRCULAR_CHUNK` 和
 `CYCLIC_CROSS_CHUNK_REEXPORT` warning 提升为 error。不要隐藏或宽泛
