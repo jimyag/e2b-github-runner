@@ -59,17 +59,13 @@ type accountCachePreference struct {
 }
 
 type accountCacheServicePreferenceValue struct {
-	Region   string `json:"region"`
-	Bucket   string `json:"bucket"`
-	Prefix   string `json:"prefix,omitempty"`
-	Endpoint string `json:"endpoint,omitempty"`
+	Bucket string `json:"bucket"`
+	Prefix string `json:"prefix,omitempty"`
 }
 
 type upsertCacheConfigRequest struct {
-	Region          string `json:"region"`
 	Bucket          string `json:"bucket"`
 	Prefix          string `json:"prefix"`
-	Endpoint        string `json:"endpoint"`
 	AccessKeyID     string `json:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key"`
 }
@@ -448,8 +444,8 @@ func (s *Server) handleUserSaveCacheConfig(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	value := accountCacheServicePreferenceValue{
-		Region: region, Bucket: strings.TrimSpace(input.Bucket),
-		Prefix: strings.Trim(strings.TrimSpace(input.Prefix), "/"), Endpoint: endpoint,
+		Bucket: strings.TrimSpace(input.Bucket),
+		Prefix: strings.Trim(strings.TrimSpace(input.Prefix), "/"),
 	}
 	if value.Prefix != "" {
 		if err := validateCachePrefix(value.Prefix); err != nil {
@@ -457,8 +453,8 @@ func (s *Server) handleUserSaveCacheConfig(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-	if value.Bucket == "" {
-		writeError(w, http.StatusBadRequest, "bucket is required")
+	if err := validateCacheBucket(value.Bucket); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	accessKeyID := strings.TrimSpace(input.AccessKeyID)
@@ -493,14 +489,7 @@ func (s *Server) handleUserSaveCacheConfig(w http.ResponseWriter, r *http.Reques
 			}
 		}
 	}
-	if value.Endpoint != "" {
-		value.Endpoint, err = normalizeHTTPURL(value.Endpoint)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "endpoint must be an absolute HTTP(S) URL")
-			return
-		}
-	}
-	if _, err := newCacheS3(cacheS3Config{Region: value.Region, Bucket: value.Bucket, Prefix: value.Prefix, Endpoint: value.Endpoint, AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey}); err != nil {
+	if _, err := newCacheS3(cacheS3Config{Region: region, Bucket: value.Bucket, Prefix: value.Prefix, Endpoint: endpoint, AccessKeyID: accessKeyID, SecretAccessKey: secretAccessKey}); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -525,7 +514,7 @@ func (s *Server) handleUserSaveCacheConfig(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.recordAudit("github:"+session.Subject, "cache.configure", scope.Type, strconv.FormatInt(scope.ID, 10), map[string]any{"region": value.Region, "bucket": value.Bucket, "endpoint": value.Endpoint})
+	s.recordAudit("github:"+session.Subject, "cache.configure", scope.Type, strconv.FormatInt(scope.ID, 10), map[string]any{"region": region, "bucket": value.Bucket, "endpoint": endpoint})
 	response, err := s.accountPreferencesResponse(scope, account.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -826,12 +815,6 @@ func (s *Server) fillCachePreferenceResponse(response accountPreferencesResponse
 	}
 	if secretErr != nil {
 		return accountPreferencesResponse{}, secretErr
-	}
-	if region == "" {
-		region = value.Region
-	}
-	if endpoint == "" {
-		endpoint = value.Endpoint
 	}
 	response.Cache = accountCachePreference{
 		Configured: true,

@@ -9,6 +9,22 @@ import (
 	"github.com/qiniu/ci-runner/internal/config"
 )
 
+func TestNewCacheS3UsesDefaultPrefix(t *testing.T) {
+	storage, err := newCacheS3(cacheS3Config{
+		Region:          "us-north-1",
+		Bucket:          "cache-bucket",
+		Endpoint:        "https://s3.example.test",
+		AccessKeyID:     "access-key",
+		SecretAccessKey: "secret-key",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storage.prefix != "gh-actions-cache" {
+		t.Fatalf("prefix = %q, want default gh-actions-cache", storage.prefix)
+	}
+}
+
 func TestHandleSandboxRegionsOmitsS3Mappings(t *testing.T) {
 	srv := &Server{cfg: config.Config{SandboxRegions: []config.SandboxRegionConfig{{
 		ID:            "us-south-1",

@@ -152,7 +152,7 @@ export function UserDashboard({
   onSaveProductTourOnboarding: (state: ProductTourOnboarding) => Promise<void>
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
-  onSaveCacheConfig: (input: { region: string; bucket: string; prefix: string; endpoint: string; access_key_id: string; secret_access_key: string }, installationID?: number) => Promise<void>
+  onSaveCacheConfig: (input: { bucket: string; prefix: string; access_key_id: string; secret_access_key: string }, installationID?: number) => Promise<void>
   onDeleteCacheConfig: (installationID?: number) => Promise<void>
   onNavigate: (page: UserPage) => void
   onNavigateRepositoryAccount: (accountLogin: string | undefined) => void
@@ -406,7 +406,7 @@ function AccountsPage({
   showProductTourSetup: boolean
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
-  onSaveCacheConfig: (input: { region: string; bucket: string; prefix: string; endpoint: string; access_key_id: string; secret_access_key: string }, installationID?: number) => Promise<void>
+  onSaveCacheConfig: (input: { bucket: string; prefix: string; access_key_id: string; secret_access_key: string }, installationID?: number) => Promise<void>
   onDeleteCacheConfig: (installationID?: number) => Promise<void>
   currentLogin?: string
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
@@ -653,7 +653,7 @@ function CacheS3Card({
 }: {
   preferences: UserPreferences | null
   installationID?: number
-  onSave: (input: { region: string; bucket: string; prefix: string; endpoint: string; access_key_id: string; secret_access_key: string }, installationID?: number) => Promise<void>
+  onSave: (input: { bucket: string; prefix: string; access_key_id: string; secret_access_key: string }, installationID?: number) => Promise<void>
   onDelete: (installationID?: number) => Promise<void>
 }) {
   const { t } = useTranslation()
@@ -690,7 +690,7 @@ function CacheS3Card({
     setSaving(true)
     setError("")
     try {
-      await onSave({ region: s3Region, bucket, prefix, endpoint: s3Endpoint, access_key_id: accessKeyID, secret_access_key: secretAccessKey }, installationID)
+      await onSave({ bucket, prefix, access_key_id: accessKeyID, secret_access_key: secretAccessKey }, installationID)
       setAccessKeyID("")
       setSecretAccessKey("")
     } catch (cause) {

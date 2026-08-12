@@ -638,7 +638,7 @@ function App() {
     toast.success(appI18n.t("app.sandboxSaved"))
   }, [request])
 
-  const saveCacheConfig = useCallback(async (input: { region: string; bucket: string; prefix: string; endpoint: string; access_key_id: string; secret_access_key: string }, installationID?: number) => {
+  const saveCacheConfig = useCallback(async (input: { bucket: string; prefix: string; access_key_id: string; secret_access_key: string }, installationID?: number) => {
     const preferences = (await request(userPreferencesPath(installationID, "/user/preferences/cache"), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },

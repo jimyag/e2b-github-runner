@@ -53,16 +53,6 @@ type runnerRequestRecord struct {
 
 func (runnerRequestRecord) TableName() string { return "runner_requests" }
 
-type githubRepositoryRecord struct {
-	ID             int64     `gorm:"column:id;primaryKey"`
-	FullName       string    `gorm:"column:full_name;not null"`
-	InstallationID int64     `gorm:"column:installation_id;not null;index:idx_github_repositories_installation"`
-	CreatedAt      time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
-}
-
-func (githubRepositoryRecord) TableName() string { return "github_repositories" }
-
 type runnerEventRecord struct {
 	ID          int64     `gorm:"column:id;primaryKey;autoIncrement"`
 	RequestID   string    `gorm:"column:request_id;not null;index:idx_runner_events_request_created"`

@@ -82,14 +82,12 @@ func (s *Server) cacheStorageForScope(scope accountPreferenceScope, sandboxAPIUR
 		return nil, err
 	}
 	// Region and endpoint are operator-owned mappings. Derive them from the
-	// Sandbox configuration already resolved for this runner so old preferences
-	// cannot retain a stale or user-supplied endpoint.
+	// Sandbox configuration already resolved for this runner so preferences only
+	// contain the user's bucket and prefix.
 	mappedRegion, mappedEndpoint, mapped := s.cacheS3SettingsForSandboxAPIURL(sandboxAPIURL)
 	if !mapped || mappedRegion == "" || mappedEndpoint == "" {
 		return nil, state.ErrCacheServiceNotConfigured
 	}
-	value.Region = mappedRegion
-	value.Endpoint = mappedEndpoint
 	accessKey, err := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeCacheAccessKeyID)
 	if err != nil {
 		if errors.Is(err, state.ErrNotFound) {
@@ -113,7 +111,7 @@ func (s *Server) cacheStorageForScope(scope accountPreferenceScope, sandboxAPIUR
 		return nil, err
 	}
 	return newCacheS3(cacheS3Config{
-		Region: value.Region, Bucket: value.Bucket, Prefix: value.Prefix, Endpoint: value.Endpoint,
+		Region: mappedRegion, Bucket: value.Bucket, Prefix: value.Prefix, Endpoint: mappedEndpoint,
 		AccessKeyID: accessKeyValue, SecretAccessKey: secretKeyValue,
 	})
 }

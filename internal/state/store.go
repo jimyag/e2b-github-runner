@@ -343,20 +343,6 @@ type IdentityStore interface {
 	LinkOAuthIdentityToAccount(accountID int64, identity OAuthIdentity) (Account, OAuthIdentity, error)
 }
 
-type GitHubRepository struct {
-	ID             int64     `json:"id"`
-	FullName       string    `json:"full_name"`
-	InstallationID int64     `json:"installation_id"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-}
-
-type GitHubRepositoryStore interface {
-	GetGitHubRepository(id int64) (GitHubRepository, error)
-	GetGitHubRepositoryByName(fullName string) (GitHubRepository, error)
-	UpsertGitHubRepository(repository GitHubRepository) (GitHubRepository, error)
-}
-
 type GitHubInstallationStore interface {
 	ListGitHubInstallations(accountID int64) ([]GitHubInstallation, error)
 	ListGitHubInstallationAccounts() ([]GitHubInstallationAccount, error)
@@ -403,7 +389,6 @@ type AuditStore interface {
 
 type Store interface {
 	RunnerRequestStore
-	GitHubRepositoryStore
 	RunnerCatalogStore
 	IdentityStore
 	GitHubInstallationStore
