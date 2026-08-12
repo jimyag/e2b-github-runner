@@ -338,24 +338,28 @@ language-neutral technical literals can be intentionally allowlisted. GitHub
 Actions runs the same gate in an independent `i18n` job. The job is
 merge-blocking only when repository branch protection or a ruleset requires it.
 
-After changing UI dependencies, Vite/Rollup configuration, manual chunking, or
-production asset loading, execute the built bundle in Chromium:
+After changing UI dependencies, Vite/Rollup configuration, manual chunking,
+production asset loading, or the Jobs viewport/scroll layout, execute the built
+bundle in Chromium:
 
 ```bash
 task ui-production-smoke
 ```
 
 The task installs the matching Chromium runtime, builds `internal/server/ui/`,
-starts Vite preview on port `4173`, and opens `/` with Playwright. It fails when
-the page raises a JavaScript error, logs a console error, cannot load a script or
-stylesheet, leaves `#root` empty, or does not render the public landing-page
-heading. If port `4173` is occupied, set
+and starts Vite preview on port `4173`. Playwright opens `/` to catch JavaScript
+or console errors, failed script/stylesheet requests, an empty `#root`, or a
+missing landing-page heading. The local preview also opens `/jobs` with scoped
+authenticated API fixtures and proves that a long desktop Jobs list scrolls
+without moving the document or Web Console, while a narrow viewport preserves
+normal document flow. If port `4173` is occupied, set
 `RUNNERD_UI_SMOKE_PORT=<free-port>`. The local preview does not start `runnerd`,
-so Playwright fulfills only `/auth/session` with a signed-out response. Set
+so these responses are test fixtures. Set
 `RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host>` to test a deployed origin
-with its real auth endpoint. This production smoke is a dedicated GitHub Actions
-job because a successful Vite build does not prove that generated chunks execute
-in a browser.
+with its real auth endpoint; that deployed public canary skips the local
+fixture-backed Jobs regression. This production smoke is a dedicated GitHub
+Actions job because a successful Vite build does not prove that generated
+chunks execute in a browser.
 
 The Vite build also promotes Rollup `CIRCULAR_CHUNK` and
 `CYCLIC_CROSS_CHUNK_REEXPORT` warnings to errors. Do not suppress or broadly
