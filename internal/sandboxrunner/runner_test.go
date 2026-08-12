@@ -79,6 +79,30 @@ func TestStartScriptEncodesRunnerArguments(t *testing.T) {
 	}
 }
 
+func TestStartScriptExportsScopedCachePrefixes(t *testing.T) {
+	input := StartInput{
+		CacheS3Bucket:       "cache-bucket",
+		CacheS3AccessKeyID:  "access-key",
+		CacheS3SecretKey:    "secret-key",
+		CacheS3ReadPrefixes: `["cache/o/r/scopes/pr-7","cache/o/r/scopes/branch-main"]`,
+		CacheS3WritePrefix:  "cache/o/r/scopes/pr-7",
+	}
+	script := startScript(input, "sandbox-1")
+	for _, want := range []string{
+		"RUNS_ON_S3_CACHE_READ_PREFIXES",
+		"RUNS_ON_S3_CACHE_WRITE_PREFIX",
+		base64.StdEncoding.EncodeToString([]byte(input.CacheS3ReadPrefixes)),
+		base64.StdEncoding.EncodeToString([]byte(input.CacheS3WritePrefix)),
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("script missing %q:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, "RUNS_ON_S3_CACHE_REPO_PREFIX") {
+		t.Fatalf("script contains obsolete cache prefix environment variable:\n%s", script)
+	}
+}
+
 func TestRunnerBootstrapRequiresRootUser(t *testing.T) {
 	if runnerBootstrapUser != "root" {
 		t.Fatalf("runner bootstrap user = %q, want root", runnerBootstrapUser)

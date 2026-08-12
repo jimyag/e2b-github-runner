@@ -88,10 +88,11 @@ sandbox_id="$(printf '%%s' "%[7]s" | base64 -d)"
 cache_s3_region="$(printf '%%s' "%[9]s" | base64 -d)"
 cache_s3_bucket="$(printf '%%s' "%[10]s" | base64 -d)"
 cache_s3_endpoint="$(printf '%%s' "%[11]s" | base64 -d)"
-cache_s3_prefix="$(printf '%%s' "%[12]s" | base64 -d)"
-cache_s3_access_key="$(printf '%%s' "%[13]s" | base64 -d)"
-cache_s3_secret_key="$(printf '%%s' "%[14]s" | base64 -d)"
-cache_s3_session_token="$(printf '%%s' "%[15]s" | base64 -d)"
+cache_s3_read_prefixes="$(printf '%%s' "%[12]s" | base64 -d)"
+cache_s3_write_prefix="$(printf '%%s' "%[13]s" | base64 -d)"
+cache_s3_access_key="$(printf '%%s' "%[14]s" | base64 -d)"
+cache_s3_secret_key="$(printf '%%s' "%[15]s" | base64 -d)"
+cache_s3_session_token="$(printf '%%s' "%[16]s" | base64 -d)"
 
 # Inject Cache S3 STS credentials for runs-on/cache
 if [ -n "$cache_s3_bucket" ] && [ -n "$cache_s3_access_key" ] && [ -n "$cache_s3_secret_key" ]; then
@@ -106,8 +107,11 @@ if [ -n "$cache_s3_bucket" ] && [ -n "$cache_s3_access_key" ] && [ -n "$cache_s3
   if [ -n "$cache_s3_session_token" ]; then
     export AWS_SESSION_TOKEN="$cache_s3_session_token"
   fi
-  if [ -n "$cache_s3_prefix" ]; then
-    export RUNS_ON_S3_CACHE_REPO_PREFIX="$cache_s3_prefix"
+  if [ -n "$cache_s3_read_prefixes" ]; then
+    export RUNS_ON_S3_CACHE_READ_PREFIXES="$cache_s3_read_prefixes"
+  fi
+  if [ -n "$cache_s3_write_prefix" ]; then
+    export RUNS_ON_S3_CACHE_WRITE_PREFIX="$cache_s3_write_prefix"
   fi
   # Tune runs-on/cache upload/download concurrency for better throughput.
   export UPLOAD_QUEUE_SIZE="${UPLOAD_QUEUE_SIZE:-16}"

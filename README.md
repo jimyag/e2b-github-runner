@@ -120,7 +120,7 @@ Supported fields: `database.dsn`, `auth.session_secret`, `auth.encryption_key`, 
 
 Each user configures a Cache S3 Bucket, optional Prefix, AK, and SK in account or GitHub installation Preferences. The default prefix is `gh-actions-cache`. The S3 region and endpoint are derived from the selected Sandbox service region and are configured by the operator in `runnerd.yaml` under `sandbox.regions`. Because the configured endpoint may be private to the Sandbox network, runnerd only validates the configuration shape when saving it; bucket reachability and permissions are verified by the actual workflow in the Sandbox. AK/SK are encrypted in scoped state and are never returned to the browser or runner.
 
-On every sandbox start, runnerd resolves the GitHub repository to its installation/account scope, verifies the Workflow Run trust context, and mints a Qiniu IAM federation token through the configured `cache.sts_endpoint` (default `https://sts-ov.qiniuapi.com`). Its requested lifetime is the configured Sandbox lifecycle plus five minutes for the post-job cache save step; no refresh mechanism is provided yet. It injects the token plus bucket/endpoint/prefix as `AWS_*` / `RUNS_ON_S3_*` environment variables in the Sandbox start script, so a `runs-on/cache` action can upload and restore caches directly to the user bucket without proxying bytes through runnerd.
+On every sandbox start, runnerd resolves the GitHub repository to its installation/account scope, verifies the Workflow Run trust context, and mints a Qiniu IAM federation token through the configured `cache.sts_endpoint` (default `https://sts-ov.qiniuapi.com`). Its requested lifetime is the configured Sandbox lifecycle plus five minutes for the post-job cache save step; no refresh mechanism is provided yet. It injects the token plus bucket/endpoint/prefix as `AWS_*` / `RUNS_ON_S3_*` environment variables in the Sandbox start script, so the scoped cache action can upload and restore caches directly to the user bucket without proxying bytes through runnerd.
 
 Cache object keys are isolated by repository and workflow context:
 
@@ -129,7 +129,7 @@ Cache object keys are isolated by repository and workflow context:
 <configured-prefix>/<owner>/<repo>/scopes/pr-<number>/...
 ```
 
-A trusted branch workflow can write only its branch scope. An internal PR can write only its PR scope. Fork PRs, and jobs whose Workflow Run metadata cannot be verified, receive read-only credentials. Kodo currently requires bucket-level `kodo/list` and `kodo/listMultipartUploads` permissions because it does not support prefix-scoped list policy resources; object contents remain restricted to explicit repository and scope paths, but object key names in the same bucket are not confidential across those credentials.
+With the scoped `ma6174/cache@v5-qiniu` action, runnerd injects ordered read prefixes plus one write prefix. A trusted branch searches its own scope and then the default-branch scope, and writes only its own scope. A pull request, including a Fork PR, searches its PR scope, base-branch scope, and default-branch scope in that order, and writes only its own PR scope; this matches GitHub's merge-ref cache isolation so a Fork cannot poison a base-branch cache. `pull_request_target`, `workflow_run`, `issue_comment`, and unverified metadata are default-branch read-only. Kodo currently requires bucket-level `kodo/list` and `kodo/listMultipartUploads` permissions because it does not support prefix-scoped list policy resources; object contents remain restricted to explicit repository and scope paths, but object key names in the same bucket are not confidential across those credentials.
 
 #### Operator configuration
 
@@ -150,7 +150,7 @@ cache:
 
 #### Using cache in GitHub Actions workflows
 
-Use [`runs-on/cache`](https://github.com/runs-on/cache) instead of `actions/cache`. No additional configuration is needed in the workflow — runnerd injects all credentials and settings as environment variables:
+Use [`ma6174/cache@v5-qiniu`](https://github.com/ma6174/cache/tree/v5-qiniu) instead of `actions/cache`. No additional configuration is needed in the workflow — runnerd injects S3 credentials plus ordered read prefixes and a single write prefix as environment variables:
 
 ```yaml
 steps:

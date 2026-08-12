@@ -828,6 +828,42 @@ func (c *Client) GetWorkflowJob(ctx context.Context, repositoryFullName string, 
 	return job, nil
 }
 
+func (c *Client) GetRepository(ctx context.Context, repositoryFullName string) (Repository, error) {
+	startedAt := time.Now()
+	result := "error"
+	defer func() { metrics.RecordGitHubAPI("get_repository", result, time.Since(startedAt)) }()
+	repositoryFullName = c.repositoryFullName(repositoryFullName)
+	if repositoryFullName == "" {
+		return Repository{}, fmt.Errorf("repository full name is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/repos/%s", c.baseURL, repositoryFullName), nil)
+	if err != nil {
+		return Repository{}, err
+	}
+	setGitHubHeaders(req)
+	resp, err := c.do(req, repositoryFullName)
+	if err != nil {
+		return Repository{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return Repository{}, fmt.Errorf("read github repository response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return Repository{}, fmt.Errorf("github repository: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var repository Repository
+	if err := json.Unmarshal(body, &repository); err != nil {
+		return Repository{}, err
+	}
+	if strings.TrimSpace(repository.FullName) == "" {
+		return Repository{}, fmt.Errorf("github repository response missing full name")
+	}
+	result = "success"
+	return repository, nil
+}
+
 func (c *Client) GetPullRequest(ctx context.Context, repositoryFullName string, number int64) (PullRequest, error) {
 	startedAt := time.Now()
 	result := "error"
@@ -1272,8 +1308,15 @@ type WorkflowJob struct {
 }
 
 type PullRequest struct {
-	Number int64  `json:"number"`
-	Title  string `json:"title"`
+	Number int64          `json:"number"`
+	Title  string         `json:"title"`
+	Head   PullRequestRef `json:"head"`
+	Base   PullRequestRef `json:"base"`
+}
+
+type PullRequestRef struct {
+	Ref        string     `json:"ref"`
+	Repository Repository `json:"repo"`
 }
 
 type Issue struct {

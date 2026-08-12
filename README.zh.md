@@ -120,7 +120,7 @@ unset secret_value
 
 用户需要在账户或 GitHub installation 的 Preferences 中配置 Cache S3 Bucket、可选 Prefix、AK 和 SK。默认 Prefix 是 `gh-actions-cache`。S3 region 和 endpoint 由用户选择的 Sandbox service region 决定，并由运维人员在 `runnerd.yaml` 的 `sandbox.regions` 中配置。由于 endpoint 可能只在 Sandbox 内网可访问，runnerd 保存时只校验配置格式；Bucket 的可达性和权限由实际工作流在 Sandbox 中验证。AK/SK 会加密保存在 scoped state，不会返回给浏览器或 Runner。
 
-每次启动沙箱时，runnerd 将 GitHub 仓库解析到对应 installation/account scope，校验 Workflow Run 的可信上下文，并通过 `cache.sts_endpoint`（默认 `https://sts-ov.qiniuapi.com`）签发七牛 IAM 联邦凭证。凭证请求时长为配置的 Sandbox 生命周期加五分钟，用于覆盖任务结束后的缓存保存步骤；目前暂不提供刷新机制。随后在沙箱启动脚本中注入 `AWS_*` / `RUNS_ON_S3_*` 环境变量，使 `runs-on/cache` action 可以直接把缓存上传/恢复到用户 bucket，而无需经过 runnerd 转发字节。
+每次启动沙箱时，runnerd 将 GitHub 仓库解析到对应 installation/account scope，校验 Workflow Run 的可信上下文，并通过 `cache.sts_endpoint`（默认 `https://sts-ov.qiniuapi.com`）签发七牛 IAM 联邦凭证。凭证请求时长为配置的 Sandbox 生命周期加五分钟，用于覆盖任务结束后的缓存保存步骤；目前暂不提供刷新机制。随后在沙箱启动脚本中注入 `AWS_*` / `RUNS_ON_S3_*` 环境变量，使 scoped cache action 可以直接把缓存上传/恢复到用户 bucket，而无需经过 runnerd 转发字节。
 
 缓存对象 Key 按仓库和工作流上下文隔离：
 
@@ -129,7 +129,7 @@ unset secret_value
 <配置前缀>/<owner>/<repo>/scopes/pr-<number>/...
 ```
 
-可信分支工作流只能写入自身的 branch scope；同仓 PR 只能写入自身 PR scope；Fork PR 及无法验证 Workflow Run 元数据的 job 只会获得只读凭证。当前 Kodo 因不支持按对象前缀限制 list policy resource，仍要求 bucket 级 `kodo/list` 和 `kodo/listMultipartUploads`；对象内容仍被限制到显式的仓库和 scope 路径，但同一 bucket 内的对象 Key 名称不能视为对这些凭证保密。
+配合 scoped `ma6174/cache@v5-qiniu` action，runnerd 会注入有序读取前缀和唯一写入前缀。可信分支依次搜索自身和默认分支 scope，且只能写入自身 scope；PR（包括 Fork PR）按 PR、自身 base branch、默认分支的顺序搜索，并且只能写入自己的 PR scope。这与 GitHub merge-ref cache 隔离语义一致，Fork 无法污染 base branch Cache。`pull_request_target`、`workflow_run`、`issue_comment` 及无法验证的元数据只能只读默认分支 scope。当前 Kodo 因不支持按对象前缀限制 list policy resource，仍要求 bucket 级 `kodo/list` 和 `kodo/listMultipartUploads`；对象内容仍被限制到显式的仓库和 scope 路径，但同一 bucket 内的对象 Key 名称不能视为对这些凭证保密。
 
 #### 运维配置
 
@@ -150,7 +150,7 @@ cache:
 
 #### 在 GitHub Actions 工作流中使用缓存
 
-使用 [`runs-on/cache`](https://github.com/runs-on/cache) 替代 `actions/cache`。工作流中无需额外配置，runnerd 会自动注入所有凭证和设置作为环境变量：
+使用 [`ma6174/cache@v5-qiniu`](https://github.com/ma6174/cache/tree/v5-qiniu) 替代 `actions/cache`。工作流中无需额外配置，runnerd 会自动注入 S3 凭证、有序读取前缀和唯一写入前缀作为环境变量：
 
 ```yaml
 steps:

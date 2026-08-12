@@ -466,6 +466,44 @@ func TestGetWorkflowRun(t *testing.T) {
 	}
 }
 
+func TestGetRepository(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":123,"full_name":"o/r","default_branch":"master"}`))
+	}))
+	defer ts.Close()
+
+	repository, err := NewClient(ts.URL, ts.Client()).GetRepository(t.Context(), "o/r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.ID != 123 || repository.FullName != "o/r" || repository.DefaultBranch != "master" {
+		t.Fatalf("unexpected repository: %#v", repository)
+	}
+}
+
+func TestGetPullRequestIncludesTrustedRefs(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/pulls/7" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":7,"head":{"ref":"feature","repo":{"full_name":"fork/r"}},"base":{"ref":"release","repo":{"full_name":"o/r"}}}`))
+	}))
+	defer ts.Close()
+
+	pull, err := NewClient(ts.URL, ts.Client()).GetPullRequest(t.Context(), "o/r", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pull.Number != 7 || pull.Head.Ref != "feature" || pull.Head.Repository.FullName != "fork/r" || pull.Base.Ref != "release" || pull.Base.Repository.FullName != "o/r" {
+		t.Fatalf("unexpected pull request: %#v", pull)
+	}
+}
+
 func TestGetWorkflowJob(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/o/r/actions/jobs/1001" {
