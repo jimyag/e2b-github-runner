@@ -19,20 +19,21 @@ func TestCacheScopesForWorkflowUsesVerifiedWorkflowRun(t *testing.T) {
 	}{
 		{
 			name:          "fork pull request is read only",
-			response:      `{"id":101,"event":"pull_request","head_branch":"main","head_repository":{"full_name":"fork/repo"},"repository":{"full_name":"owner/repo"},"pull_requests":[{"number":7}]}`,
+			response:      `{"id":101,"event":"pull_request","head_branch":"main","head_repository":{"full_name":"fork/repo"},"repository":{"full_name":"owner/repo","default_branch":"master"},"pull_requests":[{"number":7}]}`,
+			wantOwnScope:  "",
 			wantDecision:  "read_only_fork_pull_request",
 			wantReadCount: 1,
 		},
 		{
 			name:          "internal pull request writes only PR scope",
-			response:      `{"id":101,"event":"pull_request","head_branch":"feature","head_repository":{"full_name":"owner/repo"},"repository":{"full_name":"owner/repo"},"pull_requests":[{"number":7}]}`,
+			response:      `{"id":101,"event":"pull_request","head_branch":"feature","head_repository":{"full_name":"owner/repo"},"repository":{"full_name":"owner/repo","default_branch":"master"},"pull_requests":[{"number":7}]}`,
 			wantOwnScope:  scopeForPR(7),
 			wantDecision:  "internal_pull_request",
 			wantReadCount: 3,
 		},
 		{
 			name:          "branch workflow writes only branch scope",
-			response:      `{"id":101,"event":"push","head_branch":"main","head_repository":{"full_name":"owner/repo"},"repository":{"full_name":"owner/repo"}}`,
+			response:      `{"id":101,"event":"push","head_branch":"main","head_repository":{"full_name":"owner/repo"},"repository":{"full_name":"owner/repo","default_branch":"master"}}`,
 			wantOwnScope:  scopeForBranch("main"),
 			wantDecision:  "branch",
 			wantReadCount: 2,

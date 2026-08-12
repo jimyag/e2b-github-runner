@@ -94,7 +94,7 @@ cache_s3_secret_key="$(printf '%%s' "%[14]s" | base64 -d)"
 cache_s3_session_token="$(printf '%%s' "%[15]s" | base64 -d)"
 
 # Inject Cache S3 STS credentials for runs-on/cache
-if [ -n "$cache_s3_bucket" ]; then
+if [ -n "$cache_s3_bucket" ] && [ -n "$cache_s3_access_key" ] && [ -n "$cache_s3_secret_key" ]; then
   export RUNS_ON_S3_BUCKET_CACHE="$cache_s3_bucket"
   if [ -n "$cache_s3_endpoint" ]; then
     export RUNS_ON_S3_BUCKET_ENDPOINT="$cache_s3_endpoint"
@@ -113,6 +113,8 @@ if [ -n "$cache_s3_bucket" ]; then
   export DOWNLOAD_QUEUE_SIZE="${DOWNLOAD_QUEUE_SIZE:-16}"
   export DOWNLOAD_PART_SIZE="${DOWNLOAD_PART_SIZE:-16}"
   echo "injected cache S3 STS credentials for runs-on/cache (upload_queue=${UPLOAD_QUEUE_SIZE} upload_part=${UPLOAD_PART_SIZE}MiB download_queue=${DOWNLOAD_QUEUE_SIZE} download_part=${DOWNLOAD_PART_SIZE}MiB)"
+elif [ -n "$cache_s3_bucket" ]; then
+  echo "cache S3 configuration is incomplete; skipping credential injection" >&2
 fi
 export RUNNERD_SANDBOX_ID="$sandbox_id"
 export RUNNERD_REQUEST_ID="$runner_request_id"

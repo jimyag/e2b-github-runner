@@ -244,13 +244,13 @@ func (s *Server) handleWorkflowRunWebhook(w http.ResponseWriter, r *http.Request
 		return
 	}
 	s.logger.Info("workflow_run webhook parsed", "action", event.Action, "run_id", event.WorkflowRun.ID, "workflow", event.WorkflowRun.Name, "repository", event.Repository.FullName)
-	if event.Repository.ID > 0 && event.Installation.ID > 0 {
-		if _, err := s.store.UpsertGitHubRepository(state.GitHubRepository{ID: event.Repository.ID, FullName: event.Repository.FullName, InstallationID: event.Installation.ID}); err != nil {
-			s.logger.Warn("save github repository identity", "repository_id", event.Repository.ID, "error", err)
-		}
-	}
 	switch event.Action {
 	case "requested", "in_progress":
+		if event.Repository.ID > 0 && event.Installation.ID > 0 {
+			if _, err := s.store.UpsertGitHubRepository(state.GitHubRepository{ID: event.Repository.ID, FullName: event.Repository.FullName, InstallationID: event.Installation.ID}); err != nil {
+				s.logger.Warn("save github repository identity", "repository_id", event.Repository.ID, "error", err)
+			}
+		}
 	default:
 		s.logger.Info("workflow_run webhook ignored", "action", event.Action, "run_id", event.WorkflowRun.ID, "repository", event.Repository.FullName, "delivery", r.Header.Get("X-GitHub-Delivery"))
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "ignored"})

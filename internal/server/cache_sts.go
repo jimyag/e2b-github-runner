@@ -225,7 +225,7 @@ func generateCacheSTSWithClient(ctx context.Context, config cacheSTSCredentialCo
 	creds := stResp.Data.Credential
 	expiration, err := time.Parse(time.RFC3339, creds.Expiration)
 	if err != nil {
-		expiration = time.Now().UTC().Add(time.Hour)
+		return CacheSTSCredentials{}, fmt.Errorf("parse STS credential expiration %q: %w", creds.Expiration, err)
 	}
 	return CacheSTSCredentials{
 		AccessKeyID:     creds.AccessKey,

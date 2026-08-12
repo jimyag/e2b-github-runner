@@ -19,6 +19,36 @@ import (
 	"github.com/qiniu/ci-runner/internal/state"
 )
 
+const workflowRunCacheTTL = 30 * time.Second
+
+func (s *Server) workflowRunForCache(ctx context.Context, repository string, runID int64) (github.WorkflowRun, error) {
+	key := fmt.Sprintf("%s#%d", repository, runID)
+	now := time.Now()
+	s.workflowRunMu.Lock()
+	if s.workflowRunCache == nil {
+		s.workflowRunCache = make(map[string]cachedWorkflowRun)
+	}
+	if cached, ok := s.workflowRunCache[key]; ok && now.Before(cached.expiresAt) {
+		s.workflowRunMu.Unlock()
+		return cached.run, nil
+	}
+	s.workflowRunMu.Unlock()
+	value, err, _ := s.workflowRunGroup.Do(key, func() (any, error) {
+		run, err := s.gh.GetWorkflowRun(ctx, repository, runID)
+		if err != nil {
+			return github.WorkflowRun{}, err
+		}
+		s.workflowRunMu.Lock()
+		s.workflowRunCache[key] = cachedWorkflowRun{run: run, expiresAt: time.Now().Add(workflowRunCacheTTL)}
+		s.workflowRunMu.Unlock()
+		return run, nil
+	})
+	if err != nil {
+		return github.WorkflowRun{}, err
+	}
+	return value.(github.WorkflowRun), nil
+}
+
 func (s *Server) cacheScopesForWorkflow(ctx context.Context, repository string, st state.RunnerState, defaultScope string) (string, []string, string) {
 	readOnly := func(reason string) (string, []string, string) {
 		return "", []string{defaultScope}, reason
@@ -26,10 +56,13 @@ func (s *Server) cacheScopesForWorkflow(ctx context.Context, repository string, 
 	if st.WorkflowRunID <= 0 {
 		return readOnly("read_only_missing_workflow_run")
 	}
-	run, err := s.gh.GetWorkflowRun(ctx, repository, st.WorkflowRunID)
+	run, err := s.workflowRunForCache(ctx, repository, st.WorkflowRunID)
 	if err != nil {
 		s.logger.Warn("failed to resolve workflow run for cache scope", "workflow_run_id", st.WorkflowRunID, "repository", repository, "error", err)
 		return readOnly("read_only_workflow_run_lookup_failed")
+	}
+	if branch := strings.TrimSpace(run.Repository.DefaultBranch); branch != "" {
+		defaultScope = scopeForBranch(branch)
 	}
 	event := strings.ToLower(strings.TrimSpace(run.Event))
 	if event == "pull_request" || event == "pull_request_target" {
@@ -44,6 +77,8 @@ func (s *Server) cacheScopesForWorkflow(ctx context.Context, repository string, 
 		if !strings.EqualFold(headRepo, baseRepo) {
 			return readOnly("read_only_fork_pull_request")
 		}
+		// pull_request_target intentionally receives a write token only for its
+		// own PR scope; it never receives branch/default-scope write access.
 		ownScope := scopeForPR(run.PullRequests[0].Number)
 		readScopes := []string{ownScope, defaultScope}
 		if branch := strings.TrimSpace(run.HeadBranch); branch != "" {
@@ -350,11 +385,11 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 				ownScope, readScopes, decision := s.cacheScopesForWorkflow(createCtx, req.RepositoryFullName, st, defaultScope)
 				s.logger.Debug("cache STS scope decision", "id", id, "decision", decision, "pull_request", st.PullRequestNumber)
 
-				stsCreds, err := generateCacheSTS(createCtx, cacheSTSCredentialConfig{
+				stsCreds, stsErr := generateCacheSTS(createCtx, cacheSTSCredentialConfig{
 					Bucket: storage.bucket, AccessKeyID: storage.accessKeyID, SecretAccessKey: storage.secretKey,
 				}, cacheBasePrefix, ownScope, readScopes, s.cfg.CacheSTSEndpoint, cacheSTSDurationSeconds(s.cfg.SandboxTimeout), s.cacheSTS)
-				if err != nil {
-					s.logger.Warn("failed to generate cache STS", "id", id, "error", err)
+				if stsErr != nil {
+					s.logger.Warn("failed to generate cache STS", "id", id, "error", stsErr)
 				} else {
 					effectivePrefix := cacheBasePrefix + "/" + defaultScope
 					if ownScope != "" {

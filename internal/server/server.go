@@ -50,6 +50,10 @@ type Server struct {
 	pullTitleCache map[string]cachedPullTitle
 	pullTitleGroup singleflight.Group
 
+	workflowRunMu    sync.Mutex
+	workflowRunCache map[string]cachedWorkflowRun
+	workflowRunGroup singleflight.Group
+
 	userRepositoryAccessMu    sync.Mutex
 	userRepositoryAccessCache map[int64]cachedUserRepositoryAccess
 	userRepositoryAccessEpoch map[int64]uint64
@@ -59,6 +63,11 @@ type Server struct {
 type cachedPullTitle struct {
 	title     string
 	errorText string
+	expiresAt time.Time
+}
+
+type cachedWorkflowRun struct {
+	run       github.WorkflowRun
 	expiresAt time.Time
 }
 
@@ -169,6 +178,7 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		cacheSTS:                  &http.Client{Timeout: 30 * time.Second},
 		terminals:                 newTerminalHub(logger),
 		pullTitleCache:            map[string]cachedPullTitle{},
+		workflowRunCache:          map[string]cachedWorkflowRun{},
 		userRepositoryAccessCache: map[int64]cachedUserRepositoryAccess{},
 		userRepositoryAccessEpoch: map[int64]uint64{},
 	}

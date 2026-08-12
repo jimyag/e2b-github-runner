@@ -68,8 +68,5 @@ func (s *DBStore) UpsertGitHubRepository(repository GitHubRepository) (GitHubRep
 	}).Create(&record).Error; err != nil {
 		return GitHubRepository{}, err
 	}
-	if err := db.First(&record, "id = ?", repository.ID).Error; err != nil {
-		return GitHubRepository{}, err
-	}
 	return GitHubRepository(record), nil
 }
