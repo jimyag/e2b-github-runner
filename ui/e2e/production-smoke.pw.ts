@@ -26,6 +26,62 @@ test("boots the public landing page from the production bundle", async ({ page }
   diagnostics.expectClean()
 })
 
+test("serves the hosted guide as a responsive public production route", async ({ page }) => {
+  const diagnostics = observeBrowserDiagnostics(page)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const response = await page.goto("/docs/getting-started/hosted", { waitUntil: "networkidle" })
+
+  expect(response?.ok()).toBe(true)
+  await expect(
+    page.getByRole("heading", { name: "Get started with the hosted service", exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole("link", { name: "Copy a complete workflow" })).toHaveAttribute(
+    "href",
+    "/docs/guides/workflow",
+  )
+  await expect(page.locator("#root")).not.toBeEmpty()
+
+  const viewport = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }))
+  expect(viewport.documentWidth).toBeLessThanOrEqual(viewport.viewportWidth + 1)
+
+  await page.waitForTimeout(postRenderObservationMs)
+  diagnostics.expectClean()
+})
+
+test("serves the custom template guide from the production bundle", async ({ page }) => {
+  const diagnostics = observeBrowserDiagnostics(page)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  const response = await page.goto("/docs/guides/custom-templates", { waitUntil: "networkidle" })
+
+  expect(response?.ok()).toBe(true)
+  await expect(
+    page.getByRole("heading", { name: "Build and use a custom runner template", exact: true }),
+  ).toBeVisible()
+  await expect(page).toHaveTitle("Build and use a custom runner template · Qiniu CI Runner")
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+    "content",
+    "Build a private Qiniu Sandbox template for your own tools, connect it to a custom Runner Spec, and select it from a GitHub Actions workflow.",
+  )
+  await expect(
+    page.locator("pre code").filter({ hasText: "qshell sandbox template build --wait" }),
+  ).toBeVisible()
+  await expect(page.getByText("Status: ready", { exact: true }).first()).toBeVisible()
+
+  const viewport = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }))
+  expect(viewport.documentWidth).toBeLessThanOrEqual(viewport.viewportWidth + 1)
+
+  await page.waitForTimeout(postRenderObservationMs)
+  diagnostics.expectClean()
+})
+
 test("keeps the Jobs list independently scrollable beside the Web Console", async ({ page }) => {
   test.skip(Boolean(process.env.RUNNERD_UI_SMOKE_BASE_URL), "local fixture coverage only")
 

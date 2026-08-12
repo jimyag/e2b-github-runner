@@ -1,0 +1,143 @@
+# Build and use a custom runner template
+
+Build a private Qiniu Sandbox template for your own tools, connect it to a custom Runner Spec, and select it from a GitHub Actions workflow.
+
+## Decide whether you need a custom template
+
+Use a [managed runner label](/docs/reference/runner-labels) when the maintained Ubuntu images already contain what the job needs. Choose a custom template when you need a different base image, preinstalled toolchain, system package, certificate, or other image-level customization.
+
+A custom template is private to its Sandbox environment. It does not need to be published. Build it in the same Sandbox region and account or organization scope that runnerd will use for the target repository.
+
+## Before you start
+
+You need:
+
+- qshell 2.19.10 or newer;
+- a Qiniu Sandbox endpoint and API key for the target region;
+- administrator access to runnerd;
+- a GitHub repository connected to the same account or organization scope.
+
+Keep credentials in environment variables or a local secret store. Do not commit API keys or a region-specific template ID.
+
+## Start from a compatible runner image
+
+The safest starting point is one of the existing `templates/github-runner-*` directories in the Qiniu CI Runner repository. Copy the closest image, rename it, and add only the tools your workflows need.
+
+A compatible image must provide executable GitHub Actions runner scripts at:
+
+```text
+/opt/actions-runner/config.sh
+/opt/actions-runner/run.sh
+```
+
+It should also provide a writable `/home/runner` and allow outbound HTTPS access to GitHub. A `runner` user, `/opt/hostedtoolcache`, and `/usr/local/bin/ensure-docker` follow the maintained image convention. Docker startup is best-effort for custom specs, so omit it only when workflows do not need containers or service containers.
+
+runnerd injects a Bash startup script into the Sandbox. The image must provide `bash`, `base64`, `install`, `cp`, `mkdir`, and `id`. If the conventional `runner` user exists, it must also provide `sudo` so the startup script can switch to that user without interaction.
+
+A locally successful `docker build` is useful diagnostics, but it does not prove that a remote Sandbox template exists or can start in the target region.
+
+## Configure the template build
+
+Place `qshell.sandbox.toml` beside the Dockerfile. Start with a portable name-only configuration:
+
+```toml
+name = "acme-runner-ubuntu-24-04"
+dockerfile = "./Dockerfile"
+path = "."
+cpu_count = 8
+memory_mb = 8192
+no_cache = false
+```
+
+The name must be unique in one Sandbox environment. qshell can resolve an existing template by name and rebuild it; otherwise it creates one. Some qshell versions may write `template_id` back to the file after the first build. Review the file before committing and remove that region-specific value from shared source.
+
+## Build in Qiniu Sandbox
+
+Set the credentials for the target region, enter the template directory, and run the remote build:
+
+```bash
+export QINIU_SANDBOX_API_URL="https://<sandbox-region-endpoint>"
+read -r -s QINIU_API_KEY
+export QINIU_API_KEY
+
+cd path/to/acme-runner-ubuntu-24-04
+qshell sandbox template build --wait
+```
+
+Do not continue until qshell reports `Status: ready`. Use the same command to rebuild a name-resolved template after changing its Dockerfile. Then list the templates and record the ID returned for this region:
+
+```bash
+qshell sandbox template list --format json
+qshell sandbox template get <template-id>
+```
+
+## Verify the remote template
+
+Create a short-lived Sandbox from the template before connecting it to runnerd:
+
+```bash
+qshell sandbox create <template-id-or-name> --timeout 300
+```
+
+In the Sandbox terminal, verify the runner contract and the tools your workflow needs:
+
+```bash
+command -v bash base64 install cp mkdir id
+test -x /opt/actions-runner/config.sh
+test -x /opt/actions-runner/run.sh
+test -w /home/runner
+git --version
+
+if id -u runner >/dev/null 2>&1; then
+  command -v sudo
+  sudo -E -u runner true
+fi
+```
+
+When Docker is required, also run `/usr/local/bin/ensure-docker` and `docker info`. Exit the session, use `qshell sandbox list` to check for a remaining instance, and clean it up with `qshell sandbox kill <sandbox-id>`.
+
+## Create a custom Runner Spec
+
+Sign in as a runnerd administrator, open `/admin/runner_specs`, and create a custom spec with:
+
+- a recognizable name;
+- advertised labels such as `self-hosted`, `linux`, `x64`, and `acme-linux-x64`;
+- required labels containing `acme-linux-x64`;
+- the exact template ID from the target Sandbox region;
+- an optional runner group for an organization repository, left blank for a personal repository;
+- suitable `max_concurrency`, `min_idle`, and priority values;
+- `enabled` turned on.
+
+Keep `default_available` off for the first rollout and add a Repository Policy for the intended repository. Turn it on only when every repository should be allowed to use the spec.
+
+Saving a custom spec does not validate the template. A wrong ID, region mismatch, missing runtime file, or inaccessible image will surface when runnerd tries to create and register a runner.
+
+## Use the custom labels
+
+Runner matching preserves `required labels ⊆ job labels ⊆ advertised labels`. The workflow must include every required label and must not request a label that the spec does not advertise.
+
+For the example spec, use:
+
+```yaml
+name: Custom runner check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: [self-hosted, linux, x64, acme-linux-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - run: git --version
+```
+
+Dispatch the workflow, then open Jobs in Qiniu CI Runner. A successful result shows the request matched the custom spec, created a Sandbox from its template ID, registered the runner, and completed the job.
+
+## Roll out safely and troubleshoot
+
+Start with one repository and one manually dispatched smoke workflow. Increase concurrency or grant more Repository Policies only after the job has completed and the Sandbox was cleaned up.
+
+If the job stays queued, compare the job labels, required labels, advertised labels, `enabled`, `default_available`, and Repository Policy. If runner creation fails, confirm the effective account or organization Sandbox endpoint, template ID, and `Status: ready`. For runtime failures, re-run the remote template checks and inspect runnerd logs.
+
+When a rebuild produces a new template ID, update the custom Runner Spec before the next job. Continue with [Troubleshooting](/docs/troubleshooting) for symptom-based checks.
