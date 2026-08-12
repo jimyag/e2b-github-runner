@@ -7,8 +7,6 @@ vars:
   TEMPLATE_DIR: templates/github-runner-ubuntu-24.04
   QSHELL: qshell
   RUNNER_TEMPLATE_IMAGE_PREFIX: qiniu-ci-runner
-  QBOX_KODO_TEMPLATE_DIR: templates/qbox-kodo-ubuntu-16.04
-  QBOX_KODO_BASE_IMAGE: jimyag/qbox-kodo-ubuntu-16.04-base:runner-docker
   GO_PACKAGES: "./cmd/... ./internal/..."
 
 tasks:
@@ -251,8 +249,6 @@ tasks:
     cmds:
       - docker build --check -f Dockerfile .
       - docker build --check --platform=linux/amd64 -f {{.TEMPLATE_DIR}}/Dockerfile {{.TEMPLATE_DIR}}
-      - docker build --check --platform=linux/amd64 -f {{.QBOX_KODO_TEMPLATE_DIR}}/base.Dockerfile {{.QBOX_KODO_TEMPLATE_DIR}}
-      - docker build --check --platform=linux/amd64 -f {{.QBOX_KODO_TEMPLATE_DIR}}/Dockerfile {{.QBOX_KODO_TEMPLATE_DIR}}
 
   template-deps:
     desc: Check Qiniu sandbox template build dependencies
@@ -394,37 +390,6 @@ tasks:
         : "${QINIU_SANDBOX_API_URL:?QINIU_SANDBOX_API_URL is required}"
         : "${QINIU_API_KEY:?QINIU_API_KEY is required}"
         QSHELL="{{.QSHELL}}" scripts/smoke-runner-template.sh "{{.IMAGE_KEY}}" "{{.TEMPLATE_ID}}"
-
-  qbox-kodo-base-build:
-    desc: Build the qbox kodo Ubuntu 16.04 base Docker image locally
-    cmds:
-      - docker build --platform=linux/amd64 -f {{.QBOX_KODO_TEMPLATE_DIR}}/base.Dockerfile -t {{.QBOX_KODO_BASE_IMAGE}} {{.QBOX_KODO_TEMPLATE_DIR}}
-
-  qbox-kodo-base-push:
-    desc: Push the qbox kodo Ubuntu 16.04 base Docker image
-    deps:
-      - qbox-kodo-base-build
-    cmds:
-      - docker push {{.QBOX_KODO_BASE_IMAGE}}
-
-  qbox-kodo-template-deps:
-    desc: Check qbox kodo Qiniu sandbox template build dependencies
-    dir: "{{.QBOX_KODO_TEMPLATE_DIR}}"
-    cmds:
-      - qshell sandbox template build --help >/dev/null
-
-  qbox-kodo-template-build-prod:
-    desc: Build the qbox kodo production Qiniu sandbox template
-    dir: "{{.QBOX_KODO_TEMPLATE_DIR}}"
-    cmds:
-      - |
-        set -e
-        : "${QINIU_SANDBOX_API_URL:?QINIU_SANDBOX_API_URL is required}"
-        : "${QINIU_API_KEY:?QINIU_API_KEY is required}"
-        tmp_config="$(mktemp ".qshell-sandbox.XXXXXX")"
-        trap 'rm -f "$tmp_config"' EXIT
-        cp qshell.sandbox.toml "$tmp_config"
-        qshell sandbox template build --config "$tmp_config" --wait
 
   release-check:
     desc: Validate the GoReleaser configuration

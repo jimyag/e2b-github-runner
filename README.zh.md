@@ -263,13 +263,11 @@ task release-check # 验证发布构建
 | `templates/github-runner-ubuntu-22.04` | 维护中的 Ubuntu 22.04 x64 Runner 模板         |
 | `templates/github-runner-ubuntu-24.04` | 维护中的 Ubuntu 24.04 x64 Runner 模板         |
 | `templates/github-runner-ubuntu-26.04` | 预览版 Ubuntu 26.04 x64 Runner 模板           |
-| `templates/qbox-kodo-ubuntu-16.04`     | 旧版 Ubuntu 16.04，用于 qbox/kodo 风格的 job  |
 
 先运行 `task template-check-all`，再通过 4 个
 `task template-build-ubuntu-*` targets 执行真实 qshell Sandbox 构建。发布与
 远程构建超时后的缓存续跑、发布与 smoke 命令见
-[公共 Runner 模板](docs/zh/default-runner-templates.md)。qbox-kodo
-基础镜像仍使用独立的 `task qbox-kodo-base-build` 流程。
+[公共 Runner 模板](docs/zh/default-runner-templates.md)。
 
 ## 文档
 
