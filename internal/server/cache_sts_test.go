@@ -131,25 +131,3 @@ func TestGenerateCacheSTSRequiresReadScope(t *testing.T) {
 		t.Fatalf("expected missing read scope error, got %v", err)
 	}
 }
-
-func TestIsForkPullRequestPayload(t *testing.T) {
-	forkPayload := `{
-		"workflow_run": {
-			"head_repository": { "full_name": "fork-owner/repo" }
-		},
-		"repository": { "full_name": "upstream-owner/repo" }
-	}`
-	if !isForkPullRequestPayload(forkPayload) {
-		t.Fatalf("expected forkPayload to be recognized as fork PR")
-	}
-
-	internalPayload := `{
-		"workflow_run": {
-			"head_repository": { "full_name": "upstream-owner/repo" }
-		},
-		"repository": { "full_name": "upstream-owner/repo" }
-	}`
-	if isForkPullRequestPayload(internalPayload) {
-		t.Fatalf("expected internalPayload to NOT be recognized as fork PR")
-	}
-}

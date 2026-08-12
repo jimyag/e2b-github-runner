@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -15,11 +14,7 @@ import (
 	"github.com/qiniu/go-sdk/v7/auth"
 )
 
-// defaultCacheSTSAPI is the fallback Qiniu IAM federation token endpoint.
-const (
-	defaultCacheSTSAPI = "https://sts-ov.qiniuapi.com"
-	cacheSTSHeadroom   = 5 * time.Minute
-)
+const cacheSTSHeadroom = 5 * time.Minute
 
 // CacheSTSCredentials represents temporary S3 credentials generated for a sandbox.
 type CacheSTSCredentials struct {
@@ -84,8 +79,11 @@ func scopeForPR(prNumber int64) string {
 // object read actions (stat/get) cover all specified readScopes, and object
 // write actions (upload/delete/etc.) are strictly restricted to ownScope.
 // If ownScope is empty, write permissions are omitted (read-only mode).
-func generateCacheSTS(ctx context.Context, config cacheS3Config, cachePrefix, ownScope string, readScopes []string, endpoint string, durationSeconds int) (CacheSTSCredentials, error) {
-	return generateCacheSTSWithClient(ctx, config, cachePrefix, ownScope, readScopes, endpoint, durationSeconds, &http.Client{Timeout: 30 * time.Second})
+func generateCacheSTS(ctx context.Context, config cacheS3Config, cachePrefix, ownScope string, readScopes []string, endpoint string, durationSeconds int, client cacheSTSClient) (CacheSTSCredentials, error) {
+	if client == nil {
+		return CacheSTSCredentials{}, fmt.Errorf("cache STS HTTP client is required")
+	}
+	return generateCacheSTSWithClient(ctx, config, cachePrefix, ownScope, readScopes, endpoint, durationSeconds, client)
 }
 
 func generateCacheSTSWithClient(ctx context.Context, config cacheS3Config, cachePrefix, ownScope string, readScopes []string, endpoint string, durationSeconds int, client cacheSTSClient) (CacheSTSCredentials, error) {
@@ -175,11 +173,9 @@ func generateCacheSTSWithClient(ctx context.Context, config cacheS3Config, cache
 		return CacheSTSCredentials{}, fmt.Errorf("marshal STS request: %w", err)
 	}
 
-	slog.Info("cache STS request", "bucket", bucket, "prefix", cachePrefix, "policy", string(policyJSON))
-
 	endpoint = strings.TrimRight(strings.TrimSpace(endpoint), "/")
 	if endpoint == "" {
-		endpoint = defaultCacheSTSAPI
+		return CacheSTSCredentials{}, fmt.Errorf("cache STS endpoint is required")
 	}
 	if !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
 		endpoint = "https://" + endpoint

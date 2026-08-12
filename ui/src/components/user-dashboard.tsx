@@ -656,14 +656,9 @@ function CacheS3Card({
   onSave: (input: { region: string; bucket: string; prefix: string; endpoint: string; access_key_id: string; secret_access_key: string }, installationID?: number) => Promise<void>
   onDelete: (installationID?: number) => Promise<void>
 }) {
-  const sandboxRegions = useSandboxRegions()
   const { t } = useTranslation()
-  // Cache preferences contain the effective operator-owned mapping. This also
-  // works when Sandbox is supplied by inheritance or the admin default, where
-  // there may be no local sandbox api_url in the response.
-  const sandboxRegion = findSandboxRegionByAPIURL(sandboxRegions, preferences?.sandbox?.api_url ?? "")
-  const s3Region = preferences?.cache?.region ?? sandboxRegion?.s3Region ?? ""
-  const s3Endpoint = preferences?.cache?.endpoint ?? sandboxRegion?.s3Endpoint ?? ""
+  const s3Region = preferences?.cache?.region ?? ""
+  const s3Endpoint = preferences?.cache?.endpoint ?? ""
 
   const [bucket, setBucket] = useState(preferences?.cache?.bucket ?? "")
   const [prefix, setPrefix] = useState(preferences?.cache?.prefix ?? "")

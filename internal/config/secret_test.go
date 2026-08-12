@@ -205,6 +205,11 @@ database:
 auth:
   session_secret: %s
   encryption_key: %s
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
 github:
   webhook_secret: %s
   token: %s

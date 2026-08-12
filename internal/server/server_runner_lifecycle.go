@@ -336,17 +336,17 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		}
 
 		if req.GitHubInstallationID > 0 {
-			if storage, err := s.cacheStorageForInstallation(req.GitHubInstallationID); err == nil {
+			if storage, err := s.cacheStorageForInstallation(req.GitHubInstallationID, sandboxConfig.APIURL); err == nil {
 				cacheBasePrefix := storage.prefix + "/" + req.RepositoryFullName
 				defaultScope := scopeForBranch("main")
 
 				ownScope, readScopes, decision := s.cacheScopesForWorkflow(createCtx, req.RepositoryFullName, st, defaultScope)
-				s.logger.Info("cache STS scope decision", "id", id, "decision", decision, "pull_request", st.PullRequestNumber, "own_scope", ownScope, "read_scopes", readScopes)
+				s.logger.Debug("cache STS scope decision", "id", id, "decision", decision, "pull_request", st.PullRequestNumber)
 
 				stsCreds, err := generateCacheSTS(createCtx, cacheS3Config{
 					Region: storage.region, Bucket: storage.bucket, Prefix: cacheBasePrefix, Endpoint: storage.endpoint,
 					AccessKeyID: storage.accessKeyID, SecretAccessKey: storage.secretKey,
-				}, cacheBasePrefix, ownScope, readScopes, s.cfg.CacheSTSEndpoint, cacheSTSDurationSeconds(s.cfg.SandboxTimeout))
+				}, cacheBasePrefix, ownScope, readScopes, s.cfg.CacheSTSEndpoint, cacheSTSDurationSeconds(s.cfg.SandboxTimeout), s.cacheSTS)
 				if err != nil {
 					s.logger.Warn("failed to generate cache STS", "id", id, "error", err)
 				} else {
@@ -1649,49 +1649,4 @@ func (s *Server) stopSandboxWithTimeout(ctx context.Context, id, sandboxID strin
 	}
 	s.logger.Info("sandbox stopped", "sandbox_id", sandboxID, "pid", pid)
 	return nil
-}
-
-type githubPayloadRepositoryCheck struct {
-	WorkflowRun struct {
-		HeadRepository struct {
-			FullName string `json:"full_name"`
-		} `json:"head_repository"`
-	} `json:"workflow_run"`
-	Repository struct {
-		FullName string `json:"full_name"`
-	} `json:"repository"`
-	PullRequest struct {
-		Head struct {
-			Repo struct {
-				FullName string `json:"full_name"`
-			} `json:"repo"`
-		} `json:"head"`
-		Base struct {
-			Repo struct {
-				FullName string `json:"full_name"`
-			} `json:"repo"`
-		} `json:"base"`
-	} `json:"pull_request"`
-}
-
-func isForkPullRequestPayload(payloadJSON string) bool {
-	if payloadJSON == "" {
-		return false
-	}
-	var check githubPayloadRepositoryCheck
-	if err := json.Unmarshal([]byte(payloadJSON), &check); err != nil {
-		return false
-	}
-	headRepo := check.WorkflowRun.HeadRepository.FullName
-	if headRepo == "" {
-		headRepo = check.PullRequest.Head.Repo.FullName
-	}
-	baseRepo := check.Repository.FullName
-	if baseRepo == "" {
-		baseRepo = check.PullRequest.Base.Repo.FullName
-	}
-	if headRepo != "" && baseRepo != "" && !strings.EqualFold(headRepo, baseRepo) {
-		return true
-	}
-	return false
 }

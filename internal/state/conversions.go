@@ -66,7 +66,6 @@ func recordToState(record runnerRequestRecord) RunnerState {
 		HeadSHA:                githubLinks.headSHA,
 		GitHubJobURL:           githubLinks.jobURL,
 		PullRequestNumber:      githubLinks.pullRequestNumber,
-		GitHubPayloadJSON:      record.GitHubPayloadJSON,
 		AssignedJobID:          record.AssignedJobID,
 		AssignedJobName:        record.AssignedJobName,
 		Error:                  record.Error,

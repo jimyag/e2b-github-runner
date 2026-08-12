@@ -32,6 +32,7 @@ type Server struct {
 	slots       chan struct{}
 	oauth       *http.Client
 	diagnostics *http.Client
+	cacheSTS    *http.Client
 	terminals   *terminalHub
 
 	admissionMu sync.Mutex
@@ -165,6 +166,7 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		queueNotify:               make(chan struct{}, 1),
 		oauth:                     &http.Client{Timeout: 10 * time.Second},
 		diagnostics:               &http.Client{Timeout: 5 * time.Second},
+		cacheSTS:                  &http.Client{Timeout: 30 * time.Second},
 		terminals:                 newTerminalHub(logger),
 		pullTitleCache:            map[string]cachedPullTitle{},
 		userRepositoryAccessCache: map[int64]cachedUserRepositoryAccess{},

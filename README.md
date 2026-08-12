@@ -118,9 +118,18 @@ Supported fields: `database.dsn`, `auth.session_secret`, `auth.encryption_key`, 
 
 ### Cache and S3
 
-Each user configures a Cache S3 Bucket, optional Prefix, AK, and SK in account or GitHub installation Preferences. The S3 region and endpoint are derived from the selected Sandbox service region and are configured by the operator in `runnerd.yaml` under `sandbox.regions`. Because the configured endpoint may be private to the Sandbox network, runnerd only validates the configuration shape when saving it; bucket reachability and permissions are verified by the actual workflow in the Sandbox. AK/SK are encrypted in scoped state and are never returned to the browser or runner.
+Each user configures a Cache S3 Bucket, optional Prefix, AK, and SK in account or GitHub installation Preferences. The default prefix is `gh-actions-cache`. The S3 region and endpoint are derived from the selected Sandbox service region and are configured by the operator in `runnerd.yaml` under `sandbox.regions`. Because the configured endpoint may be private to the Sandbox network, runnerd only validates the configuration shape when saving it; bucket reachability and permissions are verified by the actual workflow in the Sandbox. AK/SK are encrypted in scoped state and are never returned to the browser or runner.
 
-On every sandbox start, runnerd resolves the GitHub repository to its installation/account scope, reads the scoped S3 configuration, and mints a Qiniu IAM federation token through the configured `cache.sts_endpoint` (default `https://sts-ov.qiniuapi.com`). Its requested lifetime is the configured Sandbox lifecycle plus five minutes for the post-job cache save step; no refresh mechanism is provided yet. It injects the token plus bucket/endpoint/prefix as `AWS_*` / `RUNS_ON_S3_*` environment variables in the Sandbox start script, so a `runs-on/cache` action can upload and restore caches directly to the user bucket without proxying bytes through runnerd. Cache object keys are prefixed with `<configured-prefix>/<owner>/<repo>/`.
+On every sandbox start, runnerd resolves the GitHub repository to its installation/account scope, verifies the Workflow Run trust context, and mints a Qiniu IAM federation token through the configured `cache.sts_endpoint` (default `https://sts-ov.qiniuapi.com`). Its requested lifetime is the configured Sandbox lifecycle plus five minutes for the post-job cache save step; no refresh mechanism is provided yet. It injects the token plus bucket/endpoint/prefix as `AWS_*` / `RUNS_ON_S3_*` environment variables in the Sandbox start script, so a `runs-on/cache` action can upload and restore caches directly to the user bucket without proxying bytes through runnerd.
+
+Cache object keys are isolated by repository and workflow context:
+
+```text
+<configured-prefix>/<owner>/<repo>/scopes/branch-<sha256(branch)[:16]>/...
+<configured-prefix>/<owner>/<repo>/scopes/pr-<number>/...
+```
+
+A trusted branch workflow can write only its branch scope. An internal PR can write only its PR scope. Fork PRs, and jobs whose Workflow Run metadata cannot be verified, receive read-only credentials. Kodo currently requires bucket-level `kodo/list` and `kodo/listMultipartUploads` permissions because it does not support prefix-scoped list policy resources; object contents remain restricted to explicit repository and scope paths, but object key names in the same bucket are not confidential across those credentials.
 
 #### Operator configuration
 
@@ -137,7 +146,7 @@ cache:
   sts_endpoint: https://sts-ov.qiniuapi.com
 ```
 
-`sandbox.regions` defines the catalog exposed to the frontend via `GET /sandbox/regions`. Each entry maps a Sandbox API endpoint to its Kodo S3 region and endpoint. `cache.sts_endpoint` is the Qiniu IAM federation token endpoint used to mint short-lived credentials.
+`sandbox.regions` defines the public Sandbox region catalog exposed through `GET /sandbox/regions`; S3 mappings remain server-side because endpoints can be private. Each entry maps a Sandbox API endpoint to its Kodo S3 region and endpoint. At least one region is required. `cache.sts_endpoint` is the Qiniu IAM federation token endpoint used to mint short-lived credentials.
 
 #### Using cache in GitHub Actions workflows
 

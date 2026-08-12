@@ -21,6 +21,12 @@ auth:
   encryption_key: test-encryption-key
 admin:
   token: admin-token
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   allowed_repositories:
@@ -80,6 +86,12 @@ auth:
   encryption_key: test-encryption-key
 admin:
   token: admin-token
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   app:
@@ -116,6 +128,12 @@ auth:
   encryption_key: test-encryption-key
 admin:
   token: admin-token
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   app:
@@ -153,6 +171,12 @@ auth:
   encryption_key: test-encryption-key
 admin:
   token: admin-token
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   app:
@@ -183,6 +207,12 @@ database:
 auth:
   session_secret: test-session-secret
   encryption_key: test-encryption-key
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   app:
@@ -212,6 +242,12 @@ database:
   dsn: ./runnerd.db
 auth:
   session_secret: test-session-secret
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   token: ghp_test
@@ -243,6 +279,12 @@ auth:
   encryption_key: test-encryption-key
 admin:
   token: admin-token
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   owner: o
@@ -278,6 +320,12 @@ auth:
   encryption_key: test-encryption-key
 admin:
   token: admin-token
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   owner: ""
@@ -309,6 +357,12 @@ auth:
   encryption_key: test-encryption-key
 admin:
   token: admin-token
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   api_base_url: https://github.example/api/v3
@@ -341,6 +395,12 @@ auth:
   encryption_key: test-encryption-key
 admin:
   token: admin-token
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   token: ghp_test
@@ -372,6 +432,12 @@ auth:
   encryption_key: test-encryption-key
 admin:
   token: admin-token
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   basic_auth:
@@ -404,6 +470,12 @@ database:
 auth:
   session_secret: test-session-secret
   encryption_key: test-encryption-key
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   token: ghp_test
@@ -439,6 +511,12 @@ database:
 auth:
   session_secret: test-session-secret
   encryption_key: test-encryption-key
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   token: ghp_test
@@ -474,6 +552,12 @@ database:
   dsn: `+filepath.Join(dir, "runnerd.db")+`
 admin:
   token: admin-token
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
 `), 0o644); err != nil {
@@ -501,6 +585,12 @@ auth:
   encryption_key: test-encryption-key
 admin:
   token: admin-token
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
+
 github:
   webhook_secret: webhook-secret
   token: ghp_test

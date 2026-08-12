@@ -47,12 +47,12 @@ func newCacheS3(config cacheS3Config) (*cacheS3, error) {
 // cacheStorageForInstallation resolves the cache S3 configuration for a
 // GitHub installation ID. Installation-scoped configuration wins; a personal
 // installation without its own configuration falls back to the account scope.
-func (s *Server) cacheStorageForInstallation(installationID int64) (*cacheS3, error) {
+func (s *Server) cacheStorageForInstallation(installationID int64, sandboxAPIURL string) (*cacheS3, error) {
 	if installationID <= 0 {
 		return nil, fmt.Errorf("invalid cache installation id")
 	}
 	installationScope := accountPreferenceScope{Type: state.AccountScopeTypeGitHubInstall, ID: installationID}
-	storage, err := s.cacheStorageForScope(installationScope)
+	storage, err := s.cacheStorageForScope(installationScope, sandboxAPIURL)
 	if err == nil {
 		return storage, nil
 	}
@@ -66,10 +66,10 @@ func (s *Server) cacheStorageForInstallation(installationID int64) (*cacheS3, er
 	if !ok {
 		return nil, state.ErrCacheServiceNotConfigured
 	}
-	return s.cacheStorageForScope(accountPreferenceScope{Type: state.AccountScopeTypeAccount, ID: accountID})
+	return s.cacheStorageForScope(accountPreferenceScope{Type: state.AccountScopeTypeAccount, ID: accountID}, sandboxAPIURL)
 }
 
-func (s *Server) cacheStorageForScope(scope accountPreferenceScope) (*cacheS3, error) {
+func (s *Server) cacheStorageForScope(scope accountPreferenceScope, sandboxAPIURL string) (*cacheS3, error) {
 	preference, err := s.store.GetAccountPreference(scope.Type, scope.ID, accountPreferenceNamespaceCache, accountPreferenceKeyCacheS3)
 	if err != nil {
 		if errors.Is(err, state.ErrNotFound) {
@@ -81,17 +81,10 @@ func (s *Server) cacheStorageForScope(scope accountPreferenceScope) (*cacheS3, e
 	if err := json.Unmarshal([]byte(preference.ValueJSON), &value); err != nil {
 		return nil, err
 	}
-	// Region and endpoint are operator-owned mappings. Re-resolve them at use
-	// time so old preferences cannot keep using a stale or user-supplied
-	// endpoint after the Sandbox region catalog changes.
-	_, sandboxSnapshot, sandboxErr := s.sandboxServiceForScopeWithDefault(scope)
-	if sandboxErr != nil {
-		if errors.Is(sandboxErr, errSandboxServiceNotConfigured) {
-			return nil, state.ErrCacheServiceNotConfigured
-		}
-		return nil, sandboxErr
-	}
-	mappedRegion, mappedEndpoint, mapped := s.cacheS3SettingsForSandboxAPIURL(sandboxSnapshot.APIURL)
+	// Region and endpoint are operator-owned mappings. Derive them from the
+	// Sandbox configuration already resolved for this runner so old preferences
+	// cannot retain a stale or user-supplied endpoint.
+	mappedRegion, mappedEndpoint, mapped := s.cacheS3SettingsForSandboxAPIURL(sandboxAPIURL)
 	if !mapped || mappedRegion == "" || mappedEndpoint == "" {
 		return nil, state.ErrCacheServiceNotConfigured
 	}
@@ -134,17 +127,14 @@ func (s *Server) cacheS3SettingsForSandboxAPIURL(apiURL string) (string, string,
 	return "", "", false
 }
 
-// handleSandboxRegions returns the sandbox region catalog configured in
-// runnerd.yaml. This is a public endpoint — no auth required — so the frontend
-// can display region labels, API URLs, and the associated S3 cache
-// region/endpoint mapping.
+// handleSandboxRegions returns the public Sandbox region catalog configured in
+// runnerd.yaml. S3 mappings remain server-only because endpoints can be private
+// to the Sandbox network.
 func (s *Server) handleSandboxRegions(w http.ResponseWriter, r *http.Request) {
 	type regionEntry struct {
 		ID            string `json:"id"`
 		Label         string `json:"label"`
 		SandboxAPIURL string `json:"api_url"`
-		S3Region      string `json:"s3_region,omitempty"`
-		S3Endpoint    string `json:"s3_endpoint,omitempty"`
 	}
 	entries := make([]regionEntry, 0, len(s.cfg.SandboxRegions))
 	for _, region := range s.cfg.SandboxRegions {
@@ -152,16 +142,10 @@ func (s *Server) handleSandboxRegions(w http.ResponseWriter, r *http.Request) {
 		if id == "" {
 			continue
 		}
-		endpoint := strings.TrimSpace(region.S3Endpoint)
-		if endpoint != "" && !strings.HasPrefix(endpoint, "http://") && !strings.HasPrefix(endpoint, "https://") {
-			endpoint = "https://" + endpoint
-		}
 		entries = append(entries, regionEntry{
 			ID:            id,
 			Label:         strings.TrimSpace(region.Label),
 			SandboxAPIURL: strings.TrimSpace(region.SandboxAPIURL),
-			S3Region:      strings.TrimSpace(region.S3Region),
-			S3Endpoint:    endpoint,
 		})
 	}
 	writeJSON(w, http.StatusOK, entries)

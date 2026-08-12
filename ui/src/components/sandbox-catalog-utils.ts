@@ -7,8 +7,6 @@ export type SandboxRegion = {
   id: string
   label: string
   apiURL: string
-  s3Region?: string
-  s3Endpoint?: string
 }
 
 /** Region catalog provided by runnerd.yaml through GET /sandbox/regions. */
@@ -32,12 +30,10 @@ export async function fetchSandboxRegions(): Promise<SandboxRegion[] | null> {
     if (!res.ok) return null
     const data = await res.json()
     if (!Array.isArray(data) || data.length === 0) return null
-    return data.map((item: { id: string; label?: string; api_url?: string; s3_region?: string; s3_endpoint?: string }) => ({
+    return data.map((item: { id: string; label?: string; api_url?: string }) => ({
       id: item.id,
       label: item.label ?? item.id,
       apiURL: item.api_url ?? "",
-      s3Region: item.s3_region || undefined,
-      s3Endpoint: item.s3_endpoint || undefined,
     }))
   } catch {
     return null

@@ -118,9 +118,18 @@ unset secret_value
 
 ### Cache 与 S3
 
-用户需要在账户或 GitHub installation 的 Preferences 中配置 Cache S3 Bucket、可选 Prefix、AK 和 SK。S3 region 和 endpoint 由用户选择的 Sandbox service region 决定，并由运维人员在 `runnerd.yaml` 的 `sandbox.regions` 中配置。由于 endpoint 可能只在 Sandbox 内网可访问，runnerd 保存时只校验配置格式；Bucket 的可达性和权限由实际工作流在 Sandbox 中验证。AK/SK 会加密保存在 scoped state，不会返回给浏览器或 Runner。
+用户需要在账户或 GitHub installation 的 Preferences 中配置 Cache S3 Bucket、可选 Prefix、AK 和 SK。默认 Prefix 是 `gh-actions-cache`。S3 region 和 endpoint 由用户选择的 Sandbox service region 决定，并由运维人员在 `runnerd.yaml` 的 `sandbox.regions` 中配置。由于 endpoint 可能只在 Sandbox 内网可访问，runnerd 保存时只校验配置格式；Bucket 的可达性和权限由实际工作流在 Sandbox 中验证。AK/SK 会加密保存在 scoped state，不会返回给浏览器或 Runner。
 
-每次启动沙箱时，runnerd 将 GitHub 仓库解析到对应 installation/account scope，读取该 scope 的 S3 配置，并通过 `cache.sts_endpoint`（默认 `https://sts-ov.qiniuapi.com`）签发七牛 IAM 联邦凭证。凭证请求时长为配置的 Sandbox 生命周期加五分钟，用于覆盖任务结束后的缓存保存步骤；目前暂不提供刷新机制。随后在沙箱启动脚本中注入 `AWS_*` / `RUNS_ON_S3_*` 环境变量，使 `runs-on/cache` action 可以直接把缓存上传/恢复到用户 bucket，而无需经过 runnerd 转发字节。缓存对象 Key 以 `<配置前缀>/<owner>/<repo>/` 开头。
+每次启动沙箱时，runnerd 将 GitHub 仓库解析到对应 installation/account scope，校验 Workflow Run 的可信上下文，并通过 `cache.sts_endpoint`（默认 `https://sts-ov.qiniuapi.com`）签发七牛 IAM 联邦凭证。凭证请求时长为配置的 Sandbox 生命周期加五分钟，用于覆盖任务结束后的缓存保存步骤；目前暂不提供刷新机制。随后在沙箱启动脚本中注入 `AWS_*` / `RUNS_ON_S3_*` 环境变量，使 `runs-on/cache` action 可以直接把缓存上传/恢复到用户 bucket，而无需经过 runnerd 转发字节。
+
+缓存对象 Key 按仓库和工作流上下文隔离：
+
+```text
+<配置前缀>/<owner>/<repo>/scopes/branch-<sha256(branch)[:16]>/...
+<配置前缀>/<owner>/<repo>/scopes/pr-<number>/...
+```
+
+可信分支工作流只能写入自身的 branch scope；同仓 PR 只能写入自身 PR scope；Fork PR 及无法验证 Workflow Run 元数据的 job 只会获得只读凭证。当前 Kodo 因不支持按对象前缀限制 list policy resource，仍要求 bucket 级 `kodo/list` 和 `kodo/listMultipartUploads`；对象内容仍被限制到显式的仓库和 scope 路径，但同一 bucket 内的对象 Key 名称不能视为对这些凭证保密。
 
 #### 运维配置
 
@@ -137,7 +146,7 @@ cache:
   sts_endpoint: https://sts-ov.qiniuapi.com
 ```
 
-`sandbox.regions` 定义区域目录，通过 `GET /sandbox/regions` 暴露给前端。每个条目将 Sandbox API 端点映射到对应的 Kodo S3 region 和 endpoint。`cache.sts_endpoint` 是七牛 IAM 联邦凭证端点，用于签发短期凭证。
+`sandbox.regions` 定义通过 `GET /sandbox/regions` 暴露给前端的公开 Sandbox 区域目录；S3 映射只保留在服务端，因为 endpoint 可能是内网地址。每个条目将 Sandbox API 端点映射到对应的 Kodo S3 region 和 endpoint。必须至少配置一个 region。`cache.sts_endpoint` 是七牛 IAM 联邦凭证端点，用于签发短期凭证。
 
 #### 在 GitHub Actions 工作流中使用缓存
 

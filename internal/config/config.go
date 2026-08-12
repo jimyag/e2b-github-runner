@@ -123,6 +123,9 @@ const (
 )
 
 func validateSandboxRegions(regions []SandboxRegionConfig) error {
+	if len(regions) == 0 {
+		return fmt.Errorf("sandbox.regions requires at least one region")
+	}
 	seen := make(map[string]struct{}, len(regions))
 	for i, region := range regions {
 		id := strings.TrimSpace(region.ID)
@@ -131,7 +134,7 @@ func validateSandboxRegions(regions []SandboxRegionConfig) error {
 		s3Region := strings.TrimSpace(region.S3Region)
 		s3Endpoint := strings.TrimSpace(region.S3Endpoint)
 		if id == "" || label == "" || apiURL == "" {
-			return fmt.Errorf("sandbox.regions[%d] requires id, label, and api_url", i)
+			return fmt.Errorf("sandbox.regions[%d] requires id, label, and sandbox_api_url", i)
 		}
 		if s3Region == "" && s3Endpoint != "" || s3Region != "" && s3Endpoint == "" {
 			return fmt.Errorf("sandbox.regions[%d] must set both s3_region and s3_endpoint", i)
