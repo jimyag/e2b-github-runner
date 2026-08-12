@@ -266,14 +266,12 @@ loading.
 | `templates/github-runner-ubuntu-22.04` | Maintained Ubuntu 22.04 x64 runner template |
 | `templates/github-runner-ubuntu-24.04` | Maintained Ubuntu 24.04 x64 runner template |
 | `templates/github-runner-ubuntu-26.04` | Preview Ubuntu 26.04 x64 runner template |
-| `templates/qbox-kodo-ubuntu-16.04` | Legacy Ubuntu 16.04 for qbox/kodo-style jobs |
 
 Run `task template-check-all`, then use the four
 `task template-build-ubuntu-*` targets for real qshell Sandbox builds. See
 [Public Runner Templates](docs/default-runner-templates.md) for publication and
 cache-resume guidance after a remote build time limit, plus publication and
-smoke commands. The qbox-kodo base image remains a separate
-`task qbox-kodo-base-build` workflow.
+smoke commands.
 
 ## Documentation
 

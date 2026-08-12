@@ -106,7 +106,7 @@ Keep `SMEE_TARGET` aligned with the runnerd port when testing webhook forwarding
 - Production UI bundle execution: `task ui-production-smoke`.
 - GoReleaser config: `task release-check`.
 - Snapshot release behavior: `task release-snapshot`.
-- Template changes may require the relevant `template-*` or `qbox-kodo-*` task.
+- Template changes may require the relevant `template-*` task.
 
 ## Deployment Smoke
 
