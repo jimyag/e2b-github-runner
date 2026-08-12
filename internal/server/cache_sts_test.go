@@ -33,7 +33,7 @@ func TestCacheSTSDurationSecondsAddsHeadroom(t *testing.T) {
 func TestGenerateCacheSTSUsesRequestedDuration(t *testing.T) {
 	client := new(cacheSTSRecordingClient)
 	ownScope := scopeForBranch("main")
-	_, err := generateCacheSTSWithClient(t.Context(), cacheS3Config{
+	_, err := generateCacheSTSWithClient(t.Context(), cacheSTSCredentialConfig{
 		Bucket:          "cache-bucket",
 		AccessKeyID:     "access-key",
 		SecretAccessKey: "secret-key",
@@ -66,7 +66,7 @@ func TestValidateCachePrefixRejectsInvalidComponents(t *testing.T) {
 func TestGenerateCacheSTSRejectsResourceWildcards(t *testing.T) {
 	for _, prefix := range []string{"gh-actions/*/repo", "gh-actions/?/repo"} {
 		t.Run(prefix, func(t *testing.T) {
-			_, err := generateCacheSTSWithClient(t.Context(), cacheS3Config{Bucket: "cache-bucket"}, prefix, "scopes/branch-main", []string{"scopes/branch-main"}, "", 3900, &cacheSTSRecordingClient{})
+			_, err := generateCacheSTSWithClient(t.Context(), cacheSTSCredentialConfig{Bucket: "cache-bucket"}, prefix, "scopes/branch-main", []string{"scopes/branch-main"}, "", 3900, &cacheSTSRecordingClient{})
 			if err == nil || !strings.Contains(err.Error(), "resource wildcard") {
 				t.Fatalf("expected resource wildcard error, got %v", err)
 			}
@@ -79,7 +79,7 @@ func TestGenerateCacheSTSScopedBranch(t *testing.T) {
 	ownScope := scopeForBranch("feature-a")
 	defaultScope := scopeForBranch("main")
 
-	_, err := generateCacheSTSWithClient(t.Context(), cacheS3Config{
+	_, err := generateCacheSTSWithClient(t.Context(), cacheSTSCredentialConfig{
 		Bucket:          "my-bucket",
 		AccessKeyID:     "ak",
 		SecretAccessKey: "sk",
@@ -106,7 +106,7 @@ func TestGenerateCacheSTSReadOnlyForkPR(t *testing.T) {
 	defaultScope := scopeForBranch("main")
 
 	// ownScope is empty for Fork PR
-	_, err := generateCacheSTSWithClient(t.Context(), cacheS3Config{
+	_, err := generateCacheSTSWithClient(t.Context(), cacheSTSCredentialConfig{
 		Bucket:          "my-bucket",
 		AccessKeyID:     "ak",
 		SecretAccessKey: "sk",
@@ -126,7 +126,7 @@ func TestGenerateCacheSTSReadOnlyForkPR(t *testing.T) {
 }
 
 func TestGenerateCacheSTSRequiresReadScope(t *testing.T) {
-	_, err := generateCacheSTSWithClient(t.Context(), cacheS3Config{Bucket: "my-bucket"}, "gh-cache/org/repo", "", nil, "https://sts.example.test", 1800, &cacheSTSRecordingClient{})
+	_, err := generateCacheSTSWithClient(t.Context(), cacheSTSCredentialConfig{Bucket: "my-bucket"}, "gh-cache/org/repo", "", nil, "https://sts.example.test", 1800, &cacheSTSRecordingClient{})
 	if err == nil || !strings.Contains(err.Error(), "read scope") {
 		t.Fatalf("expected missing read scope error, got %v", err)
 	}

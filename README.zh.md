@@ -146,7 +146,7 @@ cache:
   sts_endpoint: https://sts-ov.qiniuapi.com
 ```
 
-`sandbox.regions` 定义通过 `GET /sandbox/regions` 暴露给前端的公开 Sandbox 区域目录；S3 映射只保留在服务端，因为 endpoint 可能是内网地址。每个条目将 Sandbox API 端点映射到对应的 Kodo S3 region 和 endpoint。必须至少配置一个 region。`cache.sts_endpoint` 是七牛 IAM 联邦凭证端点，用于签发短期凭证。
+`sandbox.regions` 定义通过 `GET /sandbox/regions` 暴露给前端的公开 Sandbox 区域目录；S3 映射只保留在服务端，因为 endpoint 可能是内网地址。每个条目必须包含 `id`、`label` 和 `sandbox_api_url`。`s3_region` 与 `s3_endpoint` 是可选字段，但必须同时配置；只有同时配置的区域支持 Cache S3。必须至少配置一个 region。为了更好地隔离缓存 Key 元数据，建议每个 GitHub installation 使用独立 Bucket。`cache.sts_endpoint` 是七牛 IAM 联邦凭证端点，用于签发短期凭证。
 
 #### 在 GitHub Actions 工作流中使用缓存
 

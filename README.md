@@ -146,7 +146,7 @@ cache:
   sts_endpoint: https://sts-ov.qiniuapi.com
 ```
 
-`sandbox.regions` defines the public Sandbox region catalog exposed through `GET /sandbox/regions`; S3 mappings remain server-side because endpoints can be private. Each entry maps a Sandbox API endpoint to its Kodo S3 region and endpoint. At least one region is required. `cache.sts_endpoint` is the Qiniu IAM federation token endpoint used to mint short-lived credentials.
+`sandbox.regions` defines the public Sandbox region catalog exposed through `GET /sandbox/regions`; S3 mappings remain server-side because endpoints can be private. Each entry must include `id`, `label`, and `sandbox_api_url`. `s3_region` and `s3_endpoint` are optional and must be configured together; only regions with both fields support Cache S3. At least one region is required. For stronger cache-key metadata isolation, use a dedicated bucket per GitHub installation. `cache.sts_endpoint` is the Qiniu IAM federation token endpoint used to mint short-lived credentials.
 
 #### Using cache in GitHub Actions workflows
 

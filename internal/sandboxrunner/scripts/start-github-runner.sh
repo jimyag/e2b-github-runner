@@ -41,7 +41,7 @@ if [ "$(id -u)" -eq 0 ] && id -u "$runner_user" >/dev/null 2>&1 && [ "${RUNNERD_
     ENSURE_DOCKER="$ensure_docker" \
     RUNNER_ENVIRONMENT_FILE="$runner_environment_file" \
     HOME="$HOME" \
-    bash "$0" "$@"
+    bash "$0"
 fi
 if [ "$(id -u)" -eq 0 ]; then
   export RUNNER_ALLOW_RUNASROOT=1

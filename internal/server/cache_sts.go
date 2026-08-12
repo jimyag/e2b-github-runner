@@ -50,6 +50,12 @@ type qiniuSTSCredential struct {
 	Expiration   string `json:"expiration"`
 }
 
+type cacheSTSCredentialConfig struct {
+	Bucket          string
+	AccessKeyID     string
+	SecretAccessKey string
+}
+
 // cacheSTSClient performs the Qiniu-signed HTTP call so the endpoint can be
 // swapped in tests.
 type cacheSTSClient interface {
@@ -79,14 +85,14 @@ func scopeForPR(prNumber int64) string {
 // object read actions (stat/get) cover all specified readScopes, and object
 // write actions (upload/delete/etc.) are strictly restricted to ownScope.
 // If ownScope is empty, write permissions are omitted (read-only mode).
-func generateCacheSTS(ctx context.Context, config cacheS3Config, cachePrefix, ownScope string, readScopes []string, endpoint string, durationSeconds int, client cacheSTSClient) (CacheSTSCredentials, error) {
+func generateCacheSTS(ctx context.Context, config cacheSTSCredentialConfig, cachePrefix, ownScope string, readScopes []string, endpoint string, durationSeconds int, client cacheSTSClient) (CacheSTSCredentials, error) {
 	if client == nil {
 		return CacheSTSCredentials{}, fmt.Errorf("cache STS HTTP client is required")
 	}
 	return generateCacheSTSWithClient(ctx, config, cachePrefix, ownScope, readScopes, endpoint, durationSeconds, client)
 }
 
-func generateCacheSTSWithClient(ctx context.Context, config cacheS3Config, cachePrefix, ownScope string, readScopes []string, endpoint string, durationSeconds int, client cacheSTSClient) (CacheSTSCredentials, error) {
+func generateCacheSTSWithClient(ctx context.Context, config cacheSTSCredentialConfig, cachePrefix, ownScope string, readScopes []string, endpoint string, durationSeconds int, client cacheSTSClient) (CacheSTSCredentials, error) {
 	bucket := strings.TrimSpace(config.Bucket)
 	if bucket == "" {
 		return CacheSTSCredentials{}, fmt.Errorf("cache S3 bucket is required to generate STS")

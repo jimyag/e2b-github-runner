@@ -336,16 +336,22 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		}
 
 		if req.GitHubInstallationID > 0 {
-			if storage, err := s.cacheStorageForInstallation(req.GitHubInstallationID, sandboxConfig.APIURL); err == nil {
+			storage, storageErr := s.cacheStorageForInstallation(req.GitHubInstallationID, sandboxConfig.APIURL)
+			if storageErr != nil {
+				if !errors.Is(storageErr, state.ErrCacheServiceNotConfigured) {
+					s.logger.Warn("failed to resolve cache storage", "id", id, "error", storageErr)
+				} else {
+					s.logger.Debug("cache storage is not configured", "id", id)
+				}
+			} else {
 				cacheBasePrefix := storage.prefix + "/" + req.RepositoryFullName
 				defaultScope := scopeForBranch("main")
 
 				ownScope, readScopes, decision := s.cacheScopesForWorkflow(createCtx, req.RepositoryFullName, st, defaultScope)
 				s.logger.Debug("cache STS scope decision", "id", id, "decision", decision, "pull_request", st.PullRequestNumber)
 
-				stsCreds, err := generateCacheSTS(createCtx, cacheS3Config{
-					Region: storage.region, Bucket: storage.bucket, Prefix: cacheBasePrefix, Endpoint: storage.endpoint,
-					AccessKeyID: storage.accessKeyID, SecretAccessKey: storage.secretKey,
+				stsCreds, err := generateCacheSTS(createCtx, cacheSTSCredentialConfig{
+					Bucket: storage.bucket, AccessKeyID: storage.accessKeyID, SecretAccessKey: storage.secretKey,
 				}, cacheBasePrefix, ownScope, readScopes, s.cfg.CacheSTSEndpoint, cacheSTSDurationSeconds(s.cfg.SandboxTimeout), s.cacheSTS)
 				if err != nil {
 					s.logger.Warn("failed to generate cache STS", "id", id, "error", err)
