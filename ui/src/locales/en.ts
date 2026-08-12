@@ -656,7 +656,7 @@ export const en = {
     cacheS3SecretAccessKey: "Secret Access Key",
     cacheS3SecretAccessKeyPlaceholderNew: "Enter a new SK to replace the saved one",
     cacheS3SecretAccessKeyPlaceholder: "Secret Access Key",
-    cacheS3Validating: "Validating",
+    cacheS3Validating: "Saving",
     cacheS3SaveChanges: "Save changes",
     cacheS3Save: "Save Cache S3",
     cacheS3Remove: "Remove",

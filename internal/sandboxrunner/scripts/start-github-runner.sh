@@ -103,7 +103,9 @@ if [ -n "$cache_s3_bucket" ] && [ -n "$cache_s3_access_key" ] && [ -n "$cache_s3
   export RUNS_ON_S3_FORCE_PATH_STYLE="true"
   export AWS_ACCESS_KEY_ID="$cache_s3_access_key"
   export AWS_SECRET_ACCESS_KEY="$cache_s3_secret_key"
-  export AWS_SESSION_TOKEN="$cache_s3_session_token"
+  if [ -n "$cache_s3_session_token" ]; then
+    export AWS_SESSION_TOKEN="$cache_s3_session_token"
+  fi
   if [ -n "$cache_s3_prefix" ]; then
     export RUNS_ON_S3_CACHE_REPO_PREFIX="$cache_s3_prefix"
   fi

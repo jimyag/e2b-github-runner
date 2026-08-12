@@ -39,7 +39,25 @@ func (s *Server) workflowRunForCache(ctx context.Context, repository string, run
 			return github.WorkflowRun{}, err
 		}
 		s.workflowRunMu.Lock()
-		s.workflowRunCache[key] = cachedWorkflowRun{run: run, expiresAt: time.Now().Add(workflowRunCacheTTL)}
+		now := time.Now()
+		for cachedKey, cached := range s.workflowRunCache {
+			if !now.Before(cached.expiresAt) {
+				delete(s.workflowRunCache, cachedKey)
+			}
+		}
+		if len(s.workflowRunCache) >= maxWorkflowRunCacheItems {
+			var oldestKey string
+			var oldestExpiry time.Time
+			for cachedKey, cached := range s.workflowRunCache {
+				if oldestKey == "" || cached.expiresAt.Before(oldestExpiry) {
+					oldestKey, oldestExpiry = cachedKey, cached.expiresAt
+				}
+			}
+			if oldestKey != "" {
+				delete(s.workflowRunCache, oldestKey)
+			}
+		}
+		s.workflowRunCache[key] = cachedWorkflowRun{run: run, expiresAt: now.Add(workflowRunCacheTTL)}
 		s.workflowRunMu.Unlock()
 		return run, nil
 	})

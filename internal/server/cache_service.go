@@ -92,11 +92,17 @@ func (s *Server) cacheStorageForScope(scope accountPreferenceScope, sandboxAPIUR
 	value.Endpoint = mappedEndpoint
 	accessKey, err := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeCacheAccessKeyID)
 	if err != nil {
-		return nil, state.ErrCacheServiceNotConfigured
+		if errors.Is(err, state.ErrNotFound) {
+			return nil, state.ErrCacheServiceNotConfigured
+		}
+		return nil, err
 	}
 	secretKey, err := s.store.GetAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeCacheSecretAccessKey)
 	if err != nil {
-		return nil, state.ErrCacheServiceNotConfigured
+		if errors.Is(err, state.ErrNotFound) {
+			return nil, state.ErrCacheServiceNotConfigured
+		}
+		return nil, err
 	}
 	accessKeyValue, err := decryptSecret(accessKey.EncryptedValue, s.cfg.AuthEncryptionKey.Value())
 	if err != nil {

@@ -79,6 +79,14 @@ func scopeForPR(prNumber int64) string {
 	return fmt.Sprintf("scopes/pr-%d", prNumber)
 }
 
+func validateCacheBucket(bucket string) error {
+	bucket = strings.TrimSpace(bucket)
+	if bucket == "" || bucket == "." || bucket == ".." || strings.ContainsAny(bucket, "/\\*?") {
+		return fmt.Errorf("cache S3 bucket contains an invalid resource component")
+	}
+	return nil
+}
+
 // generateCacheSTS generates a temporary S3-compatible credential via the
 // Qiniu IAM federation token API. The session policy uses resource-level
 // scope isolation: bucket-level actions (list) are scoped to the bucket,
@@ -94,8 +102,8 @@ func generateCacheSTS(ctx context.Context, config cacheSTSCredentialConfig, cach
 
 func generateCacheSTSWithClient(ctx context.Context, config cacheSTSCredentialConfig, cachePrefix, ownScope string, readScopes []string, endpoint string, durationSeconds int, client cacheSTSClient) (CacheSTSCredentials, error) {
 	bucket := strings.TrimSpace(config.Bucket)
-	if bucket == "" {
-		return CacheSTSCredentials{}, fmt.Errorf("cache S3 bucket is required to generate STS")
+	if err := validateCacheBucket(bucket); err != nil {
+		return CacheSTSCredentials{}, err
 	}
 	cachePrefix = strings.TrimPrefix(strings.TrimSpace(cachePrefix), "/")
 	cachePrefix = strings.TrimSuffix(cachePrefix, "/")

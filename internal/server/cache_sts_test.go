@@ -63,6 +63,16 @@ func TestValidateCachePrefixRejectsInvalidComponents(t *testing.T) {
 	}
 }
 
+func TestValidateCacheBucketRejectsResourceComponents(t *testing.T) {
+	for _, bucket := range []string{"", "*", "name/other", "name/..", "name?"} {
+		t.Run(bucket, func(t *testing.T) {
+			if err := validateCacheBucket(bucket); err == nil {
+				t.Fatalf("validateCacheBucket(%q) should reject invalid bucket", bucket)
+			}
+		})
+	}
+}
+
 func TestGenerateCacheSTSRejectsResourceWildcards(t *testing.T) {
 	for _, prefix := range []string{"gh-actions/*/repo", "gh-actions/?/repo"} {
 		t.Run(prefix, func(t *testing.T) {

@@ -142,6 +142,8 @@ type adminSession struct {
 
 const runnerJobStartedMarker = "__runner_job_started__"
 
+const maxWorkflowRunCacheItems = 1024
+
 const (
 	defaultRunnerRequestListLimit = 100
 	maxRunnerRequestListLimit     = 500

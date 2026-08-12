@@ -656,7 +656,7 @@ export const zh = {
     cacheS3SecretAccessKey: "Secret Access Key",
     cacheS3SecretAccessKeyPlaceholderNew: "输入新的 SK 以替换已保存的",
     cacheS3SecretAccessKeyPlaceholder: "Secret Access Key",
-    cacheS3Validating: "验证中",
+    cacheS3Validating: "保存中",
     cacheS3SaveChanges: "保存更改",
     cacheS3Save: "保存 Cache S3",
     cacheS3Remove: "移除",
