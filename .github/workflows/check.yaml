@@ -171,8 +171,8 @@ jobs:
         with:
           go-version: stable
           cache-dependency-path: go.sum
-      - name: Compare catalog matching on PostgreSQL and MySQL
-        run: go test ./internal/state -run TestCompareProfileMatchesSQLBackends -count=1 -v
+      - name: Verify fresh schema and catalog matching on PostgreSQL and MySQL
+        run: go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
 
   ui-production-smoke:
     runs-on: ubuntu-latest

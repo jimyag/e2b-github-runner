@@ -111,16 +111,18 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
-The shadow catalog matcher also has an opt-in real-dialect compatibility test.
-Both DSNs must point to dedicated disposable databases whose names end in
-`_test`: the test refuses other database names, then drops and recreates only
-its catalog tables to cover legacy tables present, empty, and absent.
+State migration and the shadow catalog matcher also have an opt-in real-dialect
+compatibility gate. Both DSNs must point to dedicated disposable databases
+whose names end in `_test`: the tests refuse other database names, then drop
+and recreate runnerd state tables. They cover fresh schema creation, repeated
+migration with preserved catalog rows, and legacy catalog tables present,
+empty, and absent.
 
 ```bash
 RUNNERD_CATALOG_BACKEND_TESTS=1 \
 RUNNERD_POSTGRES_TEST_DSN='host=127.0.0.1 user=runnerd password=runnerd dbname=runnerd_test port=5432 sslmode=disable' \
 RUNNERD_MYSQL_TEST_DSN='runnerd:runnerd@tcp(127.0.0.1:3306)/runnerd_test' \
-  go test ./internal/state -run TestCompareProfileMatchesSQLBackends -count=1 -v
+  go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
 ```
 
 Restart recovery has focused tests that do not require a live sandbox:

@@ -45,6 +45,17 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
+For schema or migration changes that affect Postgres or MySQL, also run the
+opt-in real-dialect tests against dedicated disposable databases whose names
+end in `_test`:
+
+```bash
+RUNNERD_CATALOG_BACKEND_TESTS=1 \
+RUNNERD_POSTGRES_TEST_DSN='<dedicated postgres test DSN>' \
+RUNNERD_MYSQL_TEST_DSN='<dedicated mysql test DSN>' \
+  go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+```
+
 ## Go Server Or API
 
 - For focused backend changes, start with the relevant package test.

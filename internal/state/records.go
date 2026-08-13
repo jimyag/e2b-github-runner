@@ -111,9 +111,9 @@ func (runnerGroupSpecRecord) TableName() string { return "runner_group_specs" }
 
 type repositoryPolicyRecord struct {
 	ID                 int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	RepositoryFullName string    `gorm:"column:repository_full_name;not null;uniqueIndex:idx_repository_policies_unique"`
-	ProfileName        string    `gorm:"column:profile_name;not null;uniqueIndex:idx_repository_policies_unique"`
-	RunnerGroupName    string    `gorm:"column:runner_group_name;not null;default:'';uniqueIndex:idx_repository_policies_unique"`
+	RepositoryFullName string    `gorm:"column:repository_full_name;not null;uniqueIndex:idx_repository_policies_unique,length:191"`
+	ProfileName        string    `gorm:"column:profile_name;not null;uniqueIndex:idx_repository_policies_unique,length:191"`
+	RunnerGroupName    string    `gorm:"column:runner_group_name;not null;default:'';uniqueIndex:idx_repository_policies_unique,length:191"`
 	Enabled            bool      `gorm:"column:enabled;not null"`
 	CreatedAt          time.Time `gorm:"column:created_at;not null"`
 }
@@ -151,8 +151,8 @@ type oauthIdentityRecord struct {
 	ID            int64         `gorm:"column:id;primaryKey;autoIncrement"`
 	AccountID     int64         `gorm:"column:account_id;not null;index:idx_oauth_identities_account"`
 	Account       accountRecord `gorm:"foreignKey:AccountID"`
-	OAuthProvider string        `gorm:"column:oauth_provider;not null;uniqueIndex:idx_oauth_identities_provider_subject"`
-	OAuthSubject  string        `gorm:"column:oauth_subject;not null;uniqueIndex:idx_oauth_identities_provider_subject"`
+	OAuthProvider string        `gorm:"column:oauth_provider;not null;uniqueIndex:idx_oauth_identities_provider_subject,length:191"`
+	OAuthSubject  string        `gorm:"column:oauth_subject;not null;uniqueIndex:idx_oauth_identities_provider_subject,length:191"`
 	OAuthLogin    string        `gorm:"column:oauth_login;not null"`
 	CreatedAt     time.Time     `gorm:"column:created_at;not null"`
 	UpdatedAt     time.Time     `gorm:"column:updated_at;not null"`
@@ -191,9 +191,9 @@ func (githubInstallationOwnerRecord) TableName() string { return "github_install
 
 type accountSecretRecord struct {
 	ID             int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	ScopeType      string    `gorm:"column:scope_type;not null;uniqueIndex:idx_account_secrets_scope_type,priority:1;index:idx_account_secrets_scope"`
+	ScopeType      string    `gorm:"column:scope_type;not null;uniqueIndex:idx_account_secrets_scope_type,priority:1,length:191;index:idx_account_secrets_scope"`
 	ScopeID        int64     `gorm:"column:scope_id;not null;uniqueIndex:idx_account_secrets_scope_type,priority:2;index:idx_account_secrets_scope"`
-	KeyType        string    `gorm:"column:key_type;not null;uniqueIndex:idx_account_secrets_scope_type,priority:3"`
+	KeyType        string    `gorm:"column:key_type;not null;uniqueIndex:idx_account_secrets_scope_type,priority:3,length:191"`
 	EncryptedValue string    `gorm:"column:encrypted_value;type:text;not null"`
 	CreatedAt      time.Time `gorm:"column:created_at;not null"`
 	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
@@ -203,10 +203,10 @@ func (accountSecretRecord) TableName() string { return "account_secrets" }
 
 type accountPreferenceRecord struct {
 	ID        int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	ScopeType string    `gorm:"column:scope_type;not null;uniqueIndex:idx_account_preferences_scope_key,priority:1;index:idx_account_preferences_scope"`
+	ScopeType string    `gorm:"column:scope_type;not null;uniqueIndex:idx_account_preferences_scope_key,priority:1,length:191;index:idx_account_preferences_scope"`
 	ScopeID   int64     `gorm:"column:scope_id;not null;uniqueIndex:idx_account_preferences_scope_key,priority:2;index:idx_account_preferences_scope"`
-	Namespace string    `gorm:"column:namespace;not null;uniqueIndex:idx_account_preferences_scope_key,priority:3"`
-	Key       string    `gorm:"column:key;not null;uniqueIndex:idx_account_preferences_scope_key,priority:4"`
+	Namespace string    `gorm:"column:namespace;not null;uniqueIndex:idx_account_preferences_scope_key,priority:3,length:191"`
+	Key       string    `gorm:"column:key;not null;uniqueIndex:idx_account_preferences_scope_key,priority:4,length:191"`
 	ValueJSON string    `gorm:"column:value_json;type:text;not null"`
 	CreatedAt time.Time `gorm:"column:created_at;not null"`
 	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
@@ -230,7 +230,7 @@ func (sandboxServiceDefaultRecord) TableName() string { return "sandbox_service_
 type sandboxServiceDefaultAudienceRecord struct {
 	ID              int64     `gorm:"column:id;primaryKey;autoIncrement"`
 	GitHubAccountID int64     `gorm:"column:github_account_id;not null;uniqueIndex:idx_sandbox_default_audience_identity,priority:2"`
-	AccountType     string    `gorm:"column:account_type;not null;uniqueIndex:idx_sandbox_default_audience_identity,priority:1"`
+	AccountType     string    `gorm:"column:account_type;not null;uniqueIndex:idx_sandbox_default_audience_identity,priority:1,length:191"`
 	AccountLogin    string    `gorm:"column:account_login;not null"`
 	AccountName     string    `gorm:"column:account_name"`
 	AccountAvatar   string    `gorm:"column:account_avatar"`

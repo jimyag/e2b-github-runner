@@ -3216,12 +3216,7 @@ func TestCompareProfileMatchesSQLBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 			requireCatalogMatcherTestDatabase(t, db, backend.name)
-			defer closeTestDB(t, db)
-			defer func() {
-				for _, table := range []string{"repository_policies", "runner_group_specs", "runner_groups", "runner_profiles"} {
-					_ = db.Migrator().DropTable(table)
-				}
-			}()
+			registerSQLBackendTestCleanup(t, backend.name, backend.dsn)
 			createCatalogMatcherTestTables(t, db, backend.name)
 
 			if _, err := store.UpsertProfile(RunnerProfile{
@@ -3242,6 +3237,27 @@ func TestCompareProfileMatchesSQLBackends(t *testing.T) {
 				t.Fatal(err)
 			}
 			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+			closeTestDB(t, db)
+
+			migrated := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: true,
+			}).(*DBStore)
+			migratedDB, err := migrated.dbOrEnsure()
+			if err != nil {
+				t.Fatalf("migrate existing %s catalog schema: %v", backend.name, err)
+			}
+			defer closeTestDB(t, migratedDB)
+			store = migrated
+			db = migratedDB
+			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+			groups, err := store.ListRunnerGroups()
+			if err != nil || len(groups) != 1 || groups[0].Name != "policy-group" {
+				t.Fatalf("existing %s groups after migration = %#v, err=%v", backend.name, groups, err)
+			}
+			policies, err := store.ListRepositoryPolicies()
+			if err != nil || len(policies) != 1 || policies[0].RepositoryFullName != "owner/repo" {
+				t.Fatalf("existing %s policies after migration = %#v, err=%v", backend.name, policies, err)
+			}
 
 			if err := db.Exec("DELETE FROM repository_policies").Error; err != nil {
 				t.Fatal(err)
@@ -3272,6 +3288,138 @@ func TestCompareProfileMatchesSQLBackends(t *testing.T) {
 	}
 }
 
+func registerSQLBackendTestCleanup(t *testing.T, backend, dsn string) {
+	t.Helper()
+	t.Cleanup(func() {
+		store := NewWithOptions(Options{
+			Backend: backend, DatabaseDSN: dsn, MigrateOnStart: false,
+		}).(*DBStore)
+		db, err := store.dbOrEnsure()
+		if err != nil {
+			t.Errorf("open %s test database for cleanup: %v", backend, err)
+			return
+		}
+		defer closeTestDB(t, db)
+		requireCatalogMatcherTestDatabase(t, db, backend)
+		resetSQLBackendTestTables(t, db)
+	})
+}
+
+func TestFreshSchemaSQLBackends(t *testing.T) {
+	if os.Getenv("RUNNERD_CATALOG_BACKEND_TESTS") != "1" {
+		t.Skip("set RUNNERD_CATALOG_BACKEND_TESTS=1 with dedicated Postgres and MySQL test databases")
+	}
+	for _, backend := range []struct {
+		name string
+		dsn  string
+	}{
+		{name: BackendPostgres, dsn: os.Getenv("RUNNERD_POSTGRES_TEST_DSN")},
+		{name: BackendMySQL, dsn: os.Getenv("RUNNERD_MYSQL_TEST_DSN")},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			if strings.TrimSpace(backend.dsn) == "" {
+				t.Fatalf("dedicated %s test DSN is required", backend.name)
+			}
+			setupStore := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: false,
+			}).(*DBStore)
+			setupDB, err := setupStore.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireCatalogMatcherTestDatabase(t, setupDB, backend.name)
+			resetSQLBackendTestTables(t, setupDB)
+			defer func() {
+				resetSQLBackendTestTables(t, setupDB)
+				closeTestDB(t, setupDB)
+			}()
+
+			migrated := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: true,
+			}).(*DBStore)
+			if err := migrated.Ensure(); err != nil {
+				t.Fatalf("fresh %s migration failed: %v", backend.name, err)
+			}
+			migratedDB, err := migrated.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer closeTestDB(t, migratedDB)
+			for _, table := range sqlBackendTestTables() {
+				if !migratedDB.Migrator().HasTable(table) {
+					t.Fatalf("fresh %s migration did not create %s", backend.name, table)
+				}
+			}
+			for _, index := range []struct {
+				model any
+				name  string
+			}{
+				{model: &repositoryPolicyRecord{}, name: "idx_repository_policies_unique"},
+				{model: &oauthIdentityRecord{}, name: "idx_oauth_identities_provider_subject"},
+				{model: &accountSecretRecord{}, name: "idx_account_secrets_scope_type"},
+				{model: &accountPreferenceRecord{}, name: "idx_account_preferences_scope_key"},
+				{model: &sandboxServiceDefaultAudienceRecord{}, name: "idx_sandbox_default_audience_identity"},
+			} {
+				if !migratedDB.Migrator().HasIndex(index.model, index.name) {
+					t.Fatalf("fresh %s migration did not create %s", backend.name, index.name)
+				}
+			}
+			if _, err := migrated.UpsertProfile(RunnerProfile{
+				Name: "fresh-default", Labels: []string{"self-hosted", "fresh-default"},
+				RequiredLabels: []string{"fresh-default"}, TemplateID: "fresh-template",
+				MaxConcurrency: 1, Enabled: true, DefaultAvailable: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			policy := repositoryPolicyRecord{
+				RepositoryFullName: "owner/unique", ProfileName: "fresh-default",
+				Enabled: true, CreatedAt: time.Now().UTC(),
+			}
+			if err := migratedDB.Create(&policy).Error; err != nil {
+				t.Fatal(err)
+			}
+			policy.ID = 0
+			if err := migratedDB.Create(&policy).Error; err == nil {
+				t.Fatalf("fresh %s schema allowed a duplicate repository policy", backend.name)
+			}
+			assertProfileComparison(t, migrated, "owner/repo", []string{"fresh-default"}, "fresh-default")
+			if err := migrated.migrate(migratedDB); err != nil {
+				t.Fatalf("second %s migration failed: %v", backend.name, err)
+			}
+			assertProfileComparison(t, migrated, "owner/repo", []string{"fresh-default"}, "fresh-default")
+		})
+	}
+}
+
+func sqlBackendTestTables() []string {
+	return []string{
+		"runner_events",
+		"runner_requests",
+		"runner_group_specs",
+		"repository_policies",
+		"runner_groups",
+		"runner_profiles",
+		"audit_events",
+		"oauth_identities",
+		"github_installations",
+		"github_installation_owners",
+		"account_secrets",
+		"account_preferences",
+		"sandbox_service_default_audiences",
+		"sandbox_service_defaults",
+		"accounts",
+	}
+}
+
+func resetSQLBackendTestTables(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, table := range sqlBackendTestTables() {
+		if err := db.Migrator().DropTable(table); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func requireCatalogMatcherTestDatabase(t *testing.T, db *gorm.DB, backend string) {
 	t.Helper()
 	var databaseName string
@@ -3294,11 +3442,7 @@ func requireCatalogMatcherTestDatabase(t *testing.T, db *gorm.DB, backend string
 
 func createCatalogMatcherTestTables(t *testing.T, db *gorm.DB, backend string) {
 	t.Helper()
-	for _, table := range []string{"repository_policies", "runner_group_specs", "runner_groups", "runner_profiles"} {
-		if err := db.Migrator().DropTable(table); err != nil {
-			t.Fatal(err)
-		}
-	}
+	resetSQLBackendTestTables(t, db)
 	var statements []string
 	switch backend {
 	case BackendPostgres:
@@ -3342,9 +3486,9 @@ func createCatalogMatcherTestTables(t *testing.T, db *gorm.DB, backend string) {
 				PRIMARY KEY (group_name, spec_name)
 			)`,
 			`CREATE TABLE repository_policies (
-				id BIGINT AUTO_INCREMENT PRIMARY KEY, repository_full_name VARCHAR(255) NOT NULL, profile_name VARCHAR(255) NOT NULL,
-				runner_group_name VARCHAR(255) NOT NULL DEFAULT '', enabled BOOLEAN NOT NULL, created_at DATETIME(6) NOT NULL,
-				CONSTRAINT idx_repository_policies_unique UNIQUE (repository_full_name, profile_name, runner_group_name)
+				id BIGINT AUTO_INCREMENT PRIMARY KEY, repository_full_name LONGTEXT NOT NULL, profile_name LONGTEXT NOT NULL,
+				runner_group_name VARCHAR(191) NOT NULL DEFAULT '', enabled BOOLEAN NOT NULL, created_at DATETIME(6) NOT NULL,
+				UNIQUE KEY idx_repository_policies_unique (repository_full_name(191), profile_name(191), runner_group_name(191))
 			)`,
 		}
 	default:

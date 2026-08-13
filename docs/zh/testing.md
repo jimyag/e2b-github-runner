@@ -107,15 +107,16 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
-Shadow catalog matcher 还提供 opt-in 的真实方言兼容性测试。两个 DSN 必须指向
-名称以 `_test` 结尾的专用、可丢弃数据库；测试会拒绝其他数据库名称，然后删除并
-重建自身使用的 catalog tables，以覆盖 legacy tables 存在、为空和不存在三种状态。
+State migration 和 shadow catalog matcher 还提供 opt-in 的真实方言兼容性门禁。
+两个 DSN 必须指向名称以 `_test` 结尾的专用、可丢弃数据库；测试会拒绝其他数据库
+名称，然后删除并重建 runnerd state tables。覆盖范围包括 fresh schema 创建、保留
+catalog rows 的重复迁移，以及 legacy catalog tables 存在、为空和不存在三种状态。
 
 ```bash
 RUNNERD_CATALOG_BACKEND_TESTS=1 \
 RUNNERD_POSTGRES_TEST_DSN='host=127.0.0.1 user=runnerd password=runnerd dbname=runnerd_test port=5432 sslmode=disable' \
 RUNNERD_MYSQL_TEST_DSN='runnerd:runnerd@tcp(127.0.0.1:3306)/runnerd_test' \
-  go test ./internal/state -run TestCompareProfileMatchesSQLBackends -count=1 -v
+  go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
 ```
 
 服务重启恢复有一组不依赖真实 Sandbox 的定向测试：
