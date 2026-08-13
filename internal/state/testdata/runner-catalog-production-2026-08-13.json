@@ -113,7 +113,7 @@
     {"repository_full_name": "qbox/*", "runner_spec_name": "qbox-kodo-ubuntu-16-04", "enabled": true},
     {"repository_full_name": "qbox/*", "runner_spec_name": "qbox-kodo-web-ubuntu-20-04", "enabled": true}
   ],
-  "requested_label_sets": [
+  "brief_compatibility_label_sets": [
     ["qiniu", "ubuntu-slim"],
     ["qiniu", "ubuntu-22.04"],
     ["qiniu", "ubuntu-24.04"],
@@ -127,5 +127,11 @@
     ["self-hosted", "e2b", "qbox-kodo-ubuntu-16-04"],
     ["self-hosted", "e2b", "qbox-kodo-web-ubuntu-20-04"],
     ["self-hosted", "e2b", "not-in-production-catalog"]
-  ]
+  ],
+  "production_requested_labels_replay": {
+    "status": "pending_fresh_read_only_export",
+    "provenance": "",
+    "captured_at": "",
+    "label_sets": []
+  }
 }

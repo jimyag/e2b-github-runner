@@ -33,10 +33,18 @@ func closeTestDB(t *testing.T, db *gorm.DB) {
 // state records so the expected catalog cannot be derived from the code under
 // test.
 type productionRunnerCatalogFixture struct {
-	Profiles           []productionRunnerCatalogProfile `json:"profiles"`
-	Groups             []RunnerGroup                    `json:"groups"`
-	Policies           []RepositoryPolicy               `json:"policies"`
-	RequestedLabelSets [][]string                       `json:"requested_label_sets"`
+	Profiles                        []productionRunnerCatalogProfile `json:"profiles"`
+	Groups                          []RunnerGroup                    `json:"groups"`
+	Policies                        []RepositoryPolicy               `json:"policies"`
+	BriefCompatibilityLabelSets     [][]string                       `json:"brief_compatibility_label_sets"`
+	ProductionRequestedLabelsReplay productionRequestedLabelsReplay  `json:"production_requested_labels_replay"`
+}
+
+type productionRequestedLabelsReplay struct {
+	Status     string     `json:"status"`
+	Provenance string     `json:"provenance"`
+	CapturedAt string     `json:"captured_at"`
+	LabelSets  [][]string `json:"label_sets"`
 }
 
 type productionRunnerCatalogProfile struct {
@@ -3196,17 +3204,142 @@ func TestProductionRunnerCatalogFixtureFreezesLegacyWorkflowMatches(t *testing.T
 	}
 }
 
-func TestProductionRunnerCatalogFixtureKeepsLegacyAndPolicyFreeMatchesEquivalent(t *testing.T) {
-	// Characterization test: every observed non-empty requested-label set must
-	// retain the exact profile/reason outcome once policy-free matching lands.
+func TestProductionRunnerCatalogFixtureFreezesExactInternalGroupAndDirectPolicies(t *testing.T) {
+	// Characterization test: this catches a fixture or migration that silently
+	// drops a qbox/* Group member, changes a direct Policy target, or turns a
+	// direct Policy into an implicit repository authorization boundary.
+	store := New(t.TempDir())
+	loadProductionRunnerCatalog(t, store)
+
+	groups, err := store.ListRunnerGroups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0].Name != "qbox/*" || !groups[0].Enabled || !reflect.DeepEqual(groups[0].SpecNames, []string{
+		"github-runner-ubuntu-24-04",
+		"qbox-dora-ubuntu-16-04",
+		"qbox-dora-ubuntu-24-04",
+		"qbox-kodo-ubuntu-16-04",
+		"qbox-kodo-web-ubuntu-20-04",
+	}) {
+		t.Fatalf("internal Groups = %#v, want enabled qbox/* with all five custom Specs", groups)
+	}
+
+	type policyBinding struct {
+		repository string
+		spec       string
+		enabled    bool
+	}
+	policies, err := store.ListRepositoryPolicies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotPolicies := make([]policyBinding, 0, len(policies))
+	for _, policy := range policies {
+		if policy.RunnerGroupName != "" {
+			t.Fatalf("Policy %#v targets an internal Group, want seven direct Spec Policies", policy)
+		}
+		gotPolicies = append(gotPolicies, policyBinding{policy.RepositoryFullName, policy.ProfileName, policy.Enabled})
+	}
+	wantPolicies := []policyBinding{
+		{"1024XEngineer/*", "github-runner-ubuntu-24-04", true},
+		{"goplus/*", "github-runner-ubuntu-24-04", true},
+		{"qbox/*", "github-runner-ubuntu-24-04", true},
+		{"qbox/*", "qbox-dora-ubuntu-16-04", true},
+		{"qbox/*", "qbox-dora-ubuntu-24-04", true},
+		{"qbox/*", "qbox-kodo-ubuntu-16-04", true},
+		{"qbox/*", "qbox-kodo-web-ubuntu-20-04", true},
+	}
+	if !reflect.DeepEqual(gotPolicies, wantPolicies) {
+		t.Fatalf("direct Policy map = %#v, want %#v", gotPolicies, wantPolicies)
+	}
+
+	profiles, err := store.ListProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range profiles {
+		profile.DefaultAvailable = false
+		if _, err := store.UpsertProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tt := range []struct {
+		name       string
+		repository string
+		labels     []string
+		wantSpec   string
+		wantReason string
+	}{
+		{"1024 engineer direct generic", "1024XEngineer/example", []string{"self-hosted", "e2b"}, "github-runner-ubuntu-24-04", ""},
+		{"goplus direct generic", "goplus/example", []string{"self-hosted", "e2b"}, "github-runner-ubuntu-24-04", ""},
+		{"qbox direct generic", "qbox/example", []string{"self-hosted", "e2b"}, "github-runner-ubuntu-24-04", ""},
+		{"qbox direct dora", "qbox/example", []string{"self-hosted", "e2b", "qbox-dora-ubuntu-24-04"}, "qbox-dora-ubuntu-24-04", ""},
+		{"goplus does not receive qbox dora policy", "goplus/example", []string{"self-hosted", "e2b", "qbox-dora-ubuntu-24-04"}, "", "profile_labels_not_matched"},
+		{"outside has no direct policy", "outside/example", []string{"self-hosted", "e2b"}, "", "profile_not_allowed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			match, err := store.MatchProfile(tt.repository, tt.labels)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantSpec == "" {
+				if match.Profile != nil || match.Reason != tt.wantReason {
+					t.Fatalf("MatchProfile(%q, %#v) = %#v, want reason %q", tt.repository, tt.labels, match, tt.wantReason)
+				}
+				return
+			}
+			if match.Profile == nil || match.Profile.Name != tt.wantSpec || match.Reason != tt.wantReason {
+				t.Fatalf("MatchProfile(%q, %#v) = %#v, want spec %q", tt.repository, tt.labels, match, tt.wantSpec)
+			}
+		})
+	}
+}
+
+func TestRunnerCatalogFixtureKeepsLegacyAndPolicyFreeBriefCasesEquivalent(t *testing.T) {
+	// Characterization test: these are the named compatibility cases from the
+	// brief, not a claimed fresh production requested_labels_json export.
 	store := New(t.TempDir())
 	fixture := loadProductionRunnerCatalog(t, store)
 	profiles, err := store.ListProfiles()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, labels := range fixture.RequestedLabelSets {
+	for _, labels := range fixture.BriefCompatibilityLabelSets {
 		legacy, err := store.MatchProfile("qbox/legacy-production-replay", labels)
+		if err != nil {
+			t.Fatal(err)
+		}
+		enabled := selectEnabledFixtureProfile(profiles, labels)
+		if legacy.Profile == nil && enabled == nil {
+			if legacy.Reason != "profile_labels_not_matched" {
+				t.Fatalf("MatchProfile(%#v) reason = %q, want profile_labels_not_matched", labels, legacy.Reason)
+			}
+			continue
+		}
+		if legacy.Profile == nil || enabled == nil || legacy.Profile.Name != enabled.Name || legacy.Reason != "" {
+			t.Fatalf("MatchProfile(%#v) legacy=%#v policy-free=%#v, want same selected spec", labels, legacy, enabled)
+		}
+	}
+}
+
+func TestRunnerCatalogProductionRequestedLabelReplayWhenExportIsAvailable(t *testing.T) {
+	fixture := loadProductionRunnerCatalogFixture(t)
+	replay := fixture.ProductionRequestedLabelsReplay
+	if replay.Status != "ready" {
+		t.Skip("pending fresh read-only production requested_labels_json export with provenance and capture date")
+	}
+	if replay.Provenance == "" || replay.CapturedAt == "" || len(replay.LabelSets) == 0 {
+		t.Fatalf("production requested-label replay is ready but incomplete: %#v", replay)
+	}
+	store := New(t.TempDir())
+	loadProductionRunnerCatalog(t, store)
+	profiles, err := store.ListProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, labels := range replay.LabelSets {
+		legacy, err := store.MatchProfile("qbox/production-replay", labels)
 		if err != nil {
 			t.Fatal(err)
 		}
