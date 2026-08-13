@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 
 import * as catalogUtils from "./sandbox-catalog-utils"
+import { SandboxTemplateCatalog } from "./sandbox-catalog-sections"
 
 const { formatOptionalTime } = catalogUtils
 
@@ -54,6 +57,30 @@ describe("sandbox catalog loaders", () => {
     expect(paths).toEqual([
       "/user/sandbox/instances?region=us-south-1&installation_id=42&template_id=template-1",
     ])
+  })
+})
+
+describe("sandbox template catalog", () => {
+  test("keeps public managed templates visible when the scoped provider catalog fails", () => {
+    const html = renderToStaticMarkup(createElement(SandboxTemplateCatalog, {
+      publicTemplates: [{
+        default_template_name: "github-runner-ubuntu-24-04",
+        runner_spec_names: ["qiniu-ubuntu-24.04", "qiniu-ubuntu-latest"],
+        workflow_labels: [["qiniu", "ubuntu-24.04"], ["qiniu", "ubuntu-latest"]],
+      }],
+      publicLoading: false,
+      publicError: "",
+      scopedTemplates: [],
+      scopedLoading: false,
+      scopedError: "Sandbox credentials are not configured",
+    }))
+
+    expect(html).toContain("Managed runner templates")
+    expect(html).toContain("github-runner-ubuntu-24-04")
+    expect(html).toContain("qiniu-ubuntu-latest")
+    expect(html).toContain("qiniu, ubuntu-latest")
+    expect(html).toContain("Provider templates")
+    expect(html).toContain("Sandbox credentials are not configured")
   })
 })
 

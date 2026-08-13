@@ -33,6 +33,7 @@ import (
 
 	"github.com/qiniu/ci-runner/internal/config"
 	"github.com/qiniu/ci-runner/internal/github"
+	"github.com/qiniu/ci-runner/internal/runnercatalog"
 	"github.com/qiniu/ci-runner/internal/sandboxrunner"
 	"github.com/qiniu/ci-runner/internal/state"
 )
@@ -60,6 +61,53 @@ type fakeSandbox struct {
 	repositoryURL       string
 	runnerGroup         string
 	terminal            *fakeTerminalSession
+}
+
+func TestPublicTemplateCatalogIsAvailableWithoutAuthenticationOrSandboxCredentials(t *testing.T) {
+	srv := newTestServer(t, state.New(t.TempDir()), "", &fakeSandbox{})
+
+	request := func(cookie *http.Cookie) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/public/runner-templates", nil)
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+
+	signedOut := request(nil)
+	if signedOut.Code != http.StatusOK {
+		t.Fatalf("signed-out status = %d, want %d; body=%s", signedOut.Code, http.StatusOK, signedOut.Body.String())
+	}
+	if got := signedOut.Header().Get("Cache-Control"); got != "public, max-age=3600" {
+		t.Fatalf("Cache-Control = %q, want %q", got, "public, max-age=3600")
+	}
+
+	signedIn := request(testSessionCookie("hubot-id", "hubot", "user"))
+	if signedIn.Code != http.StatusOK {
+		t.Fatalf("signed-in status = %d, want %d; body=%s", signedIn.Code, http.StatusOK, signedIn.Body.String())
+	}
+	if signedIn.Body.String() != signedOut.Body.String() {
+		t.Fatalf("signed-in payload = %s, want signed-out payload %s", signedIn.Body.String(), signedOut.Body.String())
+	}
+
+	var got []runnercatalog.PublicTemplate
+	if err := json.Unmarshal(signedOut.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode public templates: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("public template count = %d, want 4: %#v", len(got), got)
+	}
+	if !reflect.DeepEqual(got, runnercatalog.PublicTemplates()) {
+		t.Fatalf("public endpoint payload = %#v, want %#v", got, runnercatalog.PublicTemplates())
+	}
+	for _, forbidden := range []string{"template_id", "api_key", "api_url", "qbox", "custom"} {
+		if strings.Contains(strings.ToLower(signedOut.Body.String()), forbidden) {
+			t.Fatalf("public payload exposes forbidden metadata %q: %s", forbidden, signedOut.Body.String())
+		}
+	}
 }
 
 func TestSandboxHTTPClientDoesNotBoundRunnerCommandStreams(t *testing.T) {
