@@ -554,9 +554,9 @@ func (s *DBStore) CompareProfileMatches(repositoryFullName string, labels []stri
 		return ProfileMatchComparison{}, err
 	}
 
-	legacyCandidates := legacyAllowedProfiles(profiles, policies, groups, repositoryFullName)
+	legacyCandidates, legacyHasAllowedNames := legacyAllowedProfiles(profiles, policies, groups, repositoryFullName)
 	legacy := profileMatchFromCandidates(repositoryFullName, labels, legacyCandidates)
-	if len(legacyCandidates) == 0 {
+	if !legacyHasAllowedNames {
 		legacy.Reason = "profile_not_allowed"
 	}
 	enabled := profileMatchFromCandidates(repositoryFullName, labels, profiles)
@@ -582,7 +582,7 @@ func catalogTableExists(tx *gorm.DB, tableName string) (bool, error) {
 	return count > 0, nil
 }
 
-func legacyAllowedProfiles(profiles []RunnerProfile, policies []RepositoryPolicy, groups []RunnerGroup, repositoryFullName string) []RunnerProfile {
+func legacyAllowedProfiles(profiles []RunnerProfile, policies []RepositoryPolicy, groups []RunnerGroup, repositoryFullName string) ([]RunnerProfile, bool) {
 	groupsByName := make(map[string]RunnerGroup, len(groups))
 	for _, group := range groups {
 		groupsByName[group.Name] = group
@@ -618,7 +618,7 @@ func legacyAllowedProfiles(profiles []RunnerProfile, policies []RepositoryPolicy
 			candidates = append(candidates, profile)
 		}
 	}
-	return candidates
+	return candidates, len(allowed) > 0
 }
 
 func profileMatchFromCandidates(repositoryFullName string, labels []string, profiles []RunnerProfile) ProfileMatch {

@@ -200,6 +200,12 @@ catalog 更新并取得新的区域 smoke 证据。
 
 支持的 workflow labels、发布状态和区域验证流程见[公共 Runner 模板](docs/zh/default-runner-templates.md)。
 
+`GET /api/public/runner-templates` 无需登录即可返回 runnerd 管理的 4 个公共
+模板。稳定响应只包含公共模板名称、对应的逻辑 Runner Spec 名称和支持的 workflow
+label 组合，不包含 provider template ID、credential、endpoint，也不会暴露私有或
+自定义模板。依赖 credential 的
+`GET /user/sandbox/templates?region=<id>` 仍是独立的 scoped resource。
+
 对于自定义 spec，`template_id` 应指向包含 GitHub runner 镜像的 Qiniu Sandbox 模板。创建沙箱时会使用 **Repositories → Runner readiness** 中显示的仓库 owner 有效 Sandbox service 检查模板访问权限。
 
 ## 管理控制台

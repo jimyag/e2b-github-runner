@@ -202,6 +202,14 @@ evidence.
 See [Public Runner Templates](docs/default-runner-templates.md) for supported
 workflow labels, publication status, and regional verification.
 
+`GET /api/public/runner-templates` exposes the four runnerd-managed public
+templates without authentication. Its stable response contains only each
+public template name, logical Runner Spec names, and supported workflow label
+sets; it never includes provider template IDs, credentials, endpoints, or
+private/custom templates. The credential-bound
+`GET /user/sandbox/templates?region=<id>` catalog remains a separate scoped
+resource.
+
 For custom specs, `template_id` should point to a Qiniu Sandbox template containing the GitHub runner image. Template access is checked against the repository owner's effective Sandbox service shown under **Repositories → Runner readiness** at sandbox creation time.
 
 ## Admin Console

@@ -18,6 +18,33 @@ registration remained. See
 [`templates/README.md`](../templates/README.md) for pinned upstream provenance,
 the compatibility contract, and per-image differences.
 
+## Public catalog API
+
+`GET /api/public/runner-templates` is available to signed-out and signed-in
+clients and returns the same cacheable, runnerd-owned catalog. The response is
+sorted and contains four objects with only these stable fields:
+
+```json
+[
+  {
+    "default_template_name": "github-runner-ubuntu-24-04",
+    "runner_spec_names": ["qiniu-ubuntu-24.04", "qiniu-ubuntu-latest"],
+    "workflow_labels": [
+      ["qiniu", "ubuntu-24.04"],
+      ["qiniu", "ubuntu-latest"]
+    ]
+  }
+]
+```
+
+The example shows one entry; the full response contains all four physical
+public templates. The API intentionally excludes provider template IDs,
+regions, credentials, endpoints, and private/custom templates. Provider-visible
+templates remain behind the credential-bound, account or organization scoped
+`GET /user/sandbox/templates?region=<id>` API. The ordinary-user Sandbox
+Templates page renders these catalogs as independent sections, so a provider
+catalog failure does not hide the public catalog and vice versa.
+
 ## Workflow labels
 
 Use the exact pair for the requested environment:

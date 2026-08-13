@@ -156,6 +156,7 @@ func TestMatchProfileForAdmissionClassifiesShadowResultAndReturnsLegacy(t *testi
 		{name: "legacy only", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Profile: profile("legacy")}, Enabled: state.ProfileMatch{Reason: "profile_labels_not_matched"}}, result: "legacy_only"},
 		{name: "enabled only", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Reason: "profile_not_allowed"}, Enabled: state.ProfileMatch{Profile: profile("enabled")}}, result: "enabled_only"},
 		{name: "different profile", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Profile: profile("legacy")}, Enabled: state.ProfileMatch{Profile: profile("enabled")}}, result: "different_profile"},
+		{name: "different no-match reason", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Reason: "profile_not_allowed"}, Enabled: state.ProfileMatch{Reason: "profile_labels_not_matched"}}, result: "different_profile"},
 	}
 
 	for _, tt := range tests {

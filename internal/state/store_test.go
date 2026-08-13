@@ -3193,6 +3193,183 @@ func TestCompareProfileMatchesReturnsCatalogMetadataLookupError(t *testing.T) {
 	}
 }
 
+func TestCompareProfileMatchesSQLBackends(t *testing.T) {
+	if os.Getenv("RUNNERD_CATALOG_BACKEND_TESTS") != "1" {
+		t.Skip("set RUNNERD_CATALOG_BACKEND_TESTS=1 with dedicated Postgres and MySQL test databases")
+	}
+	for _, backend := range []struct {
+		name string
+		dsn  string
+	}{
+		{name: BackendPostgres, dsn: os.Getenv("RUNNERD_POSTGRES_TEST_DSN")},
+		{name: BackendMySQL, dsn: os.Getenv("RUNNERD_MYSQL_TEST_DSN")},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			if strings.TrimSpace(backend.dsn) == "" {
+				t.Fatalf("dedicated %s test DSN is required", backend.name)
+			}
+			store := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: false,
+			}).(*DBStore)
+			db, err := store.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireCatalogMatcherTestDatabase(t, db, backend.name)
+			defer closeTestDB(t, db)
+			defer func() {
+				for _, table := range []string{"repository_policies", "runner_group_specs", "runner_groups", "runner_profiles"} {
+					_ = db.Migrator().DropTable(table)
+				}
+			}()
+			createCatalogMatcherTestTables(t, db, backend.name)
+
+			if _, err := store.UpsertProfile(RunnerProfile{
+				Name: "policy-selected", Labels: []string{"self-hosted", "policy-selected"},
+				RequiredLabels: []string{"policy-selected"}, TemplateID: "policy-template",
+				MaxConcurrency: 1, Enabled: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.UpsertRunnerGroup(RunnerGroup{
+				Name: "policy-group", SpecNames: []string{"policy-selected"}, Enabled: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
+				RepositoryFullName: "owner/repo", RunnerGroupName: "policy-group", Enabled: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+
+			if err := db.Exec("DELETE FROM repository_policies").Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Exec("DELETE FROM runner_group_specs").Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Exec("DELETE FROM runner_groups").Error; err != nil {
+				t.Fatal(err)
+			}
+			profile, err := store.GetProfile("policy-selected")
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile.DefaultAvailable = true
+			if _, err := store.UpsertProfile(profile); err != nil {
+				t.Fatal(err)
+			}
+			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+
+			for _, table := range []string{"repository_policies", "runner_group_specs", "runner_groups"} {
+				if err := db.Migrator().DropTable(table); err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+		})
+	}
+}
+
+func requireCatalogMatcherTestDatabase(t *testing.T, db *gorm.DB, backend string) {
+	t.Helper()
+	var databaseName string
+	var query string
+	switch backend {
+	case BackendPostgres:
+		query = `SELECT CURRENT_DATABASE()`
+	case BackendMySQL:
+		query = `SELECT DATABASE()`
+	default:
+		t.Fatalf("unsupported catalog matcher test backend %q", backend)
+	}
+	if err := db.Raw(query).Scan(&databaseName).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(strings.ToLower(databaseName), "_test") {
+		t.Fatalf("refusing destructive catalog matcher setup in database %q; dedicated database name must end in _test", databaseName)
+	}
+}
+
+func createCatalogMatcherTestTables(t *testing.T, db *gorm.DB, backend string) {
+	t.Helper()
+	for _, table := range []string{"repository_policies", "runner_group_specs", "runner_groups", "runner_profiles"} {
+		if err := db.Migrator().DropTable(table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var statements []string
+	switch backend {
+	case BackendPostgres:
+		statements = []string{
+			`CREATE TABLE runner_profiles (
+				name VARCHAR(255) PRIMARY KEY, labels_json TEXT NOT NULL, required_labels_json TEXT,
+				template_id VARCHAR(255) NOT NULL, default_template_name VARCHAR(255), runner_group VARCHAR(255),
+				max_concurrency BIGINT NOT NULL, min_idle BIGINT NOT NULL DEFAULT 0, priority BIGINT NOT NULL DEFAULT 0,
+				enabled BOOLEAN NOT NULL, default_available BOOLEAN NOT NULL, managed_by VARCHAR(255),
+				catalog_revision BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+			)`,
+			`CREATE TABLE runner_groups (
+				name VARCHAR(255) PRIMARY KEY, description TEXT, enabled BOOLEAN NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+			)`,
+			`CREATE TABLE runner_group_specs (
+				group_name VARCHAR(255) NOT NULL, spec_name VARCHAR(255) NOT NULL, created_at TIMESTAMPTZ NOT NULL,
+				PRIMARY KEY (group_name, spec_name)
+			)`,
+			`CREATE TABLE repository_policies (
+				id BIGSERIAL PRIMARY KEY, repository_full_name VARCHAR(255) NOT NULL, profile_name VARCHAR(255) NOT NULL,
+				runner_group_name VARCHAR(255) NOT NULL DEFAULT '', enabled BOOLEAN NOT NULL, created_at TIMESTAMPTZ NOT NULL,
+				CONSTRAINT idx_repository_policies_unique UNIQUE (repository_full_name, profile_name, runner_group_name)
+			)`,
+		}
+	case BackendMySQL:
+		statements = []string{
+			`CREATE TABLE runner_profiles (
+				name VARCHAR(255) PRIMARY KEY, labels_json TEXT NOT NULL, required_labels_json TEXT,
+				template_id VARCHAR(255) NOT NULL, default_template_name VARCHAR(255), runner_group VARCHAR(255),
+				max_concurrency BIGINT NOT NULL, min_idle BIGINT NOT NULL DEFAULT 0, priority BIGINT NOT NULL DEFAULT 0,
+				enabled BOOLEAN NOT NULL, default_available BOOLEAN NOT NULL, managed_by VARCHAR(255),
+				catalog_revision BIGINT NOT NULL DEFAULT 0, created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL
+			)`,
+			`CREATE TABLE runner_groups (
+				name VARCHAR(255) PRIMARY KEY, description TEXT, enabled BOOLEAN NOT NULL,
+				created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL
+			)`,
+			`CREATE TABLE runner_group_specs (
+				group_name VARCHAR(255) NOT NULL, spec_name VARCHAR(255) NOT NULL, created_at DATETIME(6) NOT NULL,
+				PRIMARY KEY (group_name, spec_name)
+			)`,
+			`CREATE TABLE repository_policies (
+				id BIGINT AUTO_INCREMENT PRIMARY KEY, repository_full_name VARCHAR(255) NOT NULL, profile_name VARCHAR(255) NOT NULL,
+				runner_group_name VARCHAR(255) NOT NULL DEFAULT '', enabled BOOLEAN NOT NULL, created_at DATETIME(6) NOT NULL,
+				CONSTRAINT idx_repository_policies_unique UNIQUE (repository_full_name, profile_name, runner_group_name)
+			)`,
+		}
+	default:
+		t.Fatalf("unsupported catalog matcher test backend %q", backend)
+	}
+	for _, statement := range statements {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func assertProfileComparison(t *testing.T, store *DBStore, repository string, labels []string, wantProfile string) {
+	t.Helper()
+	comparison, err := store.CompareProfileMatches(repository, labels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, match := range map[string]ProfileMatch{"legacy": comparison.Legacy, "enabled": comparison.Enabled} {
+		if match.Profile == nil || match.Profile.Name != wantProfile || match.Reason != "" {
+			t.Fatalf("%s match = %#v, want profile %q", name, match, wantProfile)
+		}
+	}
+}
+
 func TestCompareProfileMatchesEnabledCatalogOrderingAndNoMatch(t *testing.T) {
 	store := New(t.TempDir())
 	for _, profile := range []RunnerProfile{
@@ -3234,6 +3411,25 @@ func TestCompareProfileMatchesEnabledCatalogOrderingAndNoMatch(t *testing.T) {
 	}
 	if comparison.Enabled.Profile != nil || comparison.Enabled.Reason != "profile_labels_not_matched" {
 		t.Fatalf("unmatched enabled result = %#v, want profile_labels_not_matched", comparison.Enabled)
+	}
+}
+
+func TestMatchProfilePreservesLegacyReasonForDanglingPolicyTarget(t *testing.T) {
+	store := New(t.TempDir())
+	if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
+		RepositoryFullName: "owner/repo",
+		ProfileName:        "deleted-spec",
+		Enabled:            true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	match, err := store.MatchProfile("owner/repo", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile != nil || match.Reason != "profile_labels_not_matched" {
+		t.Fatalf("dangling Policy match = %#v, want the legacy profile_labels_not_matched reason", match)
 	}
 }
 
@@ -4270,20 +4466,47 @@ func TestReplayRunnerCatalogSnapshotRequestedLabelsFromDisposableCopy(t *testing
 	// to diverge for a deployed label family.
 	sourcePath := filepath.Join(t.TempDir(), "runnerd-snapshot.db")
 	source := NewWithOptions(Options{Backend: BackendSQLite, DatabaseDSN: sourcePath, MigrateOnStart: true}).(*DBStore)
-	for i, labels := range [][]string{
-		{"qiniu", "ubuntu-24.04"},
-		{"self-hosted", "e2b"},
-		{"self-hosted", "e2b", "not-in-production-catalog"},
+	for _, profile := range []RunnerProfile{
+		{
+			Name: "snapshot-default", Labels: []string{"self-hosted", "snapshot-default"},
+			RequiredLabels: []string{"snapshot-default"}, TemplateID: "snapshot-default-template",
+			MaxConcurrency: 1, Enabled: true, DefaultAvailable: true,
+		},
+		{
+			Name: "snapshot-policy", Labels: []string{"self-hosted", "snapshot-policy"},
+			RequiredLabels: []string{"snapshot-policy"}, TemplateID: "snapshot-policy-template",
+			MaxConcurrency: 1, Enabled: true, DefaultAvailable: false,
+		},
+	} {
+		if _, err := source.UpsertProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := source.UpsertRepositoryPolicy(RepositoryPolicy{
+		RepositoryFullName: "policy-owner/repo",
+		ProfileName:        "snapshot-policy",
+		Enabled:            true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i, request := range []struct {
+		repository string
+		labels     []string
+	}{
+		{"outside/repo", []string{"snapshot-default"}},
+		{"policy-owner/repo", []string{"snapshot-policy"}},
+		{"outside/repo", []string{"not-in-snapshot-catalog"}},
 	} {
 		created, _, err := source.CreateRequest(RunnerRequest{
-			ID:              fmt.Sprintf("snapshot-replay-%d", i),
-			Source:          "test",
-			RequestedLabels: labels,
-			Labels:          labels,
-			RunnerName:      fmt.Sprintf("e2b-snapshot-replay-%d", i),
+			ID:                 fmt.Sprintf("snapshot-replay-%d", i),
+			Source:             "test",
+			RepositoryFullName: request.repository,
+			RequestedLabels:    request.labels,
+			Labels:             request.labels,
+			RunnerName:         fmt.Sprintf("e2b-snapshot-replay-%d", i),
 		}, nil)
 		if err != nil || !created {
-			t.Fatalf("CreateRequest(%#v) created=%v err=%v", labels, created, err)
+			t.Fatalf("CreateRequest(%#v) created=%v err=%v", request.labels, created, err)
 		}
 	}
 	db, err := source.dbOrEnsure()
@@ -4296,8 +4519,9 @@ func TestReplayRunnerCatalogSnapshotRequestedLabelsFromDisposableCopy(t *testing
 		t.Fatal(err)
 	}
 
-	if got := replayRunnerCatalogSnapshotRequestedLabels(t, sourcePath); got != 3 {
-		t.Fatalf("replayed distinct requested label sets = %d, want 3", got)
+	got := replayRunnerCatalogSnapshotRequestedLabels(t, sourcePath)
+	if got.RequestShapes != 3 || got.MatchedProfiles != 2 || got.NoMatches != 1 {
+		t.Fatalf("snapshot replay summary = %#v, want 3 request shapes, 2 matches, and 1 no-match", got)
 	}
 	after, err := os.ReadFile(sourcePath)
 	if err != nil {
@@ -4313,8 +4537,8 @@ func TestReplayRunnerCatalogProductionSQLiteSnapshotRequestedLabels(t *testing.T
 	if sourcePath == "" {
 		t.Skip("set RUNNERD_SQLITE_SNAPSHOT to a fresh disposable production SQLite snapshot to replay every distinct requested_labels_json value")
 	}
-	count := replayRunnerCatalogSnapshotRequestedLabels(t, sourcePath)
-	t.Logf("replayed %d distinct requested label sets from snapshot %q", count, filepath.Base(sourcePath))
+	summary := replayRunnerCatalogSnapshotRequestedLabels(t, sourcePath)
+	t.Logf("replayed %d distinct repository/label shapes from snapshot %q (%d matched, %d unmatched)", summary.RequestShapes, filepath.Base(sourcePath), summary.MatchedProfiles, summary.NoMatches)
 }
 
 func copySQLiteSnapshot(t *testing.T, sourcePath string) string {
@@ -4339,7 +4563,13 @@ func copySQLiteSnapshot(t *testing.T, sourcePath string) string {
 	return destinationPath
 }
 
-func replayRunnerCatalogSnapshotRequestedLabels(t *testing.T, sourcePath string) int {
+type runnerCatalogSnapshotReplaySummary struct {
+	RequestShapes   int
+	MatchedProfiles int
+	NoMatches       int
+}
+
+func replayRunnerCatalogSnapshotRequestedLabels(t *testing.T, sourcePath string) runnerCatalogSnapshotReplaySummary {
 	t.Helper()
 	copyPath := copySQLiteSnapshot(t, sourcePath)
 	snapshot := NewWithOptions(Options{
@@ -4353,48 +4583,55 @@ func replayRunnerCatalogSnapshotRequestedLabels(t *testing.T, sourcePath string)
 	}
 	defer closeTestDB(t, db)
 
-	var encodedLabelSets []string
-	if err := db.Raw(`SELECT DISTINCT requested_labels_json
+	type snapshotRequestShape struct {
+		RepositoryFullName  string `gorm:"column:repository_full_name"`
+		RequestedLabelsJSON string `gorm:"column:requested_labels_json"`
+	}
+	var requestShapes []snapshotRequestShape
+	if err := db.Raw(`SELECT repository_full_name, requested_labels_json
 		FROM runner_requests
 		WHERE requested_labels_json IS NOT NULL AND requested_labels_json <> ''
-		ORDER BY requested_labels_json`).Scan(&encodedLabelSets).Error; err != nil {
+		GROUP BY repository_full_name, requested_labels_json
+		ORDER BY repository_full_name, requested_labels_json`).Scan(&requestShapes).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(encodedLabelSets) == 0 {
+	if len(requestShapes) == 0 {
 		t.Fatal("snapshot has no non-empty runner_requests.requested_labels_json values")
 	}
-	labelSets := make([][]string, 0, len(encodedLabelSets))
-	for _, encoded := range encodedLabelSets {
+	type replayInput struct {
+		repository string
+		labels     []string
+	}
+	inputs := make([]replayInput, 0, len(requestShapes))
+	for _, shape := range requestShapes {
 		var labels []string
-		if err := json.Unmarshal([]byte(encoded), &labels); err != nil || labels == nil {
+		if err := json.Unmarshal([]byte(shape.RequestedLabelsJSON), &labels); err != nil || labels == nil {
 			t.Fatalf("snapshot requested_labels_json is not a JSON string array: %v", err)
 		}
-		labelSets = append(labelSets, labels)
+		inputs = append(inputs, replayInput{repository: shape.RepositoryFullName, labels: labels})
 	}
 
-	catalog := New(t.TempDir())
-	loadProductionRunnerCatalog(t, catalog)
-	profiles, err := catalog.ListProfiles()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, labels := range labelSets {
-		legacy, err := catalog.MatchProfile("production-snapshot/replay", labels)
+	summary := runnerCatalogSnapshotReplaySummary{RequestShapes: len(inputs)}
+	for _, input := range inputs {
+		comparison, err := snapshot.CompareProfileMatches(input.repository, input.labels)
 		if err != nil {
 			t.Fatal(err)
 		}
-		enabled := selectEnabledFixtureProfile(profiles, labels)
-		if legacy.Profile == nil && enabled == nil {
-			if legacy.Reason != "profile_labels_not_matched" {
-				t.Fatalf("snapshot replay no-match reason = %q, want profile_labels_not_matched", legacy.Reason)
+		if comparison.Legacy.Profile == nil && comparison.Enabled.Profile == nil {
+			if comparison.Legacy.Reason != comparison.Enabled.Reason {
+				t.Fatalf("snapshot replay matcher reasons diverged for one repository/label shape: legacy=%q enabled=%q", comparison.Legacy.Reason, comparison.Enabled.Reason)
 			}
+			summary.NoMatches++
 			continue
 		}
-		if legacy.Profile == nil || enabled == nil || legacy.Profile.Name != enabled.Name || legacy.Reason != "" {
-			t.Fatalf("snapshot replay legacy and enabled matcher diverged")
+		if comparison.Legacy.Profile == nil || comparison.Enabled.Profile == nil ||
+			comparison.Legacy.Profile.Name != comparison.Enabled.Profile.Name ||
+			comparison.Legacy.Reason != comparison.Enabled.Reason {
+			t.Fatalf("snapshot replay legacy and enabled matcher diverged for one repository/label shape")
 		}
+		summary.MatchedProfiles++
 	}
-	return len(labelSets)
+	return summary
 }
 
 func TestMigrateSQLiteRunnerRequestSnapshot(t *testing.T) {
