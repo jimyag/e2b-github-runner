@@ -127,11 +127,5 @@
     ["self-hosted", "e2b", "qbox-kodo-ubuntu-16-04"],
     ["self-hosted", "e2b", "qbox-kodo-web-ubuntu-20-04"],
     ["self-hosted", "e2b", "not-in-production-catalog"]
-  ],
-  "production_requested_labels_replay": {
-    "status": "pending_fresh_read_only_export",
-    "provenance": "",
-    "captured_at": "",
-    "label_sets": []
-  }
+  ]
 }

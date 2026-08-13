@@ -33,18 +33,10 @@ func closeTestDB(t *testing.T, db *gorm.DB) {
 // state records so the expected catalog cannot be derived from the code under
 // test.
 type productionRunnerCatalogFixture struct {
-	Profiles                        []productionRunnerCatalogProfile `json:"profiles"`
-	Groups                          []RunnerGroup                    `json:"groups"`
-	Policies                        []RepositoryPolicy               `json:"policies"`
-	BriefCompatibilityLabelSets     [][]string                       `json:"brief_compatibility_label_sets"`
-	ProductionRequestedLabelsReplay productionRequestedLabelsReplay  `json:"production_requested_labels_replay"`
-}
-
-type productionRequestedLabelsReplay struct {
-	Status     string     `json:"status"`
-	Provenance string     `json:"provenance"`
-	CapturedAt string     `json:"captured_at"`
-	LabelSets  [][]string `json:"label_sets"`
+	Profiles                    []productionRunnerCatalogProfile `json:"profiles"`
+	Groups                      []RunnerGroup                    `json:"groups"`
+	Policies                    []RepositoryPolicy               `json:"policies"`
+	BriefCompatibilityLabelSets [][]string                       `json:"brief_compatibility_label_sets"`
 }
 
 type productionRunnerCatalogProfile struct {
@@ -3323,39 +3315,6 @@ func TestRunnerCatalogFixtureKeepsLegacyAndPolicyFreeBriefCasesEquivalent(t *tes
 	}
 }
 
-func TestRunnerCatalogProductionRequestedLabelReplayWhenExportIsAvailable(t *testing.T) {
-	fixture := loadProductionRunnerCatalogFixture(t)
-	replay := fixture.ProductionRequestedLabelsReplay
-	if replay.Status != "ready" {
-		t.Skip("pending fresh read-only production requested_labels_json export with provenance and capture date")
-	}
-	if replay.Provenance == "" || replay.CapturedAt == "" || len(replay.LabelSets) == 0 {
-		t.Fatalf("production requested-label replay is ready but incomplete: %#v", replay)
-	}
-	store := New(t.TempDir())
-	loadProductionRunnerCatalog(t, store)
-	profiles, err := store.ListProfiles()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, labels := range replay.LabelSets {
-		legacy, err := store.MatchProfile("qbox/production-replay", labels)
-		if err != nil {
-			t.Fatal(err)
-		}
-		enabled := selectEnabledFixtureProfile(profiles, labels)
-		if legacy.Profile == nil && enabled == nil {
-			if legacy.Reason != "profile_labels_not_matched" {
-				t.Fatalf("MatchProfile(%#v) reason = %q, want profile_labels_not_matched", labels, legacy.Reason)
-			}
-			continue
-		}
-		if legacy.Profile == nil || enabled == nil || legacy.Profile.Name != enabled.Name || legacy.Reason != "" {
-			t.Fatalf("MatchProfile(%#v) legacy=%#v policy-free=%#v, want same selected spec", labels, legacy, enabled)
-		}
-	}
-}
-
 func TestMatchProfileProductionOrderingAndNegativeContract(t *testing.T) {
 	// This test catches a policy-free selector that accidentally admits a
 	// disabled spec, changes the no-match reason, or forks the existing sort.
@@ -4126,28 +4085,145 @@ func TestMigrateDoesNotRewriteUnrecoverableRunnerRequestInstallationID(t *testin
 	}
 }
 
-func TestMigrateSQLiteRunnerRequestSnapshot(t *testing.T) {
+func TestReplayRunnerCatalogSnapshotRequestedLabelsFromDisposableCopy(t *testing.T) {
+	// This catches a replay implementation that skips distinct request labels,
+	// mutates the source snapshot, or allows the legacy and policy-free results
+	// to diverge for a deployed label family.
+	sourcePath := filepath.Join(t.TempDir(), "runnerd-snapshot.db")
+	source := NewWithOptions(Options{Backend: BackendSQLite, DatabaseDSN: sourcePath, MigrateOnStart: true}).(*DBStore)
+	for i, labels := range [][]string{
+		{"qiniu", "ubuntu-24.04"},
+		{"self-hosted", "e2b"},
+		{"self-hosted", "e2b", "not-in-production-catalog"},
+	} {
+		created, _, err := source.CreateRequest(RunnerRequest{
+			ID:              fmt.Sprintf("snapshot-replay-%d", i),
+			Source:          "test",
+			RequestedLabels: labels,
+			Labels:          labels,
+			RunnerName:      fmt.Sprintf("e2b-snapshot-replay-%d", i),
+		}, nil)
+		if err != nil || !created {
+			t.Fatalf("CreateRequest(%#v) created=%v err=%v", labels, created, err)
+		}
+	}
+	db, err := source.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+	before, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got := replayRunnerCatalogSnapshotRequestedLabels(t, sourcePath); got != 3 {
+		t.Fatalf("replayed distinct requested label sets = %d, want 3", got)
+	}
+	after, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatal("snapshot replay changed the supplied source database")
+	}
+}
+
+func TestReplayRunnerCatalogProductionSQLiteSnapshotRequestedLabels(t *testing.T) {
 	sourcePath := strings.TrimSpace(os.Getenv("RUNNERD_SQLITE_SNAPSHOT"))
 	if sourcePath == "" {
-		t.Skip("set RUNNERD_SQLITE_SNAPSHOT to verify a disposable copy of a production SQLite database")
+		t.Skip("set RUNNERD_SQLITE_SNAPSHOT to a fresh disposable production SQLite snapshot to replay every distinct requested_labels_json value")
 	}
+	count := replayRunnerCatalogSnapshotRequestedLabels(t, sourcePath)
+	t.Logf("replayed %d distinct requested label sets from snapshot %q", count, filepath.Base(sourcePath))
+}
+
+func copySQLiteSnapshot(t *testing.T, sourcePath string) string {
+	t.Helper()
 	source, err := os.Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer source.Close()
-	databaseURL := filepath.Join(t.TempDir(), "runnerd.db")
-	destination, err := os.Create(databaseURL)
+	destinationPath := filepath.Join(t.TempDir(), "runnerd.db")
+	destination, err := os.Create(destinationPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := io.Copy(destination, source); err != nil {
-		destination.Close()
+		_ = destination.Close()
 		t.Fatal(err)
 	}
 	if err := destination.Close(); err != nil {
 		t.Fatal(err)
 	}
+	return destinationPath
+}
+
+func replayRunnerCatalogSnapshotRequestedLabels(t *testing.T, sourcePath string) int {
+	t.Helper()
+	copyPath := copySQLiteSnapshot(t, sourcePath)
+	snapshot := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    copyPath,
+		MigrateOnStart: false,
+	}).(*DBStore)
+	db, err := snapshot.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTestDB(t, db)
+
+	var encodedLabelSets []string
+	if err := db.Raw(`SELECT DISTINCT requested_labels_json
+		FROM runner_requests
+		WHERE requested_labels_json IS NOT NULL AND requested_labels_json <> ''
+		ORDER BY requested_labels_json`).Scan(&encodedLabelSets).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(encodedLabelSets) == 0 {
+		t.Fatal("snapshot has no non-empty runner_requests.requested_labels_json values")
+	}
+	labelSets := make([][]string, 0, len(encodedLabelSets))
+	for _, encoded := range encodedLabelSets {
+		var labels []string
+		if err := json.Unmarshal([]byte(encoded), &labels); err != nil || labels == nil {
+			t.Fatalf("snapshot requested_labels_json is not a JSON string array: %v", err)
+		}
+		labelSets = append(labelSets, labels)
+	}
+
+	catalog := New(t.TempDir())
+	loadProductionRunnerCatalog(t, catalog)
+	profiles, err := catalog.ListProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, labels := range labelSets {
+		legacy, err := catalog.MatchProfile("production-snapshot/replay", labels)
+		if err != nil {
+			t.Fatal(err)
+		}
+		enabled := selectEnabledFixtureProfile(profiles, labels)
+		if legacy.Profile == nil && enabled == nil {
+			if legacy.Reason != "profile_labels_not_matched" {
+				t.Fatalf("snapshot replay no-match reason = %q, want profile_labels_not_matched", legacy.Reason)
+			}
+			continue
+		}
+		if legacy.Profile == nil || enabled == nil || legacy.Profile.Name != enabled.Name || legacy.Reason != "" {
+			t.Fatalf("snapshot replay legacy and enabled matcher diverged")
+		}
+	}
+	return len(labelSets)
+}
+
+func TestMigrateSQLiteRunnerRequestSnapshot(t *testing.T) {
+	sourcePath := strings.TrimSpace(os.Getenv("RUNNERD_SQLITE_SNAPSHOT"))
+	if sourcePath == "" {
+		t.Skip("set RUNNERD_SQLITE_SNAPSHOT to verify a disposable copy of a production SQLite database")
+	}
+	databaseURL := copySQLiteSnapshot(t, sourcePath)
 
 	type counts struct {
 		Total                            int64 `gorm:"column:total"`
