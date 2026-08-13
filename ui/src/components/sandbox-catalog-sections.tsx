@@ -150,7 +150,8 @@ export function SandboxTemplatesSection({
       scopedError={scopedError}
       region={region}
       onRegion={setRegion}
-      onRefresh={() => void Promise.all([loadPublic(), loadScoped()])}
+      onPublicRefresh={() => void loadPublic()}
+      onScopedRefresh={() => void loadScoped()}
     />
   )
 }
@@ -164,7 +165,8 @@ export function SandboxTemplateCatalog({
   scopedError,
   region = sandboxRegions[0].id,
   onRegion = () => {},
-  onRefresh = () => {},
+  onPublicRefresh = () => {},
+  onScopedRefresh = () => {},
 }: {
   publicTemplates: PublicRunnerTemplate[]
   publicLoading: boolean
@@ -174,16 +176,28 @@ export function SandboxTemplateCatalog({
   scopedError: string
   region?: string
   onRegion?: (value: string) => void
-  onRefresh?: () => void
+  onPublicRefresh?: () => void
+  onScopedRefresh?: () => void
 }) {
   const { t } = useTranslation()
 
   return (
     <div className="space-y-4">
       <Card className="rounded-lg">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">{t("user.publicRunnerTemplates")}</CardTitle>
-          <CardDescription className="mt-1">{t("user.publicRunnerTemplatesDescription")}</CardDescription>
+        <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
+          <div>
+            <CardTitle className="text-base">{t("user.publicRunnerTemplates")}</CardTitle>
+            <CardDescription className="mt-1">{t("user.publicRunnerTemplatesDescription")}</CardDescription>
+          </div>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={onPublicRefresh}
+            disabled={publicLoading}
+            aria-label={t("common.refresh")}
+          >
+            <RefreshCw className={publicLoading ? "animate-spin" : ""} />
+          </Button>
         </CardHeader>
         <CardContent>
           {publicError ? (
@@ -229,9 +243,9 @@ export function SandboxTemplateCatalog({
           title={t("user.providerTemplates")}
           description={t("user.providerTemplatesDescription")}
           region={region}
-          loading={scopedLoading || publicLoading}
+          loading={scopedLoading}
           onRegion={onRegion}
-          onRefresh={onRefresh}
+          onRefresh={onScopedRefresh}
         />
         <CardContent>
           {scopedError ? (
