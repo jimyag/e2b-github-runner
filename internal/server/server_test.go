@@ -6803,7 +6803,9 @@ func TestManualExplicitProfileMustRespectRepositoryPolicy(t *testing.T) {
 	}
 }
 
-func TestRetryRunnerRequeuesFailedRequestAndWritesAuditEvent(t *testing.T) {
+func TestRetryRunnerRequeuesFailedRequestWithPersistedAdmissionAndWritesAuditEvent(t *testing.T) {
+	// This catches a retry endpoint that rematches a failed request and changes
+	// the Runner Spec, GitHub runner group, or original workflow labels.
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
 
@@ -6842,7 +6844,9 @@ func TestRetryRunnerRequeuesFailedRequestAndWritesAuditEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != state.StatusQueued || !got.NextRetryAt.IsZero() {
+	if got.Status != state.StatusQueued || !got.NextRetryAt.IsZero() ||
+		got.ProfileName != "default" || got.RunnerGroup != "default" ||
+		!reflect.DeepEqual(got.RequestedLabels, []string{"self-hosted", "e2b"}) {
 		t.Fatalf("expected queued retry state, got %#v", got)
 	}
 	events, err := store.ListAuditEvents(10)

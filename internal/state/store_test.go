@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,99 @@ func closeTestDB(t *testing.T, db *gorm.DB) {
 	if err := sqlDB.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// productionRunnerCatalogFixture contains only the non-secret fields that
+// influence the runner-spec matcher. It is deliberately independent from the
+// state records so the expected catalog cannot be derived from the code under
+// test.
+type productionRunnerCatalogFixture struct {
+	Profiles           []productionRunnerCatalogProfile `json:"profiles"`
+	Groups             []RunnerGroup                    `json:"groups"`
+	Policies           []RepositoryPolicy               `json:"policies"`
+	RequestedLabelSets [][]string                       `json:"requested_label_sets"`
+}
+
+type productionRunnerCatalogProfile struct {
+	Name             string   `json:"name"`
+	Labels           []string `json:"labels"`
+	RequiredLabels   []string `json:"required_labels"`
+	RunnerGroup      string   `json:"runner_group"`
+	Priority         int      `json:"priority"`
+	Enabled          bool     `json:"enabled"`
+	DefaultAvailable bool     `json:"default_available"`
+}
+
+func loadProductionRunnerCatalogFixture(t *testing.T) productionRunnerCatalogFixture {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "runner-catalog-production-2026-08-13.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture productionRunnerCatalogFixture
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.Profiles) != 10 || len(fixture.Groups) != 1 || len(fixture.Policies) != 7 {
+		t.Fatalf("production catalog shape = profiles:%d groups:%d policies:%d, want 10/1/7", len(fixture.Profiles), len(fixture.Groups), len(fixture.Policies))
+	}
+	return fixture
+}
+
+func loadProductionRunnerCatalog(t *testing.T, store Store) productionRunnerCatalogFixture {
+	t.Helper()
+	fixture := loadProductionRunnerCatalogFixture(t)
+	for _, profile := range fixture.Profiles {
+		if _, err := store.UpsertProfile(RunnerProfile{
+			Name:             profile.Name,
+			Labels:           append([]string(nil), profile.Labels...),
+			RequiredLabels:   append([]string(nil), profile.RequiredLabels...),
+			RunnerGroup:      profile.RunnerGroup,
+			TemplateID:       "fixture-template-" + profile.Name,
+			MaxConcurrency:   1,
+			Priority:         profile.Priority,
+			Enabled:          profile.Enabled,
+			DefaultAvailable: profile.DefaultAvailable,
+		}); err != nil {
+			t.Fatalf("upsert fixture profile %q: %v", profile.Name, err)
+		}
+	}
+	for _, group := range fixture.Groups {
+		if _, err := store.UpsertRunnerGroup(group); err != nil {
+			t.Fatalf("upsert fixture group %q: %v", group.Name, err)
+		}
+	}
+	for _, policy := range fixture.Policies {
+		if _, err := store.UpsertRepositoryPolicy(policy); err != nil {
+			t.Fatalf("upsert fixture policy %q/%q: %v", policy.RepositoryFullName, policy.ProfileName, err)
+		}
+	}
+	return fixture
+}
+
+// selectEnabledFixtureProfile is the policy-free result expected after the
+// migration. It remains test-only until the production matcher is introduced.
+func selectEnabledFixtureProfile(profiles []RunnerProfile, labels []string) *RunnerProfile {
+	candidates := make([]RunnerProfile, 0, len(profiles))
+	for _, profile := range profiles {
+		if profile.Enabled && labelsMatch(profile.RequiredLabels, labels) && labelsMatch(labels, profile.Labels) {
+			candidates = append(candidates, profile)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Priority != candidates[j].Priority {
+			return candidates[i].Priority > candidates[j].Priority
+		}
+		if len(candidates[i].Labels) != len(candidates[j].Labels) {
+			return len(candidates[i].Labels) > len(candidates[j].Labels)
+		}
+		return candidates[i].Name < candidates[j].Name
+	})
+	selected := candidates[0]
+	return &selected
 }
 
 func managedProfileForReconciliation(name string, revision int) RunnerProfile {
@@ -3059,6 +3153,238 @@ func TestRunnerGroupPolicyMatchesGroupSpecs(t *testing.T) {
 	}
 	if match.Profile == nil || match.Profile.Name != "large" {
 		t.Fatalf("expected large profile through group policy, got %#v", match.Profile)
+	}
+}
+
+func TestProductionRunnerCatalogFixtureFreezesLegacyWorkflowMatches(t *testing.T) {
+	// Characterization test: this intentionally passes against the policy-aware
+	// baseline. It catches a future matcher that changes production workflow
+	// label compatibility while Groups and Policies are removed.
+	store := New(t.TempDir())
+	loadProductionRunnerCatalog(t, store)
+
+	tests := []struct {
+		name       string
+		repository string
+		labels     []string
+		wantSpec   string
+	}{
+		{"managed slim canonical", "outside/example", []string{"qiniu", "ubuntu-slim"}, "qiniu-ubuntu-slim"},
+		{"managed 2204 canonical", "outside/example", []string{"qiniu", "ubuntu-22.04"}, "qiniu-ubuntu-22.04"},
+		{"managed 2404 canonical", "outside/example", []string{"qiniu", "ubuntu-24.04"}, "qiniu-ubuntu-24.04"},
+		{"managed 2604 canonical", "outside/example", []string{"qiniu", "ubuntu-26.04"}, "qiniu-ubuntu-26.04"},
+		{"managed latest canonical", "outside/example", []string{"qiniu", "ubuntu-latest"}, "qiniu-ubuntu-latest"},
+		{"managed 2404 advertised", "outside/example", []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-24.04"}, "qiniu-ubuntu-24.04"},
+		{"legacy generic custom", "qbox/example", []string{"self-hosted", "e2b"}, "github-runner-ubuntu-24-04"},
+		{"legacy public custom", "goplus/example", []string{"self-hosted", "e2b", "github-runner-ubuntu-24-04"}, "github-runner-ubuntu-24-04"},
+		{"legacy public custom outside policy", "outside/example", []string{"self-hosted", "e2b", "github-runner-ubuntu-24-04"}, "github-runner-ubuntu-24-04"},
+		{"qbox dora 1604", "qbox/example", []string{"self-hosted", "e2b", "qbox-dora-ubuntu-16-04"}, "qbox-dora-ubuntu-16-04"},
+		{"qbox dora 2404", "qbox/example", []string{"self-hosted", "e2b", "qbox-dora-ubuntu-24-04"}, "qbox-dora-ubuntu-24-04"},
+		{"qbox kodo 1604", "qbox/example", []string{"self-hosted", "e2b", "qbox-kodo-ubuntu-16-04"}, "qbox-kodo-ubuntu-16-04"},
+		{"qbox kodo web", "qbox/example", []string{"self-hosted", "e2b", "qbox-kodo-web-ubuntu-20-04"}, "qbox-kodo-web-ubuntu-20-04"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			match, err := store.MatchProfile(tt.repository, tt.labels)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if match.Profile == nil || match.Profile.Name != tt.wantSpec {
+				t.Fatalf("MatchProfile(%q, %#v) = %#v, want spec %q", tt.repository, tt.labels, match, tt.wantSpec)
+			}
+		})
+	}
+}
+
+func TestProductionRunnerCatalogFixtureKeepsLegacyAndPolicyFreeMatchesEquivalent(t *testing.T) {
+	// Characterization test: every observed non-empty requested-label set must
+	// retain the exact profile/reason outcome once policy-free matching lands.
+	store := New(t.TempDir())
+	fixture := loadProductionRunnerCatalog(t, store)
+	profiles, err := store.ListProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, labels := range fixture.RequestedLabelSets {
+		legacy, err := store.MatchProfile("qbox/legacy-production-replay", labels)
+		if err != nil {
+			t.Fatal(err)
+		}
+		enabled := selectEnabledFixtureProfile(profiles, labels)
+		if legacy.Profile == nil && enabled == nil {
+			if legacy.Reason != "profile_labels_not_matched" {
+				t.Fatalf("MatchProfile(%#v) reason = %q, want profile_labels_not_matched", labels, legacy.Reason)
+			}
+			continue
+		}
+		if legacy.Profile == nil || enabled == nil || legacy.Profile.Name != enabled.Name || legacy.Reason != "" {
+			t.Fatalf("MatchProfile(%#v) legacy=%#v policy-free=%#v, want same selected spec", labels, legacy, enabled)
+		}
+	}
+}
+
+func TestMatchProfileProductionOrderingAndNegativeContract(t *testing.T) {
+	// This test catches a policy-free selector that accidentally admits a
+	// disabled spec, changes the no-match reason, or forks the existing sort.
+	store := New(t.TempDir())
+	loadProductionRunnerCatalog(t, store)
+
+	disabled, err := store.GetProfile("qiniu-ubuntu-24.04")
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled.Enabled = false
+	if _, err := store.UpsertProfile(disabled); err != nil {
+		t.Fatal(err)
+	}
+	match, err := store.MatchProfile("outside/example", []string{"qiniu", "ubuntu-24.04"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile != nil || match.Reason != "profile_labels_not_matched" {
+		t.Fatalf("disabled spec match = %#v, want profile_labels_not_matched", match)
+	}
+	match, err = store.MatchProfile("outside/example", []string{"self-hosted", "e2b", "not-in-production-catalog"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile != nil || match.Reason != "profile_labels_not_matched" {
+		t.Fatalf("unmatched labels result = %#v, want profile_labels_not_matched", match)
+	}
+
+	ordering := New(t.TempDir())
+	for _, profile := range []RunnerProfile{
+		{Name: "z-name", Labels: []string{"self-hosted", "e2b"}, TemplateID: "z", MaxConcurrency: 1, Priority: 30, Enabled: true, DefaultAvailable: true},
+		{Name: "a-name", Labels: []string{"self-hosted", "e2b"}, TemplateID: "a", MaxConcurrency: 1, Priority: 30, Enabled: true, DefaultAvailable: true},
+		{Name: "longer-label-set", Labels: []string{"self-hosted", "e2b", "optional"}, TemplateID: "long", MaxConcurrency: 1, Priority: 30, Enabled: true, DefaultAvailable: true},
+		{Name: "higher-priority", Labels: []string{"self-hosted", "e2b"}, TemplateID: "high", MaxConcurrency: 1, Priority: 31, Enabled: true, DefaultAvailable: true},
+	} {
+		if _, err := ordering.UpsertProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	match, err = ordering.MatchProfile("outside/example", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile == nil || match.Profile.Name != "higher-priority" {
+		t.Fatalf("priority ordering selected %#v, want higher-priority", match.Profile)
+	}
+	higher, err := ordering.GetProfile("higher-priority")
+	if err != nil {
+		t.Fatal(err)
+	}
+	higher.Enabled = false
+	if _, err := ordering.UpsertProfile(higher); err != nil {
+		t.Fatal(err)
+	}
+	match, err = ordering.MatchProfile("outside/example", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile == nil || match.Profile.Name != "longer-label-set" {
+		t.Fatalf("label-count ordering selected %#v, want longer-label-set", match.Profile)
+	}
+	longer, err := ordering.GetProfile("longer-label-set")
+	if err != nil {
+		t.Fatal(err)
+	}
+	longer.Enabled = false
+	if _, err := ordering.UpsertProfile(longer); err != nil {
+		t.Fatal(err)
+	}
+	match, err = ordering.MatchProfile("outside/example", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile == nil || match.Profile.Name != "a-name" {
+		t.Fatalf("name ordering selected %#v, want a-name", match.Profile)
+	}
+}
+
+func TestMatchProfileProductionRequestSurvivesMigrationAndRetry(t *testing.T) {
+	// This test catches a catalog migration that rewrites an already-admitted
+	// request or a retry path that rematches it instead of retaining its spec.
+	databaseURL := filepath.Join(t.TempDir(), "runnerd.db")
+	store := NewWithOptions(Options{Backend: BackendSQLite, DatabaseDSN: databaseURL, MigrateOnStart: true}).(*DBStore)
+	loadProductionRunnerCatalog(t, store)
+
+	match, err := store.MatchProfile("qbox/example", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile == nil || match.Profile.Name != "github-runner-ubuntu-24-04" {
+		t.Fatalf("legacy match = %#v, want github-runner-ubuntu-24-04", match)
+	}
+	createdAt := time.Date(2026, time.August, 13, 9, 10, 11, 0, time.UTC)
+	request := RunnerRequest{
+		ID:                     "legacy-admitted-request",
+		Source:                 "test",
+		RepositoryFullName:     "qbox/example",
+		RequestedLabels:        []string{"self-hosted", "e2b"},
+		Labels:                 append([]string(nil), match.Profile.Labels...),
+		ProfileName:            match.Profile.Name,
+		RunnerGroup:            match.Profile.RunnerGroup,
+		RunnerName:             "e2b-legacy-admitted-request",
+		SandboxAPIURL:          "https://sandbox.example.test",
+		SandboxAPIKeyEncrypted: "fixture-encrypted-snapshot",
+		SandboxConfigSource:    "account",
+		CreatedAt:              createdAt,
+	}
+	if created, _, err := store.CreateRequest(request, nil); err != nil || !created {
+		t.Fatalf("CreateRequest created=%v err=%v", created, err)
+	}
+	beforeRequest, err := store.ReadRequest(request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeState, err := store.ReadState(request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	restarted := NewWithOptions(Options{Backend: BackendSQLite, DatabaseDSN: databaseURL, MigrateOnStart: true}).(*DBStore)
+	afterRequest, err := restarted.ReadRequest(request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterState, err := restarted.ReadState(request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRequest.ProfileName != beforeRequest.ProfileName ||
+		afterRequest.RunnerGroup != beforeRequest.RunnerGroup ||
+		!reflect.DeepEqual(afterRequest.RequestedLabels, beforeRequest.RequestedLabels) ||
+		afterRequest.SandboxAPIURL != beforeRequest.SandboxAPIURL ||
+		afterRequest.SandboxAPIKeyEncrypted != beforeRequest.SandboxAPIKeyEncrypted ||
+		afterRequest.SandboxConfigSource != beforeRequest.SandboxConfigSource ||
+		afterState.SandboxAPIURL != beforeState.SandboxAPIURL ||
+		afterState.SandboxAPIKeyEncrypted != beforeState.SandboxAPIKeyEncrypted ||
+		afterState.SandboxConfigSource != beforeState.SandboxConfigSource ||
+		!afterRequest.CreatedAt.Equal(beforeRequest.CreatedAt) ||
+		!afterState.CreatedAt.Equal(beforeState.CreatedAt) ||
+		!afterState.UpdatedAt.Equal(beforeState.UpdatedAt) {
+		t.Fatalf("migration rewrote admitted request: before request=%#v state=%#v after request=%#v state=%#v", beforeRequest, beforeState, afterRequest, afterState)
+	}
+
+	afterState.Status = StatusFailed
+	afterState.LastErrorRetryable = true
+	if err := restarted.WriteState(afterState); err != nil {
+		t.Fatal(err)
+	}
+	retried, err := restarted.RetryRequest(request.ID, time.Date(2026, time.August, 13, 9, 11, 12, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.ProfileName != "github-runner-ubuntu-24-04" ||
+		retried.RunnerGroup != "Default" ||
+		!reflect.DeepEqual(retried.RequestedLabels, []string{"self-hosted", "e2b"}) {
+		t.Fatalf("retry changed persisted admission: %#v", retried)
 	}
 }
 

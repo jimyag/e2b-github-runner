@@ -254,6 +254,74 @@ func TestRunnerLifecycleCustomTemplateUsesStoredIDWithoutCatalog(t *testing.T) {
 	}
 }
 
+func TestRunnerLifecycleRetryUsesPersistedSpecWithoutPolicyOrGroupReads(t *testing.T) {
+	// Characterization test: a retry starts from its admitted Runner Spec. It
+	// catches a migration that rematches a stored request through retired policy
+	// or internal-group tables.
+	baseStore := state.New(t.TempDir())
+	upsertLifecycleProfile(t, baseStore, state.RunnerProfile{
+		Name:           "legacy-admitted-custom",
+		Labels:         []string{"self-hosted", "e2b", "legacy-admitted-custom"},
+		TemplateID:     "persisted-custom-template",
+		RunnerGroup:    "Default",
+		MaxConcurrency: 1,
+		Enabled:        true,
+	})
+	created, failed, err := baseStore.CreateRequest(state.RunnerRequest{
+		ID:                 "retry-persisted-spec",
+		Source:             "test",
+		RepositoryFullName: "o/r",
+		RequestedLabels:    []string{"self-hosted", "e2b"},
+		Labels:             []string{"self-hosted", "e2b", "legacy-admitted-custom"},
+		ProfileName:        "legacy-admitted-custom",
+		RunnerGroup:        "Default",
+		RunnerName:         "e2b-retry-persisted-spec",
+	}, nil)
+	if err != nil || !created {
+		t.Fatalf("CreateRequest created=%v err=%v", created, err)
+	}
+	failed.Status = state.StatusFailed
+	failed.LastErrorRetryable = true
+	if err := baseStore.WriteState(failed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := baseStore.RetryRequest("retry-persisted-spec", time.Date(2026, time.August, 13, 9, 11, 12, 0, time.UTC)); err != nil {
+		t.Fatal(err)
+	}
+
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/orgs/o/actions/runners/registration-token" {
+			t.Errorf("unexpected GitHub request: %s %s", r.Method, r.URL.Path)
+			http.Error(w, "unexpected request", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"token":"runner-token","expires_at":"2026-08-13T10:00:00Z"}`))
+	}))
+	defer ghServer.Close()
+
+	store := &catalogReadRejectingStore{Store: baseStore}
+	sandbox := &lifecycleSandboxService{}
+	srv := newRunnerLifecycleTestServer(t, store, ghServer.URL, sandbox)
+	srv.startRunner(context.Background(), "retry-persisted-spec", "worker-test")
+
+	got, err := baseStore.ReadState("retry-persisted-spec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusRunning || got.ProfileName != "legacy-admitted-custom" || got.RunnerGroup != "Default" || !equalStrings(got.RequestedLabels, []string{"self-hosted", "e2b"}) {
+		t.Fatalf("retry state = %#v, want running request with persisted admission fields", got)
+	}
+	inputs := sandbox.startInputs()
+	if len(inputs) != 1 || inputs[0].TemplateID != "persisted-custom-template" || inputs[0].RunnerGroup != "Default" || !equalStrings(inputs[0].Labels, []string{"self-hosted", "e2b", "legacy-admitted-custom"}) {
+		t.Fatalf("retry StartRunner inputs = %#v, want persisted custom profile", inputs)
+	}
+	if store.groupReads != 0 || store.policyReads != 0 {
+		t.Fatalf("retry read retired catalog tables: group reads=%d policy reads=%d", store.groupReads, store.policyReads)
+	}
+}
+
 func TestRunnerLifecycleManagedDefaultResolvesBeforeRegistration(t *testing.T) {
 	events := &lifecycleEventRecorder{}
 	ghServer := newLifecycleGitHubServer(t, events)
@@ -622,6 +690,22 @@ func (r *lifecycleEventRecorder) snapshot() []string {
 type profileLoadRecordingStore struct {
 	state.Store
 	events *lifecycleEventRecorder
+}
+
+type catalogReadRejectingStore struct {
+	state.Store
+	groupReads  int
+	policyReads int
+}
+
+func (s *catalogReadRejectingStore) ListRunnerGroups() ([]state.RunnerGroup, error) {
+	s.groupReads++
+	return nil, errors.New("retry must not read internal runner groups")
+}
+
+func (s *catalogReadRejectingStore) ListRepositoryPolicies() ([]state.RepositoryPolicy, error) {
+	s.policyReads++
+	return nil, errors.New("retry must not read repository policies")
 }
 
 func (s *profileLoadRecordingStore) GetProfile(name string) (state.RunnerProfile, error) {
