@@ -501,7 +501,11 @@ func (s *DBStore) CompareProfileMatches(repositoryFullName string, labels []stri
 			profiles = append(profiles, profile)
 		}
 
-		if tx.Migrator().HasTable(&repositoryPolicyRecord{}) {
+		hasPolicies, err := catalogTableExists(tx, repositoryPolicyRecord{}.TableName())
+		if err != nil {
+			return err
+		}
+		if hasPolicies {
 			var policyRecords []repositoryPolicyRecord
 			if err := tx.Order("repository_full_name ASC, id ASC").Find(&policyRecords).Error; err != nil {
 				return err
@@ -512,13 +516,21 @@ func (s *DBStore) CompareProfileMatches(repositoryFullName string, labels []stri
 			}
 		}
 
-		if tx.Migrator().HasTable(&runnerGroupRecord{}) {
+		hasGroups, err := catalogTableExists(tx, runnerGroupRecord{}.TableName())
+		if err != nil {
+			return err
+		}
+		if hasGroups {
 			var groupRecords []runnerGroupRecord
 			if err := tx.Order("name ASC").Find(&groupRecords).Error; err != nil {
 				return err
 			}
 			specsByGroup := make(map[string][]string, len(groupRecords))
-			if tx.Migrator().HasTable(&runnerGroupSpecRecord{}) {
+			hasGroupSpecs, err := catalogTableExists(tx, runnerGroupSpecRecord{}.TableName())
+			if err != nil {
+				return err
+			}
+			if hasGroupSpecs {
 				var specRecords []runnerGroupSpecRecord
 				if err := tx.Order("group_name ASC, spec_name ASC").Find(&specRecords).Error; err != nil {
 					return err
@@ -549,6 +561,25 @@ func (s *DBStore) CompareProfileMatches(repositoryFullName string, labels []stri
 	}
 	enabled := profileMatchFromCandidates(repositoryFullName, labels, profiles)
 	return ProfileMatchComparison{Legacy: legacy, Enabled: enabled}, nil
+}
+
+func catalogTableExists(tx *gorm.DB, tableName string) (bool, error) {
+	var query string
+	switch tx.Dialector.Name() {
+	case BackendSQLite:
+		query = `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`
+	case BackendPostgres:
+		query = `SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = ? AND table_type = 'BASE TABLE'`
+	case BackendMySQL:
+		query = `SELECT count(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ? AND table_type = 'BASE TABLE'`
+	default:
+		return false, fmt.Errorf("unsupported state backend for catalog table lookup: %s", tx.Dialector.Name())
+	}
+	var count int64
+	if err := tx.Raw(query, tableName).Scan(&count).Error; err != nil {
+		return false, fmt.Errorf("check catalog table %q: %w", tableName, err)
+	}
+	return count > 0, nil
 }
 
 func legacyAllowedProfiles(profiles []RunnerProfile, policies []RepositoryPolicy, groups []RunnerGroup, repositoryFullName string) []RunnerProfile {

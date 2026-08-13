@@ -1,6 +1,8 @@
 package state
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,50 @@ import (
 
 	"gorm.io/gorm"
 )
+
+var errCatalogMetadataLookup = errors.New("catalog metadata lookup failed")
+
+type catalogMetadataFailingPool struct {
+	gorm.ConnPool
+	tableName string
+}
+
+func (p *catalogMetadataFailingPool) BeginTx(ctx context.Context, opts *sql.TxOptions) (gorm.ConnPool, error) {
+	beginner, ok := p.ConnPool.(gorm.TxBeginner)
+	if !ok {
+		return nil, fmt.Errorf("test connection does not support transactions")
+	}
+	tx, err := beginner.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &catalogMetadataFailingTx{Tx: tx, tableName: p.tableName}, nil
+}
+
+type catalogMetadataFailingTx struct {
+	*sql.Tx
+	tableName string
+}
+
+func (tx *catalogMetadataFailingTx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if tx.failsCatalogLookup(query, args) {
+		return nil, errCatalogMetadataLookup
+	}
+	return tx.Tx.QueryContext(ctx, query, args...)
+}
+
+func (tx *catalogMetadataFailingTx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if tx.failsCatalogLookup(query, args) {
+		cancelled, cancel := context.WithCancel(ctx)
+		cancel()
+		return tx.Tx.QueryRowContext(cancelled, query, args...)
+	}
+	return tx.Tx.QueryRowContext(ctx, query, args...)
+}
+
+func (tx *catalogMetadataFailingTx) failsCatalogLookup(query string, args []any) bool {
+	return strings.Contains(query, "sqlite_master") && len(args) == 1 && args[0] == tx.tableName
+}
 
 func closeTestDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
@@ -3116,6 +3162,32 @@ func TestCompareProfileMatchesEnabledCatalogIgnoresLegacyTables(t *testing.T) {
 			}
 			if comparison.Enabled.Profile == nil || comparison.Enabled.Profile.Name != "selected" || comparison.Enabled.Reason != "" {
 				t.Fatalf("enabled match = %#v, want selected", comparison.Enabled)
+			}
+		})
+	}
+}
+
+func TestCompareProfileMatchesReturnsCatalogMetadataLookupError(t *testing.T) {
+	for _, tableName := range []string{"repository_policies", "runner_groups", "runner_group_specs"} {
+		t.Run(tableName, func(t *testing.T) {
+			store := New(t.TempDir()).(*DBStore)
+			if _, err := store.UpsertProfile(RunnerProfile{
+				Name: "enabled", Labels: []string{"self-hosted", "e2b"},
+				TemplateID: "enabled", MaxConcurrency: 1, Enabled: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			db, err := store.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			faultDB := db.Session(&gorm.Session{NewDB: true})
+			faultDB.Statement.ConnPool = &catalogMetadataFailingPool{ConnPool: db.Statement.ConnPool, tableName: tableName}
+			store.db = faultDB
+
+			comparison, err := store.CompareProfileMatches("owner/repo", []string{"self-hosted", "e2b"})
+			if !errors.Is(err, errCatalogMetadataLookup) {
+				t.Fatalf("CompareProfileMatches error = %v with comparison %#v, want catalog metadata error", err, comparison)
 			}
 		})
 	}
