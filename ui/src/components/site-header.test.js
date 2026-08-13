@@ -25,6 +25,8 @@ describe("SiteHeader", () => {
     )
 
     expect(html).toContain('aria-label="Account menu"')
+    expect(html).toContain('href="/docs"')
+    expect(html).toContain('aria-label="Documentation"')
     expect(html).toContain('src="https://avatars.example.test/miclle.png"')
     expect(html).not.toContain("Toggle theme")
     expect(html).not.toContain('data-language-switcher="true"')

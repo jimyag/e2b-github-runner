@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { lazy, Suspense, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
@@ -80,6 +80,10 @@ import {
   requiresGitHubReauthentication,
   type RequestError,
 } from "@/user-auth-errors"
+
+const DocsPage = lazy(() =>
+  import("@/components/docs-page").then(({ DocsPage: Component }) => ({ default: Component }))
+)
 
 type AccountSettingsTab = "repositories" | "preferences" | "sandbox-templates" | "sandbox-instances"
 type AccountSettingsRoute = {
@@ -947,7 +951,20 @@ function App() {
   if (routeAccess === "public") {
     return (
       <>
-        <LandingPage />
+        {locationPath === "/" ? (
+          <LandingPage />
+        ) : (
+          <Suspense
+            fallback={
+              <div
+                className="min-h-screen bg-[#f7fbfd] dark:bg-[#07171e]"
+                aria-busy="true"
+              />
+            }
+          >
+            <DocsPage path={locationPath} />
+          </Suspense>
+        )}
         <Toaster richColors />
       </>
     )

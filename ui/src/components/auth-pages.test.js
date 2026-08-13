@@ -20,6 +20,8 @@ describe("authentication route pages", () => {
 
       expect(html).toContain("登录后继续")
       expect(html).toContain("使用 GitHub 继续")
+      expect(html).toContain('href="/docs/getting-started/hosted"')
+      expect(html).toContain("先阅读托管版快速开始")
       expect(html).toContain("返回首页")
     } finally {
       await i18n.changeLanguage("en")

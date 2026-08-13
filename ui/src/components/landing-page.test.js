@@ -132,9 +132,8 @@ describe("LandingPage", () => {
     expect(html).toContain("Use hosted service")
     expect(html).toContain("Deploy runnerd")
     expect(html).toContain('href="/jobs"')
-    expect(html).toContain(
-      'href="https://github.com/qiniu/ci-runner#quick-start"',
-    )
+    expect(html).toContain('href="/docs/getting-started/hosted"')
+    expect(html).toContain('href="/docs/getting-started/deploy"')
     expect(html).toContain("Both run workflow jobs on Qiniu Sandbox")
     expect(html).toContain("cloud service operated by Qiniu")
     expect(html).toContain("GitHub.com")
@@ -174,7 +173,9 @@ describe("LandingPage", () => {
 
     expect(html).toContain('href="#capabilities"')
     expect(html).toContain('href="#how-it-works"')
-    expect(html).toContain('href="https://github.com/qiniu/ci-runner#documentation"')
+    expect(html).toContain('href="/docs"')
+    expect(html).toContain('href="/docs/getting-started/hosted"')
+    expect(html).toContain('href="/docs/getting-started/deploy"')
     expect(html).toContain('href="/jobs"')
     expect(html).toContain('aria-label="Documentation"')
   })

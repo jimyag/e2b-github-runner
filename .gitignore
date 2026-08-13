@@ -13,3 +13,5 @@ templates/*/.qshell-sandbox.*
 secrets/
 .smee-url
 tmp/
+.gstack/
+.worktrees/

@@ -22,13 +22,21 @@ export function SignInPage({
       description={t("auth.signInDescription", { destination: destination.toLowerCase() })}
     >
       {oauthEnabled ? (
-        <a
-          href={signInURLFromReturnTo(returnTo)}
-          className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#00aae7] px-5 text-sm font-semibold text-[#041018] transition-colors hover:bg-[#27c5f5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00aae7]"
-        >
-          <Github className="h-4 w-4" />
-          {t("auth.continueGitHub")}
-        </a>
+        <div className="flex flex-col items-start gap-4">
+          <a
+            href={signInURLFromReturnTo(returnTo)}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#00aae7] px-5 text-sm font-semibold text-[#041018] transition-colors hover:bg-[#27c5f5] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#00aae7]"
+          >
+            <Github className="h-4 w-4" />
+            {t("auth.continueGitHub")}
+          </a>
+          <a
+            href="/docs/getting-started/hosted"
+            className="text-sm font-semibold text-[#006b91] hover:text-[#004e6b]"
+          >
+            {t("auth.readHostedGuide")}
+          </a>
+        </div>
       ) : (
         <div className="rounded-lg border border-[#f0d5a8] bg-[#fff9ed] px-4 py-3 text-sm leading-6 text-[#6f4b11]" role="status">
           <strong className="block">{t("auth.signInUnavailable")}</strong>

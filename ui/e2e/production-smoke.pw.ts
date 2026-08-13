@@ -8,12 +8,7 @@ const postRenderObservationMs = 1_000
 test("boots the public landing page from the production bundle", async ({ page }) => {
   const diagnostics = observeBrowserDiagnostics(page)
 
-  const authSessionRoute = getLocalAuthSessionRoute(process.env.RUNNERD_UI_SMOKE_BASE_URL)
-  if (authSessionRoute) {
-    await page.route(authSessionRoute.pattern, async (route) => {
-      await route.fulfill({ json: authSessionRoute.json })
-    })
-  }
+  await routeLocalAnonymousSession(page)
 
   const response = await page.goto("/", { waitUntil: "networkidle" })
 
@@ -22,6 +17,64 @@ test("boots the public landing page from the production bundle", async ({ page }
     page.getByRole("heading", { name: "GitHub Actions, powered by Qiniu Sandbox" }),
   ).toBeVisible()
   await expect(page.locator("#root")).not.toBeEmpty()
+  await page.waitForTimeout(postRenderObservationMs)
+  diagnostics.expectClean()
+})
+
+test("serves the hosted guide as a responsive public production route", async ({ page }) => {
+  const diagnostics = observeBrowserDiagnostics(page)
+
+  await routeLocalAnonymousSession(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  const response = await page.goto("/docs/getting-started/hosted", { waitUntil: "networkidle" })
+
+  expect(response?.ok()).toBe(true)
+  await expect(
+    page.getByRole("heading", { name: "Get started with the hosted service", exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole("link", { name: "Copy a complete workflow" })).toHaveAttribute(
+    "href",
+    "/docs/guides/workflow",
+  )
+  await expect(page.locator("#root")).not.toBeEmpty()
+
+  const viewport = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }))
+  expect(viewport.documentWidth).toBeLessThanOrEqual(viewport.viewportWidth + 1)
+
+  await page.waitForTimeout(postRenderObservationMs)
+  diagnostics.expectClean()
+})
+
+test("serves the custom template guide from the production bundle", async ({ page }) => {
+  const diagnostics = observeBrowserDiagnostics(page)
+
+  await routeLocalAnonymousSession(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  const response = await page.goto("/docs/guides/custom-templates", { waitUntil: "networkidle" })
+
+  expect(response?.ok()).toBe(true)
+  await expect(
+    page.getByRole("heading", { name: "Build and use a custom runner template", exact: true }),
+  ).toBeVisible()
+  await expect(page).toHaveTitle("Build and use a custom runner template · Qiniu CI Runner")
+  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+    "content",
+    "Build a private Qiniu Sandbox template for your own tools, connect it to a custom Runner Spec, and select it from a GitHub Actions workflow.",
+  )
+  await expect(
+    page.locator("pre code").filter({ hasText: "qshell sandbox template build --wait" }),
+  ).toBeVisible()
+  await expect(page.getByText("Status: ready", { exact: true }).first()).toBeVisible()
+
+  const viewport = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }))
+  expect(viewport.documentWidth).toBeLessThanOrEqual(viewport.viewportWidth + 1)
+
   await page.waitForTimeout(postRenderObservationMs)
   diagnostics.expectClean()
 })
@@ -158,6 +211,15 @@ test("keeps the Jobs list independently scrollable beside the Web Console", asyn
   await page.waitForTimeout(postRenderObservationMs)
   diagnostics.expectClean()
 })
+
+async function routeLocalAnonymousSession(page: Page) {
+  const authSessionRoute = getLocalAuthSessionRoute(process.env.RUNNERD_UI_SMOKE_BASE_URL)
+  if (!authSessionRoute) return
+
+  await page.route(authSessionRoute.pattern, async (route) => {
+    await route.fulfill({ json: authSessionRoute.json })
+  })
+}
 
 function observeBrowserDiagnostics(page: Page) {
   const consoleErrors: string[] = []

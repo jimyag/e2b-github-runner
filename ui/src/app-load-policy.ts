@@ -1,4 +1,5 @@
 import { adminSections, type AdminSection } from "@/admin-types"
+import { isSiteDocumentPath } from "@/site-doc-routes"
 
 export const userRunnerInitialPageSize = 100
 export const userRunnerHistoryWindow = 500
@@ -96,7 +97,7 @@ export function userRunnerRequestsPath(limit: number, offset: number): string {
 }
 
 export function appRouteAccess(path: string): AppRouteAccess {
-  if (path === "/") return "public"
+  if (path === "/" || isSiteDocumentPath(path)) return "public"
   if (isAdminRoute(path)) return "admin"
   if (isUserRoute(path)) return "user"
   return "not-found"

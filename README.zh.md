@@ -6,10 +6,11 @@
 
 <p align="center">
   <a href="./README.md">English</a> ·
+  <a href="https://runner.qiniuinc.com/docs/getting-started/hosted">托管版指南</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="https://app-6a6b0d723d3a24e095531129.app.qiniucc.com/">一键部署到七牛云 LAS</a> ·
-  <a href="https://github.com/qiniu/ci-runner/issues/59">部署使用指南</a> ·
-  <a href="#文档">文档</a> ·
+  <a href="https://runner.qiniuinc.com/docs/getting-started/deploy">部署使用指南</a> ·
+  <a href="https://runner.qiniuinc.com/docs">文档</a> ·
   <a href="#许可证">许可证</a> ·
   <a href="#社区与贡献">社区与贡献</a>
 </p>
@@ -72,7 +73,7 @@ cp runnerd.yaml.example runnerd.yaml
 ./bin/runnerd --config runnerd.yaml
 ```
 
-5. 打开 `http://<host>:25500/`，使用 GitHub OAuth 登录。公开产品首页提供当前 GitHub 文档入口，以及指向 `/jobs` 受保护的 Jobs 控制台入口。用户首次登录访问 `/jobs` 时，会看到介绍 Jobs、Repositories、Settings 和 Sandbox 设置的六步引导；之后可从账户菜单重播。
+5. 打开 `http://<host>:25500/`，使用 GitHub OAuth 登录。公开产品首页提供同域 `/docs` 指南，以及指向 `/jobs` 受保护的 Jobs 控制台入口。用户首次登录访问 `/jobs` 时，会看到介绍 Jobs、Repositories、Settings 和 Sandbox 设置的六步引导；之后可从账户菜单重播。
 6. 打开 **Repositories** 查看账户或组织的 **Runner readiness**。有效来源只显示状态，不提供配置控件；缺少 Sandbox 且用户可管理该 scope 时，通过 **Configure Sandbox** 进入精确的账户或组织 **Preferences** 页面并配置 **Sandbox Service** 凭据。Settings 只列出个人账户和用户属于 active member 的组织；outside collaborator 只能看到 readiness 只读提示，不能浏览该组织的 Sandbox 资源目录。管理员可以在 `/admin/sandbox_service` 配置兜底。
 7. 在**管理控制台**中确认 5 个 Qiniu managed Runner Specs。它们的公共模板已通过双区域 release gate；operator 仍可禁用单个 managed spec，或调整并发与 idle capacity。
 8. 配置 GitHub webhook → `POST http://<host>:25500/webhooks/github`。
@@ -211,7 +212,7 @@ catalog 更新并取得新的区域 smoke 证据。
 | `/admin/accounts`        | 账户管理：列表、搜索、角色变更 |
 | `/admin/sandbox_service` | Sandbox 服务配置               |
 
-`/` 始终是公开的 Qiniu CI Runner 产品首页。普通用户 Jobs 首页位于 `/jobs`；其他受保护路由包括 `/repositories`、PR job 分组（`/github/pulls/{owner}/{repo}/{number}/jobs`）、账户设置（`/account/preferences`、`/account/sandbox-templates`、`/account/sandbox-instances`），以及对应的 `/organizations/{login}/...` 路由。未登录访问受保护路由时会显示独立的 GitHub 登录页，并在 OAuth 完成后返回原 URL。
+`/` 始终是公开的 Qiniu CI Runner 产品首页。`/docs` 及其固定指南路由公开、同域，并提供英文和简体中文。普通用户 Jobs 首页位于 `/jobs`；其他受保护路由包括 `/repositories`、PR job 分组（`/github/pulls/{owner}/{repo}/{number}/jobs`）、账户设置（`/account/preferences`、`/account/sandbox-templates`、`/account/sandbox-instances`），以及对应的 `/organizations/{login}/...` 路由。未登录访问受保护路由时会显示独立的 GitHub 登录页，并在 OAuth 完成后返回原 URL。
 
 Runner request 列表默认返回最新 100 行，单页最多 500 行，并且只读取公开 runner state 所需字段，不加载已保存的 webhook payload 或 Sandbox credentials。Admin 轮询使用 `(queued_at DESC, id ASC)` 索引；经过 repository 授权的普通用户轮询通过 `(github_installation_id, queued_at DESC, id ASC)` 分别查询每个 installation，再合并有界结果，同时保留精确的 installation/repository 授权关系。
 
@@ -273,6 +274,7 @@ task release-check # 验证发布构建
 
 | 文档                                                                                   | 说明                                                    |
 | -------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| [站点指南](https://runner.qiniuinc.com/docs)                                           | 托管版快速开始、runnerd 部署、Workflow 示例、自定义模板全流程、故障排查和 managed labels |
 | [docs/zh/testing.md](docs/zh/testing.md)                                               | 本地测试、GitHub App/OAuth 设置、webhook 转发、故障排查 |
 | [docs/zh/deployment-smoke.md](docs/zh/deployment-smoke.md)                             | 生产环境就绪检查清单                                    |
 | [docs/zh/default-runner-templates.md](docs/zh/default-runner-templates.md)             | 公共模板 labels、qshell 发布流程、区域 smoke 和回滚     |
