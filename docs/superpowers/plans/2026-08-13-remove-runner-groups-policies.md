@@ -57,7 +57,7 @@ unchanged scoped/default Sandbox credential resolution
 public-name resolution or custom template ID creation
 ```
 
-The four public managed templates remain visible through the public/default template catalog. qbox custom templates remain governed by the effective Sandbox account/organization credentials and provider permissions. Removing Group/Policy must not move template authorization into Runner Spec.
+The four public managed templates remain visible to every user through a credential-independent public runner-template catalog. qbox custom templates remain governed by the effective Sandbox account/organization credentials and provider permissions. Removing Group/Policy must not move template authorization into Runner Spec.
 
 ## Rollout Sequence
 
@@ -95,11 +95,13 @@ tests := []struct {
 	labels     []string
 	wantSpec   string
 }{
-	{"managed slim", "outside/example", []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-slim"}, "qiniu-ubuntu-slim"},
-	{"managed 2204", "outside/example", []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-22.04"}, "qiniu-ubuntu-22.04"},
-	{"managed 2404", "outside/example", []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-24.04"}, "qiniu-ubuntu-24.04"},
-	{"managed 2604", "outside/example", []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-26.04"}, "qiniu-ubuntu-26.04"},
-	{"managed latest", "outside/example", []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-latest"}, "qiniu-ubuntu-latest"},
+	{"managed slim canonical", "outside/example", []string{"qiniu", "ubuntu-slim"}, "qiniu-ubuntu-slim"},
+	{"managed 2204 canonical", "outside/example", []string{"qiniu", "ubuntu-22.04"}, "qiniu-ubuntu-22.04"},
+	{"managed 2404 canonical", "outside/example", []string{"qiniu", "ubuntu-24.04"}, "qiniu-ubuntu-24.04"},
+	{"managed 2604 canonical", "outside/example", []string{"qiniu", "ubuntu-26.04"}, "qiniu-ubuntu-26.04"},
+	{"managed latest canonical", "outside/example", []string{"qiniu", "ubuntu-latest"}, "qiniu-ubuntu-latest"},
+	{"managed 2404 advertised", "outside/example", []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-24.04"}, "qiniu-ubuntu-24.04"},
+	{"legacy generic custom", "qbox/example", []string{"self-hosted", "e2b"}, "github-runner-ubuntu-24-04"},
 	{"legacy public custom", "goplus/example", []string{"self-hosted", "e2b", "github-runner-ubuntu-24-04"}, "github-runner-ubuntu-24-04"},
 	{"legacy public custom outside policy", "outside/example", []string{"self-hosted", "e2b", "github-runner-ubuntu-24-04"}, "github-runner-ubuntu-24-04"},
 	{"qbox dora 1604", "qbox/example", []string{"self-hosted", "e2b", "qbox-dora-ubuntu-16-04"}, "qbox-dora-ubuntu-16-04"},
@@ -115,7 +117,7 @@ Assert that disabled specs remain ineligible, unmatched labels still return `pro
 
 - [ ] **Step 4: Add queued-request and retry compatibility tests**
 
-Create a request selected under the legacy matcher, restart the store through the migration path, and assert that `ProfileName`, `RunnerGroup`, `RequestedLabels`, Sandbox snapshot fields, and timestamps remain unchanged. Requeue a failed request and assert it starts from its persisted spec without re-reading Group/Policy.
+Create a request selected under the legacy matcher, restart the store through the migration path, and assert that `ProfileName`, `RunnerGroup`, `RequestedLabels`, Sandbox snapshot fields, and timestamps remain unchanged. Requeue a failed request and assert it starts from its persisted spec without re-reading Group/Policy. Replay every distinct non-empty `requested_labels_json` value observed in the production snapshot and require the legacy and policy-free matcher to select the same spec; this covers deployed custom label combinations beyond the named regression cases.
 
 - [ ] **Step 5: Run the focused baseline**
 
@@ -232,14 +234,22 @@ git commit -m "feat(runner): shadow policy-free spec matching"
 
 - [ ] **Step 1: Export the production database before deployment**
 
-Use the backend-native consistent backup mechanism. For sqlite, copy through the sqlite backup command rather than copying the live WAL database file:
+Use `GET /diagnostics/pprof` on the deployment being upgraded to record the effective backend and the resolved, credential-redacted database location. Compare it with the service's `--config` path and deployment database attachment before taking a backup; do not infer the production database from the process working directory. For sqlite, set both variables below to absolute paths approved by the operator, require the source to exist, and copy through the sqlite backup command rather than copying the live WAL database file:
 
 ```bash
-sqlite3 ./var/runnerd.db ".backup './var/runnerd-before-policy-removal.db'"
-sqlite3 ./var/runnerd-before-policy-removal.db "PRAGMA integrity_check;"
+test -n "$RUNNERD_MIGRATION_SQLITE_SOURCE"
+test -f "$RUNNERD_MIGRATION_SQLITE_SOURCE"
+test -n "$RUNNERD_MIGRATION_SQLITE_BACKUP"
+test ! -e "$RUNNERD_MIGRATION_SQLITE_BACKUP"
+sqlite3 "$RUNNERD_MIGRATION_SQLITE_SOURCE" ".backup '$RUNNERD_MIGRATION_SQLITE_BACKUP'"
+sqlite3 "$RUNNERD_MIGRATION_SQLITE_BACKUP" "PRAGMA integrity_check;"
+sqlite3 "$RUNNERD_MIGRATION_SQLITE_SOURCE" \
+  "SELECT 'runner_profiles', COUNT(*) FROM runner_profiles UNION ALL SELECT 'runner_groups', COUNT(*) FROM runner_groups UNION ALL SELECT 'repository_policies', COUNT(*) FROM repository_policies;"
+sqlite3 "$RUNNERD_MIGRATION_SQLITE_BACKUP" \
+  "SELECT 'runner_profiles', COUNT(*) FROM runner_profiles UNION ALL SELECT 'runner_groups', COUNT(*) FROM runner_groups UNION ALL SELECT 'repository_policies', COUNT(*) FROM repository_policies;"
 ```
 
-Expected: `ok`. For Postgres or MySQL, use the platform's managed snapshot/point-in-time recovery facility and record its snapshot identifier.
+Expected: `ok`, and identical source/backup row counts for all three catalog tables. For Postgres or MySQL, use the platform's managed snapshot/point-in-time recovery facility for the exact effective database reported by Diagnostics, record its snapshot identifier, and verify the same three row counts through both the live connection and a restored disposable database before authorizing deployment.
 
 - [ ] **Step 2: Capture the pre-deploy catalog rows read-only**
 
@@ -260,6 +270,12 @@ ORDER BY group_name, spec_name;
 SELECT id, repository_full_name, profile_name, runner_group_name, enabled
 FROM repository_policies
 ORDER BY id;
+
+SELECT requested_labels_json, COUNT(*) AS request_count
+FROM runner_requests
+WHERE requested_labels_json IS NOT NULL AND requested_labels_json <> ''
+GROUP BY requested_labels_json
+ORDER BY requested_labels_json;
 ```
 
 - [ ] **Step 3: Deploy Release A without changing any admin data**
@@ -410,7 +426,70 @@ git commit -m "refactor(admin): retire runner groups and policies"
 
 ---
 
-### Task 6: Remove the Group/Policy code models while preserving old databases
+### Task 6: Expose the four managed public templates without Sandbox credentials
+
+**Files:**
+- Create: `internal/runnercatalog/public_templates.go`
+- Create: `internal/runnercatalog/public_templates_test.go`
+- Create: `internal/server/server_public_templates.go`
+- Modify: `internal/server/server.go`
+- Modify: `internal/server/server_test.go`
+- Modify: `ui/src/admin-types.ts`
+- Modify: `ui/src/components/sandbox-catalog-sections.tsx`
+- Modify: `ui/src/components/sandbox-catalog-sections.test.js`
+- Modify: `ui/src/locales/en.ts`
+- Modify: `ui/src/locales/zh.ts`
+
+**Interfaces:**
+- Produces: unauthenticated `GET /api/public/runner-templates`.
+- Produces: `runnercatalog.PublicTemplates() []PublicTemplate` derived only from runnerd-owned managed catalog metadata.
+- Preserves: scoped `GET /user/sandbox/templates?region=<id>` for credential-bound provider templates, including qbox custom templates.
+
+```go
+type PublicTemplate struct {
+	DefaultTemplateName string     `json:"default_template_name"`
+	RunnerSpecNames     []string   `json:"runner_spec_names"`
+	WorkflowLabels      [][]string `json:"workflow_labels"`
+}
+```
+
+- [ ] **Step 1: Write failing public-catalog tests**
+
+Assert that a signed-out request with no Sandbox configuration returns HTTP 200 and exactly four unique templates: slim, 22.04, 24.04, and 26.04. The 24.04 entry must expose both `ubuntu-24.04` and `ubuntu-latest` workflow label pairs because those managed specs share one stable public template. Assert that no custom Spec name or provider template ID appears.
+
+- [ ] **Step 2: Derive public metadata from the managed runner catalog**
+
+Deduplicate `runnercatalog.DefaultProfiles()` by `DefaultTemplateName`, sort templates and aliases deterministically, and expose only stable public names, managed Spec names, and supported workflow label pairs. Do not call Sandbox and do not persist a region-specific template ID.
+
+- [ ] **Step 3: Add the public endpoint without authentication or credentials**
+
+Register `GET /api/public/runner-templates` outside admin/user authorization helpers. Return cacheable runnerd-owned metadata; never include Sandbox credentials, private template IDs, qbox custom Specs, build history, or account/organization information.
+
+- [ ] **Step 4: Keep public and credential-bound catalogs separate in the UI**
+
+Always render the four public managed templates from `/api/public/runner-templates`. Load `/user/sandbox/templates` separately for the selected manageable account/organization; an unconfigured or forbidden scoped catalog may show its own configuration message but must not hide or fail the public section.
+
+- [ ] **Step 5: Verify public visibility and scoped isolation**
+
+```bash
+go test ./internal/runnercatalog ./internal/server -run 'Test.*PublicTemplate' -count=1
+cd ui && bun test src/components/sandbox-catalog-sections.test.js
+task ui-i18n-check
+task ui-production-smoke
+```
+
+Expected: signed-out and signed-in users see the same four public templates without a Sandbox API key; scoped users additionally see only the provider templates returned by their effective credentials.
+
+- [ ] **Step 6: Commit the public catalog**
+
+```bash
+git add internal/runnercatalog internal/server ui/src
+git commit -m "feat(runner): expose public template catalog"
+```
+
+---
+
+### Task 7: Remove the Group/Policy code models while preserving old databases
 
 **Files:**
 - Modify: `internal/state/store.go`
@@ -488,7 +567,7 @@ git commit -m "refactor(state): remove runner group and policy models"
 
 ---
 
-### Task 7: Synchronize operator and user documentation
+### Task 8: Synchronize operator and user documentation
 
 **Files:**
 - Modify: `README.md`
@@ -520,11 +599,15 @@ Delete guidance that tells operators to create a Repository Policy for a custom 
 
 State that the internal Runner Group model no longer exists. `runner_group` remains an optional GitHub Organization Runner Group passed to GitHub runner registration.
 
-- [ ] **Step 3: Document rollback-safe database handling**
+- [ ] **Step 3: Document public versus scoped template catalogs**
+
+Document `/api/public/runner-templates` as credential-independent runnerd-owned metadata available to everyone. Keep `/user/sandbox/templates` documented as the credential-bound account/organization provider catalog; public visibility does not imply that every scope can create every template.
+
+- [ ] **Step 4: Document rollback-safe database handling**
 
 State that Release B/C ignore but preserve obsolete tables, and that table deletion is an explicit post-soak operator action.
 
-- [ ] **Step 4: Run documentation verification**
+- [ ] **Step 5: Run documentation verification**
 
 ```bash
 task ui-i18n-check
@@ -535,7 +618,7 @@ rg -n "Runner Polic|Repository Polic|internal Runner Group|default_available|run
 
 Expected: remaining matches refer only to migration history or the GitHub Runner Group distinction.
 
-- [ ] **Step 5: Commit documentation**
+- [ ] **Step 6: Commit documentation**
 
 ```bash
 git add README.md README.zh.md TODO.md AGENTS.md docs ui/src/content/site-docs .agents/rules
@@ -544,7 +627,7 @@ git commit -m "docs(runner): document policy-free runner specs"
 
 ---
 
-### Task 8: Deploy Release B/C with explicit canary and rollback gates
+### Task 9: Deploy Release B/C with explicit canary and rollback gates
 
 **Files:**
 - No additional repository file changes.
@@ -555,7 +638,7 @@ git commit -m "docs(runner): document policy-free runner specs"
 
 - [ ] **Step 1: Preflight immediately before Release B**
 
-Re-run the four catalog queries from Task 3 and compare them with the baseline. Any Spec field drift requires regenerating the expected match matrix before deployment.
+Re-run the five catalog queries from Task 3 and compare them with the baseline. Any Spec field drift requires regenerating the expected match matrix before deployment.
 
 - [ ] **Step 2: Deploy without deleting legacy data**
 
@@ -587,7 +670,7 @@ Remove the temporary shadow matcher, comparison metrics, compatibility API shims
 
 ---
 
-### Task 9: Perform optional destructive database cleanup after the rollback window
+### Task 10: Perform optional destructive database cleanup after the rollback window
 
 **Files:**
 - No startup migration code.
@@ -633,7 +716,7 @@ Run the full production canary matrix and compare active/queued request counts, 
 - [ ] No existing workflow changed its `runs-on` labels.
 - [ ] All ten current production label families select the same Runner Spec as before.
 - [ ] Existing queued, running, failed/retried, and completed requests retain their persisted spec and GitHub runner group.
-- [ ] The four public templates remain publicly discoverable through the public/default catalog.
+- [ ] Unauthenticated and authenticated requests to `/api/public/runner-templates` return the same four credential-independent public templates.
 - [ ] qbox custom-template access remains controlled by Sandbox account/organization credentials and provider permissions.
 - [ ] Repository allowlist and GitHub App authorization behavior is unchanged.
 - [ ] Admin UI contains Runner Specs but no internal Runner Groups or Runner Policies.
