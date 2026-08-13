@@ -304,7 +304,8 @@ func TestRunnerLifecycleRetryUsesPersistedSpecWithoutPolicyOrGroupReads(t *testi
 	store := &catalogReadRejectingStore{Store: baseStore}
 	sandbox := &lifecycleSandboxService{}
 	srv := newRunnerLifecycleTestServer(t, store, ghServer.URL, sandbox)
-	srv.startRunner(context.Background(), "retry-persisted-spec", "worker-test")
+	go srv.startRunner(context.Background(), "retry-persisted-spec", "worker-test")
+	waitForState(t, baseStore, "retry-persisted-spec", state.StatusRunning)
 
 	got, err := baseStore.ReadState("retry-persisted-spec")
 	if err != nil {
