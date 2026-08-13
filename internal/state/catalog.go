@@ -475,25 +475,86 @@ func (s *DBStore) DeleteRepositoryPolicy(id int64) error {
 }
 
 func (s *DBStore) MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error) {
-	policies, err := s.ListRepositoryPolicies()
+	comparison, err := s.CompareProfileMatches(repositoryFullName, labels)
+	return comparison.Legacy, err
+}
+
+func (s *DBStore) CompareProfileMatches(repositoryFullName string, labels []string) (ProfileMatchComparison, error) {
+	db, err := s.dbOrEnsure()
 	if err != nil {
-		return ProfileMatch{}, err
+		return ProfileMatchComparison{}, err
 	}
-	profiles, err := s.ListProfiles()
+	var profiles []RunnerProfile
+	var policies []RepositoryPolicy
+	var groups []RunnerGroup
+	err = db.Transaction(func(tx *gorm.DB) error {
+		var profileRecords []runnerProfileRecord
+		if err := tx.Order("priority DESC, name ASC").Find(&profileRecords).Error; err != nil {
+			return err
+		}
+		profiles = make([]RunnerProfile, 0, len(profileRecords))
+		for _, record := range profileRecords {
+			profile, err := recordToProfile(record)
+			if err != nil {
+				return err
+			}
+			profiles = append(profiles, profile)
+		}
+
+		if tx.Migrator().HasTable(&repositoryPolicyRecord{}) {
+			var policyRecords []repositoryPolicyRecord
+			if err := tx.Order("repository_full_name ASC, id ASC").Find(&policyRecords).Error; err != nil {
+				return err
+			}
+			policies = make([]RepositoryPolicy, 0, len(policyRecords))
+			for _, record := range policyRecords {
+				policies = append(policies, recordToRepositoryPolicy(record))
+			}
+		}
+
+		if tx.Migrator().HasTable(&runnerGroupRecord{}) {
+			var groupRecords []runnerGroupRecord
+			if err := tx.Order("name ASC").Find(&groupRecords).Error; err != nil {
+				return err
+			}
+			specsByGroup := make(map[string][]string, len(groupRecords))
+			if tx.Migrator().HasTable(&runnerGroupSpecRecord{}) {
+				var specRecords []runnerGroupSpecRecord
+				if err := tx.Order("group_name ASC, spec_name ASC").Find(&specRecords).Error; err != nil {
+					return err
+				}
+				for _, record := range specRecords {
+					specsByGroup[record.GroupName] = append(specsByGroup[record.GroupName], record.SpecName)
+				}
+			}
+			groups = make([]RunnerGroup, 0, len(groupRecords))
+			for _, record := range groupRecords {
+				groups = append(groups, RunnerGroup{
+					Name: record.Name, Description: record.Description,
+					SpecNames: specsByGroup[record.Name], Enabled: record.Enabled,
+					CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
+				})
+			}
+		}
+		return nil
+	}, catalogSnapshotTxOptions)
 	if err != nil {
-		return ProfileMatch{}, err
+		return ProfileMatchComparison{}, err
 	}
-	groups, err := s.ListRunnerGroups()
-	if err != nil {
-		return ProfileMatch{}, err
+
+	legacyCandidates := legacyAllowedProfiles(profiles, policies, groups, repositoryFullName)
+	legacy := profileMatchFromCandidates(repositoryFullName, labels, legacyCandidates)
+	if len(legacyCandidates) == 0 {
+		legacy.Reason = "profile_not_allowed"
 	}
+	enabled := profileMatchFromCandidates(repositoryFullName, labels, profiles)
+	return ProfileMatchComparison{Legacy: legacy, Enabled: enabled}, nil
+}
+
+func legacyAllowedProfiles(profiles []RunnerProfile, policies []RepositoryPolicy, groups []RunnerGroup, repositoryFullName string) []RunnerProfile {
 	groupsByName := make(map[string]RunnerGroup, len(groups))
 	for _, group := range groups {
 		groupsByName[group.Name] = group
-	}
-	match := ProfileMatch{
-		RepositoryFullName: repositoryFullName,
-		Labels:             append([]string(nil), labels...),
 	}
 	allowed := map[string]bool{}
 	for _, profile := range profiles {
@@ -520,22 +581,33 @@ func (s *DBStore) MatchProfile(repositoryFullName string, labels []string) (Prof
 			}
 		}
 	}
-	if len(allowed) == 0 {
-		match.Reason = "profile_not_allowed"
-		return match, nil
-	}
 	var candidates []RunnerProfile
 	for _, profile := range profiles {
-		if !profile.Enabled || !allowed[profile.Name] {
-			continue
+		if allowed[profile.Name] {
+			candidates = append(candidates, profile)
 		}
-		if labelsMatch(profile.RequiredLabels, labels) && labelsMatch(labels, profile.Labels) {
+	}
+	return candidates
+}
+
+func profileMatchFromCandidates(repositoryFullName string, labels []string, profiles []RunnerProfile) ProfileMatch {
+	match := ProfileMatch{RepositoryFullName: repositoryFullName, Labels: append([]string(nil), labels...)}
+	match.Profile = selectMatchingProfile(profiles, labels)
+	if match.Profile == nil {
+		match.Reason = "profile_labels_not_matched"
+	}
+	return match
+}
+
+func selectMatchingProfile(profiles []RunnerProfile, labels []string) *RunnerProfile {
+	var candidates []RunnerProfile
+	for _, profile := range profiles {
+		if profile.Enabled && labelsMatch(profile.RequiredLabels, labels) && labelsMatch(labels, profile.Labels) {
 			candidates = append(candidates, profile)
 		}
 	}
 	if len(candidates) == 0 {
-		match.Reason = "profile_labels_not_matched"
-		return match, nil
+		return nil
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].Priority != candidates[j].Priority {
@@ -546,6 +618,6 @@ func (s *DBStore) MatchProfile(repositoryFullName string, labels []string) (Prof
 		}
 		return candidates[i].Name < candidates[j].Name
 	})
-	match.Profile = &candidates[0]
-	return match, nil
+	selected := candidates[0]
+	return &selected
 }

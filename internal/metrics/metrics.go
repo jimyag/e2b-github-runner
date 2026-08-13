@@ -10,39 +10,40 @@ import (
 )
 
 var (
-	profileCurrent       = expvar.NewMap("e2b_runner_profile_current")
-	profileBusy          = expvar.NewMap("e2b_runner_profile_busy")
-	profileIdle          = expvar.NewMap("e2b_runner_profile_idle")
-	profileDesired       = expvar.NewMap("e2b_runner_profile_desired")
-	profilePending       = expvar.NewMap("e2b_runner_profile_pending")
-	profileStatus        = expvar.NewMap("e2b_runner_profile_status")
-	requestsByStatus     = expvar.NewMap("e2b_runner_requests_by_profile_status")
-	requestsByRepository = expvar.NewMap("e2b_runner_requests_by_repository_status")
-	retryState           = expvar.NewMap("e2b_runner_retry_state")
-	leaseState           = expvar.NewMap("e2b_runner_lease_state")
-	createDuration       = expvar.NewMap("e2b_runner_create_duration_ms_total")
-	createCount          = expvar.NewMap("e2b_runner_create_duration_count")
-	stopDuration         = expvar.NewMap("e2b_runner_stop_duration_ms_total")
-	stopCount            = expvar.NewMap("e2b_runner_stop_duration_count")
-	operationsTotal      = expvar.NewMap("e2b_runner_operations_total")
-	runnerRegistered     = expvar.NewMap("e2b_runner_registered_total")
-	runnerCleanup        = expvar.NewMap("e2b_runner_cleanup_total")
-	githubAPIOperations  = expvar.NewMap("e2b_runner_github_api_operations_total")
-	githubAPIDuration    = expvar.NewMap("e2b_runner_github_api_duration_ms_total")
-	httpRequestsTotal    = expvar.NewMap("e2b_runner_http_requests_total")
-	httpRequestDuration  = expvar.NewMap("e2b_runner_http_request_duration_ms_total")
-	workflowQueued       = expvar.NewMap("github_workflow_jobs_queued_total")
-	workflowStarted      = expvar.NewMap("github_workflow_jobs_started_total")
-	workflowComplete     = expvar.NewMap("github_workflow_jobs_completed_total")
-	workflowConclusions  = expvar.NewMap("github_workflow_job_conclusions_total")
-	workflowFailures     = expvar.NewMap("github_workflow_job_failures_total")
-	workflowQueueTime    = expvar.NewMap("github_workflow_job_queue_duration_ms_total")
-	workflowQueueCount   = expvar.NewMap("github_workflow_job_queue_duration_count")
-	workflowRunTime      = expvar.NewMap("github_workflow_job_run_duration_ms_total")
-	workflowRunCount     = expvar.NewMap("github_workflow_job_run_duration_count")
-	runnerRequestsTotal  = expvar.NewMap("e2b_runner_requests_total")
-	lastReconcileUnix    = expvar.NewInt("e2b_runner_last_reconcile_unix")
-	refreshMu            sync.Mutex
+	profileCurrent        = expvar.NewMap("e2b_runner_profile_current")
+	profileBusy           = expvar.NewMap("e2b_runner_profile_busy")
+	profileIdle           = expvar.NewMap("e2b_runner_profile_idle")
+	profileDesired        = expvar.NewMap("e2b_runner_profile_desired")
+	profilePending        = expvar.NewMap("e2b_runner_profile_pending")
+	profileStatus         = expvar.NewMap("e2b_runner_profile_status")
+	requestsByStatus      = expvar.NewMap("e2b_runner_requests_by_profile_status")
+	requestsByRepository  = expvar.NewMap("e2b_runner_requests_by_repository_status")
+	retryState            = expvar.NewMap("e2b_runner_retry_state")
+	leaseState            = expvar.NewMap("e2b_runner_lease_state")
+	createDuration        = expvar.NewMap("e2b_runner_create_duration_ms_total")
+	createCount           = expvar.NewMap("e2b_runner_create_duration_count")
+	stopDuration          = expvar.NewMap("e2b_runner_stop_duration_ms_total")
+	stopCount             = expvar.NewMap("e2b_runner_stop_duration_count")
+	operationsTotal       = expvar.NewMap("e2b_runner_operations_total")
+	runnerRegistered      = expvar.NewMap("e2b_runner_registered_total")
+	runnerCleanup         = expvar.NewMap("e2b_runner_cleanup_total")
+	githubAPIOperations   = expvar.NewMap("e2b_runner_github_api_operations_total")
+	githubAPIDuration     = expvar.NewMap("e2b_runner_github_api_duration_ms_total")
+	httpRequestsTotal     = expvar.NewMap("e2b_runner_http_requests_total")
+	httpRequestDuration   = expvar.NewMap("e2b_runner_http_request_duration_ms_total")
+	workflowQueued        = expvar.NewMap("github_workflow_jobs_queued_total")
+	workflowStarted       = expvar.NewMap("github_workflow_jobs_started_total")
+	workflowComplete      = expvar.NewMap("github_workflow_jobs_completed_total")
+	workflowConclusions   = expvar.NewMap("github_workflow_job_conclusions_total")
+	workflowFailures      = expvar.NewMap("github_workflow_job_failures_total")
+	workflowQueueTime     = expvar.NewMap("github_workflow_job_queue_duration_ms_total")
+	workflowQueueCount    = expvar.NewMap("github_workflow_job_queue_duration_count")
+	workflowRunTime       = expvar.NewMap("github_workflow_job_run_duration_ms_total")
+	workflowRunCount      = expvar.NewMap("github_workflow_job_run_duration_count")
+	runnerRequestsTotal   = expvar.NewMap("e2b_runner_requests_total")
+	catalogMatchMigration = expvar.NewMap("e2b_runner_catalog_match_migration_total")
+	lastReconcileUnix     = expvar.NewInt("e2b_runner_last_reconcile_unix")
+	refreshMu             sync.Mutex
 )
 
 func Refresh(profiles []state.RunnerProfile, states []state.RunnerState) {
@@ -144,6 +145,15 @@ func RecordRunnerCleanup(profile, result string) {
 
 func RecordRunnerRequest(repository, profile, source, result string) {
 	runnerRequestsTotal.Add(metricKey(repository, profile, source, result), 1)
+}
+
+func RecordCatalogMatchComparison(legacyProfile, enabledProfile, result string) {
+	_ = legacyProfile
+	_ = enabledProfile
+	switch result {
+	case "same", "legacy_only", "enabled_only", "different_profile":
+		catalogMatchMigration.Add(result, 1)
+	}
 }
 
 func RecordGitHubAPI(operation, result string, d time.Duration) {

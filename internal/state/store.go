@@ -1,6 +1,7 @@
 package state
 
 import (
+	"database/sql"
 	"errors"
 	"time"
 )
@@ -136,6 +137,11 @@ type ProfileMatch struct {
 	Labels             []string       `json:"labels"`
 	Profile            *RunnerProfile `json:"runner_spec,omitempty"`
 	Reason             string         `json:"reason,omitempty"`
+}
+
+type ProfileMatchComparison struct {
+	Legacy  ProfileMatch
+	Enabled ProfileMatch
 }
 
 type AuditEvent struct {
@@ -325,7 +331,10 @@ type RunnerCatalogStore interface {
 	UpsertRepositoryPolicy(policy RepositoryPolicy) (RepositoryPolicy, error)
 	DeleteRepositoryPolicy(id int64) error
 	MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error)
+	CompareProfileMatches(repositoryFullName string, labels []string) (ProfileMatchComparison, error)
 }
+
+var catalogSnapshotTxOptions = &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}
 
 type IdentityStore interface {
 	GetAccount(accountID int64) (Account, error)

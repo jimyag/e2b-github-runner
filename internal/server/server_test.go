@@ -15,8 +15,10 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"expvar"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -79,6 +81,103 @@ type blockingSandboxDefaultStore struct {
 	getStarted  chan struct{}
 	continueGet chan struct{}
 	blockOnce   sync.Once
+}
+
+type profileMatchComparisonStore struct {
+	state.Store
+	comparison state.ProfileMatchComparison
+	err        error
+	calls      int
+}
+
+func (s *profileMatchComparisonStore) CompareProfileMatches(repository string, labels []string) (state.ProfileMatchComparison, error) {
+	s.calls++
+	return s.comparison, s.err
+}
+
+func TestMatchProfileForAdmissionClassifiesShadowResultAndReturnsLegacy(t *testing.T) {
+	profile := func(name string) *state.RunnerProfile {
+		return &state.RunnerProfile{Name: name, TemplateID: "must-not-appear-in-log"}
+	}
+	tests := []struct {
+		name       string
+		comparison state.ProfileMatchComparison
+		result     string
+	}{
+		{name: "same", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Profile: profile("same")}, Enabled: state.ProfileMatch{Profile: profile("same")}}, result: "same"},
+		{name: "legacy only", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Profile: profile("legacy")}, Enabled: state.ProfileMatch{Reason: "profile_labels_not_matched"}}, result: "legacy_only"},
+		{name: "enabled only", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Reason: "profile_not_allowed"}, Enabled: state.ProfileMatch{Profile: profile("enabled")}}, result: "enabled_only"},
+		{name: "different profile", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Profile: profile("legacy")}, Enabled: state.ProfileMatch{Profile: profile("enabled")}}, result: "different_profile"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &profileMatchComparisonStore{Store: state.New(t.TempDir()), comparison: tt.comparison}
+			var logs bytes.Buffer
+			srv := &Server{store: store, logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+			before := expvarMapInt(t, "e2b_runner_catalog_match_migration_total", tt.result)
+
+			match, err := srv.matchProfileForAdmission("owner/repo", []string{"self-hosted", "e2b"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(match, tt.comparison.Legacy) {
+				t.Fatalf("admission match = %#v, want legacy %#v", match, tt.comparison.Legacy)
+			}
+			if store.calls != 1 {
+				t.Fatalf("CompareProfileMatches calls = %d, want 1", store.calls)
+			}
+			if got := expvarMapInt(t, "e2b_runner_catalog_match_migration_total", tt.result); got != before+1 {
+				t.Fatalf("comparison metric %q = %d, want %d", tt.result, got, before+1)
+			}
+			if tt.result != "same" {
+				logText := logs.String()
+				for _, want := range []string{
+					"catalog profile match mismatch",
+					"owner/repo",
+					"self-hosted",
+					tt.result,
+					matchedProfileName(tt.comparison.Legacy),
+					matchedProfileName(tt.comparison.Enabled),
+					tt.comparison.Legacy.Reason,
+					tt.comparison.Enabled.Reason,
+				} {
+					if want == "" {
+						continue
+					}
+					if !strings.Contains(logText, want) {
+						t.Fatalf("mismatch log %q does not contain %q", logText, want)
+					}
+				}
+				if strings.Contains(logText, "must-not-appear-in-log") {
+					t.Fatalf("mismatch log leaked profile fields: %s", logText)
+				}
+			}
+		})
+	}
+}
+
+func TestMatchProfileForAdmissionReturnsComparisonError(t *testing.T) {
+	wantErr := errors.New("catalog snapshot failed")
+	store := &profileMatchComparisonStore{Store: state.New(t.TempDir()), err: wantErr}
+	srv := &Server{store: store, logger: slog.Default()}
+	if _, err := srv.matchProfileForAdmission("owner/repo", []string{"self-hosted"}); !errors.Is(err, wantErr) {
+		t.Fatalf("matchProfileForAdmission error = %v, want %v", err, wantErr)
+	}
+}
+
+func expvarMapInt(t *testing.T, metricName, key string) int64 {
+	t.Helper()
+	metric := expvar.Get(metricName)
+	if metric == nil {
+		t.Fatalf("expvar %s is not registered", metricName)
+	}
+	value := metric.String()
+	var values map[string]int64
+	if err := json.Unmarshal([]byte(value), &values); err != nil {
+		t.Fatalf("decode expvar %s: %v (%s)", metricName, err, value)
+	}
+	return values[key]
 }
 
 func (s *blockingSandboxDefaultStore) GetSandboxServiceDefault() (state.SandboxServiceDefault, error) {

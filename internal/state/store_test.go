@@ -3058,6 +3058,113 @@ func TestProfilesAndPoliciesCanBeMatched(t *testing.T) {
 	}
 }
 
+func TestCompareProfileMatchesEnabledCatalogIgnoresLegacyTables(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, store *DBStore)
+	}{
+		{
+			name: "present",
+			setup: func(t *testing.T, store *DBStore) {
+				t.Helper()
+				if _, err := store.UpsertRunnerGroup(RunnerGroup{Name: "legacy", SpecNames: []string{"disabled"}, Enabled: true}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{RepositoryFullName: "owner/repo", RunnerGroupName: "legacy", Enabled: true}); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{name: "empty", setup: func(*testing.T, *DBStore) {}},
+		{
+			name: "absent",
+			setup: func(t *testing.T, store *DBStore) {
+				t.Helper()
+				db, err := store.dbOrEnsure()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, table := range []string{"repository_policies", "runner_group_specs", "runner_groups"} {
+					if err := db.Migrator().DropTable(table); err != nil {
+						t.Fatal(err)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := New(t.TempDir()).(*DBStore)
+			for _, profile := range []RunnerProfile{
+				{Name: "disabled", Labels: []string{"self-hosted", "e2b"}, TemplateID: "disabled", MaxConcurrency: 1, Priority: 100, Enabled: false},
+				{Name: "lower-priority", Labels: []string{"self-hosted", "e2b", "optional"}, TemplateID: "lower", MaxConcurrency: 1, Priority: 10, Enabled: true},
+				{Name: "selected", Labels: []string{"self-hosted", "e2b"}, TemplateID: "selected", MaxConcurrency: 1, Priority: 20, Enabled: true},
+			} {
+				if _, err := store.UpsertProfile(profile); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tt.setup(t, store)
+
+			comparison, err := store.CompareProfileMatches("owner/repo", []string{"self-hosted", "e2b"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if comparison.Enabled.RepositoryFullName != "owner/repo" || !reflect.DeepEqual(comparison.Enabled.Labels, []string{"self-hosted", "e2b"}) {
+				t.Fatalf("enabled match request echo = %#v", comparison.Enabled)
+			}
+			if comparison.Enabled.Profile == nil || comparison.Enabled.Profile.Name != "selected" || comparison.Enabled.Reason != "" {
+				t.Fatalf("enabled match = %#v, want selected", comparison.Enabled)
+			}
+		})
+	}
+}
+
+func TestCompareProfileMatchesEnabledCatalogOrderingAndNoMatch(t *testing.T) {
+	store := New(t.TempDir())
+	for _, profile := range []RunnerProfile{
+		{Name: "z-name", Labels: []string{"self-hosted", "e2b"}, TemplateID: "z", MaxConcurrency: 1, Priority: 30, Enabled: true},
+		{Name: "a-name", Labels: []string{"self-hosted", "e2b"}, TemplateID: "a", MaxConcurrency: 1, Priority: 30, Enabled: true},
+		{Name: "longer-label-set", Labels: []string{"self-hosted", "e2b", "optional"}, TemplateID: "long", MaxConcurrency: 1, Priority: 30, Enabled: true},
+	} {
+		if _, err := store.UpsertProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	comparison, err := store.CompareProfileMatches("owner/repo", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comparison.Enabled.Profile == nil || comparison.Enabled.Profile.Name != "longer-label-set" {
+		t.Fatalf("label-count ordering selected %#v, want longer-label-set", comparison.Enabled.Profile)
+	}
+	longer, err := store.GetProfile("longer-label-set")
+	if err != nil {
+		t.Fatal(err)
+	}
+	longer.Enabled = false
+	if _, err := store.UpsertProfile(longer); err != nil {
+		t.Fatal(err)
+	}
+	comparison, err = store.CompareProfileMatches("owner/repo", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comparison.Enabled.Profile == nil || comparison.Enabled.Profile.Name != "a-name" {
+		t.Fatalf("name ordering selected %#v, want a-name", comparison.Enabled.Profile)
+	}
+
+	comparison, err = store.CompareProfileMatches("owner/repo", []string{"self-hosted", "not-in-catalog"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comparison.Enabled.Profile != nil || comparison.Enabled.Reason != "profile_labels_not_matched" {
+		t.Fatalf("unmatched enabled result = %#v, want profile_labels_not_matched", comparison.Enabled)
+	}
+}
+
 func TestMatchProfileReturnsReasonWhenPolicyMissing(t *testing.T) {
 	store := New(t.TempDir())
 	match, err := store.MatchProfile("owner/repo", []string{"self-hosted", "e2b"})
