@@ -131,7 +131,7 @@ Cache object keys are isolated by repository and workflow context:
 <configured-prefix>/<owner>/<repo>/scopes/pr-<number>/...
 ```
 
-With the scoped `qiniu/actions-cache@v5` action, runnerd injects ordered read prefixes plus one write prefix. A trusted branch searches its own scope and then the default-branch scope, and writes only its own scope. A pull request, including a Fork PR, searches its PR scope, base-branch scope, and default-branch scope in that order, and writes only its own PR scope; this matches GitHub's merge-ref cache isolation so a Fork cannot poison a base-branch cache. `pull_request_target`, `workflow_run`, `issue_comment`, and unverified metadata are default-branch read-only. Kodo currently requires bucket-level `kodo/list` and `kodo/listMultipartUploads` permissions because it does not support prefix-scoped list policy resources; object contents remain restricted to explicit repository and scope paths, but object key names in the same bucket are not confidential across those credentials.
+With the scoped `qiniu/actions-cache@v5` action, runnerd injects ordered read prefixes plus one write prefix. A trusted branch searches its own scope and then the default-branch scope, and writes only its own scope. A pull request, including a Fork PR, searches its PR scope, base-branch scope, and default-branch scope in that order, and writes only its own PR scope; this matches GitHub's merge-ref cache isolation so a Fork cannot poison a base-branch cache. `pull_request_target`, `workflow_run`, `issue_comment`, and unverified metadata are default-branch read-only. Kodo list operations are scoped to authorized prefixes via `kodo:prefix` Condition, so cache key names outside the granted scopes are not enumerable across credentials.
 
 #### Operator configuration
 
@@ -148,7 +148,7 @@ cache:
   sts_endpoint: https://sts-ov.qiniuapi.com
 ```
 
-`sandbox.regions` defines the public Sandbox region catalog exposed through `GET /sandbox/regions`; S3 mappings remain server-side because endpoints can be private. Each entry must include `id`, `label`, and `sandbox_api_url`. `s3_region` and `s3_endpoint` are optional and must be configured together; only regions with both fields support Cache S3. At least one region is required. For stronger cache-key metadata isolation, use a dedicated bucket per GitHub installation. `cache.sts_endpoint` is the Qiniu IAM federation token endpoint used to mint short-lived credentials.
+`sandbox.regions` defines the public Sandbox region catalog exposed through `GET /sandbox/regions`; S3 mappings remain server-side because endpoints can be private. Each entry must include `id`, `label`, and `sandbox_api_url`. `s3_region` and `s3_endpoint` are optional and must be configured together; only regions with both fields support Cache S3. At least one region is required. For stronger cache isolation, use a dedicated bucket per GitHub installation. `cache.sts_endpoint` is the Qiniu IAM federation token endpoint used to mint short-lived credentials.
 
 #### Using cache in GitHub Actions workflows
 

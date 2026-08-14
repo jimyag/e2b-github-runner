@@ -131,7 +131,7 @@ unset secret_value
 <配置前缀>/<owner>/<repo>/scopes/pr-<number>/...
 ```
 
-配合 scoped `qiniu/actions-cache@v5` action，runnerd 会注入有序读取前缀和唯一写入前缀。可信分支依次搜索自身和默认分支 scope，且只能写入自身 scope；PR（包括 Fork PR）按 PR、自身 base branch、默认分支的顺序搜索，并且只能写入自己的 PR scope。这与 GitHub merge-ref cache 隔离语义一致，Fork 无法污染 base branch Cache。`pull_request_target`、`workflow_run`、`issue_comment` 及无法验证的元数据只能只读默认分支 scope。当前 Kodo 因不支持按对象前缀限制 list policy resource，仍要求 bucket 级 `kodo/list` 和 `kodo/listMultipartUploads`；对象内容仍被限制到显式的仓库和 scope 路径，但同一 bucket 内的对象 Key 名称不能视为对这些凭证保密。
+配合 scoped `qiniu/actions-cache@v5` action，runnerd 会注入有序读取前缀和唯一写入前缀。可信分支依次搜索自身和默认分支 scope，且只能写入自身 scope；PR（包括 Fork PR）按 PR、自身 base branch、默认分支的顺序搜索，并且只能写入自己的 PR scope。这与 GitHub merge-ref cache 隔离语义一致，Fork 无法污染 base branch Cache。`pull_request_target`、`workflow_run`、`issue_comment` 及无法验证的元数据只能只读默认分支 scope。Kodo list 操作通过 `kodo:prefix` Condition 限定到已授权的前缀范围，授权范围外的缓存 Key 名称不可枚举。
 
 #### 运维配置
 
@@ -148,7 +148,7 @@ cache:
   sts_endpoint: https://sts-ov.qiniuapi.com
 ```
 
-`sandbox.regions` 定义通过 `GET /sandbox/regions` 暴露给前端的公开 Sandbox 区域目录；S3 映射只保留在服务端，因为 endpoint 可能是内网地址。每个条目必须包含 `id`、`label` 和 `sandbox_api_url`。`s3_region` 与 `s3_endpoint` 是可选字段，但必须同时配置；只有同时配置的区域支持 Cache S3。必须至少配置一个 region。为了更好地隔离缓存 Key 元数据，建议每个 GitHub installation 使用独立 Bucket。`cache.sts_endpoint` 是七牛 IAM 联邦凭证端点，用于签发短期凭证。
+`sandbox.regions` 定义通过 `GET /sandbox/regions` 暴露给前端的公开 Sandbox 区域目录；S3 映射只保留在服务端，因为 endpoint 可能是内网地址。每个条目必须包含 `id`、`label` 和 `sandbox_api_url`。`s3_region` 与 `s3_endpoint` 是可选字段，但必须同时配置；只有同时配置的区域支持 Cache S3。必须至少配置一个 region。为了更好地隔离缓存，建议每个 GitHub installation 使用独立 Bucket。`cache.sts_endpoint` 是七牛 IAM 联邦凭证端点，用于签发短期凭证。
 
 #### 在 GitHub Actions 工作流中使用缓存
 

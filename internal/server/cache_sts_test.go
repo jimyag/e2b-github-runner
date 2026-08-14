@@ -109,6 +109,9 @@ func TestGenerateCacheSTSScopedBranch(t *testing.T) {
 	if !strings.Contains(bodyStr, "kodo/upload") {
 		t.Fatalf("expected branch policy to allow write actions, got: %s", bodyStr)
 	}
+	if !strings.Contains(bodyStr, "kodo:prefix") {
+		t.Fatalf("expected policy to scope list via kodo:prefix condition, got: %s", bodyStr)
+	}
 }
 
 func TestGenerateCacheSTSReadOnlyForkPR(t *testing.T) {

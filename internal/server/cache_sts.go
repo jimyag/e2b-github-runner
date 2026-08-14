@@ -114,16 +114,11 @@ func generateCacheSTSWithClient(ctx context.Context, config cacheSTSCredentialCo
 	bucketResource := fmt.Sprintf("qrn:kodo:::bucket/%s", bucket)
 	bucketActions := []string{"kodo/list", "kodo/listMultipartUploads"}
 
-	statements := []map[string]any{
-		{
-			"effect":   "Allow",
-			"action":   bucketActions,
-			"resource": []string{bucketResource},
-		},
-	}
-
+	// Collect validated read scopes and derive both the object-level read
+	// resources and the kodo:prefix condition values for list scoping.
 	readActions := []string{"kodo/stat", "kodo/get"}
 	var readResources []string
+	var listPrefixValues []string
 	seenRead := make(map[string]bool)
 	for _, scope := range readScopes {
 		scope = strings.Trim(strings.TrimSpace(scope), "/")
@@ -137,16 +132,33 @@ func generateCacheSTSWithClient(ctx context.Context, config cacheSTSCredentialCo
 		if !seenRead[res] {
 			seenRead[res] = true
 			readResources = append(readResources, res)
+			listPrefixValues = append(listPrefixValues, fmt.Sprintf("%s/%s/*", cachePrefix, scope))
 		}
 	}
 	if len(readResources) == 0 {
 		return CacheSTSCredentials{}, fmt.Errorf("at least one cache read scope is required")
 	}
-	statements = append(statements, map[string]any{
-		"effect":   "Allow",
-		"action":   readActions,
-		"resource": readResources,
-	})
+
+	statements := []map[string]any{
+		// List operations are scoped to authorized prefixes via kodo:prefix
+		// condition so cache key names outside the granted scopes are not
+		// enumerable.
+		{
+			"effect":   "Allow",
+			"action":   bucketActions,
+			"resource": []string{bucketResource},
+			"condition": map[string]any{
+				"StringLike": map[string]any{
+					"kodo:prefix": listPrefixValues,
+				},
+			},
+		},
+		{
+			"effect":   "Allow",
+			"action":   readActions,
+			"resource": readResources,
+		},
+	}
 
 	ownScope = strings.Trim(strings.TrimSpace(ownScope), "/")
 	if ownScope != "" {
