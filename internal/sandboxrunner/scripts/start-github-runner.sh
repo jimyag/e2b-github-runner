@@ -94,7 +94,7 @@ cache_s3_access_key="$(printf '%%s' "%[14]s" | base64 -d)"
 cache_s3_secret_key="$(printf '%%s' "%[15]s" | base64 -d)"
 cache_s3_session_token="$(printf '%%s' "%[16]s" | base64 -d)"
 
-# Inject Cache S3 STS credentials for runs-on/cache
+# Inject Cache S3 STS credentials for qiniu/actions-cache
 if [ -n "$cache_s3_bucket" ] && [ -n "$cache_s3_access_key" ] && [ -n "$cache_s3_secret_key" ]; then
   export RUNS_ON_S3_BUCKET_CACHE="$cache_s3_bucket"
   if [ -n "$cache_s3_endpoint" ]; then
@@ -113,12 +113,12 @@ if [ -n "$cache_s3_bucket" ] && [ -n "$cache_s3_access_key" ] && [ -n "$cache_s3
   if [ -n "$cache_s3_write_prefix" ]; then
     export RUNS_ON_S3_CACHE_WRITE_PREFIX="$cache_s3_write_prefix"
   fi
-  # Tune runs-on/cache upload/download concurrency for better throughput.
+  # Tune qiniu/actions-cache upload/download concurrency for better throughput.
   export UPLOAD_QUEUE_SIZE="${UPLOAD_QUEUE_SIZE:-16}"
   export UPLOAD_PART_SIZE="${UPLOAD_PART_SIZE:-16}"
   export DOWNLOAD_QUEUE_SIZE="${DOWNLOAD_QUEUE_SIZE:-16}"
   export DOWNLOAD_PART_SIZE="${DOWNLOAD_PART_SIZE:-16}"
-  echo "injected cache S3 STS credentials for runs-on/cache (upload_queue=${UPLOAD_QUEUE_SIZE} upload_part=${UPLOAD_PART_SIZE}MiB download_queue=${DOWNLOAD_QUEUE_SIZE} download_part=${DOWNLOAD_PART_SIZE}MiB)"
+  echo "injected cache S3 STS credentials for qiniu/actions-cache (upload_queue=${UPLOAD_QUEUE_SIZE} upload_part=${UPLOAD_PART_SIZE}MiB download_queue=${DOWNLOAD_QUEUE_SIZE} download_part=${DOWNLOAD_PART_SIZE}MiB)"
 elif [ -n "$cache_s3_bucket" ]; then
   echo "cache S3 configuration is incomplete; skipping credential injection" >&2
 fi

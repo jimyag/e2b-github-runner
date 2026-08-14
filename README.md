@@ -131,7 +131,7 @@ Cache object keys are isolated by repository and workflow context:
 <configured-prefix>/<owner>/<repo>/scopes/pr-<number>/...
 ```
 
-With the scoped `ma6174/cache@v5-qiniu` action, runnerd injects ordered read prefixes plus one write prefix. A trusted branch searches its own scope and then the default-branch scope, and writes only its own scope. A pull request, including a Fork PR, searches its PR scope, base-branch scope, and default-branch scope in that order, and writes only its own PR scope; this matches GitHub's merge-ref cache isolation so a Fork cannot poison a base-branch cache. `pull_request_target`, `workflow_run`, `issue_comment`, and unverified metadata are default-branch read-only. Kodo currently requires bucket-level `kodo/list` and `kodo/listMultipartUploads` permissions because it does not support prefix-scoped list policy resources; object contents remain restricted to explicit repository and scope paths, but object key names in the same bucket are not confidential across those credentials.
+With the scoped `qiniu/actions-cache@v5` action, runnerd injects ordered read prefixes plus one write prefix. A trusted branch searches its own scope and then the default-branch scope, and writes only its own scope. A pull request, including a Fork PR, searches its PR scope, base-branch scope, and default-branch scope in that order, and writes only its own PR scope; this matches GitHub's merge-ref cache isolation so a Fork cannot poison a base-branch cache. `pull_request_target`, `workflow_run`, `issue_comment`, and unverified metadata are default-branch read-only. Kodo currently requires bucket-level `kodo/list` and `kodo/listMultipartUploads` permissions because it does not support prefix-scoped list policy resources; object contents remain restricted to explicit repository and scope paths, but object key names in the same bucket are not confidential across those credentials.
 
 #### Operator configuration
 
@@ -152,11 +152,11 @@ cache:
 
 #### Using cache in GitHub Actions workflows
 
-Use [`ma6174/cache@v5-qiniu`](https://github.com/ma6174/cache/tree/v5-qiniu) instead of `actions/cache`. No additional configuration is needed in the workflow — runnerd injects S3 credentials plus ordered read prefixes and a single write prefix as environment variables:
+Use [`qiniu/actions-cache@v5`](https://github.com/qiniu/actions-cache) instead of `actions/cache`. No additional configuration is needed in the workflow — runnerd injects S3 credentials plus ordered read prefixes and a single write prefix as environment variables:
 
 ```yaml
 steps:
-  - uses: runs-on/cache@v5
+  - uses: qiniu/actions-cache@v5
     with:
       path: |
         ~/.cache/go-build

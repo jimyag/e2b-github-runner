@@ -131,7 +131,7 @@ unset secret_value
 <配置前缀>/<owner>/<repo>/scopes/pr-<number>/...
 ```
 
-配合 scoped `ma6174/cache@v5-qiniu` action，runnerd 会注入有序读取前缀和唯一写入前缀。可信分支依次搜索自身和默认分支 scope，且只能写入自身 scope；PR（包括 Fork PR）按 PR、自身 base branch、默认分支的顺序搜索，并且只能写入自己的 PR scope。这与 GitHub merge-ref cache 隔离语义一致，Fork 无法污染 base branch Cache。`pull_request_target`、`workflow_run`、`issue_comment` 及无法验证的元数据只能只读默认分支 scope。当前 Kodo 因不支持按对象前缀限制 list policy resource，仍要求 bucket 级 `kodo/list` 和 `kodo/listMultipartUploads`；对象内容仍被限制到显式的仓库和 scope 路径，但同一 bucket 内的对象 Key 名称不能视为对这些凭证保密。
+配合 scoped `qiniu/actions-cache@v5` action，runnerd 会注入有序读取前缀和唯一写入前缀。可信分支依次搜索自身和默认分支 scope，且只能写入自身 scope；PR（包括 Fork PR）按 PR、自身 base branch、默认分支的顺序搜索，并且只能写入自己的 PR scope。这与 GitHub merge-ref cache 隔离语义一致，Fork 无法污染 base branch Cache。`pull_request_target`、`workflow_run`、`issue_comment` 及无法验证的元数据只能只读默认分支 scope。当前 Kodo 因不支持按对象前缀限制 list policy resource，仍要求 bucket 级 `kodo/list` 和 `kodo/listMultipartUploads`；对象内容仍被限制到显式的仓库和 scope 路径，但同一 bucket 内的对象 Key 名称不能视为对这些凭证保密。
 
 #### 运维配置
 
@@ -152,11 +152,11 @@ cache:
 
 #### 在 GitHub Actions 工作流中使用缓存
 
-使用 [`ma6174/cache@v5-qiniu`](https://github.com/ma6174/cache/tree/v5-qiniu) 替代 `actions/cache`。工作流中无需额外配置，runnerd 会自动注入 S3 凭证、有序读取前缀和唯一写入前缀作为环境变量：
+使用 [`qiniu/actions-cache@v5`](https://github.com/qiniu/actions-cache) 替代 `actions/cache`。工作流中无需额外配置，runnerd 会自动注入 S3 凭证、有序读取前缀和唯一写入前缀作为环境变量：
 
 ```yaml
 steps:
-  - uses: runs-on/cache@v5
+  - uses: qiniu/actions-cache@v5
     with:
       path: |
         ~/.cache/go-build

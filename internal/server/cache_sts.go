@@ -244,7 +244,7 @@ func generateCacheSTSWithClient(ctx context.Context, config cacheSTSCredentialCo
 }
 
 // cacheSTSDurationSeconds covers the complete sandbox lifecycle and adds
-// five minutes for runs-on/cache's post-job save step. There is no refresh
+// five minutes for qiniu/actions-cache's post-job save step. There is no refresh
 // flow from the sandbox yet, so the credential must outlive the timeout.
 func cacheSTSDurationSeconds(sandboxTimeout time.Duration) int {
 	if sandboxTimeout <= 0 {
