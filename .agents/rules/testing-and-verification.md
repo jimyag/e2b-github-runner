@@ -45,6 +45,17 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
+For schema or migration changes that affect Postgres or MySQL, also run the
+opt-in real-dialect tests against dedicated disposable databases whose names
+end in `_test`:
+
+```bash
+RUNNERD_CATALOG_BACKEND_TESTS=1 \
+RUNNERD_POSTGRES_TEST_DSN='<dedicated postgres test DSN>' \
+RUNNERD_MYSQL_TEST_DSN='<dedicated mysql test DSN>' \
+  go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+```
+
 ## Go Server Or API
 
 - For focused backend changes, start with the relevant package test.
@@ -58,10 +69,10 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
 - For focused UI unit tests, run `cd ui && bun run test`.
 - For UI source changes, run `task ui-lint` or `task build` depending on scope.
 - Use `task build` when verifying production embedded UI behavior.
-- Run `task ui-production-smoke` after changing UI dependencies, Vite/Rollup configuration, manual chunking, or production asset loading. The smoke must execute the built bundle in Chromium and fail on page errors, console errors, failed script/style requests, an empty root, or a missing public landing-page heading.
-- Use `RUNNERD_UI_SMOKE_PORT=<free-port> task ui-production-smoke` when port `4173` is occupied. The local preview supplies only a signed-out `/auth/session` fixture because it does not start `runnerd`. Use `RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host> task ui-production-smoke` for a post-deploy browser canary; deployed canaries must not replace the real auth endpoint.
+- Run `task ui-production-smoke` after changing UI dependencies, Vite/Rollup configuration, manual chunking, production asset loading, public guides, or the Jobs viewport/scroll layout. The smoke must execute the built bundle in Chromium, cover the public landing page plus responsive `/docs/getting-started/hosted` and `/docs/guides/custom-templates` routes, and use local authenticated fixtures to prove that the desktop Jobs list scrolls independently beside the Web Console while narrow layouts retain document flow.
+- Use `RUNNERD_UI_SMOKE_PORT=<free-port> task ui-production-smoke` when port `4173` is occupied. The local preview supplies a signed-out landing-page auth response plus scoped authenticated Jobs API fixtures because it does not start `runnerd`. Use `RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host> task ui-production-smoke` for a post-deploy public browser canary; the local fixture-backed Jobs regression is skipped and deployed canaries must not replace the real auth endpoint.
 - Keep Rollup `CIRCULAR_CHUNK` and `CYCLIC_CROSS_CHUNK_REEXPORT` warnings fatal. Do not suppress or broadly allowlist them when changing manual chunk rules.
-- Use the real ordinary-user entries `/`, `/repositories`, `/account/repositories`, `/account/preferences`, `/account/sandbox-templates`, and `/account/sandbox-instances` when changing user UI. Also exercise the corresponding `/organizations/{login}/...` route when scope resolution changes.
+- Use the real ordinary-user entries `/`, `/docs`, `/docs/getting-started/hosted`, `/repositories`, `/account/repositories`, `/account/preferences`, `/account/sandbox-templates`, and `/account/sandbox-instances` when changing user UI. Also exercise the corresponding `/organizations/{login}/...` route when scope resolution changes.
 - Use the real admin entries `/admin/`, `/admin/accounts`, and `/admin/sandbox_service`; do not assume the `ui/` tree is all admin-only.
 - For account-role changes, verify global statistics, linked identity/avatar fallback, search, role filters, pagination, self-role protection, immediate authorization changes, and `account.role.update` audit events. Backend tests must also cover atomic audit rollback and concurrent demotions preserving at least one administrator.
 - For Sandbox fallback changes, verify scoped override, enabled-default fallback, disabled/incomplete default rejection, catalog access, and config-source display without exposing endpoint/key or audience metadata to ordinary users.
@@ -106,7 +117,7 @@ Keep `SMEE_TARGET` aligned with the runnerd port when testing webhook forwarding
 - Production UI bundle execution: `task ui-production-smoke`.
 - GoReleaser config: `task release-check`.
 - Snapshot release behavior: `task release-snapshot`.
-- Template changes may require the relevant `template-*` or `qbox-kodo-*` task.
+- Template changes may require the relevant `template-*` task.
 
 ## Deployment Smoke
 

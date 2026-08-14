@@ -15,8 +15,10 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"expvar"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +33,7 @@ import (
 
 	"github.com/qiniu/ci-runner/internal/config"
 	"github.com/qiniu/ci-runner/internal/github"
+	"github.com/qiniu/ci-runner/internal/runnercatalog"
 	"github.com/qiniu/ci-runner/internal/sandboxrunner"
 	"github.com/qiniu/ci-runner/internal/state"
 )
@@ -60,6 +63,53 @@ type fakeSandbox struct {
 	terminal            *fakeTerminalSession
 }
 
+func TestPublicTemplateCatalogIsAvailableWithoutAuthenticationOrSandboxCredentials(t *testing.T) {
+	srv := newTestServer(t, state.New(t.TempDir()), "", &fakeSandbox{})
+
+	request := func(cookie *http.Cookie) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/public/runner-templates", nil)
+		if cookie != nil {
+			req.AddCookie(cookie)
+		}
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec
+	}
+
+	signedOut := request(nil)
+	if signedOut.Code != http.StatusOK {
+		t.Fatalf("signed-out status = %d, want %d; body=%s", signedOut.Code, http.StatusOK, signedOut.Body.String())
+	}
+	if got := signedOut.Header().Get("Cache-Control"); got != "public, max-age=3600" {
+		t.Fatalf("Cache-Control = %q, want %q", got, "public, max-age=3600")
+	}
+
+	signedIn := request(testSessionCookie("hubot-id", "hubot", "user"))
+	if signedIn.Code != http.StatusOK {
+		t.Fatalf("signed-in status = %d, want %d; body=%s", signedIn.Code, http.StatusOK, signedIn.Body.String())
+	}
+	if signedIn.Body.String() != signedOut.Body.String() {
+		t.Fatalf("signed-in payload = %s, want signed-out payload %s", signedIn.Body.String(), signedOut.Body.String())
+	}
+
+	var got []runnercatalog.PublicTemplate
+	if err := json.Unmarshal(signedOut.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode public templates: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("public template count = %d, want 4: %#v", len(got), got)
+	}
+	if !reflect.DeepEqual(got, runnercatalog.PublicTemplates()) {
+		t.Fatalf("public endpoint payload = %#v, want %#v", got, runnercatalog.PublicTemplates())
+	}
+	for _, forbidden := range []string{"template_id", "api_key", "api_url", "qbox", "custom"} {
+		if strings.Contains(strings.ToLower(signedOut.Body.String()), forbidden) {
+			t.Fatalf("public payload exposes forbidden metadata %q: %s", forbidden, signedOut.Body.String())
+		}
+	}
+}
+
 func TestSandboxHTTPClientDoesNotBoundRunnerCommandStreams(t *testing.T) {
 	client := newSandboxHTTPClient()
 	if client.Timeout != 0 {
@@ -79,6 +129,104 @@ type blockingSandboxDefaultStore struct {
 	getStarted  chan struct{}
 	continueGet chan struct{}
 	blockOnce   sync.Once
+}
+
+type profileMatchComparisonStore struct {
+	state.Store
+	comparison state.ProfileMatchComparison
+	err        error
+	calls      int
+}
+
+func (s *profileMatchComparisonStore) CompareProfileMatches(repository string, labels []string) (state.ProfileMatchComparison, error) {
+	s.calls++
+	return s.comparison, s.err
+}
+
+func TestMatchProfileForAdmissionClassifiesShadowResultAndReturnsLegacy(t *testing.T) {
+	profile := func(name string) *state.RunnerProfile {
+		return &state.RunnerProfile{Name: name, TemplateID: "must-not-appear-in-log"}
+	}
+	tests := []struct {
+		name       string
+		comparison state.ProfileMatchComparison
+		result     string
+	}{
+		{name: "same", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Profile: profile("same")}, Enabled: state.ProfileMatch{Profile: profile("same")}}, result: "same"},
+		{name: "legacy only", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Profile: profile("legacy")}, Enabled: state.ProfileMatch{Reason: "profile_labels_not_matched"}}, result: "legacy_only"},
+		{name: "enabled only", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Reason: "profile_not_allowed"}, Enabled: state.ProfileMatch{Profile: profile("enabled")}}, result: "enabled_only"},
+		{name: "different profile", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Profile: profile("legacy")}, Enabled: state.ProfileMatch{Profile: profile("enabled")}}, result: "different_profile"},
+		{name: "different no-match reason", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Reason: "profile_not_allowed"}, Enabled: state.ProfileMatch{Reason: "profile_labels_not_matched"}}, result: "different_profile"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &profileMatchComparisonStore{Store: state.New(t.TempDir()), comparison: tt.comparison}
+			var logs bytes.Buffer
+			srv := &Server{store: store, logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+			before := expvarMapInt(t, "e2b_runner_catalog_match_migration_total", tt.result)
+
+			match, err := srv.matchProfileForAdmission("owner/repo", []string{"self-hosted", "e2b"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(match, tt.comparison.Legacy) {
+				t.Fatalf("admission match = %#v, want legacy %#v", match, tt.comparison.Legacy)
+			}
+			if store.calls != 1 {
+				t.Fatalf("CompareProfileMatches calls = %d, want 1", store.calls)
+			}
+			if got := expvarMapInt(t, "e2b_runner_catalog_match_migration_total", tt.result); got != before+1 {
+				t.Fatalf("comparison metric %q = %d, want %d", tt.result, got, before+1)
+			}
+			if tt.result != "same" {
+				logText := logs.String()
+				for _, want := range []string{
+					"catalog profile match mismatch",
+					"owner/repo",
+					"self-hosted",
+					tt.result,
+					matchedProfileName(tt.comparison.Legacy),
+					matchedProfileName(tt.comparison.Enabled),
+					tt.comparison.Legacy.Reason,
+					tt.comparison.Enabled.Reason,
+				} {
+					if want == "" {
+						continue
+					}
+					if !strings.Contains(logText, want) {
+						t.Fatalf("mismatch log %q does not contain %q", logText, want)
+					}
+				}
+				if strings.Contains(logText, "must-not-appear-in-log") {
+					t.Fatalf("mismatch log leaked profile fields: %s", logText)
+				}
+			}
+		})
+	}
+}
+
+func TestMatchProfileForAdmissionReturnsComparisonError(t *testing.T) {
+	wantErr := errors.New("catalog snapshot failed")
+	store := &profileMatchComparisonStore{Store: state.New(t.TempDir()), err: wantErr}
+	srv := &Server{store: store, logger: slog.Default()}
+	if _, err := srv.matchProfileForAdmission("owner/repo", []string{"self-hosted"}); !errors.Is(err, wantErr) {
+		t.Fatalf("matchProfileForAdmission error = %v, want %v", err, wantErr)
+	}
+}
+
+func expvarMapInt(t *testing.T, metricName, key string) int64 {
+	t.Helper()
+	metric := expvar.Get(metricName)
+	if metric == nil {
+		t.Fatalf("expvar %s is not registered", metricName)
+	}
+	value := metric.String()
+	var values map[string]int64
+	if err := json.Unmarshal([]byte(value), &values); err != nil {
+		t.Fatalf("decode expvar %s: %v (%s)", metricName, err, value)
+	}
+	return values[key]
 }
 
 func (s *blockingSandboxDefaultStore) GetSandboxServiceDefault() (state.SandboxServiceDefault, error) {
@@ -6803,7 +6951,9 @@ func TestManualExplicitProfileMustRespectRepositoryPolicy(t *testing.T) {
 	}
 }
 
-func TestRetryRunnerRequeuesFailedRequestAndWritesAuditEvent(t *testing.T) {
+func TestRetryRunnerRequeuesFailedRequestWithPersistedAdmissionAndWritesAuditEvent(t *testing.T) {
+	// This catches a retry endpoint that rematches a failed request and changes
+	// the Runner Spec, GitHub runner group, or original workflow labels.
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
 
@@ -6842,7 +6992,9 @@ func TestRetryRunnerRequeuesFailedRequestAndWritesAuditEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Status != state.StatusQueued || !got.NextRetryAt.IsZero() {
+	if got.Status != state.StatusQueued || !got.NextRetryAt.IsZero() ||
+		got.ProfileName != "default" || got.RunnerGroup != "default" ||
+		!reflect.DeepEqual(got.RequestedLabels, []string{"self-hosted", "e2b"}) {
 		t.Fatalf("expected queued retry state, got %#v", got)
 	}
 	events, err := store.ListAuditEvents(10)

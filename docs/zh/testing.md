@@ -116,6 +116,18 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
+State migration 和 shadow catalog matcher 还提供 opt-in 的真实方言兼容性门禁。
+两个 DSN 必须指向名称以 `_test` 结尾的专用、可丢弃数据库；测试会拒绝其他数据库
+名称，然后删除并重建 runnerd state tables。覆盖范围包括 fresh schema 创建、保留
+catalog rows 的重复迁移，以及 legacy catalog tables 存在、为空和不存在三种状态。
+
+```bash
+RUNNERD_CATALOG_BACKEND_TESTS=1 \
+RUNNERD_POSTGRES_TEST_DSN='host=127.0.0.1 user=runnerd password=runnerd dbname=runnerd_test port=5432 sslmode=disable' \
+RUNNERD_MYSQL_TEST_DSN='runnerd:runnerd@tcp(127.0.0.1:3306)/runnerd_test' \
+  go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+```
+
 服务重启恢复有一组不依赖真实 Sandbox 的定向测试：
 
 ```bash
@@ -319,7 +331,7 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/admin/api/sandbox-service-default/api-key | jq
 ```
 
-页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。`/` 始终显示公开产品首页，提供文档和 Jobs 入口，并且不会加载受保护的用户资源；受保护的普通用户 Jobs 首页位于 `/jobs`。未登录访问 `/jobs`、Job 分组深链、账户设置或 Admin 路由时，会显示独立登录页，其 OAuth 链接通过 `return_to` 保留完整的同源目标地址。未知路由显示 404；已登录但没有管理员角色的用户访问 Admin 路由时，会看到明确的无权限页面。`/repositories` 是普通用户统一的 readiness 页面，负责 GitHub App 安装/同步、用户与 App 的授权仓库交集、本地 job activity，以及有效 Sandbox service 状态。`/account/repositories` 和 `/organizations/{login}/repositories` 作为兼容的 scoped deep links，仍由同一页面渲染。账户与组织 Preferences 是普通用户唯一的 Sandbox credential 编辑器；readiness 只在可管理 scope 缺少配置时链接过去。Settings 只为当前账户和可管理组织保留 Sandbox Service、Sandbox Templates 和 Sandbox Instances 资源管理。首次进入页面时只加载当前路由实际使用的资源。已登录的用户路由会读取一次 `GET /user/onboarding/product-tour` 获取账户级引导状态；该增强请求失败时会被忽略，不会阻断核心 workspace 数据，也不会参与轮询。只有状态为 `pending`、尚未看过引导且精确进入 `/jobs` 首页的账户会自动开始六步引导，深链不会被打断。最后几步会导航到 `/repositories`；有效来源无需操作，缺少且可管理的来源会引导用户进入 Settings。已看过、已完成或跳过的账户都可从账户菜单重播，且不修改已保存状态。Jobs 首页加载第一页 `GET /user/runner_requests?limit=100&offset=0` 并每 5 秒轮询该页，同时保留已经加载的历史；稳定 job-group 路由和 Load older jobs 操作可以加载受限的 500 行历史窗口。API 会拒绝 `limit + offset` 超过 500 的请求，也不会返回不可用的 next link。GitHub App metadata、Preferences 和 onboarding state 都不进入轮询。Admin 路由只加载当前 section 所需的 request/spec/group/policy/audit 依赖，且只有 Overview 和 Runner Requests 会轮询 runner requests。目录使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes，并使用统一的 scoped/default credential resolver。Installation scope 的目录读取必须属于可管理组织。管理面包含 `/admin/accounts` 的账户列表与角色控制、`/admin/sandbox_service` 的平台回退、runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
+页面源码在 `ui/`，使用和 `kubevirt-console` 相同的 React、Vite、Tailwind CSS、shadcn 风格组件和主题 CSS。`task build` 会先执行 `task ui-build`，把前端产物写入 `internal/server/ui/` 后再编译 `runnerd`。`/` 始终显示公开产品首页，提供文档和 Jobs 入口，并且不会加载受保护的用户资源；受保护的普通用户 Jobs 首页位于 `/jobs`。未登录访问 `/jobs`、Job 分组深链、账户设置或 Admin 路由时，会显示独立登录页，其 OAuth 链接通过 `return_to` 保留完整的同源目标地址。未知路由显示 404；已登录但没有管理员角色的用户访问 Admin 路由时，会看到明确的无权限页面。`/repositories` 是普通用户统一的 readiness 页面，负责 GitHub App 安装/同步、用户与 App 的授权仓库交集、本地 job activity，以及有效 Sandbox service 状态。`/account/repositories` 和 `/organizations/{login}/repositories` 作为兼容的 scoped deep links，仍由同一页面渲染。账户与组织 Preferences 是普通用户唯一的 Sandbox credential 编辑器；readiness 只在可管理 scope 缺少配置时链接过去。Settings 只为当前账户和可管理组织保留 Sandbox Service、Sandbox Templates 和 Sandbox Instances 资源管理。首次进入页面时只加载当前路由实际使用的资源。已登录的用户路由会读取一次 `GET /user/onboarding/product-tour` 获取账户级引导状态；该增强请求失败时会被忽略，不会阻断核心 workspace 数据，也不会参与轮询。只有状态为 `pending`、尚未看过引导且精确进入 `/jobs` 首页的账户会自动开始六步引导，深链不会被打断。最后几步会导航到 `/repositories`；有效来源无需操作，缺少且可管理的来源会引导用户进入 Settings。已看过、已完成或跳过的账户都可从账户菜单重播，且不修改已保存状态。Jobs 首页加载第一页 `GET /user/runner_requests?limit=100&offset=0` 并每 5 秒轮询该页，同时保留已经加载的历史；稳定 job-group 路由和 Load older jobs 操作可以加载受限的 500 行历史窗口。API 会拒绝 `limit + offset` 超过 500 的请求，也不会返回不可用的 next link。GitHub App metadata、Preferences 和 onboarding state 都不进入轮询。Admin 路由只加载当前 section 所需的 request/spec/group/policy/audit 依赖，且只有 Overview 和 Runner Requests 会轮询 runner requests。公共 managed catalog 使用无需登录的 `GET /api/public/runner-templates`，并且只能暴露 runnerd-owned 稳定名称和 workflow labels。Provider catalog 使用 `GET /user/sandbox/templates?region=<id>` 和 `GET /user/sandbox/instances?region=<id>&template_id=<id>`；实例接口只列出 runner 创建的 sandboxes，并使用统一的 scoped/default credential resolver。Installation scope 的目录读取必须属于可管理组织。测试必须证明未登录与已登录的公共响应完全相同、不包含 provider/scoped metadata，并保证公共与 provider catalog 的加载、重试、失败恢复和 stale response 处理彼此独立。管理面包含 `/admin/accounts` 的账户列表与角色控制、`/admin/sandbox_service` 的平台回退、runners、runner specs、runner groups、runner policies、retry、audit、label match test 和 diagnostics 页面，不包含 provider resource catalogs。
 
 只运行 UI unit tests 时使用：
 
@@ -340,22 +352,24 @@ task ui-i18n-check
 allowlist。GitHub Actions 会在独立的 `i18n` job 中运行同一检查；只有在仓库的
 branch protection 或 ruleset 中将它设为 required check 后，它才会阻止合并。
 
-修改 UI 依赖、Vite/Rollup 配置、manual chunk 或生产静态资源加载逻辑后，要在
-Chromium 中执行构建产物：
+修改 UI 依赖、Vite/Rollup 配置、manual chunk、生产静态资源加载逻辑或 Jobs
+视口/滚动布局后，要在 Chromium 中执行构建产物：
 
 ```bash
 task ui-production-smoke
 ```
 
-该任务会安装匹配的 Chromium runtime，构建 `internal/server/ui/`，在 `4173`
-端口启动 Vite preview，并通过 Playwright 打开 `/`。如果页面出现 JavaScript
-异常、console error、script/stylesheet 加载失败、`#root` 为空，或没有渲染公开
-首页 heading，任务都会失败。端口 `4173` 被占用时可设置
-`RUNNERD_UI_SMOKE_PORT=<free-port>`。本地 preview 不会启动 `runnerd`，因此
-Playwright 只会为 `/auth/session` 返回未登录会话。设置
-`RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host>` 后，会针对部署环境的真实
-auth endpoint 执行 canary。该 production smoke 在 GitHub Actions 中是独立
-job，因为 Vite 构建成功并不能证明生成的 chunks 可以在浏览器中执行。
+该任务会安装匹配的 Chromium runtime，构建 `internal/server/ui/`，并在 `4173`
+端口启动 Vite preview。Playwright 会打开 `/`，检查 JavaScript 异常、console
+error、script/stylesheet 加载失败、空 `#root` 和缺失的公开首页 heading。本地
+preview 还会使用限定范围的已登录 API fixtures 打开 `/jobs`，验证桌面端长 Jobs
+列表滚动时 document 和 Web 控制台保持不动，同时确认窄屏仍保留正常的页面流。
+端口 `4173` 被占用时可设置 `RUNNERD_UI_SMOKE_PORT=<free-port>`。本地 preview
+不会启动 `runnerd`，因此这些响应均为测试 fixtures。设置
+`RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host>` 后，会使用部署环境的真实 auth
+endpoint 执行公开页面 canary，并跳过仅供本地使用的 Jobs fixture 回归。该
+production smoke 在 GitHub Actions 中是独立 job，因为 Vite 构建成功并不能证明
+生成的 chunks 可以在浏览器中执行。
 
 Vite 构建还会把 Rollup 的 `CIRCULAR_CHUNK` 和
 `CYCLIC_CROSS_CHUNK_REEXPORT` warning 提升为 error。不要隐藏或宽泛

@@ -6,10 +6,11 @@
 
 <p align="center">
   <a href="./README.zh.md">中文</a> ·
+  <a href="https://runner.qiniuinc.com/docs/getting-started/hosted">Hosted Guide</a> ·
   <a href="#quick-start">Quick Start</a> ·
   <a href="https://app-6a6b0d723d3a24e095531129.app.qiniucc.com/">Deploy to Qiniu LAS</a> ·
-  <a href="https://github.com/qiniu/ci-runner/issues/59">Deployment Guide</a> ·
-  <a href="#documentation">Documentation</a> ·
+  <a href="https://runner.qiniuinc.com/docs/getting-started/deploy">Deployment Guide</a> ·
+  <a href="https://runner.qiniuinc.com/docs">Documentation</a> ·
   <a href="#license">License</a> ·
   <a href="#community--contributing">Community &amp; Contributing</a>
 </p>
@@ -72,7 +73,7 @@ cp runnerd.yaml.example runnerd.yaml
 ./bin/runnerd --config runnerd.yaml
 ```
 
-5. Open `http://<host>:25500/` and sign in with GitHub OAuth. The public product landing page links to the current GitHub documentation and the protected Jobs console at `/jobs`. On the first authenticated visit to `/jobs`, a six-step product tour introduces Jobs, Repositories, Settings, and Sandbox setup; it can be replayed from the account menu.
+5. Open `http://<host>:25500/` and sign in with GitHub OAuth. The public product landing page links to the same-origin `/docs` guides and the protected Jobs console at `/jobs`. On the first authenticated visit to `/jobs`, a six-step product tour introduces Jobs, Repositories, Settings, and Sandbox setup; it can be replayed from the account menu.
 6. Open **Repositories** to review **Runner readiness** for the account or organization. Ready sources are shown without configuration controls. If Sandbox setup is missing and you can manage that scope, use **Configure Sandbox** to open the exact account or organization **Preferences** page and configure **Sandbox Service** credentials. Settings lists only your account and organizations where you are an active member; outside collaborators receive a read-only readiness prompt and cannot browse that organization's Sandbox catalogs. Administrators can provide a fallback at `/admin/sandbox_service`.
 7. Confirm the five managed Qiniu Runner Specs in the **Admin Console**. Their public templates have passed the two-region release gate; operators can still disable individual managed specs or adjust their concurrency and idle capacity.
 8. Configure a GitHub webhook → `POST http://<host>:25500/webhooks/github`.
@@ -97,6 +98,7 @@ Key notes:
 
 - Relative `database.dsn` and `github.app.private_key_file` paths resolve from the config file's directory.
 - Use SQLite for local and single-node deployments. PostgreSQL and MySQL are supported but multi-instance operation on a shared database has not been verified.
+- CI creates fresh PostgreSQL and MySQL schemas and reruns migration against an existing catalog before exercising policy-free matching. See [docs/testing.md](docs/testing.md) for the opt-in local real-dialect command.
 - Existing SQLite `runner_requests` and `runner_profiles` tables add missing model columns and indexes on startup without table recreation. This preserves historical runner values plus legacy profile rows and indexes. Creating missing indexes does not rewrite rows, but it can add brief startup I/O and lock contention on a large database; see [docs/testing.md](docs/testing.md) for migration and query-plan checks.
 - GitHub Enterprise Server is **not** supported; use a GitHub.com App.
 - Configure exactly one GitHub auth method: `github.app`, `github.token`, or `github.basic_auth`.
@@ -259,6 +261,14 @@ evidence.
 See [Public Runner Templates](docs/default-runner-templates.md) for supported
 workflow labels, publication status, and regional verification.
 
+`GET /api/public/runner-templates` exposes the four runnerd-managed public
+templates without authentication. Its stable response contains only each
+public template name, logical Runner Spec names, and supported workflow label
+sets; it never includes provider template IDs, credentials, endpoints, or
+private/custom templates. The credential-bound
+`GET /user/sandbox/templates?region=<id>` catalog remains a separate scoped
+resource.
+
 For custom specs, `template_id` should point to a Qiniu Sandbox template containing the GitHub runner image. Template access is checked against the repository owner's effective Sandbox service shown under **Repositories → Runner readiness** at sandbox creation time.
 
 ## Admin Console
@@ -271,7 +281,7 @@ The built-in web UI provides:
 | `/admin/accounts` | Account management — list, search, and change roles |
 | `/admin/sandbox_service` | Sandbox service configuration |
 
-`/` is always the public Qiniu CI Runner product landing page. The ordinary-user Jobs homepage is `/jobs`; other protected routes include `/repositories`, PR job groups (`/github/pulls/{owner}/{repo}/{number}/jobs`), and account settings (`/account/preferences`, `/account/sandbox-templates`, `/account/sandbox-instances`), with matching `/organizations/{login}/...` routes. Opening a protected route without a session shows a focused GitHub sign-in page and returns to the original URL after OAuth.
+`/` is always the public Qiniu CI Runner product landing page. `/docs` and its fixed guide routes are public, same-origin, and available in English and Simplified Chinese. The ordinary-user Jobs homepage is `/jobs`; other protected routes include `/repositories`, PR job groups (`/github/pulls/{owner}/{repo}/{number}/jobs`), and account settings (`/account/preferences`, `/account/sandbox-templates`, `/account/sandbox-instances`), with matching `/organizations/{login}/...` routes. Opening a protected route without a session shows a focused GitHub sign-in page and returns to the original URL after OAuth.
 
 Runner request lists return the newest 100 rows by default and cap pages at 500. They project only public runner-state fields instead of stored webhook payloads or Sandbox credentials. Admin polling uses the `(queued_at DESC, id ASC)` index; repository-authorized user polling queries each installation through `(github_installation_id, queued_at DESC, id ASC)` and merges the bounded results while preserving exact installation/repository access pairs.
 
@@ -324,19 +334,18 @@ loading.
 | `templates/github-runner-ubuntu-22.04` | Maintained Ubuntu 22.04 x64 runner template |
 | `templates/github-runner-ubuntu-24.04` | Maintained Ubuntu 24.04 x64 runner template |
 | `templates/github-runner-ubuntu-26.04` | Preview Ubuntu 26.04 x64 runner template |
-| `templates/qbox-kodo-ubuntu-16.04` | Legacy Ubuntu 16.04 for qbox/kodo-style jobs |
 
 Run `task template-check-all`, then use the four
 `task template-build-ubuntu-*` targets for real qshell Sandbox builds. See
 [Public Runner Templates](docs/default-runner-templates.md) for publication and
 cache-resume guidance after a remote build time limit, plus publication and
-smoke commands. The qbox-kodo base image remains a separate
-`task qbox-kodo-base-build` workflow.
+smoke commands.
 
 ## Documentation
 
 | Document | Description |
 | --- | --- |
+| [Hosted site guides](https://runner.qiniuinc.com/docs) | Hosted quick start, runnerd deployment, workflow example, custom template lifecycle, troubleshooting, and managed labels |
 | [docs/testing.md](docs/testing.md) | Local testing, GitHub App/OAuth setup, webhook forwarding, troubleshooting |
 | [docs/deployment-smoke.md](docs/deployment-smoke.md) | Production-style readiness checklist |
 | [docs/default-runner-templates.md](docs/default-runner-templates.md) | Public template labels, qshell release flow, regional smoke, and rollback |

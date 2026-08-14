@@ -86,12 +86,20 @@ describe("app load policy", () => {
 
   test("classifies public, protected, admin, and unknown routes explicitly", () => {
     expect(appPolicy.appRouteAccess?.("/")).toBe("public")
+    expect(appPolicy.appRouteAccess?.("/docs")).toBe("public")
+    expect(appPolicy.appRouteAccess?.("/docs/getting-started/hosted")).toBe("public")
+    expect(appPolicy.appRouteAccess?.("/docs/getting-started/deploy")).toBe("public")
+    expect(appPolicy.appRouteAccess?.("/docs/guides/workflow")).toBe("public")
+    expect(appPolicy.appRouteAccess?.("/docs/guides/custom-templates")).toBe("public")
+    expect(appPolicy.appRouteAccess?.("/docs/troubleshooting")).toBe("public")
+    expect(appPolicy.appRouteAccess?.("/docs/reference/runner-labels")).toBe("public")
     expect(appPolicy.appRouteAccess?.("/jobs")).toBe("user")
     expect(appPolicy.appRouteAccess?.("/jobs/job-1")).toBe("user")
     expect(appPolicy.appRouteAccess?.("/github/pulls/octo/repo/12/jobs")).toBe("user")
     expect(appPolicy.appRouteAccess?.("/account/preferences")).toBe("user")
     expect(appPolicy.appRouteAccess?.("/admin/runner_specs")).toBe("admin")
     expect(appPolicy.appRouteAccess?.("/admin/not-a-section")).toBe("not-found")
+    expect(appPolicy.appRouteAccess?.("/docs/not-a-guide")).toBe("not-found")
     expect(appPolicy.appRouteAccess?.("/not-a-route")).toBe("not-found")
   })
 

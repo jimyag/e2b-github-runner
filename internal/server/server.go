@@ -370,6 +370,7 @@ func (s *Server) recoveryTimeoutPerRunner(ctx context.Context, requestCount, wor
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /", s.handleRoot)
+	s.mux.HandleFunc("GET /api/public/runner-templates", s.handlePublicRunnerTemplates)
 	s.mux.HandleFunc("GET /admin", s.handleAdminRedirect)
 	s.mux.HandleFunc("GET /admin/api/accounts", s.handleAdminListAccounts)
 	s.mux.HandleFunc("PATCH /admin/api/accounts/{id}/role", s.handleAdminUpdateAccountRole)

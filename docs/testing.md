@@ -120,6 +120,20 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
+State migration and the shadow catalog matcher also have an opt-in real-dialect
+compatibility gate. Both DSNs must point to dedicated disposable databases
+whose names end in `_test`: the tests refuse other database names, then drop
+and recreate runnerd state tables. They cover fresh schema creation, repeated
+migration with preserved catalog rows, and legacy catalog tables present,
+empty, and absent.
+
+```bash
+RUNNERD_CATALOG_BACKEND_TESTS=1 \
+RUNNERD_POSTGRES_TEST_DSN='host=127.0.0.1 user=runnerd password=runnerd dbname=runnerd_test port=5432 sslmode=disable' \
+RUNNERD_MYSQL_TEST_DSN='runnerd:runnerd@tcp(127.0.0.1:3306)/runnerd_test' \
+  go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+```
+
 Restart recovery has focused tests that do not require a live sandbox:
 
 ```bash
@@ -323,7 +337,7 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
   http://127.0.0.1:25500/admin/api/sandbox-service-default/api-key | jq
 ```
 
-UI source lives in `ui/` and uses the same React, Vite, Tailwind CSS, shadcn-style components, and theme CSS as `kubevirt-console`. `task build` runs `task ui-build`, writes frontend output to `internal/server/ui/`, and then compiles `runnerd`. In development mode, `internal/server/ui_assets_development.go` proxies UI assets to Vite. In production builds, `internal/server/ui_assets_production.go` embeds `internal/server/ui/*`. `/` always renders the public product landing page with documentation and Jobs destinations; it does not load protected user resources. The protected ordinary-user Jobs homepage is `/jobs`. Opening `/jobs`, a job-group deep link, account settings, or an admin route without a session renders a focused sign-in page whose OAuth link preserves the full same-origin destination through `return_to`. Unknown routes render 404, and authenticated non-admin users receive an explicit access-denied page on admin routes. `/repositories` is the canonical ordinary-user readiness page for GitHub App installation/sync, the user/App authorized repository intersection, local job activity, and effective Sandbox service status. `/account/repositories` and `/organizations/{login}/repositories` remain compatible scoped deep links rendered by the same page. Account and organization Preferences are the only ordinary-user Sandbox credential editors; readiness links there only when a manageable scope is missing configuration. Settings retains Sandbox Service, Sandbox Templates, and Sandbox Instances resource management for the signed-in account and manageable organizations only. Initial navigation loads only resources used by that route. Authenticated user routes load `GET /user/onboarding/product-tour` once for account-level tour state, but a failed onboarding request is ignored so it cannot block core workspace data and it is not part of polling. Only a pending account whose tour has not been seen and that lands on the exact `/jobs` homepage auto-starts the six-step tour; deep links do not interrupt the user. The final steps navigate to `/repositories`; ready sources require no action, while a missing manageable source points the user to Settings. The account-menu replay works for seen, completed, and skipped accounts without changing stored state. The Jobs homepage loads the first `GET /user/runner_requests?limit=100&offset=0` page and polls that page every five seconds while preserving any already-loaded history. Stable job-group routes and the Load older jobs action can load the bounded 500-row history window; the API rejects `limit + offset` values past 500 and does not advertise an unusable next link. GitHub App metadata, preferences, and onboarding state are not part of the polling loop. Admin routes load only the active section's request/spec/group/policy/audit dependencies, and only Overview and Runner Requests poll runner requests. The catalog uses `GET /user/sandbox/templates?region=<id>` and `GET /user/sandbox/instances?region=<id>&template_id=<id>`; the instance endpoint lists only runner-created sandboxes and uses the effective scoped/default credential resolver. Installation-scoped catalog reads require a manageable organization scope. The admin surface includes the account list and role controls at `/admin/accounts`, the platform fallback at `/admin/sandbox_service`, runners, runner specs, runner groups, runner policies, retry, audit, label match test, and diagnostics pages, but not provider resource catalogs.
+UI source lives in `ui/` and uses the same React, Vite, Tailwind CSS, shadcn-style components, and theme CSS as `kubevirt-console`. `task build` runs `task ui-build`, writes frontend output to `internal/server/ui/`, and then compiles `runnerd`. In development mode, `internal/server/ui_assets_development.go` proxies UI assets to Vite. In production builds, `internal/server/ui_assets_production.go` embeds `internal/server/ui/*`. `/` always renders the public product landing page with documentation and Jobs destinations; it does not load protected user resources. The protected ordinary-user Jobs homepage is `/jobs`. Opening `/jobs`, a job-group deep link, account settings, or an admin route without a session renders a focused sign-in page whose OAuth link preserves the full same-origin destination through `return_to`. Unknown routes render 404, and authenticated non-admin users receive an explicit access-denied page on admin routes. `/repositories` is the canonical ordinary-user readiness page for GitHub App installation/sync, the user/App authorized repository intersection, local job activity, and effective Sandbox service status. `/account/repositories` and `/organizations/{login}/repositories` remain compatible scoped deep links rendered by the same page. Account and organization Preferences are the only ordinary-user Sandbox credential editors; readiness links there only when a manageable scope is missing configuration. Settings retains Sandbox Service, Sandbox Templates, and Sandbox Instances resource management for the signed-in account and manageable organizations only. Initial navigation loads only resources used by that route. Authenticated user routes load `GET /user/onboarding/product-tour` once for account-level tour state, but a failed onboarding request is ignored so it cannot block core workspace data and it is not part of polling. Only a pending account whose tour has not been seen and that lands on the exact `/jobs` homepage auto-starts the six-step tour; deep links do not interrupt the user. The final steps navigate to `/repositories`; ready sources require no action, while a missing manageable source points the user to Settings. The account-menu replay works for seen, completed, and skipped accounts without changing stored state. The Jobs homepage loads the first `GET /user/runner_requests?limit=100&offset=0` page and polls that page every five seconds while preserving any already-loaded history. Stable job-group routes and the Load older jobs action can load the bounded 500-row history window; the API rejects `limit + offset` values past 500 and does not advertise an unusable next link. GitHub App metadata, preferences, and onboarding state are not part of the polling loop. Admin routes load only the active section's request/spec/group/policy/audit dependencies, and only Overview and Runner Requests poll runner requests. The public managed catalog uses unauthenticated `GET /api/public/runner-templates` and must expose only stable runnerd-owned names and workflow labels. Provider catalogs use `GET /user/sandbox/templates?region=<id>` and `GET /user/sandbox/instances?region=<id>&template_id=<id>`; the instance endpoint lists only runner-created sandboxes and uses the effective scoped/default credential resolver. Installation-scoped catalog reads require a manageable organization scope. Tests must prove signed-out and signed-in public responses are identical, exclude provider/scoped metadata, and keep public and provider loading, retry, failure recovery, and stale-response handling independent. The admin surface includes the account list and role controls at `/admin/accounts`, the platform fallback at `/admin/sandbox_service`, runners, runner specs, runner groups, runner policies, retry, audit, label match test, and diagnostics pages, but not provider resource catalogs.
 
 For focused UI unit tests, run:
 
@@ -347,24 +361,28 @@ language-neutral technical literals can be intentionally allowlisted. GitHub
 Actions runs the same gate in an independent `i18n` job. The job is
 merge-blocking only when repository branch protection or a ruleset requires it.
 
-After changing UI dependencies, Vite/Rollup configuration, manual chunking, or
-production asset loading, execute the built bundle in Chromium:
+After changing UI dependencies, Vite/Rollup configuration, manual chunking,
+production asset loading, or the Jobs viewport/scroll layout, execute the built
+bundle in Chromium:
 
 ```bash
 task ui-production-smoke
 ```
 
 The task installs the matching Chromium runtime, builds `internal/server/ui/`,
-starts Vite preview on port `4173`, and opens `/` with Playwright. It fails when
-the page raises a JavaScript error, logs a console error, cannot load a script or
-stylesheet, leaves `#root` empty, or does not render the public landing-page
-heading. If port `4173` is occupied, set
+and starts Vite preview on port `4173`. Playwright opens `/` to catch JavaScript
+or console errors, failed script/stylesheet requests, an empty `#root`, or a
+missing landing-page heading. The local preview also opens `/jobs` with scoped
+authenticated API fixtures and proves that a long desktop Jobs list scrolls
+without moving the document or Web Console, while a narrow viewport preserves
+normal document flow. If port `4173` is occupied, set
 `RUNNERD_UI_SMOKE_PORT=<free-port>`. The local preview does not start `runnerd`,
-so Playwright fulfills only `/auth/session` with a signed-out response. Set
+so these responses are test fixtures. Set
 `RUNNERD_UI_SMOKE_BASE_URL=https://<runnerd-host>` to test a deployed origin
-with its real auth endpoint. This production smoke is a dedicated GitHub Actions
-job because a successful Vite build does not prove that generated chunks execute
-in a browser.
+with its real auth endpoint; that deployed public canary skips the local
+fixture-backed Jobs regression. This production smoke is a dedicated GitHub
+Actions job because a successful Vite build does not prove that generated
+chunks execute in a browser.
 
 The Vite build also promotes Rollup `CIRCULAR_CHUNK` and
 `CYCLIC_CROSS_CHUNK_REEXPORT` warnings to errors. Do not suppress or broadly

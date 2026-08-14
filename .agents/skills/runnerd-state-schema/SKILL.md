@@ -61,6 +61,17 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
+When a schema or migration change can affect Postgres or MySQL, run the
+real-dialect gate against dedicated disposable databases whose names end in
+`_test`:
+
+```bash
+RUNNERD_CATALOG_BACKEND_TESTS=1 \
+RUNNERD_POSTGRES_TEST_DSN='<dedicated postgres test DSN>' \
+RUNNERD_MYSQL_TEST_DSN='<dedicated mysql test DSN>' \
+  go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+```
+
 6. If callers or server behavior changed, also run:
 
 ```bash

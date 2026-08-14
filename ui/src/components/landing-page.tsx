@@ -25,8 +25,9 @@ import { deploymentRequirementItems, landingChecklistItems } from "@/components/
 import { QiniuRunnerLogo } from "@/components/qiniu-runner-logo"
 
 const repositoryURL = "https://github.com/qiniu/ci-runner"
-const documentationURL = `${repositoryURL}#documentation`
-const quickStartURL = `${repositoryURL}#quick-start`
+const documentationURL = "/docs"
+const hostedGuideURL = "/docs/getting-started/hosted"
+const deploymentGuideURL = "/docs/getting-started/deploy"
 const licenseURL = `${repositoryURL}/blob/main/LICENSE`
 
 const capabilities = [
@@ -97,8 +98,6 @@ export function LandingPage() {
             <a
               className="inline-flex items-center gap-1.5 transition-colors hover:text-white"
               href={documentationURL}
-              target="_blank"
-              rel="noreferrer"
             >
               {t("landing.documentation")}
               <ArrowRight className="h-3.5 w-3.5 -rotate-45" />
@@ -108,8 +107,6 @@ export function LandingPage() {
           <div className="flex items-center gap-2">
             <a
               href={documentationURL}
-              target="_blank"
-              rel="noreferrer"
               aria-label={t("landing.documentation")}
               className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/20 text-white transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#27c5f5] md:hidden"
             >
@@ -150,7 +147,7 @@ export function LandingPage() {
             </p>
 
             <div className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center">
-              <LandingAccessAction />
+              <LandingAccessAction href={hostedGuideURL} />
               <a
                 href="#how-it-works"
                 className="group inline-flex h-12 items-center justify-center gap-2 rounded-md border border-white/20 px-5 text-sm font-semibold text-white transition-all hover:border-white/40 hover:bg-white/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#27c5f5]"
@@ -325,8 +322,6 @@ export function LandingPage() {
               </p>
               <a
                 href={documentationURL}
-                target="_blank"
-                rel="noreferrer"
                 className="group mt-9 inline-flex items-center gap-2 text-sm font-semibold text-[#7ddcff] transition-colors hover:text-white"
               >
                 {t("landing.readDocumentation")}
@@ -376,11 +371,9 @@ export function LandingPage() {
           </div>
           <div className="rounded-xl border border-[#07131b]/15 bg-white/20 p-5 backdrop-blur-sm sm:p-6">
             <div className="flex flex-col gap-3 sm:flex-row">
-              <LandingAccessAction inverted label={t("landing.hosted")} />
+              <LandingAccessAction href={hostedGuideURL} inverted label={t("landing.hosted")} />
               <a
-                href={quickStartURL}
-                target="_blank"
-                rel="noreferrer"
+                href={deploymentGuideURL}
                 className="group inline-flex h-12 items-center justify-center gap-2.5 rounded-md border border-[#07131b]/25 bg-white/35 px-5 text-sm font-semibold text-[#07131b] transition-all hover:border-[#07131b]/45 hover:bg-white/55 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#07131b]"
               >
                 {t("landing.deploy")}
@@ -420,8 +413,6 @@ export function LandingPage() {
             <a
               className="inline-flex items-center gap-1.5 transition-colors hover:text-[#006b91]"
               href={documentationURL}
-              target="_blank"
-              rel="noreferrer"
             >
               {t("landing.documentation")}
               <ArrowRight className="h-3.5 w-3.5 -rotate-45" />
@@ -472,10 +463,12 @@ function LandingThemeToggle() {
 }
 
 function LandingAccessAction({
+  href = "/jobs",
   inverted = false,
   compact = false,
   label,
 }: {
+  href?: string
   inverted?: boolean
   compact?: boolean
   label?: string
@@ -491,7 +484,7 @@ function LandingAccessAction({
 
   return (
     <a
-      href="/jobs"
+      href={href}
       aria-label={compact ? actionLabel : undefined}
       className={`group inline-flex items-center justify-center gap-2.5 rounded-md text-sm font-semibold transition-all focus-visible:outline-2 focus-visible:outline-offset-2 ${sizeClass} ${colorClass}`}
     >

@@ -6,10 +6,11 @@
 
 <p align="center">
   <a href="./README.md">English</a> ·
+  <a href="https://runner.qiniuinc.com/docs/getting-started/hosted">托管版指南</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="https://app-6a6b0d723d3a24e095531129.app.qiniucc.com/">一键部署到七牛云 LAS</a> ·
-  <a href="https://github.com/qiniu/ci-runner/issues/59">部署使用指南</a> ·
-  <a href="#文档">文档</a> ·
+  <a href="https://runner.qiniuinc.com/docs/getting-started/deploy">部署使用指南</a> ·
+  <a href="https://runner.qiniuinc.com/docs">文档</a> ·
   <a href="#许可证">许可证</a> ·
   <a href="#社区与贡献">社区与贡献</a>
 </p>
@@ -72,7 +73,7 @@ cp runnerd.yaml.example runnerd.yaml
 ./bin/runnerd --config runnerd.yaml
 ```
 
-5. 打开 `http://<host>:25500/`，使用 GitHub OAuth 登录。公开产品首页提供当前 GitHub 文档入口，以及指向 `/jobs` 受保护的 Jobs 控制台入口。用户首次登录访问 `/jobs` 时，会看到介绍 Jobs、Repositories、Settings 和 Sandbox 设置的六步引导；之后可从账户菜单重播。
+5. 打开 `http://<host>:25500/`，使用 GitHub OAuth 登录。公开产品首页提供同域 `/docs` 指南，以及指向 `/jobs` 受保护的 Jobs 控制台入口。用户首次登录访问 `/jobs` 时，会看到介绍 Jobs、Repositories、Settings 和 Sandbox 设置的六步引导；之后可从账户菜单重播。
 6. 打开 **Repositories** 查看账户或组织的 **Runner readiness**。有效来源只显示状态，不提供配置控件；缺少 Sandbox 且用户可管理该 scope 时，通过 **Configure Sandbox** 进入精确的账户或组织 **Preferences** 页面并配置 **Sandbox Service** 凭据。Settings 只列出个人账户和用户属于 active member 的组织；outside collaborator 只能看到 readiness 只读提示，不能浏览该组织的 Sandbox 资源目录。管理员可以在 `/admin/sandbox_service` 配置兜底。
 7. 在**管理控制台**中确认 5 个 Qiniu managed Runner Specs。它们的公共模板已通过双区域 release gate；operator 仍可禁用单个 managed spec，或调整并发与 idle capacity。
 8. 配置 GitHub webhook → `POST http://<host>:25500/webhooks/github`。
@@ -97,6 +98,7 @@ cp runnerd.yaml.example runnerd.yaml
 
 - 相对路径的 `database.dsn` 和 `github.app.private_key_file` 按配置文件所在目录解析。
 - 本地和单节点部署建议使用 SQLite。支持 PostgreSQL 和 MySQL，但多实例共享数据库尚未验证。
+- CI 会创建全新的 PostgreSQL 与 MySQL schema，并在已有 catalog 上重复执行迁移，再验证 policy-free matching。本地 opt-in 的真实方言命令见 [docs/zh/testing.md](docs/zh/testing.md)。
 - 已有 SQLite `runner_requests` 和 `runner_profiles` 表会在启动时补建缺失的 model columns 和 indexes，不会重建整张表，从而保留历史 runner 字段以及旧 profile rows 和 indexes。创建缺失索引不会重写 rows，但大数据库可能出现短暂的启动 I/O 和锁等待；迁移与查询计划检查见 [docs/zh/testing.md](docs/zh/testing.md)。
 - **不支持** GitHub Enterprise Server，请使用 GitHub.com App。
 - GitHub 鉴权方式三选一：`github.app`、`github.token` 或 `github.basic_auth`。
@@ -257,6 +259,12 @@ catalog 更新并取得新的区域 smoke 证据。
 
 支持的 workflow labels、发布状态和区域验证流程见[公共 Runner 模板](docs/zh/default-runner-templates.md)。
 
+`GET /api/public/runner-templates` 无需登录即可返回 runnerd 管理的 4 个公共
+模板。稳定响应只包含公共模板名称、对应的逻辑 Runner Spec 名称和支持的 workflow
+label 组合，不包含 provider template ID、credential、endpoint，也不会暴露私有或
+自定义模板。依赖 credential 的
+`GET /user/sandbox/templates?region=<id>` 仍是独立的 scoped resource。
+
 对于自定义 spec，`template_id` 应指向包含 GitHub runner 镜像的 Qiniu Sandbox 模板。创建沙箱时会使用 **Repositories → Runner readiness** 中显示的仓库 owner 有效 Sandbox service 检查模板访问权限。
 
 ## 管理控制台
@@ -269,7 +277,7 @@ catalog 更新并取得新的区域 smoke 证据。
 | `/admin/accounts`        | 账户管理：列表、搜索、角色变更 |
 | `/admin/sandbox_service` | Sandbox 服务配置               |
 
-`/` 始终是公开的 Qiniu CI Runner 产品首页。普通用户 Jobs 首页位于 `/jobs`；其他受保护路由包括 `/repositories`、PR job 分组（`/github/pulls/{owner}/{repo}/{number}/jobs`）、账户设置（`/account/preferences`、`/account/sandbox-templates`、`/account/sandbox-instances`），以及对应的 `/organizations/{login}/...` 路由。未登录访问受保护路由时会显示独立的 GitHub 登录页，并在 OAuth 完成后返回原 URL。
+`/` 始终是公开的 Qiniu CI Runner 产品首页。`/docs` 及其固定指南路由公开、同域，并提供英文和简体中文。普通用户 Jobs 首页位于 `/jobs`；其他受保护路由包括 `/repositories`、PR job 分组（`/github/pulls/{owner}/{repo}/{number}/jobs`）、账户设置（`/account/preferences`、`/account/sandbox-templates`、`/account/sandbox-instances`），以及对应的 `/organizations/{login}/...` 路由。未登录访问受保护路由时会显示独立的 GitHub 登录页，并在 OAuth 完成后返回原 URL。
 
 Runner request 列表默认返回最新 100 行，单页最多 500 行，并且只读取公开 runner state 所需字段，不加载已保存的 webhook payload 或 Sandbox credentials。Admin 轮询使用 `(queued_at DESC, id ASC)` 索引；经过 repository 授权的普通用户轮询通过 `(github_installation_id, queued_at DESC, id ASC)` 分别查询每个 installation，再合并有界结果，同时保留精确的 installation/repository 授权关系。
 
@@ -321,18 +329,17 @@ task release-check # 验证发布构建
 | `templates/github-runner-ubuntu-22.04` | 维护中的 Ubuntu 22.04 x64 Runner 模板         |
 | `templates/github-runner-ubuntu-24.04` | 维护中的 Ubuntu 24.04 x64 Runner 模板         |
 | `templates/github-runner-ubuntu-26.04` | 预览版 Ubuntu 26.04 x64 Runner 模板           |
-| `templates/qbox-kodo-ubuntu-16.04`     | 旧版 Ubuntu 16.04，用于 qbox/kodo 风格的 job  |
 
 先运行 `task template-check-all`，再通过 4 个
 `task template-build-ubuntu-*` targets 执行真实 qshell Sandbox 构建。发布与
 远程构建超时后的缓存续跑、发布与 smoke 命令见
-[公共 Runner 模板](docs/zh/default-runner-templates.md)。qbox-kodo
-基础镜像仍使用独立的 `task qbox-kodo-base-build` 流程。
+[公共 Runner 模板](docs/zh/default-runner-templates.md)。
 
 ## 文档
 
 | 文档                                                                                   | 说明                                                    |
 | -------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| [站点指南](https://runner.qiniuinc.com/docs)                                           | 托管版快速开始、runnerd 部署、Workflow 示例、自定义模板全流程、故障排查和 managed labels |
 | [docs/zh/testing.md](docs/zh/testing.md)                                               | 本地测试、GitHub App/OAuth 设置、webhook 转发、故障排查 |
 | [docs/zh/deployment-smoke.md](docs/zh/deployment-smoke.md)                             | 生产环境就绪检查清单                                    |
 | [docs/zh/default-runner-templates.md](docs/zh/default-runner-templates.md)             | 公共模板 labels、qshell 发布流程、区域 smoke 和回滚     |

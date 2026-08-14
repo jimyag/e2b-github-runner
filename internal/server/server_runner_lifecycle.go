@@ -217,7 +217,7 @@ func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallatio
 		st, err := s.rejectAdmission(req, payload, "repository_not_allowed")
 		return st, false, err
 	}
-	match, err := s.store.MatchProfile(repositoryFullName, job.Labels)
+	match, err := s.matchProfileForAdmission(repositoryFullName, job.Labels)
 	if err != nil {
 		return state.RunnerState{}, false, err
 	}
@@ -232,6 +232,47 @@ func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallatio
 	s.logger.Info("workflow run job matched profile", "job_id", job.ID, "repository", repositoryFullName, "profile", match.Profile.Name, "runner_group", match.Profile.RunnerGroup, "labels", req.Labels)
 	metrics.RecordWorkflowQueued(repositoryFullName, workflowRunName, job.Name, match.Profile.Name)
 	return s.enqueueRunnerRequest(req, payload)
+}
+
+func (s *Server) matchProfileForAdmission(repository string, labels []string) (state.ProfileMatch, error) {
+	comparison, err := s.store.CompareProfileMatches(repository, labels)
+	if err != nil {
+		return state.ProfileMatch{}, err
+	}
+	legacyName := matchedProfileName(comparison.Legacy)
+	enabledName := matchedProfileName(comparison.Enabled)
+	result := "same"
+	switch {
+	case comparison.Legacy.Profile != nil && comparison.Enabled.Profile == nil:
+		result = "legacy_only"
+	case comparison.Legacy.Profile == nil && comparison.Enabled.Profile != nil:
+		result = "enabled_only"
+	case comparison.Legacy.Profile != nil && comparison.Enabled.Profile != nil && legacyName != enabledName:
+		result = "different_profile"
+	case legacyName == enabledName && comparison.Legacy.Reason != comparison.Enabled.Reason:
+		result = "different_profile"
+	}
+	metrics.RecordCatalogMatchComparison(legacyName, enabledName, result)
+	if result != "same" {
+		s.logger.Warn(
+			"catalog profile match mismatch",
+			"result", result,
+			"repository", repository,
+			"labels", append([]string(nil), labels...),
+			"legacy_profile", legacyName,
+			"legacy_reason", comparison.Legacy.Reason,
+			"enabled_profile", enabledName,
+			"enabled_reason", comparison.Enabled.Reason,
+		)
+	}
+	return comparison.Legacy, nil
+}
+
+func matchedProfileName(match state.ProfileMatch) string {
+	if match.Profile == nil {
+		return ""
+	}
+	return match.Profile.Name
 }
 
 func (s *Server) enqueueRunnerRequest(req state.RunnerRequest, payload []byte) (state.RunnerState, bool, error) {

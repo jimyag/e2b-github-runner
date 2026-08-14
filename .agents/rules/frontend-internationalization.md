@@ -9,6 +9,10 @@
   `document.documentElement.lang` synchronization.
 - Fixed product copy belongs in `ui/src/locales/en.ts` and
   `ui/src/locales/zh.ts`. Keep both resource trees aligned when adding a key.
+- Public guide prose belongs in paired Markdown files under
+  `ui/src/content/site-docs/en/` and `ui/src/content/site-docs/zh/`. Keep the
+  basenames and section intent aligned; guide routes remain fixed in
+  `ui/src/site-doc-routes.ts` and must not depend on translated titles.
 - `ui/src/i18next.d.ts` derives valid translation keys from the English
   resource. Keep dynamic keys as literal unions or explicit lookup maps so
   TypeScript can reject missing keys.
@@ -35,7 +39,8 @@
 
 ## Placement And Components
 
-- The public landing page keeps its standalone `LanguageSwitcher` button.
+- The public landing page and public guide header keep a standalone
+  `LanguageSwitcher` button.
 - Authenticated top navigation places `LanguageSwitcher variant="menu"` inside
   `AccountMenu`; do not add a second standalone language button to
   `SiteHeader` or `UserDashboard`.
@@ -48,6 +53,8 @@
 ## Change Checklist
 
 - Add or update the key in both locale files.
+- When changing public guide prose, update both locale Markdown files and keep
+  internal guide links on the exact public route catalog.
 - Add a focused behavior test for language selection, locale formatting, or
   stable identifiers when that behavior changes.
 - Confirm runtime identifiers and raw server data remain unchanged.

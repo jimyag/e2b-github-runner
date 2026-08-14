@@ -267,6 +267,12 @@ export type SandboxTemplate = {
   updated_at: string
 }
 
+export type PublicRunnerTemplate = {
+  default_template_name: string
+  runner_spec_names: string[]
+  workflow_labels: string[][]
+}
+
 export type SandboxInstance = {
   sandbox_id: string
   template_id: string
