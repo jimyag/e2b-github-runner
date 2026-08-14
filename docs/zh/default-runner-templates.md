@@ -17,6 +17,31 @@ Managed Runner Spec rollout 已于 2026-08-04（CST）通过
 上游版本来源、兼容性契约和各镜像差异见
 [`templates/README.md`](../../templates/README.md)。
 
+## 公共 Catalog API
+
+未登录和已登录客户端都可以访问 `GET /api/public/runner-templates`，并取得相同的、
+可缓存的 runnerd-owned catalog。响应按稳定顺序返回 4 个对象，且只包含以下字段：
+
+```json
+[
+  {
+    "default_template_name": "github-runner-ubuntu-24-04",
+    "runner_spec_names": ["qiniu-ubuntu-24.04", "qiniu-ubuntu-latest"],
+    "workflow_labels": [
+      ["qiniu", "ubuntu-24.04"],
+      ["qiniu", "ubuntu-latest"]
+    ]
+  }
+]
+```
+
+示例只展示其中一项；完整响应包含全部 4 个物理公共模板。该 API 不包含 provider
+template ID、region、credential、endpoint，也不会暴露私有或自定义模板。Provider
+可见模板仍通过依赖 credential、按账户或组织 scope 隔离的
+`GET /user/sandbox/templates?region=<id>` API 获取。普通用户的 Sandbox Templates
+页面把两个 catalog 作为独立 section 渲染，因此 provider catalog 失败不会隐藏
+公共 catalog，反之亦然。
+
 ## Workflow labels
 
 请根据所需环境使用准确的 label 组合：

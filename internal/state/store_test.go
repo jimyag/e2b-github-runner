@@ -1,6 +1,9 @@
 package state
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +19,50 @@ import (
 	"gorm.io/gorm"
 )
 
+var errCatalogMetadataLookup = errors.New("catalog metadata lookup failed")
+
+type catalogMetadataFailingPool struct {
+	gorm.ConnPool
+	tableName string
+}
+
+func (p *catalogMetadataFailingPool) BeginTx(ctx context.Context, opts *sql.TxOptions) (gorm.ConnPool, error) {
+	beginner, ok := p.ConnPool.(gorm.TxBeginner)
+	if !ok {
+		return nil, fmt.Errorf("test connection does not support transactions")
+	}
+	tx, err := beginner.BeginTx(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &catalogMetadataFailingTx{Tx: tx, tableName: p.tableName}, nil
+}
+
+type catalogMetadataFailingTx struct {
+	*sql.Tx
+	tableName string
+}
+
+func (tx *catalogMetadataFailingTx) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	if tx.failsCatalogLookup(query, args) {
+		return nil, errCatalogMetadataLookup
+	}
+	return tx.Tx.QueryContext(ctx, query, args...)
+}
+
+func (tx *catalogMetadataFailingTx) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if tx.failsCatalogLookup(query, args) {
+		cancelled, cancel := context.WithCancel(ctx)
+		cancel()
+		return tx.Tx.QueryRowContext(cancelled, query, args...)
+	}
+	return tx.Tx.QueryRowContext(ctx, query, args...)
+}
+
+func (tx *catalogMetadataFailingTx) failsCatalogLookup(query string, args []any) bool {
+	return strings.Contains(query, "sqlite_master") && len(args) == 1 && args[0] == tx.tableName
+}
+
 func closeTestDB(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	sqlDB, err := db.DB()
@@ -25,6 +72,99 @@ func closeTestDB(t *testing.T, db *gorm.DB) {
 	if err := sqlDB.Close(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// productionRunnerCatalogFixture contains only the non-secret fields that
+// influence the runner-spec matcher. It is deliberately independent from the
+// state records so the expected catalog cannot be derived from the code under
+// test.
+type productionRunnerCatalogFixture struct {
+	Profiles                    []productionRunnerCatalogProfile `json:"profiles"`
+	Groups                      []RunnerGroup                    `json:"groups"`
+	Policies                    []RepositoryPolicy               `json:"policies"`
+	BriefCompatibilityLabelSets [][]string                       `json:"brief_compatibility_label_sets"`
+}
+
+type productionRunnerCatalogProfile struct {
+	Name             string   `json:"name"`
+	Labels           []string `json:"labels"`
+	RequiredLabels   []string `json:"required_labels"`
+	RunnerGroup      string   `json:"runner_group"`
+	Priority         int      `json:"priority"`
+	Enabled          bool     `json:"enabled"`
+	DefaultAvailable bool     `json:"default_available"`
+}
+
+func loadProductionRunnerCatalogFixture(t *testing.T) productionRunnerCatalogFixture {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "runner-catalog-production-2026-08-13.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture productionRunnerCatalogFixture
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.Profiles) != 10 || len(fixture.Groups) != 1 || len(fixture.Policies) != 7 {
+		t.Fatalf("production catalog shape = profiles:%d groups:%d policies:%d, want 10/1/7", len(fixture.Profiles), len(fixture.Groups), len(fixture.Policies))
+	}
+	return fixture
+}
+
+func loadProductionRunnerCatalog(t *testing.T, store Store) productionRunnerCatalogFixture {
+	t.Helper()
+	fixture := loadProductionRunnerCatalogFixture(t)
+	for _, profile := range fixture.Profiles {
+		if _, err := store.UpsertProfile(RunnerProfile{
+			Name:             profile.Name,
+			Labels:           append([]string(nil), profile.Labels...),
+			RequiredLabels:   append([]string(nil), profile.RequiredLabels...),
+			RunnerGroup:      profile.RunnerGroup,
+			TemplateID:       "fixture-template-" + profile.Name,
+			MaxConcurrency:   1,
+			Priority:         profile.Priority,
+			Enabled:          profile.Enabled,
+			DefaultAvailable: profile.DefaultAvailable,
+		}); err != nil {
+			t.Fatalf("upsert fixture profile %q: %v", profile.Name, err)
+		}
+	}
+	for _, group := range fixture.Groups {
+		if _, err := store.UpsertRunnerGroup(group); err != nil {
+			t.Fatalf("upsert fixture group %q: %v", group.Name, err)
+		}
+	}
+	for _, policy := range fixture.Policies {
+		if _, err := store.UpsertRepositoryPolicy(policy); err != nil {
+			t.Fatalf("upsert fixture policy %q/%q: %v", policy.RepositoryFullName, policy.ProfileName, err)
+		}
+	}
+	return fixture
+}
+
+// selectEnabledFixtureProfile is the policy-free result expected after the
+// migration. It remains test-only until the production matcher is introduced.
+func selectEnabledFixtureProfile(profiles []RunnerProfile, labels []string) *RunnerProfile {
+	candidates := make([]RunnerProfile, 0, len(profiles))
+	for _, profile := range profiles {
+		if profile.Enabled && labelsMatch(profile.RequiredLabels, labels) && labelsMatch(labels, profile.Labels) {
+			candidates = append(candidates, profile)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Priority != candidates[j].Priority {
+			return candidates[i].Priority > candidates[j].Priority
+		}
+		if len(candidates[i].Labels) != len(candidates[j].Labels) {
+			return len(candidates[i].Labels) > len(candidates[j].Labels)
+		}
+		return candidates[i].Name < candidates[j].Name
+	})
+	selected := candidates[0]
+	return &selected
 }
 
 func managedProfileForReconciliation(name string, revision int) RunnerProfile {
@@ -2964,6 +3104,479 @@ func TestProfilesAndPoliciesCanBeMatched(t *testing.T) {
 	}
 }
 
+func TestCompareProfileMatchesEnabledCatalogIgnoresLegacyTables(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, store *DBStore)
+	}{
+		{
+			name: "present",
+			setup: func(t *testing.T, store *DBStore) {
+				t.Helper()
+				if _, err := store.UpsertRunnerGroup(RunnerGroup{Name: "legacy", SpecNames: []string{"disabled"}, Enabled: true}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{RepositoryFullName: "owner/repo", RunnerGroupName: "legacy", Enabled: true}); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{name: "empty", setup: func(*testing.T, *DBStore) {}},
+		{
+			name: "absent",
+			setup: func(t *testing.T, store *DBStore) {
+				t.Helper()
+				db, err := store.dbOrEnsure()
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, table := range []string{"repository_policies", "runner_group_specs", "runner_groups"} {
+					if err := db.Migrator().DropTable(table); err != nil {
+						t.Fatal(err)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := New(t.TempDir()).(*DBStore)
+			for _, profile := range []RunnerProfile{
+				{Name: "disabled", Labels: []string{"self-hosted", "e2b"}, TemplateID: "disabled", MaxConcurrency: 1, Priority: 100, Enabled: false},
+				{Name: "lower-priority", Labels: []string{"self-hosted", "e2b", "optional"}, TemplateID: "lower", MaxConcurrency: 1, Priority: 10, Enabled: true},
+				{Name: "selected", Labels: []string{"self-hosted", "e2b"}, TemplateID: "selected", MaxConcurrency: 1, Priority: 20, Enabled: true},
+			} {
+				if _, err := store.UpsertProfile(profile); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tt.setup(t, store)
+
+			comparison, err := store.CompareProfileMatches("owner/repo", []string{"self-hosted", "e2b"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if comparison.Enabled.RepositoryFullName != "owner/repo" || !reflect.DeepEqual(comparison.Enabled.Labels, []string{"self-hosted", "e2b"}) {
+				t.Fatalf("enabled match request echo = %#v", comparison.Enabled)
+			}
+			if comparison.Enabled.Profile == nil || comparison.Enabled.Profile.Name != "selected" || comparison.Enabled.Reason != "" {
+				t.Fatalf("enabled match = %#v, want selected", comparison.Enabled)
+			}
+		})
+	}
+}
+
+func TestCompareProfileMatchesReturnsCatalogMetadataLookupError(t *testing.T) {
+	for _, tableName := range []string{"repository_policies", "runner_groups", "runner_group_specs"} {
+		t.Run(tableName, func(t *testing.T) {
+			store := New(t.TempDir()).(*DBStore)
+			if _, err := store.UpsertProfile(RunnerProfile{
+				Name: "enabled", Labels: []string{"self-hosted", "e2b"},
+				TemplateID: "enabled", MaxConcurrency: 1, Enabled: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			db, err := store.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			faultDB := db.Session(&gorm.Session{NewDB: true})
+			faultDB.Statement.ConnPool = &catalogMetadataFailingPool{ConnPool: db.Statement.ConnPool, tableName: tableName}
+			store.db = faultDB
+
+			comparison, err := store.CompareProfileMatches("owner/repo", []string{"self-hosted", "e2b"})
+			if !errors.Is(err, errCatalogMetadataLookup) {
+				t.Fatalf("CompareProfileMatches error = %v with comparison %#v, want catalog metadata error", err, comparison)
+			}
+		})
+	}
+}
+
+func TestCompareProfileMatchesSQLBackends(t *testing.T) {
+	if os.Getenv("RUNNERD_CATALOG_BACKEND_TESTS") != "1" {
+		t.Skip("set RUNNERD_CATALOG_BACKEND_TESTS=1 with dedicated Postgres and MySQL test databases")
+	}
+	for _, backend := range []struct {
+		name string
+		dsn  string
+	}{
+		{name: BackendPostgres, dsn: os.Getenv("RUNNERD_POSTGRES_TEST_DSN")},
+		{name: BackendMySQL, dsn: os.Getenv("RUNNERD_MYSQL_TEST_DSN")},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			if strings.TrimSpace(backend.dsn) == "" {
+				t.Fatalf("dedicated %s test DSN is required", backend.name)
+			}
+			store := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: false,
+			}).(*DBStore)
+			db, err := store.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireCatalogMatcherTestDatabase(t, db, backend.name)
+			registerSQLBackendTestCleanup(t, backend.name, backend.dsn)
+			createCatalogMatcherTestTables(t, db, backend.name)
+
+			if _, err := store.UpsertProfile(RunnerProfile{
+				Name: "policy-selected", Labels: []string{"self-hosted", "policy-selected"},
+				RequiredLabels: []string{"policy-selected"}, TemplateID: "policy-template",
+				MaxConcurrency: 1, Enabled: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.UpsertRunnerGroup(RunnerGroup{
+				Name: "policy-group", SpecNames: []string{"policy-selected"}, Enabled: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
+				RepositoryFullName: "owner/repo", RunnerGroupName: "policy-group", Enabled: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+			closeTestDB(t, db)
+
+			migrated := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: true,
+			}).(*DBStore)
+			migratedDB, err := migrated.dbOrEnsure()
+			if err != nil {
+				t.Fatalf("migrate existing %s catalog schema: %v", backend.name, err)
+			}
+			defer closeTestDB(t, migratedDB)
+			store = migrated
+			db = migratedDB
+			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+			groups, err := store.ListRunnerGroups()
+			if err != nil || len(groups) != 1 || groups[0].Name != "policy-group" {
+				t.Fatalf("existing %s groups after migration = %#v, err=%v", backend.name, groups, err)
+			}
+			policies, err := store.ListRepositoryPolicies()
+			if err != nil || len(policies) != 1 || policies[0].RepositoryFullName != "owner/repo" {
+				t.Fatalf("existing %s policies after migration = %#v, err=%v", backend.name, policies, err)
+			}
+
+			if err := db.Exec("DELETE FROM repository_policies").Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Exec("DELETE FROM runner_group_specs").Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Exec("DELETE FROM runner_groups").Error; err != nil {
+				t.Fatal(err)
+			}
+			profile, err := store.GetProfile("policy-selected")
+			if err != nil {
+				t.Fatal(err)
+			}
+			profile.DefaultAvailable = true
+			if _, err := store.UpsertProfile(profile); err != nil {
+				t.Fatal(err)
+			}
+			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+
+			for _, table := range []string{"repository_policies", "runner_group_specs", "runner_groups"} {
+				if err := db.Migrator().DropTable(table); err != nil {
+					t.Fatal(err)
+				}
+			}
+			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+		})
+	}
+}
+
+func registerSQLBackendTestCleanup(t *testing.T, backend, dsn string) {
+	t.Helper()
+	t.Cleanup(func() {
+		store := NewWithOptions(Options{
+			Backend: backend, DatabaseDSN: dsn, MigrateOnStart: false,
+		}).(*DBStore)
+		db, err := store.dbOrEnsure()
+		if err != nil {
+			t.Errorf("open %s test database for cleanup: %v", backend, err)
+			return
+		}
+		defer closeTestDB(t, db)
+		requireCatalogMatcherTestDatabase(t, db, backend)
+		resetSQLBackendTestTables(t, db)
+	})
+}
+
+func TestFreshSchemaSQLBackends(t *testing.T) {
+	if os.Getenv("RUNNERD_CATALOG_BACKEND_TESTS") != "1" {
+		t.Skip("set RUNNERD_CATALOG_BACKEND_TESTS=1 with dedicated Postgres and MySQL test databases")
+	}
+	for _, backend := range []struct {
+		name string
+		dsn  string
+	}{
+		{name: BackendPostgres, dsn: os.Getenv("RUNNERD_POSTGRES_TEST_DSN")},
+		{name: BackendMySQL, dsn: os.Getenv("RUNNERD_MYSQL_TEST_DSN")},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			if strings.TrimSpace(backend.dsn) == "" {
+				t.Fatalf("dedicated %s test DSN is required", backend.name)
+			}
+			setupStore := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: false,
+			}).(*DBStore)
+			setupDB, err := setupStore.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireCatalogMatcherTestDatabase(t, setupDB, backend.name)
+			resetSQLBackendTestTables(t, setupDB)
+			defer func() {
+				resetSQLBackendTestTables(t, setupDB)
+				closeTestDB(t, setupDB)
+			}()
+
+			migrated := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: true,
+			}).(*DBStore)
+			if err := migrated.Ensure(); err != nil {
+				t.Fatalf("fresh %s migration failed: %v", backend.name, err)
+			}
+			migratedDB, err := migrated.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer closeTestDB(t, migratedDB)
+			for _, table := range sqlBackendTestTables() {
+				if !migratedDB.Migrator().HasTable(table) {
+					t.Fatalf("fresh %s migration did not create %s", backend.name, table)
+				}
+			}
+			for _, index := range []struct {
+				model any
+				name  string
+			}{
+				{model: &repositoryPolicyRecord{}, name: "idx_repository_policies_unique"},
+				{model: &oauthIdentityRecord{}, name: "idx_oauth_identities_provider_subject"},
+				{model: &accountSecretRecord{}, name: "idx_account_secrets_scope_type"},
+				{model: &accountPreferenceRecord{}, name: "idx_account_preferences_scope_key"},
+				{model: &sandboxServiceDefaultAudienceRecord{}, name: "idx_sandbox_default_audience_identity"},
+			} {
+				if !migratedDB.Migrator().HasIndex(index.model, index.name) {
+					t.Fatalf("fresh %s migration did not create %s", backend.name, index.name)
+				}
+			}
+			if _, err := migrated.UpsertProfile(RunnerProfile{
+				Name: "fresh-default", Labels: []string{"self-hosted", "fresh-default"},
+				RequiredLabels: []string{"fresh-default"}, TemplateID: "fresh-template",
+				MaxConcurrency: 1, Enabled: true, DefaultAvailable: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			policy := repositoryPolicyRecord{
+				RepositoryFullName: "owner/unique", ProfileName: "fresh-default",
+				Enabled: true, CreatedAt: time.Now().UTC(),
+			}
+			if err := migratedDB.Create(&policy).Error; err != nil {
+				t.Fatal(err)
+			}
+			policy.ID = 0
+			if err := migratedDB.Create(&policy).Error; err == nil {
+				t.Fatalf("fresh %s schema allowed a duplicate repository policy", backend.name)
+			}
+			assertProfileComparison(t, migrated, "owner/repo", []string{"fresh-default"}, "fresh-default")
+			if err := migrated.migrate(migratedDB); err != nil {
+				t.Fatalf("second %s migration failed: %v", backend.name, err)
+			}
+			assertProfileComparison(t, migrated, "owner/repo", []string{"fresh-default"}, "fresh-default")
+		})
+	}
+}
+
+func sqlBackendTestTables() []string {
+	return []string{
+		"runner_events",
+		"runner_requests",
+		"runner_group_specs",
+		"repository_policies",
+		"runner_groups",
+		"runner_profiles",
+		"audit_events",
+		"oauth_identities",
+		"github_installations",
+		"github_installation_owners",
+		"account_secrets",
+		"account_preferences",
+		"sandbox_service_default_audiences",
+		"sandbox_service_defaults",
+		"accounts",
+	}
+}
+
+func resetSQLBackendTestTables(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, table := range sqlBackendTestTables() {
+		if err := db.Migrator().DropTable(table); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func requireCatalogMatcherTestDatabase(t *testing.T, db *gorm.DB, backend string) {
+	t.Helper()
+	var databaseName string
+	var query string
+	switch backend {
+	case BackendPostgres:
+		query = `SELECT CURRENT_DATABASE()`
+	case BackendMySQL:
+		query = `SELECT DATABASE()`
+	default:
+		t.Fatalf("unsupported catalog matcher test backend %q", backend)
+	}
+	if err := db.Raw(query).Scan(&databaseName).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(strings.ToLower(databaseName), "_test") {
+		t.Fatalf("refusing destructive catalog matcher setup in database %q; dedicated database name must end in _test", databaseName)
+	}
+}
+
+func createCatalogMatcherTestTables(t *testing.T, db *gorm.DB, backend string) {
+	t.Helper()
+	resetSQLBackendTestTables(t, db)
+	var statements []string
+	switch backend {
+	case BackendPostgres:
+		statements = []string{
+			`CREATE TABLE runner_profiles (
+				name VARCHAR(255) PRIMARY KEY, labels_json TEXT NOT NULL, required_labels_json TEXT,
+				template_id VARCHAR(255) NOT NULL, default_template_name VARCHAR(255), runner_group VARCHAR(255),
+				max_concurrency BIGINT NOT NULL, min_idle BIGINT NOT NULL DEFAULT 0, priority BIGINT NOT NULL DEFAULT 0,
+				enabled BOOLEAN NOT NULL, default_available BOOLEAN NOT NULL, managed_by VARCHAR(255),
+				catalog_revision BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+			)`,
+			`CREATE TABLE runner_groups (
+				name VARCHAR(255) PRIMARY KEY, description TEXT, enabled BOOLEAN NOT NULL,
+				created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+			)`,
+			`CREATE TABLE runner_group_specs (
+				group_name VARCHAR(255) NOT NULL, spec_name VARCHAR(255) NOT NULL, created_at TIMESTAMPTZ NOT NULL,
+				PRIMARY KEY (group_name, spec_name)
+			)`,
+			`CREATE TABLE repository_policies (
+				id BIGSERIAL PRIMARY KEY, repository_full_name VARCHAR(255) NOT NULL, profile_name VARCHAR(255) NOT NULL,
+				runner_group_name VARCHAR(255) NOT NULL DEFAULT '', enabled BOOLEAN NOT NULL, created_at TIMESTAMPTZ NOT NULL,
+				CONSTRAINT idx_repository_policies_unique UNIQUE (repository_full_name, profile_name, runner_group_name)
+			)`,
+		}
+	case BackendMySQL:
+		statements = []string{
+			`CREATE TABLE runner_profiles (
+				name VARCHAR(255) PRIMARY KEY, labels_json TEXT NOT NULL, required_labels_json TEXT,
+				template_id VARCHAR(255) NOT NULL, default_template_name VARCHAR(255), runner_group VARCHAR(255),
+				max_concurrency BIGINT NOT NULL, min_idle BIGINT NOT NULL DEFAULT 0, priority BIGINT NOT NULL DEFAULT 0,
+				enabled BOOLEAN NOT NULL, default_available BOOLEAN NOT NULL, managed_by VARCHAR(255),
+				catalog_revision BIGINT NOT NULL DEFAULT 0, created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL
+			)`,
+			`CREATE TABLE runner_groups (
+				name VARCHAR(255) PRIMARY KEY, description TEXT, enabled BOOLEAN NOT NULL,
+				created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL
+			)`,
+			`CREATE TABLE runner_group_specs (
+				group_name VARCHAR(255) NOT NULL, spec_name VARCHAR(255) NOT NULL, created_at DATETIME(6) NOT NULL,
+				PRIMARY KEY (group_name, spec_name)
+			)`,
+			`CREATE TABLE repository_policies (
+				id BIGINT AUTO_INCREMENT PRIMARY KEY, repository_full_name LONGTEXT NOT NULL, profile_name LONGTEXT NOT NULL,
+				runner_group_name VARCHAR(191) NOT NULL DEFAULT '', enabled BOOLEAN NOT NULL, created_at DATETIME(6) NOT NULL,
+				UNIQUE KEY idx_repository_policies_unique (repository_full_name(191), profile_name(191), runner_group_name(191))
+			)`,
+		}
+	default:
+		t.Fatalf("unsupported catalog matcher test backend %q", backend)
+	}
+	for _, statement := range statements {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func assertProfileComparison(t *testing.T, store *DBStore, repository string, labels []string, wantProfile string) {
+	t.Helper()
+	comparison, err := store.CompareProfileMatches(repository, labels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, match := range map[string]ProfileMatch{"legacy": comparison.Legacy, "enabled": comparison.Enabled} {
+		if match.Profile == nil || match.Profile.Name != wantProfile || match.Reason != "" {
+			t.Fatalf("%s match = %#v, want profile %q", name, match, wantProfile)
+		}
+	}
+}
+
+func TestCompareProfileMatchesEnabledCatalogOrderingAndNoMatch(t *testing.T) {
+	store := New(t.TempDir())
+	for _, profile := range []RunnerProfile{
+		{Name: "z-name", Labels: []string{"self-hosted", "e2b"}, TemplateID: "z", MaxConcurrency: 1, Priority: 30, Enabled: true},
+		{Name: "a-name", Labels: []string{"self-hosted", "e2b"}, TemplateID: "a", MaxConcurrency: 1, Priority: 30, Enabled: true},
+		{Name: "longer-label-set", Labels: []string{"self-hosted", "e2b", "optional"}, TemplateID: "long", MaxConcurrency: 1, Priority: 30, Enabled: true},
+	} {
+		if _, err := store.UpsertProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	comparison, err := store.CompareProfileMatches("owner/repo", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comparison.Enabled.Profile == nil || comparison.Enabled.Profile.Name != "longer-label-set" {
+		t.Fatalf("label-count ordering selected %#v, want longer-label-set", comparison.Enabled.Profile)
+	}
+	longer, err := store.GetProfile("longer-label-set")
+	if err != nil {
+		t.Fatal(err)
+	}
+	longer.Enabled = false
+	if _, err := store.UpsertProfile(longer); err != nil {
+		t.Fatal(err)
+	}
+	comparison, err = store.CompareProfileMatches("owner/repo", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comparison.Enabled.Profile == nil || comparison.Enabled.Profile.Name != "a-name" {
+		t.Fatalf("name ordering selected %#v, want a-name", comparison.Enabled.Profile)
+	}
+
+	comparison, err = store.CompareProfileMatches("owner/repo", []string{"self-hosted", "not-in-catalog"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comparison.Enabled.Profile != nil || comparison.Enabled.Reason != "profile_labels_not_matched" {
+		t.Fatalf("unmatched enabled result = %#v, want profile_labels_not_matched", comparison.Enabled)
+	}
+}
+
+func TestMatchProfilePreservesLegacyReasonForDanglingPolicyTarget(t *testing.T) {
+	store := New(t.TempDir())
+	if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
+		RepositoryFullName: "owner/repo",
+		ProfileName:        "deleted-spec",
+		Enabled:            true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	match, err := store.MatchProfile("owner/repo", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile != nil || match.Reason != "profile_labels_not_matched" {
+		t.Fatalf("dangling Policy match = %#v, want the legacy profile_labels_not_matched reason", match)
+	}
+}
+
 func TestMatchProfileReturnsReasonWhenPolicyMissing(t *testing.T) {
 	store := New(t.TempDir())
 	match, err := store.MatchProfile("owner/repo", []string{"self-hosted", "e2b"})
@@ -3059,6 +3672,330 @@ func TestRunnerGroupPolicyMatchesGroupSpecs(t *testing.T) {
 	}
 	if match.Profile == nil || match.Profile.Name != "large" {
 		t.Fatalf("expected large profile through group policy, got %#v", match.Profile)
+	}
+}
+
+func TestProductionRunnerCatalogFixtureFreezesLegacyWorkflowMatches(t *testing.T) {
+	// Characterization test: this intentionally passes against the policy-aware
+	// baseline. It catches a future matcher that changes production workflow
+	// label compatibility while Groups and Policies are removed.
+	store := New(t.TempDir())
+	loadProductionRunnerCatalog(t, store)
+
+	tests := []struct {
+		name       string
+		repository string
+		labels     []string
+		wantSpec   string
+	}{
+		{"managed slim canonical", "outside/example", []string{"qiniu", "ubuntu-slim"}, "qiniu-ubuntu-slim"},
+		{"managed 2204 canonical", "outside/example", []string{"qiniu", "ubuntu-22.04"}, "qiniu-ubuntu-22.04"},
+		{"managed 2404 canonical", "outside/example", []string{"qiniu", "ubuntu-24.04"}, "qiniu-ubuntu-24.04"},
+		{"managed 2604 canonical", "outside/example", []string{"qiniu", "ubuntu-26.04"}, "qiniu-ubuntu-26.04"},
+		{"managed latest canonical", "outside/example", []string{"qiniu", "ubuntu-latest"}, "qiniu-ubuntu-latest"},
+		{"managed 2404 advertised", "outside/example", []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-24.04"}, "qiniu-ubuntu-24.04"},
+		{"legacy generic custom", "qbox/example", []string{"self-hosted", "e2b"}, "github-runner-ubuntu-24-04"},
+		{"legacy public custom", "goplus/example", []string{"self-hosted", "e2b", "github-runner-ubuntu-24-04"}, "github-runner-ubuntu-24-04"},
+		{"legacy public custom outside policy", "outside/example", []string{"self-hosted", "e2b", "github-runner-ubuntu-24-04"}, "github-runner-ubuntu-24-04"},
+		{"qbox dora 1604", "qbox/example", []string{"self-hosted", "e2b", "qbox-dora-ubuntu-16-04"}, "qbox-dora-ubuntu-16-04"},
+		{"qbox dora 2404", "qbox/example", []string{"self-hosted", "e2b", "qbox-dora-ubuntu-24-04"}, "qbox-dora-ubuntu-24-04"},
+		{"qbox kodo 1604", "qbox/example", []string{"self-hosted", "e2b", "qbox-kodo-ubuntu-16-04"}, "qbox-kodo-ubuntu-16-04"},
+		{"qbox kodo web", "qbox/example", []string{"self-hosted", "e2b", "qbox-kodo-web-ubuntu-20-04"}, "qbox-kodo-web-ubuntu-20-04"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			match, err := store.MatchProfile(tt.repository, tt.labels)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if match.Profile == nil || match.Profile.Name != tt.wantSpec {
+				t.Fatalf("MatchProfile(%q, %#v) = %#v, want spec %q", tt.repository, tt.labels, match, tt.wantSpec)
+			}
+		})
+	}
+}
+
+func TestProductionRunnerCatalogFixtureFreezesExactInternalGroupAndDirectPolicies(t *testing.T) {
+	// Characterization test: this catches a fixture or migration that silently
+	// drops a qbox/* Group member, changes a direct Policy target, or turns a
+	// direct Policy into an implicit repository authorization boundary.
+	store := New(t.TempDir())
+	loadProductionRunnerCatalog(t, store)
+
+	groups, err := store.ListRunnerGroups()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0].Name != "qbox/*" || !groups[0].Enabled || !reflect.DeepEqual(groups[0].SpecNames, []string{
+		"github-runner-ubuntu-24-04",
+		"qbox-dora-ubuntu-16-04",
+		"qbox-dora-ubuntu-24-04",
+		"qbox-kodo-ubuntu-16-04",
+		"qbox-kodo-web-ubuntu-20-04",
+	}) {
+		t.Fatalf("internal Groups = %#v, want enabled qbox/* with all five custom Specs", groups)
+	}
+
+	type policyBinding struct {
+		repository string
+		spec       string
+		enabled    bool
+	}
+	policies, err := store.ListRepositoryPolicies()
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotPolicies := make([]policyBinding, 0, len(policies))
+	for _, policy := range policies {
+		if policy.RunnerGroupName != "" {
+			t.Fatalf("Policy %#v targets an internal Group, want seven direct Spec Policies", policy)
+		}
+		gotPolicies = append(gotPolicies, policyBinding{policy.RepositoryFullName, policy.ProfileName, policy.Enabled})
+	}
+	wantPolicies := []policyBinding{
+		{"1024XEngineer/*", "github-runner-ubuntu-24-04", true},
+		{"goplus/*", "github-runner-ubuntu-24-04", true},
+		{"qbox/*", "github-runner-ubuntu-24-04", true},
+		{"qbox/*", "qbox-dora-ubuntu-16-04", true},
+		{"qbox/*", "qbox-dora-ubuntu-24-04", true},
+		{"qbox/*", "qbox-kodo-ubuntu-16-04", true},
+		{"qbox/*", "qbox-kodo-web-ubuntu-20-04", true},
+	}
+	if !reflect.DeepEqual(gotPolicies, wantPolicies) {
+		t.Fatalf("direct Policy map = %#v, want %#v", gotPolicies, wantPolicies)
+	}
+
+	profiles, err := store.ListProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, profile := range profiles {
+		profile.DefaultAvailable = false
+		if _, err := store.UpsertProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tt := range []struct {
+		name       string
+		repository string
+		labels     []string
+		wantSpec   string
+		wantReason string
+	}{
+		{"1024 engineer direct generic", "1024XEngineer/example", []string{"self-hosted", "e2b"}, "github-runner-ubuntu-24-04", ""},
+		{"goplus direct generic", "goplus/example", []string{"self-hosted", "e2b"}, "github-runner-ubuntu-24-04", ""},
+		{"qbox direct generic", "qbox/example", []string{"self-hosted", "e2b"}, "github-runner-ubuntu-24-04", ""},
+		{"qbox direct dora", "qbox/example", []string{"self-hosted", "e2b", "qbox-dora-ubuntu-24-04"}, "qbox-dora-ubuntu-24-04", ""},
+		{"goplus does not receive qbox dora policy", "goplus/example", []string{"self-hosted", "e2b", "qbox-dora-ubuntu-24-04"}, "", "profile_labels_not_matched"},
+		{"outside has no direct policy", "outside/example", []string{"self-hosted", "e2b"}, "", "profile_not_allowed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			match, err := store.MatchProfile(tt.repository, tt.labels)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.wantSpec == "" {
+				if match.Profile != nil || match.Reason != tt.wantReason {
+					t.Fatalf("MatchProfile(%q, %#v) = %#v, want reason %q", tt.repository, tt.labels, match, tt.wantReason)
+				}
+				return
+			}
+			if match.Profile == nil || match.Profile.Name != tt.wantSpec || match.Reason != tt.wantReason {
+				t.Fatalf("MatchProfile(%q, %#v) = %#v, want spec %q", tt.repository, tt.labels, match, tt.wantSpec)
+			}
+		})
+	}
+}
+
+func TestRunnerCatalogFixtureKeepsLegacyAndPolicyFreeBriefCasesEquivalent(t *testing.T) {
+	// Characterization test: these are the named compatibility cases from the
+	// brief, not a claimed fresh production requested_labels_json export.
+	store := New(t.TempDir())
+	fixture := loadProductionRunnerCatalog(t, store)
+	profiles, err := store.ListProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, labels := range fixture.BriefCompatibilityLabelSets {
+		legacy, err := store.MatchProfile("qbox/legacy-production-replay", labels)
+		if err != nil {
+			t.Fatal(err)
+		}
+		enabled := selectEnabledFixtureProfile(profiles, labels)
+		if legacy.Profile == nil && enabled == nil {
+			if legacy.Reason != "profile_labels_not_matched" {
+				t.Fatalf("MatchProfile(%#v) reason = %q, want profile_labels_not_matched", labels, legacy.Reason)
+			}
+			continue
+		}
+		if legacy.Profile == nil || enabled == nil || legacy.Profile.Name != enabled.Name || legacy.Reason != "" {
+			t.Fatalf("MatchProfile(%#v) legacy=%#v policy-free=%#v, want same selected spec", labels, legacy, enabled)
+		}
+	}
+}
+
+func TestMatchProfileProductionOrderingAndNegativeContract(t *testing.T) {
+	// This test catches a policy-free selector that accidentally admits a
+	// disabled spec, changes the no-match reason, or forks the existing sort.
+	store := New(t.TempDir())
+	loadProductionRunnerCatalog(t, store)
+
+	disabled, err := store.GetProfile("qiniu-ubuntu-24.04")
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled.Enabled = false
+	if _, err := store.UpsertProfile(disabled); err != nil {
+		t.Fatal(err)
+	}
+	match, err := store.MatchProfile("outside/example", []string{"qiniu", "ubuntu-24.04"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile != nil || match.Reason != "profile_labels_not_matched" {
+		t.Fatalf("disabled spec match = %#v, want profile_labels_not_matched", match)
+	}
+	match, err = store.MatchProfile("outside/example", []string{"self-hosted", "e2b", "not-in-production-catalog"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile != nil || match.Reason != "profile_labels_not_matched" {
+		t.Fatalf("unmatched labels result = %#v, want profile_labels_not_matched", match)
+	}
+
+	ordering := New(t.TempDir())
+	for _, profile := range []RunnerProfile{
+		{Name: "z-name", Labels: []string{"self-hosted", "e2b"}, TemplateID: "z", MaxConcurrency: 1, Priority: 30, Enabled: true, DefaultAvailable: true},
+		{Name: "a-name", Labels: []string{"self-hosted", "e2b"}, TemplateID: "a", MaxConcurrency: 1, Priority: 30, Enabled: true, DefaultAvailable: true},
+		{Name: "longer-label-set", Labels: []string{"self-hosted", "e2b", "optional"}, TemplateID: "long", MaxConcurrency: 1, Priority: 30, Enabled: true, DefaultAvailable: true},
+		{Name: "higher-priority", Labels: []string{"self-hosted", "e2b"}, TemplateID: "high", MaxConcurrency: 1, Priority: 31, Enabled: true, DefaultAvailable: true},
+	} {
+		if _, err := ordering.UpsertProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	match, err = ordering.MatchProfile("outside/example", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile == nil || match.Profile.Name != "higher-priority" {
+		t.Fatalf("priority ordering selected %#v, want higher-priority", match.Profile)
+	}
+	higher, err := ordering.GetProfile("higher-priority")
+	if err != nil {
+		t.Fatal(err)
+	}
+	higher.Enabled = false
+	if _, err := ordering.UpsertProfile(higher); err != nil {
+		t.Fatal(err)
+	}
+	match, err = ordering.MatchProfile("outside/example", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile == nil || match.Profile.Name != "longer-label-set" {
+		t.Fatalf("label-count ordering selected %#v, want longer-label-set", match.Profile)
+	}
+	longer, err := ordering.GetProfile("longer-label-set")
+	if err != nil {
+		t.Fatal(err)
+	}
+	longer.Enabled = false
+	if _, err := ordering.UpsertProfile(longer); err != nil {
+		t.Fatal(err)
+	}
+	match, err = ordering.MatchProfile("outside/example", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile == nil || match.Profile.Name != "a-name" {
+		t.Fatalf("name ordering selected %#v, want a-name", match.Profile)
+	}
+}
+
+func TestMatchProfileProductionRequestSurvivesMigrationAndRetry(t *testing.T) {
+	// This test catches a catalog migration that rewrites an already-admitted
+	// request or a retry path that rematches it instead of retaining its spec.
+	databaseURL := filepath.Join(t.TempDir(), "runnerd.db")
+	store := NewWithOptions(Options{Backend: BackendSQLite, DatabaseDSN: databaseURL, MigrateOnStart: true}).(*DBStore)
+	loadProductionRunnerCatalog(t, store)
+
+	match, err := store.MatchProfile("qbox/example", []string{"self-hosted", "e2b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile == nil || match.Profile.Name != "github-runner-ubuntu-24-04" {
+		t.Fatalf("legacy match = %#v, want github-runner-ubuntu-24-04", match)
+	}
+	createdAt := time.Date(2026, time.August, 13, 9, 10, 11, 0, time.UTC)
+	request := RunnerRequest{
+		ID:                     "legacy-admitted-request",
+		Source:                 "test",
+		RepositoryFullName:     "qbox/example",
+		RequestedLabels:        []string{"self-hosted", "e2b"},
+		Labels:                 append([]string(nil), match.Profile.Labels...),
+		ProfileName:            match.Profile.Name,
+		RunnerGroup:            match.Profile.RunnerGroup,
+		RunnerName:             "e2b-legacy-admitted-request",
+		SandboxAPIURL:          "https://sandbox.example.test",
+		SandboxAPIKeyEncrypted: "fixture-encrypted-snapshot",
+		SandboxConfigSource:    "account",
+		CreatedAt:              createdAt,
+	}
+	if created, _, err := store.CreateRequest(request, nil); err != nil || !created {
+		t.Fatalf("CreateRequest created=%v err=%v", created, err)
+	}
+	beforeRequest, err := store.ReadRequest(request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeState, err := store.ReadState(request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	restarted := NewWithOptions(Options{Backend: BackendSQLite, DatabaseDSN: databaseURL, MigrateOnStart: true}).(*DBStore)
+	afterRequest, err := restarted.ReadRequest(request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterState, err := restarted.ReadState(request.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRequest.ProfileName != beforeRequest.ProfileName ||
+		afterRequest.RunnerGroup != beforeRequest.RunnerGroup ||
+		!reflect.DeepEqual(afterRequest.RequestedLabels, beforeRequest.RequestedLabels) ||
+		afterRequest.SandboxAPIURL != beforeRequest.SandboxAPIURL ||
+		afterRequest.SandboxAPIKeyEncrypted != beforeRequest.SandboxAPIKeyEncrypted ||
+		afterRequest.SandboxConfigSource != beforeRequest.SandboxConfigSource ||
+		afterState.SandboxAPIURL != beforeState.SandboxAPIURL ||
+		afterState.SandboxAPIKeyEncrypted != beforeState.SandboxAPIKeyEncrypted ||
+		afterState.SandboxConfigSource != beforeState.SandboxConfigSource ||
+		!afterRequest.CreatedAt.Equal(beforeRequest.CreatedAt) ||
+		!afterState.CreatedAt.Equal(beforeState.CreatedAt) ||
+		!afterState.UpdatedAt.Equal(beforeState.UpdatedAt) {
+		t.Fatalf("migration rewrote admitted request: before request=%#v state=%#v after request=%#v state=%#v", beforeRequest, beforeState, afterRequest, afterState)
+	}
+
+	afterState.Status = StatusFailed
+	afterState.LastErrorRetryable = true
+	if err := restarted.WriteState(afterState); err != nil {
+		t.Fatal(err)
+	}
+	retried, err := restarted.RetryRequest(request.ID, time.Date(2026, time.August, 13, 9, 11, 12, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.ProfileName != "github-runner-ubuntu-24-04" ||
+		retried.RunnerGroup != "Default" ||
+		!reflect.DeepEqual(retried.RequestedLabels, []string{"self-hosted", "e2b"}) {
+		t.Fatalf("retry changed persisted admission: %#v", retried)
 	}
 }
 
@@ -3667,28 +4604,186 @@ func TestMigrateDoesNotRewriteUnrecoverableRunnerRequestInstallationID(t *testin
 	}
 }
 
-func TestMigrateSQLiteRunnerRequestSnapshot(t *testing.T) {
+func TestReplayRunnerCatalogSnapshotRequestedLabelsFromDisposableCopy(t *testing.T) {
+	// This catches a replay implementation that skips distinct request labels,
+	// mutates the source snapshot, or allows the legacy and policy-free results
+	// to diverge for a deployed label family.
+	sourcePath := filepath.Join(t.TempDir(), "runnerd-snapshot.db")
+	source := NewWithOptions(Options{Backend: BackendSQLite, DatabaseDSN: sourcePath, MigrateOnStart: true}).(*DBStore)
+	for _, profile := range []RunnerProfile{
+		{
+			Name: "snapshot-default", Labels: []string{"self-hosted", "snapshot-default"},
+			RequiredLabels: []string{"snapshot-default"}, TemplateID: "snapshot-default-template",
+			MaxConcurrency: 1, Enabled: true, DefaultAvailable: true,
+		},
+		{
+			Name: "snapshot-policy", Labels: []string{"self-hosted", "snapshot-policy"},
+			RequiredLabels: []string{"snapshot-policy"}, TemplateID: "snapshot-policy-template",
+			MaxConcurrency: 1, Enabled: true, DefaultAvailable: false,
+		},
+	} {
+		if _, err := source.UpsertProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := source.UpsertRepositoryPolicy(RepositoryPolicy{
+		RepositoryFullName: "policy-owner/repo",
+		ProfileName:        "snapshot-policy",
+		Enabled:            true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i, request := range []struct {
+		repository string
+		labels     []string
+	}{
+		{"outside/repo", []string{"snapshot-default"}},
+		{"policy-owner/repo", []string{"snapshot-policy"}},
+		{"outside/repo", []string{"not-in-snapshot-catalog"}},
+	} {
+		created, _, err := source.CreateRequest(RunnerRequest{
+			ID:                 fmt.Sprintf("snapshot-replay-%d", i),
+			Source:             "test",
+			RepositoryFullName: request.repository,
+			RequestedLabels:    request.labels,
+			Labels:             request.labels,
+			RunnerName:         fmt.Sprintf("e2b-snapshot-replay-%d", i),
+		}, nil)
+		if err != nil || !created {
+			t.Fatalf("CreateRequest(%#v) created=%v err=%v", request.labels, created, err)
+		}
+	}
+	db, err := source.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+	before, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := replayRunnerCatalogSnapshotRequestedLabels(t, sourcePath)
+	if got.RequestShapes != 3 || got.MatchedProfiles != 2 || got.NoMatches != 1 {
+		t.Fatalf("snapshot replay summary = %#v, want 3 request shapes, 2 matches, and 1 no-match", got)
+	}
+	after, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatal("snapshot replay changed the supplied source database")
+	}
+}
+
+func TestReplayRunnerCatalogProductionSQLiteSnapshotRequestedLabels(t *testing.T) {
 	sourcePath := strings.TrimSpace(os.Getenv("RUNNERD_SQLITE_SNAPSHOT"))
 	if sourcePath == "" {
-		t.Skip("set RUNNERD_SQLITE_SNAPSHOT to verify a disposable copy of a production SQLite database")
+		t.Skip("set RUNNERD_SQLITE_SNAPSHOT to a fresh disposable production SQLite snapshot to replay every distinct requested_labels_json value")
 	}
+	summary := replayRunnerCatalogSnapshotRequestedLabels(t, sourcePath)
+	t.Logf("replayed %d distinct repository/label shapes from snapshot %q (%d matched, %d unmatched)", summary.RequestShapes, filepath.Base(sourcePath), summary.MatchedProfiles, summary.NoMatches)
+}
+
+func copySQLiteSnapshot(t *testing.T, sourcePath string) string {
+	t.Helper()
 	source, err := os.Open(sourcePath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer source.Close()
-	databaseURL := filepath.Join(t.TempDir(), "runnerd.db")
-	destination, err := os.Create(databaseURL)
+	destinationPath := filepath.Join(t.TempDir(), "runnerd.db")
+	destination, err := os.Create(destinationPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := io.Copy(destination, source); err != nil {
-		destination.Close()
+		_ = destination.Close()
 		t.Fatal(err)
 	}
 	if err := destination.Close(); err != nil {
 		t.Fatal(err)
 	}
+	return destinationPath
+}
+
+type runnerCatalogSnapshotReplaySummary struct {
+	RequestShapes   int
+	MatchedProfiles int
+	NoMatches       int
+}
+
+func replayRunnerCatalogSnapshotRequestedLabels(t *testing.T, sourcePath string) runnerCatalogSnapshotReplaySummary {
+	t.Helper()
+	copyPath := copySQLiteSnapshot(t, sourcePath)
+	snapshot := NewWithOptions(Options{
+		Backend:        BackendSQLite,
+		DatabaseDSN:    copyPath,
+		MigrateOnStart: false,
+	}).(*DBStore)
+	db, err := snapshot.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTestDB(t, db)
+
+	type snapshotRequestShape struct {
+		RepositoryFullName  string `gorm:"column:repository_full_name"`
+		RequestedLabelsJSON string `gorm:"column:requested_labels_json"`
+	}
+	var requestShapes []snapshotRequestShape
+	if err := db.Raw(`SELECT repository_full_name, requested_labels_json
+		FROM runner_requests
+		WHERE requested_labels_json IS NOT NULL AND requested_labels_json <> ''
+		GROUP BY repository_full_name, requested_labels_json
+		ORDER BY repository_full_name, requested_labels_json`).Scan(&requestShapes).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(requestShapes) == 0 {
+		t.Fatal("snapshot has no non-empty runner_requests.requested_labels_json values")
+	}
+	type replayInput struct {
+		repository string
+		labels     []string
+	}
+	inputs := make([]replayInput, 0, len(requestShapes))
+	for _, shape := range requestShapes {
+		var labels []string
+		if err := json.Unmarshal([]byte(shape.RequestedLabelsJSON), &labels); err != nil || labels == nil {
+			t.Fatalf("snapshot requested_labels_json is not a JSON string array: %v", err)
+		}
+		inputs = append(inputs, replayInput{repository: shape.RepositoryFullName, labels: labels})
+	}
+
+	summary := runnerCatalogSnapshotReplaySummary{RequestShapes: len(inputs)}
+	for _, input := range inputs {
+		comparison, err := snapshot.CompareProfileMatches(input.repository, input.labels)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if comparison.Legacy.Profile == nil && comparison.Enabled.Profile == nil {
+			if comparison.Legacy.Reason != comparison.Enabled.Reason {
+				t.Fatalf("snapshot replay matcher reasons diverged for one repository/label shape: legacy=%q enabled=%q", comparison.Legacy.Reason, comparison.Enabled.Reason)
+			}
+			summary.NoMatches++
+			continue
+		}
+		if comparison.Legacy.Profile == nil || comparison.Enabled.Profile == nil ||
+			comparison.Legacy.Profile.Name != comparison.Enabled.Profile.Name ||
+			comparison.Legacy.Reason != comparison.Enabled.Reason {
+			t.Fatalf("snapshot replay legacy and enabled matcher diverged for one repository/label shape")
+		}
+		summary.MatchedProfiles++
+	}
+	return summary
+}
+
+func TestMigrateSQLiteRunnerRequestSnapshot(t *testing.T) {
+	sourcePath := strings.TrimSpace(os.Getenv("RUNNERD_SQLITE_SNAPSHOT"))
+	if sourcePath == "" {
+		t.Skip("set RUNNERD_SQLITE_SNAPSHOT to verify a disposable copy of a production SQLite database")
+	}
+	databaseURL := copySQLiteSnapshot(t, sourcePath)
 
 	type counts struct {
 		Total                            int64 `gorm:"column:total"`

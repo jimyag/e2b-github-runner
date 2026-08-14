@@ -98,6 +98,7 @@ cp runnerd.yaml.example runnerd.yaml
 
 - 相对路径的 `database.dsn` 和 `github.app.private_key_file` 按配置文件所在目录解析。
 - 本地和单节点部署建议使用 SQLite。支持 PostgreSQL 和 MySQL，但多实例共享数据库尚未验证。
+- CI 会创建全新的 PostgreSQL 与 MySQL schema，并在已有 catalog 上重复执行迁移，再验证 policy-free matching。本地 opt-in 的真实方言命令见 [docs/zh/testing.md](docs/zh/testing.md)。
 - 已有 SQLite `runner_requests` 和 `runner_profiles` 表会在启动时补建缺失的 model columns 和 indexes，不会重建整张表，从而保留历史 runner 字段以及旧 profile rows 和 indexes。创建缺失索引不会重写 rows，但大数据库可能出现短暂的启动 I/O 和锁等待；迁移与查询计划检查见 [docs/zh/testing.md](docs/zh/testing.md)。
 - **不支持** GitHub Enterprise Server，请使用 GitHub.com App。
 - GitHub 鉴权方式三选一：`github.app`、`github.token` 或 `github.basic_auth`。
@@ -199,6 +200,12 @@ catalog revision 中，`ubuntu-latest` 映射到 Ubuntu 24.04；修改映射前�
 catalog 更新并取得新的区域 smoke 证据。
 
 支持的 workflow labels、发布状态和区域验证流程见[公共 Runner 模板](docs/zh/default-runner-templates.md)。
+
+`GET /api/public/runner-templates` 无需登录即可返回 runnerd 管理的 4 个公共
+模板。稳定响应只包含公共模板名称、对应的逻辑 Runner Spec 名称和支持的 workflow
+label 组合，不包含 provider template ID、credential、endpoint，也不会暴露私有或
+自定义模板。依赖 credential 的
+`GET /user/sandbox/templates?region=<id>` 仍是独立的 scoped resource。
 
 对于自定义 spec，`template_id` 应指向包含 GitHub runner 镜像的 Qiniu Sandbox 模板。创建沙箱时会使用 **Repositories → Runner readiness** 中显示的仓库 owner 有效 Sandbox service 检查模板访问权限。
 

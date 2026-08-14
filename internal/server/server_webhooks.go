@@ -69,7 +69,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusAccepted, st)
 			return
 		}
-		match, err := s.store.MatchProfile(event.Repository.FullName, event.WorkflowJob.Labels)
+		match, err := s.matchProfileForAdmission(event.Repository.FullName, event.WorkflowJob.Labels)
 		if err != nil {
 			s.logger.Error("match workflow job profile", "job_id", id, "repository", event.Repository.FullName, "labels", []string(event.WorkflowJob.Labels), "error", err)
 			writeError(w, http.StatusInternalServerError, err.Error())

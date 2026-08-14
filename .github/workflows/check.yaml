@@ -132,6 +132,48 @@ jobs:
       - run: cd ui && bun install --frozen-lockfile && bun run build && bun run test
       - run: GORACE=atexit_sleep_ms=0 go test -v -trimpath -failfast -race -cover -coverprofile=coverage.txt ./cmd/... ./internal/...
 
+  catalog-backends:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: runnerd_test
+          POSTGRES_PASSWORD: runnerd
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: runnerd_test
+          MYSQL_ROOT_PASSWORD: runnerd
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RUNNERD_CATALOG_BACKEND_TESTS: "1"
+      RUNNERD_POSTGRES_TEST_DSN: host=127.0.0.1 user=postgres password=runnerd dbname=runnerd_test port=5432 sslmode=disable
+      RUNNERD_MYSQL_TEST_DSN: root:runnerd@tcp(127.0.0.1:3306)/runnerd_test
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-go@v6
+        with:
+          go-version: stable
+          cache-dependency-path: go.sum
+      - name: Verify fresh schema and catalog matching on PostgreSQL and MySQL
+        run: go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+
   ui-production-smoke:
     runs-on: ubuntu-latest
     steps:

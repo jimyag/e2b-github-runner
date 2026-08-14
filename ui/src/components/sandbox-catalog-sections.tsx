@@ -2,7 +2,7 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from "react"
 import { RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import type { SandboxInstance, SandboxTemplate } from "@/admin-types"
+import type { PublicRunnerTemplate, SandboxInstance, SandboxTemplate } from "@/admin-types"
 import appI18n from "@/i18n"
 import {
   formatOptionalTime,
@@ -16,6 +16,11 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+
+async function loadPublicRunnerTemplates(request: SandboxCatalogRequest) {
+  const data = await request("/api/public/runner-templates")
+  return Array.isArray(data) ? (data as PublicRunnerTemplate[]) : []
+}
 
 function Header({
   title,
@@ -70,98 +75,226 @@ export function SandboxTemplatesSection({
   request: SandboxCatalogRequest
   installationID?: number
 }) {
-  const { t } = useTranslation()
   const [region, setRegion] = useState(sandboxRegions[0].id)
-  const [items, setItems] = useState<SandboxTemplate[]>([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState("")
-  const loadGeneration = useRef(0)
+  const [publicItems, setPublicItems] = useState<PublicRunnerTemplate[]>([])
+  const [scopedItems, setScopedItems] = useState<SandboxTemplate[]>([])
+  const [publicLoading, setPublicLoading] = useState(false)
+  const [scopedLoading, setScopedLoading] = useState(false)
+  const [publicError, setPublicError] = useState("")
+  const [scopedError, setScopedError] = useState("")
+  const publicLoadGeneration = useRef(0)
+  const scopedLoadGeneration = useRef(0)
 
-  const load = useCallback(async () => {
-    const generation = ++loadGeneration.current
-    setLoading(true)
-    setError("")
-    setItems([])
+  const loadPublic = useCallback(async () => {
+    const generation = ++publicLoadGeneration.current
+    setPublicLoading(true)
+    setPublicError("")
     try {
-      const data = await loadSandboxTemplates(request, region, installationID)
-      if (generation === loadGeneration.current) {
-        setItems(data)
+      const data = await loadPublicRunnerTemplates(request)
+      if (generation === publicLoadGeneration.current) {
+        setPublicItems(data)
       }
     } catch (cause) {
-      if (generation === loadGeneration.current) {
-        setError(cause instanceof Error ? cause.message : appI18n.t("user.loadSandboxTemplatesFailed"))
+      if (generation === publicLoadGeneration.current) {
+        setPublicError(cause instanceof Error ? cause.message : appI18n.t("user.loadSandboxTemplatesFailed"))
       }
     } finally {
-      if (generation === loadGeneration.current) {
-        setLoading(false)
+      if (generation === publicLoadGeneration.current) {
+        setPublicLoading(false)
+      }
+    }
+  }, [request])
+
+  const loadScoped = useCallback(async () => {
+    const generation = ++scopedLoadGeneration.current
+    setScopedLoading(true)
+    setScopedError("")
+    setScopedItems([])
+    try {
+      const data = await loadSandboxTemplates(request, region, installationID)
+      if (generation === scopedLoadGeneration.current) {
+        setScopedItems(data)
+      }
+    } catch (cause) {
+      if (generation === scopedLoadGeneration.current) {
+        setScopedError(cause instanceof Error ? cause.message : appI18n.t("user.loadSandboxTemplatesFailed"))
+      }
+    } finally {
+      if (generation === scopedLoadGeneration.current) {
+        setScopedLoading(false)
       }
     }
   }, [installationID, region, request])
 
   useEffect(() => {
-    void load()
+    void loadPublic()
     return () => {
-      loadGeneration.current += 1
+      publicLoadGeneration.current += 1
     }
-  }, [load])
+  }, [loadPublic])
+
+  useEffect(() => {
+    void loadScoped()
+    return () => {
+      scopedLoadGeneration.current += 1
+    }
+  }, [loadScoped])
 
   return (
-    <Card className="rounded-lg">
-      <Header
-        title={t("user.sandboxTemplates")}
-        description={t("user.catalogTemplatesDescription")}
-        region={region}
-        loading={loading}
-        onRegion={setRegion}
-        onRefresh={() => void load()}
-      />
-      <CardContent>
-        {error ? (
-          <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
-        ) : (
-          <div className="overflow-x-auto rounded-md border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>{t("common.template")}</TableHead>
-                  <TableHead>{t("common.status")}</TableHead>
-                  <TableHead>{t("common.resources")}</TableHead>
-                  <TableHead>{t("common.visibility")}</TableHead>
-                  <TableHead className="text-right">{t("user.spawns")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {items.map((item) => (
-                  <TableRow key={item.template_id}>
-                    <TableCell>
-                      <div className="font-medium">{item.aliases?.[0] || item.template_id}</div>
-                      <div className="max-w-[360px] truncate text-xs text-muted-foreground">{item.template_id}</div>
-                    </TableCell>
-                    <TableCell>{item.build_status || t("common.unknown")}</TableCell>
-                    <TableCell>
-                      {t("user.catalogTemplateResources", {
-                        cpu: item.cpu_count,
-                        memory: item.memory_mb,
-                        disk: item.disk_size_mb,
-                      })}
-                    </TableCell>
-                    <TableCell>{item.public ? t("common.public") : t("common.private")}</TableCell>
-                    <TableCell className="text-right tabular-nums">{item.spawn_count}</TableCell>
-                  </TableRow>
-                ))}
-                {!loading && items.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
-                      {t("user.noTemplatesInRegion")}
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
+    <SandboxTemplateCatalog
+      publicTemplates={publicItems}
+      publicLoading={publicLoading}
+      publicError={publicError}
+      scopedTemplates={scopedItems}
+      scopedLoading={scopedLoading}
+      scopedError={scopedError}
+      region={region}
+      onRegion={setRegion}
+      onPublicRefresh={() => void loadPublic()}
+      onScopedRefresh={() => void loadScoped()}
+    />
+  )
+}
+
+export function SandboxTemplateCatalog({
+  publicTemplates,
+  publicLoading,
+  publicError,
+  scopedTemplates,
+  scopedLoading,
+  scopedError,
+  region = sandboxRegions[0].id,
+  onRegion = () => {},
+  onPublicRefresh = () => {},
+  onScopedRefresh = () => {},
+}: {
+  publicTemplates: PublicRunnerTemplate[]
+  publicLoading: boolean
+  publicError: string
+  scopedTemplates: SandboxTemplate[]
+  scopedLoading: boolean
+  scopedError: string
+  region?: string
+  onRegion?: (value: string) => void
+  onPublicRefresh?: () => void
+  onScopedRefresh?: () => void
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <div className="space-y-4">
+      <Card className="rounded-lg">
+        <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
+          <div>
+            <CardTitle className="text-base">{t("user.publicRunnerTemplates")}</CardTitle>
+            <CardDescription className="mt-1">{t("user.publicRunnerTemplatesDescription")}</CardDescription>
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={onPublicRefresh}
+            disabled={publicLoading}
+            aria-label={t("common.refresh")}
+          >
+            <RefreshCw className={publicLoading ? "animate-spin" : ""} />
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {publicError ? (
+            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{publicError}</p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("common.template")}</TableHead>
+                    <TableHead>{t("user.runnerSpecs")}</TableHead>
+                    <TableHead>{t("user.workflowLabels")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {publicTemplates.map((item) => (
+                    <TableRow key={item.default_template_name}>
+                      <TableCell className="font-medium">{item.default_template_name}</TableCell>
+                      <TableCell>
+                        {item.runner_spec_names.map((name) => <div key={name}>{name}</div>)}
+                      </TableCell>
+                      <TableCell>
+                        {item.workflow_labels.map((labels) => <div key={labels.join("\u0000")}>{labels.join(", ")}</div>)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {!publicLoading && publicTemplates.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={3} className="h-32 text-center text-muted-foreground">
+                        {t("user.noPublicRunnerTemplates")}
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-lg">
+        <Header
+          title={t("user.providerTemplates")}
+          description={t("user.providerTemplatesDescription")}
+          region={region}
+          loading={scopedLoading}
+          onRegion={onRegion}
+          onRefresh={onScopedRefresh}
+        />
+        <CardContent>
+          {scopedError ? (
+            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{scopedError}</p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("common.template")}</TableHead>
+                    <TableHead>{t("common.status")}</TableHead>
+                    <TableHead>{t("common.resources")}</TableHead>
+                    <TableHead>{t("common.visibility")}</TableHead>
+                    <TableHead className="text-right">{t("user.spawns")}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {scopedTemplates.map((item) => (
+                    <TableRow key={item.template_id}>
+                      <TableCell>
+                        <div className="font-medium">{item.aliases?.[0] || item.template_id}</div>
+                        <div className="max-w-[360px] truncate text-xs text-muted-foreground">{item.template_id}</div>
+                      </TableCell>
+                      <TableCell>{item.build_status || t("common.unknown")}</TableCell>
+                      <TableCell>
+                        {t("user.catalogTemplateResources", {
+                          cpu: item.cpu_count,
+                          memory: item.memory_mb,
+                          disk: item.disk_size_mb,
+                        })}
+                      </TableCell>
+                      <TableCell>{item.public ? t("common.public") : t("common.private")}</TableCell>
+                      <TableCell className="text-right tabular-nums">{item.spawn_count}</TableCell>
+                    </TableRow>
+                  ))}
+                  {!scopedLoading && scopedTemplates.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-32 text-center text-muted-foreground">
+                        {t("user.noTemplatesInRegion")}
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   )
 }
 

@@ -49,6 +49,19 @@ func TestRecordExpandedMetrics(t *testing.T) {
 	assertExpvarContains(t, workflowRunCount.String(), `octo/repo|ci|test|metrics-expanded|success`)
 }
 
+func TestRecordCatalogMatchComparisonUsesOnlyBoundedResultKey(t *testing.T) {
+	before := catalogMatchMigration.String()
+	RecordCatalogMatchComparison("secret/repository/legacy-profile", "private-enabled-profile", "different_profile")
+	after := catalogMatchMigration.String()
+
+	assertExpvarContains(t, after, `"different_profile"`)
+	for _, forbidden := range []string{"secret/repository", "legacy-profile", "private-enabled-profile"} {
+		if strings.Contains(after, forbidden) {
+			t.Fatalf("catalog comparison metric leaked %q: before=%s after=%s", forbidden, before, after)
+		}
+	}
+}
+
 func assertExpvarContains(t *testing.T, got, want string) {
 	t.Helper()
 	if !strings.Contains(got, want) {
