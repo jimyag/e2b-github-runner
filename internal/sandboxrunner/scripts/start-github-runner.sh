@@ -102,6 +102,15 @@ if [ -n "$cache_s3_bucket" ] && [ -n "$cache_s3_access_key" ] && [ -n "$cache_s3
   fi
   export RUNS_ON_AWS_REGION="$cache_s3_region"
   export RUNS_ON_S3_FORCE_PATH_STYLE="true"
+  # qiniu/actions-cache reads these dedicated variables into an explicit S3
+  # client provider, so workflow AWS credential changes cannot replace them.
+  export RUNS_ON_S3_ACCESS_KEY_ID="$cache_s3_access_key"
+  export RUNS_ON_S3_SECRET_ACCESS_KEY="$cache_s3_secret_key"
+  if [ -n "$cache_s3_session_token" ]; then
+    export RUNS_ON_S3_SESSION_TOKEN="$cache_s3_session_token"
+  fi
+  # Keep AWS-compatible names for SDKs used by workflow steps. The cache action
+  # snapshots the runnerd-specific names into an explicit S3 client provider.
   export AWS_ACCESS_KEY_ID="$cache_s3_access_key"
   export AWS_SECRET_ACCESS_KEY="$cache_s3_secret_key"
   if [ -n "$cache_s3_session_token" ]; then
@@ -109,9 +118,13 @@ if [ -n "$cache_s3_bucket" ] && [ -n "$cache_s3_access_key" ] && [ -n "$cache_s3
   fi
   if [ -n "$cache_s3_read_prefixes" ]; then
     export RUNS_ON_S3_CACHE_READ_PREFIXES="$cache_s3_read_prefixes"
+  else
+    echo "cache S3 read scopes are missing; restore is disabled" >&2
   fi
   if [ -n "$cache_s3_write_prefix" ]; then
     export RUNS_ON_S3_CACHE_WRITE_PREFIX="$cache_s3_write_prefix"
+  else
+    echo "cache S3 write scope is missing; save is disabled" >&2
   fi
   # Tune qiniu/actions-cache upload/download concurrency for better throughput.
   export UPLOAD_QUEUE_SIZE="${UPLOAD_QUEUE_SIZE:-16}"
