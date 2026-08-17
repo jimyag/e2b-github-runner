@@ -1256,12 +1256,13 @@ esac
 	if !result.Passed ||
 		result.SupportChannel != "preview" ||
 		!result.Cleanup.Passed ||
-		len(result.Results) != 8 {
-		t.Fatalf("release smoke result = %#v, want eight passing usability and identity checks plus cleanup", result)
+		len(result.Results) != 9 {
+		t.Fatalf("release smoke result = %#v, want nine passing usability and identity checks plus cleanup", result)
 	}
 	runnerVersionChecked := false
 	runtimeMetadataChecked := false
 	nvmHomeChecked := false
+	cloudflareDNSChecked := false
 	for _, check := range result.Results {
 		if check.Category != "Release smoke" {
 			t.Fatalf("release smoke unexpectedly ran full inventory check %#v", check)
@@ -1272,8 +1273,29 @@ esac
 		}
 		if check.Name == "runtime image metadata" {
 			runtimeMetadataChecked = strings.Contains(check.Command, `"$IMAGE_TEMPLATE" = "github-runner-ubuntu-26-04"`) &&
-				strings.Contains(check.Command, `"$ImageVersion" = "20260805.6"`) &&
-				strings.Contains(check.Command, `"$IMAGE_VERSION" = "20260805.6"`)
+				strings.Contains(check.Command, `"$ImageVersion" = "20260817.1"`) &&
+				strings.Contains(check.Command, `"$IMAGE_VERSION" = "20260817.1"`)
+		}
+		if check.Name == "Cloudflare DNS" {
+			cloudflareDNSChecked = strings.Contains(check.Command, `nameserver 1.1.1.1`) &&
+				strings.Contains(check.Command, `nameserver 1.0.0.1`) &&
+				strings.Contains(check.Command, `/etc/resolv.conf`)
+			resolvConfPath := filepath.Join(fixture, "resolv.conf")
+			if err := os.WriteFile(
+				resolvConfPath,
+				[]byte("nameserver 1.1.1.1\nnameserver 1.0.0.1\n"),
+				0o644,
+			); err != nil {
+				t.Fatal(err)
+			}
+			resolverCommand := strings.ReplaceAll(
+				check.Command,
+				"/etc/resolv.conf",
+				fmt.Sprintf("%q", resolvConfPath),
+			)
+			if output, err := runCommand(t, "bash", []string{"-c", resolverCommand}); err != nil {
+				t.Fatalf("Cloudflare DNS verification command failed: %v\n%s", err, output)
+			}
 		}
 		if check.Name == "runner writable NVM home" {
 			nvmHomeChecked = strings.Contains(check.Command, "sudo -H -u runner") &&
@@ -1301,6 +1323,9 @@ esac
 	}
 	if !nvmHomeChecked {
 		t.Fatalf("release smoke did not verify the runner-owned NVM home: %#v", result.Results)
+	}
+	if !cloudflareDNSChecked {
+		t.Fatalf("release smoke did not verify Cloudflare DNS: %#v", result.Results)
 	}
 }
 
