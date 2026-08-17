@@ -191,14 +191,18 @@ terminal `Status: ready`.
 Template version metadata and the runner-owned NVM copy are applied only after
 the heavy provisioning layers, so a release identity bump or NVM ownership fix
 does not invalidate otherwise reusable installer caches.
+Each Dockerfile then writes the final `/etc/resolv.conf` with Cloudflare
+`1.1.1.1` and `1.0.0.1` before switching to the unprivileged runner user. This
+late layer overrides the Sandbox builder default without invalidating the
+heavy provisioning layers. Release smoke requires the exact two-line file.
 The checksum-pinned AWS SAM Range layers sit between `bootstrap` and
 `platform`; rerunning the identical source reuses every completed chunk rather
 than restarting the whole archive. The platform installer runs in the same
 layer as reassembly instead of depending on a cached oversized archive.
 Release smoke checks the OS, architecture, the exact Dockerfile-pinned Actions
 Runner version, persisted runtime template name/version metadata, outbound
-HTTPS, Docker, a runner-owned writable NVM home, writable work/tool-cache
-paths, and cleanup. Full
+HTTPS, the exact Cloudflare resolver configuration, Docker, a runner-owned
+writable NVM home, writable work/tool-cache paths, and cleanup. Full
 per-inventory runtime conformance and local Docker builds remain optional
 diagnostics; neither is a substitute for the remote usability gate.
 The source gate rejects an Actions Runner version below `2.336.0`, while the

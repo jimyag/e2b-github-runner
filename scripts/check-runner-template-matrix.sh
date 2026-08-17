@@ -139,6 +139,21 @@ for image_key in ubuntu-slim ubuntu-22.04 ubuntu-24.04 ubuntu-26.04; do
   actual_phase_count="$(grep -Ec 'TEMPLATE_FLAVOR=(slim|versioned)[[:space:]]+RUNNER_TEMPLATE_PHASE=' "$directory/Dockerfile")"
   test "$actual_phase_count" -eq "$phase_count" ||
     fail "$image_key has $actual_phase_count setup phases, want $phase_count"
+  cloudflare_primary_line="$(grep -nF "'nameserver 1.1.1.1'" "$directory/Dockerfile" | cut -d: -f1 || true)"
+  cloudflare_secondary_line="$(grep -nF "'nameserver 1.0.0.1'" "$directory/Dockerfile" | cut -d: -f1 || true)"
+  resolv_conf_line="$(grep -nF '>/etc/resolv.conf' "$directory/Dockerfile" | cut -d: -f1 || true)"
+  runtime_phase_line="$(grep -nF "RUNNER_TEMPLATE_PHASE=runtime" "$directory/Dockerfile" | cut -d: -f1)"
+  user_line="$(grep -nE '^USER[[:space:]]+' "$directory/Dockerfile" | cut -d: -f1)"
+  test -n "$cloudflare_primary_line" && test -n "$cloudflare_secondary_line" && test -n "$resolv_conf_line" ||
+    fail "$image_key must configure Cloudflare nameservers 1.1.1.1 and 1.0.0.1"
+  test "$runtime_phase_line" -lt "$cloudflare_primary_line" &&
+    test "$cloudflare_primary_line" -lt "$cloudflare_secondary_line" &&
+    test "$cloudflare_secondary_line" -le "$resolv_conf_line" &&
+    test "$resolv_conf_line" -lt "$user_line" ||
+    fail "$image_key must configure Cloudflare nameservers after runtime setup and before USER"
+  if grep -Eq "['\"]nameserver[[:space:]]+8\\.8\\.(8\\.8|4\\.4)['\"]" "$directory/Dockerfile"; then
+    fail "$image_key must not retain Google Public DNS in the final template configuration"
+  fi
   if grep -Fq 'Acquire::https::Verify-Peer=false' "$directory/scripts/setup-template.sh"; then
     fail "$image_key setup must not disable apt HTTPS peer verification"
   fi

@@ -152,6 +152,10 @@ Dockerfile 会按需将 `bootstrap`、`platform`、`node`、`toolchain` 和
 `runtime` 工作保留为独立的 qshell 兼容缓存层。模板版本元数据会在预置工作
 结束后才写入，runner 所有的 NVM 副本则独立放在 `toolchain` 与 `runtime` 之间，
 因此两类变更都不会让重型安装层的缓存失效。
+这些层结束后，每个 Dockerfile 都会在切换到非特权 runner 用户前，将最终
+`/etc/resolv.conf` 写为 Cloudflare `1.1.1.1` 和 `1.0.0.1`。把覆盖操作放在
+最后可以避免重型预置层缓存失效。发布前的真实 Sandbox smoke 会检查该文件
+严格包含这两行配置。
 在 `platform` 之前，每个 Dockerfile 还会将固定校验和的 AWS SAM 归档拆成
 不超过 16 MiB 的独立 Range 下载层。服务超时后可复用已经完成的分块；
 这些分块保存在 `/opt/qiniu-runner-build-cache`，因为 qshell 不会恢复缓存层中

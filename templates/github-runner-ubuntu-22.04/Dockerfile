@@ -88,7 +88,7 @@ RUN set -eux; \
     chown -R runner:runner /home/runner/.nvm
 RUN TEMPLATE_FLAVOR=versioned RUNNER_TEMPLATE_PHASE=runtime bash /usr/local/share/qiniu-sandbox-runner-template/setup-template.sh
 
-ARG TEMPLATE_VERSION=20260805.6
+ARG TEMPLATE_VERSION=20260817.1
 ENV ImageVersion=$TEMPLATE_VERSION \
     IMAGE_VERSION=$TEMPLATE_VERSION
 
@@ -106,6 +106,12 @@ RUN set -eux; \
       "RUNNER_TOOL_CACHE=\"$RUNNER_TOOL_CACHE\"" \
       "AGENT_TOOLSDIRECTORY=\"$AGENT_TOOLSDIRECTORY\"" \
       >>"$environment_file"
+
+RUN set -eux; \
+    printf '%s\n' \
+      'nameserver 1.1.1.1' \
+      'nameserver 1.0.0.1' \
+      >/etc/resolv.conf
 
 USER runner
 WORKDIR /home/runner/work
