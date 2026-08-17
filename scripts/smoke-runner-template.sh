@@ -175,7 +175,7 @@ jq \
         status: "provided",
         verification: (
           "test \"$(cat /etc/resolv.conf)\" = "
-          + "\"$(printf \\\"%s\\\\n\\\" \\\"nameserver 1.1.1.1\\\" \\\"nameserver 1.0.0.1\\\")\""
+          + "\"$(printf \"%s\\n\" \"nameserver 1.1.1.1\" \"nameserver 1.0.0.1\")\""
         )
       },
       {

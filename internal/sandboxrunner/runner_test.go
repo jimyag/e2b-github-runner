@@ -1280,6 +1280,22 @@ esac
 			cloudflareDNSChecked = strings.Contains(check.Command, `nameserver 1.1.1.1`) &&
 				strings.Contains(check.Command, `nameserver 1.0.0.1`) &&
 				strings.Contains(check.Command, `/etc/resolv.conf`)
+			resolvConfPath := filepath.Join(fixture, "resolv.conf")
+			if err := os.WriteFile(
+				resolvConfPath,
+				[]byte("nameserver 1.1.1.1\nnameserver 1.0.0.1\n"),
+				0o644,
+			); err != nil {
+				t.Fatal(err)
+			}
+			resolverCommand := strings.ReplaceAll(
+				check.Command,
+				"/etc/resolv.conf",
+				fmt.Sprintf("%q", resolvConfPath),
+			)
+			if output, err := runCommand(t, "bash", []string{"-c", resolverCommand}); err != nil {
+				t.Fatalf("Cloudflare DNS verification command failed: %v\n%s", err, output)
+			}
 		}
 		if check.Name == "runner writable NVM home" {
 			nvmHomeChecked = strings.Contains(check.Command, "sudo -H -u runner") &&
