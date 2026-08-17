@@ -4884,6 +4884,270 @@ func TestWebhookCompletedStopsActualRunnerAndRecordsJob(t *testing.T) {
 	}
 }
 
+func TestOriginalWorkflowJobCompletionKeepsRunnerAssignedToDifferentJob(t *testing.T) {
+	ghServer := httptest.NewServer(githubRunnerAPI(t))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	srv.Close()
+
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "1001",
+		Source:             "test",
+		JobID:              1001,
+		RepositoryFullName: "o/r",
+		Labels:             []string{"self-hosted", "e2b"},
+		ProfileName:        "default",
+		RunnerName:         "e2b-1001",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-1001"
+	st.ProcessPID = 42
+	st.RunningAt = time.Now().UTC()
+	st.AssignedJobID = 2002
+	st.AssignedJobName = "actual job"
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	completed := []byte(`{"action":"completed","repository":{"full_name":"o/r"},"workflow_job":{"id":1001,"name":"original job","status":"completed","conclusion":"cancelled","labels":["self-hosted","e2b"]}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(completed))
+	req.Header.Set("X-GitHub-Event", "workflow_job")
+	req.Header.Set("X-Hub-Signature-256", sign("secret", completed))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("unexpected completed status: %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	got, err := store.ReadState("1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusRunning {
+		t.Fatalf("original job completion changed active runner status to %s", got.Status)
+	}
+	if got.AssignedJobID != 2002 || got.AssignedJobName != "actual job" {
+		t.Fatalf("original job completion replaced actual assignment: id=%d name=%q", got.AssignedJobID, got.AssignedJobName)
+	}
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("original job completion stopped sandbox assigned to another job %d times", fake.stoppedCount())
+	}
+}
+
+func TestWeakOriginalWorkflowJobCompletionKeepsCompletedRunnerAssignment(t *testing.T) {
+	ghServer := httptest.NewServer(githubRunnerAPI(t))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	srv.Close()
+
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "1001",
+		Source:             "test",
+		JobID:              1001,
+		RepositoryFullName: "o/r",
+		Labels:             []string{"self-hosted", "e2b"},
+		ProfileName:        "default",
+		RunnerName:         "e2b-1001",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusCompleted
+	st.SandboxID = "sb-1001"
+	st.ProcessPID = 42
+	st.RunningAt = time.Now().UTC().Add(-time.Minute)
+	st.CompletedAt = time.Now().UTC()
+	st.AssignedJobID = 2002
+	st.AssignedJobName = "actual job"
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	completed := []byte(`{"action":"completed","repository":{"full_name":"o/r"},"workflow_job":{"id":1001,"name":"original job","status":"completed","conclusion":"cancelled","labels":["self-hosted","e2b"]}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(completed))
+	req.Header.Set("X-GitHub-Event", "workflow_job")
+	req.Header.Set("X-Hub-Signature-256", sign("secret", completed))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("unexpected completed status: %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	got, err := store.ReadState("1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusCompleted {
+		t.Fatalf("weak original job completion changed terminal status to %s", got.Status)
+	}
+	if got.AssignedJobID != 2002 || got.AssignedJobName != "actual job" {
+		t.Fatalf("weak original job completion replaced completed runner assignment: id=%d name=%q", got.AssignedJobID, got.AssignedJobName)
+	}
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("weak original job completion stopped an already completed runner %d times", fake.stoppedCount())
+	}
+}
+
+func TestOriginalWorkflowJobCompletionKeepsRunnerAfterJobStartedMarker(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/jobs/1001":
+			w.Write([]byte(`{"id":1001,"name":"original job","status":"completed","conclusion":"cancelled","labels":["self-hosted","e2b"]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/runners":
+			w.Write([]byte(`{"runners":[]}`))
+		default:
+			t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	srv.Close()
+
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "1001",
+		Source:             "test",
+		JobID:              1001,
+		RepositoryFullName: "o/r",
+		Labels:             []string{"self-hosted", "e2b"},
+		ProfileName:        "default",
+		RunnerName:         "e2b-1001",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-1001"
+	st.ProcessPID = 42
+	st.RunningAt = time.Now().UTC()
+	st.AssignedJobName = runnerJobStartedMarker
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	completed := []byte(`{"action":"completed","repository":{"full_name":"o/r"},"workflow_job":{"id":1001,"name":"original job","status":"completed","conclusion":"cancelled","labels":["self-hosted","e2b"]}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(completed))
+	req.Header.Set("X-GitHub-Event", "workflow_job")
+	req.Header.Set("X-Hub-Signature-256", sign("secret", completed))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("unexpected completed status: %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	got, err := store.ReadState("1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusRunning {
+		t.Fatalf("original job completion changed active runner status to %s before assignment was identified", got.Status)
+	}
+	if got.AssignedJobID != 0 || got.AssignedJobName != runnerJobStartedMarker {
+		t.Fatalf("original job completion replaced the job-started marker: id=%d name=%q", got.AssignedJobID, got.AssignedJobName)
+	}
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("original job completion stopped sandbox after a job had already started %d times", fake.stoppedCount())
+	}
+
+	inProgress := []byte(`{"action":"in_progress","repository":{"full_name":"o/r"},"workflow_job":{"id":2002,"name":"actual job","runner_name":"e2b-1001","workflow_name":"ci","labels":["self-hosted","e2b"]}}`)
+	req = httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(inProgress))
+	req.Header.Set("X-GitHub-Event", "workflow_job")
+	req.Header.Set("X-Hub-Signature-256", sign("secret", inProgress))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("unexpected in_progress status: %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	actualCompleted := []byte(`{"action":"completed","repository":{"full_name":"o/r"},"workflow_job":{"id":2002,"name":"actual job","runner_name":"e2b-1001","status":"completed","conclusion":"success","labels":["self-hosted","e2b"]}}`)
+	req = httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(actualCompleted))
+	req.Header.Set("X-GitHub-Event", "workflow_job")
+	req.Header.Set("X-Hub-Signature-256", sign("secret", actualCompleted))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("unexpected actual job completed status: %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	got, err = store.ReadState("1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusCompleted {
+		t.Fatalf("actual job completion left runner in status %s", got.Status)
+	}
+	if fake.stoppedCount() != 1 {
+		t.Fatalf("actual job completion stopped sandbox %d times, want 1", fake.stoppedCount())
+	}
+}
+
+func TestCompletedWebhookWithRunnerNameStopsRunnerBeforeInProgressEvent(t *testing.T) {
+	ghServer := httptest.NewServer(githubRunnerAPI(t))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	srv.Close()
+
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "1001",
+		Source:             "test",
+		JobID:              1001,
+		RepositoryFullName: "o/r",
+		Labels:             []string{"self-hosted", "e2b"},
+		ProfileName:        "default",
+		RunnerName:         "e2b-1001",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-1001"
+	st.ProcessPID = 42
+	st.RunningAt = time.Now().UTC()
+	st.AssignedJobName = runnerJobStartedMarker
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	completed := []byte(`{"action":"completed","repository":{"full_name":"o/r"},"workflow_job":{"id":1001,"name":"original job","runner_name":"e2b-1001","status":"completed","conclusion":"success","labels":["self-hosted","e2b"]}}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhooks/github", bytes.NewReader(completed))
+	req.Header.Set("X-GitHub-Event", "workflow_job")
+	req.Header.Set("X-Hub-Signature-256", sign("secret", completed))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("unexpected completed status: %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	got, err := store.ReadState("1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusCompleted {
+		t.Fatalf("completed event with runner_name left runner in status %s", got.Status)
+	}
+	if got.AssignedJobID != 1001 || got.AssignedJobName != "original job" {
+		t.Fatalf("completed event did not record its assignment: id=%d name=%q", got.AssignedJobID, got.AssignedJobName)
+	}
+	if fake.stoppedCount() != 1 {
+		t.Fatalf("completed event with runner_name stopped sandbox %d times, want 1", fake.stoppedCount())
+	}
+}
+
 func TestWorkflowJobMismatchRequeuesOriginalJob(t *testing.T) {
 	ghServer := httptest.NewServer(githubRunnerAPI(t))
 	defer ghServer.Close()
@@ -5597,6 +5861,115 @@ func TestRecoverCleansUpCompletedWorkflowJob(t *testing.T) {
 	}
 	if fake.recoveredCount() != 0 || fake.stoppedCount() != 1 {
 		t.Fatalf("expected completed workflow job to stop without reconnect, recovered=%d stopped=%d", fake.recoveredCount(), fake.stoppedCount())
+	}
+}
+
+func TestRecoverReattachesRunnerWhenOriginalJobCompletedButDifferentJobAssigned(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/jobs/1001" {
+			w.Write([]byte(`{"id":1001,"name":"original job","status":"completed","conclusion":"cancelled"}`))
+			return
+		}
+		t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "1001",
+		Source:             "test",
+		RepositoryFullName: "o/r",
+		JobID:              1001,
+		Labels:             []string{"self-hosted", "e2b"},
+		RunnerName:         "e2b-1001",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-1001"
+	st.ProcessPID = 42
+	st.RunningAt = time.Now().UTC().Add(-time.Minute)
+	st.AssignedJobID = 2002
+	st.AssignedJobName = "actual job"
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.ReadState("1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusRunning || got.AssignedJobID != 2002 || got.AssignedJobName != "actual job" {
+		t.Fatalf("recovery changed active job assignment: %#v", got)
+	}
+	if fake.recoveredCount() != 1 {
+		t.Fatalf("recovery reattached sandbox %d times, want 1", fake.recoveredCount())
+	}
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("recovery stopped sandbox assigned to another job %d times", fake.stoppedCount())
+	}
+}
+
+func TestRecoverReattachesRunnerWhenOriginalJobCompletedAfterJobStartedMarker(t *testing.T) {
+	ghServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/actions/jobs/1001" {
+			w.Write([]byte(`{"id":1001,"name":"original job","status":"completed","conclusion":"cancelled"}`))
+			return
+		}
+		t.Fatalf("unexpected github request: %s %s", r.Method, r.URL.String())
+	}))
+	defer ghServer.Close()
+
+	store := state.New(t.TempDir())
+	_, st, err := store.CreateRequest(state.RunnerRequest{
+		ID:                 "1001",
+		Source:             "test",
+		RepositoryFullName: "o/r",
+		JobID:              1001,
+		Labels:             []string{"self-hosted", "e2b"},
+		RunnerName:         "e2b-1001",
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = state.StatusRunning
+	st.SandboxID = "sb-1001"
+	st.ProcessPID = 42
+	st.RunningAt = time.Now().UTC().Add(-time.Minute)
+	st.AssignedJobName = runnerJobStartedMarker
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := &fakeSandbox{}
+	srv := newTestServer(t, store, ghServer.URL, fake)
+	srv.Close()
+	if err := srv.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.ReadState("1001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != state.StatusRunning || got.AssignedJobID != 0 || got.AssignedJobName != runnerJobStartedMarker {
+		t.Fatalf("recovery changed unresolved active job assignment: %#v", got)
+	}
+	if fake.recoveredCount() != 1 {
+		t.Fatalf("recovery reattached sandbox %d times, want 1", fake.recoveredCount())
+	}
+	if fake.stoppedCount() != 0 {
+		t.Fatalf("recovery stopped sandbox after a job had already started %d times", fake.stoppedCount())
 	}
 }
 
