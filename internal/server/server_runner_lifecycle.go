@@ -931,6 +931,23 @@ func (s *Server) stopRunner(ctx context.Context, id string, job github.WorkflowJ
 		return state.RunnerState{}, false, err
 	}
 	s.logger.Info("runner stop requested", "id", id, "status", st.Status, "sandbox_id", st.SandboxID, "pid", st.ProcessPID, "job_id", job.ID)
+	if workflowJobStopConflictsWithAssignment(st, job) {
+		s.logger.Warn(
+			"runner stop deferred because runner ownership is unresolved or different",
+			"id", id,
+			"workflow_job_id", st.WorkflowJobID,
+			"assigned_job_id", st.AssignedJobID,
+			"assigned_job_name", st.AssignedJobName,
+			"completed_job_id", job.ID,
+		)
+		s.store.AppendLog(id, "control.log", []byte(fmt.Sprintf(
+			"runner stop deferred: workflow job %d completed while runner assignment is id=%d name=%q\n",
+			job.ID,
+			st.AssignedJobID,
+			st.AssignedJobName,
+		)))
+		return st, false, nil
+	}
 	if st.Status == state.StatusCompleted {
 		recorded := false
 		if shouldRecordAssignedJob(st, job) {
@@ -944,23 +961,6 @@ func (s *Server) stopRunner(ctx context.Context, id string, job github.WorkflowJ
 		}
 		s.logger.Info("runner stop skipped because already completed", "id", id)
 		return st, recorded, nil
-	}
-	if workflowJobStopConflictsWithAssignment(st, job) {
-		s.logger.Warn(
-			"runner stop deferred because active runner ownership is unresolved or different",
-			"id", id,
-			"workflow_job_id", st.WorkflowJobID,
-			"assigned_job_id", st.AssignedJobID,
-			"assigned_job_name", st.AssignedJobName,
-			"completed_job_id", job.ID,
-		)
-		s.store.AppendLog(id, "control.log", []byte(fmt.Sprintf(
-			"runner stop deferred: workflow job %d completed while active runner assignment is id=%d name=%q\n",
-			job.ID,
-			st.AssignedJobID,
-			st.AssignedJobName,
-		)))
-		return st, false, nil
 	}
 	if shouldRecordAssignedJob(st, job) {
 		st.AssignedJobID = job.ID
@@ -1328,6 +1328,10 @@ func shouldRecordAssignedJob(st state.RunnerState, job github.WorkflowJob) bool 
 	return st.AssignedJobID != job.ID || st.AssignedJobName != job.Name
 }
 
+// workflowJobStopConflictsWithAssignment reports whether a completed workflow
+// job must not stop or reassign this runner because its actual job ownership is
+// unresolved or already points at a different job. A matching non-empty
+// runner_name is authoritative and makes the completion safe to apply.
 func workflowJobStopConflictsWithAssignment(st state.RunnerState, job github.WorkflowJob) bool {
 	if job.ID == 0 {
 		return false

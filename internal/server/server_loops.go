@@ -287,6 +287,7 @@ func (s *Server) requeueMismatchedWorkflowJob(st state.RunnerState, observed git
 		if err := s.store.WriteState(next); err != nil {
 			return false, state.RunnerState{}, fmt.Errorf("write mismatched workflow job inspection: %w", err)
 		}
+		// Keep the returned state aligned with WriteState's CAS-persisted version.
 		next.Version++
 		s.store.AppendLog(st.ID, "control.log", []byte(fmt.Sprintf("runner completed different workflow job %d; original workflow job %d is no longer queued\n", observed.ID, st.WorkflowJobID)))
 		return false, next, nil
@@ -314,6 +315,7 @@ func (s *Server) requeueMismatchedWorkflowJob(st state.RunnerState, observed git
 	if err := s.store.WriteState(next); err != nil {
 		return false, state.RunnerState{}, fmt.Errorf("write mismatched workflow job requeue: %w", err)
 	}
+	// Keep the returned state aligned with WriteState's CAS-persisted version.
 	next.Version++
 	s.store.AppendLog(st.ID, "control.log", []byte(fmt.Sprintf("runner completed different workflow job %d; original workflow job %d is queued, requeued request\n", observed.ID, st.WorkflowJobID)))
 	s.signalQueue()
