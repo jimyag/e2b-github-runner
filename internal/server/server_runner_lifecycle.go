@@ -737,8 +737,15 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 		hasJob = false
 	}
 	if hasJob && strings.EqualFold(strings.TrimSpace(job.Status), "completed") {
-		_, _, err := s.stopRunner(ctx, st.ID, job)
-		return err
+		latest, _, err := s.stopRunner(ctx, st.ID, job)
+		if err != nil {
+			return err
+		}
+		if latest.Status != state.StatusCreating && latest.Status != state.StatusRunning {
+			return nil
+		}
+		st = latest
+		stateVersion = latest.Version
 	}
 
 	timeout := s.remainingSandboxTimeout(st, time.Now().UTC())
@@ -937,6 +944,23 @@ func (s *Server) stopRunner(ctx context.Context, id string, job github.WorkflowJ
 		}
 		s.logger.Info("runner stop skipped because already completed", "id", id)
 		return st, recorded, nil
+	}
+	if workflowJobStopConflictsWithAssignment(st, job) {
+		s.logger.Warn(
+			"runner stop deferred because active runner ownership is unresolved or different",
+			"id", id,
+			"workflow_job_id", st.WorkflowJobID,
+			"assigned_job_id", st.AssignedJobID,
+			"assigned_job_name", st.AssignedJobName,
+			"completed_job_id", job.ID,
+		)
+		s.store.AppendLog(id, "control.log", []byte(fmt.Sprintf(
+			"runner stop deferred: workflow job %d completed while active runner assignment is id=%d name=%q\n",
+			job.ID,
+			st.AssignedJobID,
+			st.AssignedJobName,
+		)))
+		return st, false, nil
 	}
 	if shouldRecordAssignedJob(st, job) {
 		st.AssignedJobID = job.ID
@@ -1302,6 +1326,19 @@ func shouldRecordAssignedJob(st state.RunnerState, job github.WorkflowJob) bool 
 		return false
 	}
 	return st.AssignedJobID != job.ID || st.AssignedJobName != job.Name
+}
+
+func workflowJobStopConflictsWithAssignment(st state.RunnerState, job github.WorkflowJob) bool {
+	if job.ID == 0 {
+		return false
+	}
+	if runnerName := strings.TrimSpace(job.RunnerName); runnerName != "" && runnerName == strings.TrimSpace(st.RunnerName) {
+		return false
+	}
+	if st.AssignedJobID != 0 {
+		return st.AssignedJobID != job.ID
+	}
+	return st.AssignedJobName == runnerJobStartedMarker && st.WorkflowJobID == job.ID
 }
 
 func workflowJobMismatch(st state.RunnerState, job github.WorkflowJob) bool {
