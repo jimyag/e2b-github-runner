@@ -76,17 +76,7 @@ func (s *Server) matchProfileForAdmission(repository string, labels []string) (s
 	}
 	legacyName := matchedProfileName(comparison.Legacy)
 	enabledName := matchedProfileName(comparison.Enabled)
-	result := "same"
-	switch {
-	case comparison.Legacy.Profile != nil && comparison.Enabled.Profile == nil:
-		result = "legacy_only"
-	case comparison.Legacy.Profile == nil && comparison.Enabled.Profile != nil:
-		result = "enabled_only"
-	case comparison.Legacy.Profile != nil && comparison.Enabled.Profile != nil && legacyName != enabledName:
-		result = "different_profile"
-	case legacyName == enabledName && comparison.Legacy.Reason != comparison.Enabled.Reason:
-		result = "different_profile"
-	}
+	result := comparison.Result()
 	metrics.RecordCatalogMatchComparison(legacyName, enabledName, result)
 	if result != "same" {
 		s.logger.Warn(
