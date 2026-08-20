@@ -6,6 +6,7 @@ import type { RunnerJobGroup, RunnerState } from "@/admin-types"
 import { logNames } from "@/admin-types"
 import { formatRunnerDuration, formatTime, runnerStatusLabel } from "@/admin-format"
 import { localizedLogTextForView, type LocalizedLogText } from "@/app-log-state"
+import type { AppTFunction } from "@/i18n"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -385,7 +386,7 @@ function isTerminalAvailable(job: RunnerState) {
   return Boolean(job.sandbox_id && ["creating", "running", "stopping"].includes(job.status))
 }
 
-function jobGroupTitle(group: RunnerJobGroup | null, t: ReturnType<typeof useTranslation>["t"]) {
+function jobGroupTitle(group: RunnerJobGroup | null, t: AppTFunction) {
   if (!group) return t("user.workflowJobs")
   return group.title ? t("user.namedJobs", { name: group.title }) : t("user.workflowJobs")
 }

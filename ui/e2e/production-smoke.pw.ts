@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 
-import type { RunnerJobGroup, RunnerState } from "../src/admin-types"
+import type { CatalogMigrationReadiness, RunnerJobGroup, RunnerState } from "../src/admin-types"
 import { getLocalAuthSessionRoute } from "./production-smoke-support"
 
 const postRenderObservationMs = 1_000
@@ -75,6 +75,47 @@ test("serves the custom template guide from the production bundle", async ({ pag
   }))
   expect(viewport.documentWidth).toBeLessThanOrEqual(viewport.viewportWidth + 1)
 
+  await page.waitForTimeout(postRenderObservationMs)
+  diagnostics.expectClean()
+})
+
+test("renders durable Release A evidence in Admin Diagnostics", async ({ page }) => {
+  test.skip(Boolean(process.env.RUNNERD_UI_SMOKE_BASE_URL), "local fixture coverage only")
+
+  const diagnostics = observeBrowserDiagnostics(page)
+  await page.route("**/auth/session", async (route) => {
+    await route.fulfill({
+      json: { authenticated: true, oauth_enabled: true, login: "fixture-admin", role: "admin" },
+    })
+  })
+  await page.route("**/diagnostics/pprof", async (route) => {
+    await route.fulfill({
+      json: {
+        pprof: [],
+        state: { backend: "sqlite", database: "/fixture/runnerd.db" },
+        github: { auth_mode: "app", api_base_url: "https://api.github.com" },
+        recent_failures: [],
+      },
+    })
+  })
+  await page.route("**/diagnostics/vars", async (route) => {
+    await route.fulfill({ json: { e2b_runner_catalog_match_migration_total: { same: 10 } } })
+  })
+  await page.route("**/diagnostics/catalog-migration-readiness?window_hours=72", async (route) => {
+    await route.fulfill({ json: readinessFixture() })
+  })
+
+  const response = await page.goto("/admin/diagnostics", { waitUntil: "networkidle" })
+  expect(response?.ok()).toBe(true)
+  const readiness = page.getByRole("region", { name: "Release A readiness" })
+  await expect(readiness).toBeVisible()
+  await expect(readiness.getByText("Automated evidence passed", { exact: true })).toBeVisible()
+  await expect(readiness.getByText("Manual signoff still required", { exact: true })).toBeVisible()
+  await expect(readiness.getByRole("cell", { name: "qiniu-ubuntu-24.04", exact: true })).toBeVisible()
+  await expect(readiness.getByRole("link", { name: "fixture-request" })).toHaveAttribute(
+    "href",
+    "https://github.com/qiniu/ci-runner/actions/runs/1/job/42",
+  )
   await page.waitForTimeout(postRenderObservationMs)
   diagnostics.expectClean()
 })
@@ -282,4 +323,63 @@ function fixtureRunners(count: number): RunnerState[] {
       completed_at: index === 0 ? undefined : createdAt,
     }
   })
+}
+
+function readinessFixture(): CatalogMigrationReadiness {
+  return {
+    window_start: "2026-08-17T00:00:00Z",
+    window_end: "2026-08-20T00:00:00Z",
+    replay: {
+      request_count: 10,
+      distinct_input_count: 2,
+      same: 10,
+      legacy_only: 0,
+      enabled_only: 0,
+      different_profile: 0,
+      errors: 0,
+      truncated: false,
+    },
+    replay_samples: [],
+    specs: [{
+      name: "qiniu-ubuntu-24.04",
+      workflow_labels: ["qiniu", "ubuntu-24.04"],
+      request_count: 1,
+      registered_requests: 1,
+      completed_requests: 1,
+      cleanup_finalized_requests: 1,
+      latest: {
+        request_id: "fixture-request",
+        repository_full_name: "qiniu/ci-runner",
+        workflow_job_id: 42,
+        github_job_url: "https://github.com/qiniu/ci-runner/actions/runs/1/job/42",
+        requested_labels: ["qiniu", "ubuntu-24.04"],
+        registered_at: "2026-08-19T00:00:00Z",
+        completed_at: "2026-08-19T00:10:00Z",
+        cleanup_finalized_at: "2026-08-19T00:10:00Z",
+      },
+    }],
+    catalog_changes: [],
+    catalog_changes_truncated: false,
+    automated_gates_passed: true,
+    gates: [
+      { code: "window_at_least_72_hours", passed: true },
+      { code: "catalog_unchanged", passed: true },
+      { code: "matcher_parity", passed: true },
+      { code: "all_enabled_specs_full_lifecycle", passed: true },
+    ],
+    manual_requirements: [
+      "backup_restore_verified",
+      "continuous_service_observation",
+      "workflow_labels_unchanged",
+    ],
+    current_process: {
+      started_at: "2026-08-20T00:00:00Z",
+      catalog_match_counts: {
+        same: 10,
+        legacy_only: 0,
+        enabled_only: 0,
+        different_profile: 0,
+      },
+    },
+  }
 }

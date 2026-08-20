@@ -1216,7 +1216,7 @@ function App() {
           {section === "audit" ? <AuditSection auditEvents={auditEvents} /> : null}
 
           {section === "diagnostics" ? (
-            <DiagnosticsSection diagnostics={diagnostics} diagnosticsVars={diagnosticsVars} />
+            <DiagnosticsSection diagnostics={diagnostics} diagnosticsVars={diagnosticsVars} request={request} />
           ) : null}
         </main>
       </SidebarInset>

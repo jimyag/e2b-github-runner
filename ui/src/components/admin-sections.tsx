@@ -11,6 +11,7 @@ import {
 } from "@/admin-types"
 import { formatTime } from "@/admin-format"
 import { Detail, StatusBadge } from "@/components/admin-shared"
+import { ReleaseReadinessSection } from "@/components/release-readiness-section"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -219,14 +220,17 @@ export function AuditSection({ auditEvents }: { auditEvents: AuditEvent[] }) {
 export function DiagnosticsSection({
   diagnostics,
   diagnosticsVars,
+  request,
 }: {
   diagnostics: DiagnosticsSummary | null
   diagnosticsVars: string
+  request: (url: string, options?: RequestInit) => Promise<unknown>
 }) {
   const { t } = useTranslation()
   return (
-    <div className="grid gap-4 xl:grid-cols-2">
-      <Card>
+    <div className="space-y-4">
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Card>
         <CardHeader>
           <CardTitle>{t("admin.diagnosticsSummary")}</CardTitle>
           <CardDescription>{t("admin.diagnosticsDescription")}</CardDescription>
@@ -252,8 +256,8 @@ export function DiagnosticsSection({
             )}
           </div>
         </CardContent>
-      </Card>
-      <Card>
+        </Card>
+        <Card>
         <CardHeader>
           <CardTitle>{t("admin.recentFailures")}</CardTitle>
           <CardDescription>{t("admin.failuresDescription")}</CardDescription>
@@ -278,7 +282,9 @@ export function DiagnosticsSection({
             {diagnosticsVars || t("admin.noDebugVars")}
           </pre>
         </CardContent>
-      </Card>
+        </Card>
+      </div>
+      <ReleaseReadinessSection request={request} />
     </div>
   )
 }
