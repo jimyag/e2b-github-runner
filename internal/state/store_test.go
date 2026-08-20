@@ -5119,6 +5119,65 @@ func TestCatalogMigrationReadinessReplaysPersistedRequestsAndLifecycleEvidence(t
 	}
 }
 
+func TestCatalogMigrationReadinessTruncatesBoundedEvidence(t *testing.T) {
+	store := New(t.TempDir())
+	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	end := start.Add(72 * time.Hour)
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "default", Labels: []string{"self-hosted", "base"},
+		RequiredLabels: []string{"base"}, TemplateID: "default-template",
+		Priority: 10, Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.(*DBStore).dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := make([]runnerRequestRecord, maxCatalogMigrationReplayInputs+1)
+	for i := range records {
+		records[i] = runnerRequestRecord{
+			ID: fmt.Sprintf("bounded-%04d", i), Source: "webhook",
+			RepositoryFullName:  fmt.Sprintf("owner/repo-%04d", i),
+			RequestedLabelsJSON: `["base"]`, LabelsJSON: `["base"]`,
+			RunnerName: fmt.Sprintf("runner-%04d", i), Status: string(StatusQueued),
+			QueuedAt: start.Add(time.Hour), UpdatedAt: start.Add(time.Hour),
+		}
+	}
+	if err := db.CreateInBatches(records, 100).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i <= maxCatalogMigrationChanges; i++ {
+		if _, err := store.AppendAuditEvent(AuditEvent{
+			Actor: "admin_api", Action: "profile.update", ResourceType: "runner_profile",
+			ResourceID: fmt.Sprintf("spec-%03d", i), CreatedAt: start.Add(2 * time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := store.CatalogMigrationReadiness(start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Replay.Truncated || report.Replay.RequestCount != maxCatalogMigrationReplayInputs+1 ||
+		report.Replay.DistinctInputCount != maxCatalogMigrationReplayInputs ||
+		report.Replay.SameRequests != maxCatalogMigrationReplayInputs {
+		t.Fatalf("bounded replay = %#v", report.Replay)
+	}
+	if !report.CatalogChangesTruncated || len(report.CatalogChanges) != maxCatalogMigrationChanges {
+		t.Fatalf("bounded catalog changes = %d truncated=%v", len(report.CatalogChanges), report.CatalogChangesTruncated)
+	}
+}
+
+func TestCatalogMigrationReadinessRejectsInvalidWindow(t *testing.T) {
+	store := New(t.TempDir())
+	now := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	if _, err := store.CatalogMigrationReadiness(now, now); err == nil {
+		t.Fatal("expected an invalid readiness window to fail")
+	}
+}
+
 type catalogReadinessRequestFixture struct {
 	id              string
 	jobID           int64
