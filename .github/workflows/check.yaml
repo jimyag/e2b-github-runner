@@ -26,11 +26,11 @@ jobs:
           fetch-depth: 1
       - uses: actions/setup-go@v6
         with:
-          go-version: stable
+          go-version-file: go.mod
           cache-dependency-path: go.sum
       - uses: oven-sh/setup-bun@v2
       - run: cd ui && bun install --frozen-lockfile && bun run build
-      - run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      - run: go install honnef.co/go/tools/cmd/staticcheck@v0.7.0
       - run: staticcheck ./cmd/... ./internal/...
 
   gofmt:
