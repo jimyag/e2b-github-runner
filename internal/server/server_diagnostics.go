@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/qiniu/ci-runner/internal/redact"
-	"github.com/qiniu/ci-runner/internal/state"
 )
 
 func (s *Server) handleDiagnosticsPprof(w http.ResponseWriter, r *http.Request) {
@@ -19,19 +18,10 @@ func (s *Server) handleDiagnosticsPprof(w http.ResponseWriter, r *http.Request) 
 		DumpScript  string `json:"dump_script"`
 	}
 	addresses, scripts := discoverPprofArtifacts()
-	states, err := s.store.ListStates()
+	failures, err := s.store.ListRecentFailedStates(5)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	failures := make([]state.RunnerState, 0, 5)
-	for _, st := range states {
-		if st.Status == state.StatusFailed {
-			failures = append(failures, st)
-			if len(failures) == 5 {
-				break
-			}
-		}
 	}
 	out := make([]artifact, 0, len(addresses))
 	for i := range addresses {

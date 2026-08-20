@@ -2331,6 +2331,65 @@ func TestListStatesPage(t *testing.T) {
 	}
 }
 
+func TestListRecentFailedStatesBoundsOrdersAndProjects(t *testing.T) {
+	store := New(t.TempDir())
+	base := time.Date(2026, time.August, 20, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 7; i++ {
+		_, st, err := store.CreateRequest(RunnerRequest{
+			ID:                     fmt.Sprintf("failed-%d", i),
+			Source:                 "test",
+			Labels:                 []string{"self-hosted"},
+			RunnerName:             fmt.Sprintf("e2b-failed-%d", i),
+			SandboxAPIURL:          "https://sandbox-secret.example.test",
+			SandboxAPIKeyEncrypted: "encrypted-secret",
+			CreatedAt:              base.Add(time.Duration(i) * time.Minute),
+		}, []byte(`{"workflow_job":{"id":123}}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Status = StatusFailed
+		st.FailureStage = "runner_registration"
+		st.FailureReason = fmt.Sprintf("fixture-%d", i)
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, completed, err := store.CreateRequest(RunnerRequest{
+		ID:         "newest-completed",
+		Source:     "test",
+		Labels:     []string{"self-hosted"},
+		RunnerName: "e2b-newest-completed",
+		CreatedAt:  base.Add(8 * time.Minute),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed.Status = StatusCompleted
+	if err := store.WriteState(completed); err != nil {
+		t.Fatal(err)
+	}
+
+	states, err := store.ListRecentFailedStates(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantIDs := []string{"failed-6", "failed-5", "failed-4", "failed-3", "failed-2"}
+	if len(states) != len(wantIDs) {
+		t.Fatalf("len = %d, want %d", len(states), len(wantIDs))
+	}
+	for i, wantID := range wantIDs {
+		if states[i].ID != wantID {
+			t.Fatalf("states[%d].ID = %q, want %q", i, states[i].ID, wantID)
+		}
+		if states[i].Status != StatusFailed {
+			t.Fatalf("states[%d].Status = %q, want %q", i, states[i].Status, StatusFailed)
+		}
+		if states[i].SandboxAPIURL != "" || states[i].SandboxAPIKeyEncrypted != "" {
+			t.Fatalf("states[%d] loaded secret columns: %#v", i, states[i])
+		}
+	}
+}
+
 func TestRunnerRequestListProjectionExcludesHeavyAndSecretColumns(t *testing.T) {
 	projection := "," + strings.Join(runnerRequestListSelectColumns, ",") + ","
 	for _, excluded := range []string{
