@@ -484,83 +484,97 @@ func (s *DBStore) CompareProfileMatches(repositoryFullName string, labels []stri
 	if err != nil {
 		return ProfileMatchComparison{}, err
 	}
-	var profiles []RunnerProfile
-	var policies []RepositoryPolicy
-	var groups []RunnerGroup
+	var snapshot catalogMatchSnapshot
 	err = db.Transaction(func(tx *gorm.DB) error {
-		var profileRecords []runnerProfileRecord
-		if err := tx.Order("priority DESC, name ASC").Find(&profileRecords).Error; err != nil {
-			return err
-		}
-		profiles = make([]RunnerProfile, 0, len(profileRecords))
-		for _, record := range profileRecords {
-			profile, err := recordToProfile(record)
-			if err != nil {
-				return err
-			}
-			profiles = append(profiles, profile)
-		}
-
-		hasPolicies, err := catalogTableExists(tx, repositoryPolicyRecord{}.TableName())
-		if err != nil {
-			return err
-		}
-		if hasPolicies {
-			var policyRecords []repositoryPolicyRecord
-			if err := tx.Order("repository_full_name ASC, id ASC").Find(&policyRecords).Error; err != nil {
-				return err
-			}
-			policies = make([]RepositoryPolicy, 0, len(policyRecords))
-			for _, record := range policyRecords {
-				policies = append(policies, recordToRepositoryPolicy(record))
-			}
-		}
-
-		hasGroups, err := catalogTableExists(tx, runnerGroupRecord{}.TableName())
-		if err != nil {
-			return err
-		}
-		if hasGroups {
-			var groupRecords []runnerGroupRecord
-			if err := tx.Order("name ASC").Find(&groupRecords).Error; err != nil {
-				return err
-			}
-			specsByGroup := make(map[string][]string, len(groupRecords))
-			hasGroupSpecs, err := catalogTableExists(tx, runnerGroupSpecRecord{}.TableName())
-			if err != nil {
-				return err
-			}
-			if hasGroupSpecs {
-				var specRecords []runnerGroupSpecRecord
-				if err := tx.Order("group_name ASC, spec_name ASC").Find(&specRecords).Error; err != nil {
-					return err
-				}
-				for _, record := range specRecords {
-					specsByGroup[record.GroupName] = append(specsByGroup[record.GroupName], record.SpecName)
-				}
-			}
-			groups = make([]RunnerGroup, 0, len(groupRecords))
-			for _, record := range groupRecords {
-				groups = append(groups, RunnerGroup{
-					Name: record.Name, Description: record.Description,
-					SpecNames: specsByGroup[record.Name], Enabled: record.Enabled,
-					CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
-				})
-			}
-		}
-		return nil
+		var loadErr error
+		snapshot, loadErr = loadCatalogMatchSnapshot(tx)
+		return loadErr
 	}, catalogSnapshotTxOptions)
 	if err != nil {
 		return ProfileMatchComparison{}, err
 	}
+	return snapshot.compare(repositoryFullName, labels), nil
+}
 
-	legacyCandidates, legacyHasAllowedNames := legacyAllowedProfiles(profiles, policies, groups, repositoryFullName)
+type catalogMatchSnapshot struct {
+	profiles []RunnerProfile
+	policies []RepositoryPolicy
+	groups   []RunnerGroup
+}
+
+func loadCatalogMatchSnapshot(tx *gorm.DB) (catalogMatchSnapshot, error) {
+	var snapshot catalogMatchSnapshot
+	var profileRecords []runnerProfileRecord
+	if err := tx.Order("priority DESC, name ASC").Find(&profileRecords).Error; err != nil {
+		return catalogMatchSnapshot{}, err
+	}
+	snapshot.profiles = make([]RunnerProfile, 0, len(profileRecords))
+	for _, record := range profileRecords {
+		profile, err := recordToProfile(record)
+		if err != nil {
+			return catalogMatchSnapshot{}, err
+		}
+		snapshot.profiles = append(snapshot.profiles, profile)
+	}
+
+	hasPolicies, err := catalogTableExists(tx, repositoryPolicyRecord{}.TableName())
+	if err != nil {
+		return catalogMatchSnapshot{}, err
+	}
+	if hasPolicies {
+		var policyRecords []repositoryPolicyRecord
+		if err := tx.Order("repository_full_name ASC, id ASC").Find(&policyRecords).Error; err != nil {
+			return catalogMatchSnapshot{}, err
+		}
+		snapshot.policies = make([]RepositoryPolicy, 0, len(policyRecords))
+		for _, record := range policyRecords {
+			snapshot.policies = append(snapshot.policies, recordToRepositoryPolicy(record))
+		}
+	}
+
+	hasGroups, err := catalogTableExists(tx, runnerGroupRecord{}.TableName())
+	if err != nil {
+		return catalogMatchSnapshot{}, err
+	}
+	if hasGroups {
+		var groupRecords []runnerGroupRecord
+		if err := tx.Order("name ASC").Find(&groupRecords).Error; err != nil {
+			return catalogMatchSnapshot{}, err
+		}
+		specsByGroup := make(map[string][]string, len(groupRecords))
+		hasGroupSpecs, err := catalogTableExists(tx, runnerGroupSpecRecord{}.TableName())
+		if err != nil {
+			return catalogMatchSnapshot{}, err
+		}
+		if hasGroupSpecs {
+			var specRecords []runnerGroupSpecRecord
+			if err := tx.Order("group_name ASC, spec_name ASC").Find(&specRecords).Error; err != nil {
+				return catalogMatchSnapshot{}, err
+			}
+			for _, record := range specRecords {
+				specsByGroup[record.GroupName] = append(specsByGroup[record.GroupName], record.SpecName)
+			}
+		}
+		snapshot.groups = make([]RunnerGroup, 0, len(groupRecords))
+		for _, record := range groupRecords {
+			snapshot.groups = append(snapshot.groups, RunnerGroup{
+				Name: record.Name, Description: record.Description,
+				SpecNames: specsByGroup[record.Name], Enabled: record.Enabled,
+				CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
+			})
+		}
+	}
+	return snapshot, nil
+}
+
+func (snapshot catalogMatchSnapshot) compare(repositoryFullName string, labels []string) ProfileMatchComparison {
+	legacyCandidates, legacyHasAllowedNames := legacyAllowedProfiles(snapshot.profiles, snapshot.policies, snapshot.groups, repositoryFullName)
 	legacy := profileMatchFromCandidates(repositoryFullName, labels, legacyCandidates)
 	if !legacyHasAllowedNames {
 		legacy.Reason = "profile_not_allowed"
 	}
-	enabled := profileMatchFromCandidates(repositoryFullName, labels, profiles)
-	return ProfileMatchComparison{Legacy: legacy, Enabled: enabled}, nil
+	enabled := profileMatchFromCandidates(repositoryFullName, labels, snapshot.profiles)
+	return ProfileMatchComparison{Legacy: legacy, Enabled: enabled}
 }
 
 func catalogTableExists(tx *gorm.DB, tableName string) (bool, error) {

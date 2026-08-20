@@ -3309,6 +3309,24 @@ func TestCompareProfileMatchesSQLBackends(t *testing.T) {
 			store = migrated
 			db = migratedDB
 			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+			windowEnd := time.Now().UTC().Add(time.Minute)
+			windowStart := windowEnd.Add(-time.Hour)
+			created, _, err := store.CreateRequest(RunnerRequest{
+				ID: "catalog-readiness-" + backend.name, Source: "webhook", JobID: 991,
+				RepositoryFullName: "owner/repo", RequestedLabels: []string{"policy-selected"},
+				Labels: []string{"policy-selected"}, ProfileName: "policy-selected",
+				CreatedAt: windowStart.Add(time.Minute),
+			}, nil)
+			if err != nil || !created {
+				t.Fatalf("create %s catalog readiness request: created=%v err=%v", backend.name, created, err)
+			}
+			readiness, err := store.CatalogMigrationReadiness(windowStart, windowEnd)
+			if err != nil {
+				t.Fatalf("%s catalog migration readiness: %v", backend.name, err)
+			}
+			if readiness.Replay.RequestCount != 1 || readiness.Replay.SameRequests != 1 || readiness.Replay.Truncated {
+				t.Fatalf("%s catalog migration replay = %#v", backend.name, readiness.Replay)
+			}
 			groups, err := store.ListRunnerGroups()
 			if err != nil || len(groups) != 1 || groups[0].Name != "policy-group" {
 				t.Fatalf("existing %s groups after migration = %#v, err=%v", backend.name, groups, err)
@@ -4919,4 +4937,241 @@ func TestMigrateSQLiteRunnerRequestSnapshot(t *testing.T) {
 		t.Fatalf("second migration changed runner request data: first=%#v second=%#v", afterFirstStart, afterSecondStart)
 	}
 	t.Logf("runner request migration counts: before=%#v after=%#v", before, afterSecondStart)
+}
+
+func TestProfileMatchComparisonResult(t *testing.T) {
+	profile := func(name string) *RunnerProfile { return &RunnerProfile{Name: name} }
+	tests := []struct {
+		name       string
+		comparison ProfileMatchComparison
+		want       string
+	}{
+		{
+			name: "same selected profile",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Profile: profile("shared")},
+				Enabled: ProfileMatch{Profile: profile("shared")},
+			},
+			want: "same",
+		},
+		{
+			name: "legacy only",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Profile: profile("legacy")},
+				Enabled: ProfileMatch{Reason: "profile_labels_not_matched"},
+			},
+			want: "legacy_only",
+		},
+		{
+			name: "enabled only",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Reason: "profile_not_allowed"},
+				Enabled: ProfileMatch{Profile: profile("enabled")},
+			},
+			want: "enabled_only",
+		},
+		{
+			name: "different selected profiles",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Profile: profile("legacy")},
+				Enabled: ProfileMatch{Profile: profile("enabled")},
+			},
+			want: "different_profile",
+		},
+		{
+			name: "different no match reasons",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Reason: "profile_not_allowed"},
+				Enabled: ProfileMatch{Reason: "profile_labels_not_matched"},
+			},
+			want: "different_profile",
+		},
+		{
+			name: "same no match reason",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Reason: "profile_labels_not_matched"},
+				Enabled: ProfileMatch{Reason: "profile_labels_not_matched"},
+			},
+			want: "same",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.comparison.Result(); got != tt.want {
+				t.Fatalf("Result() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCatalogMigrationReadinessReplaysPersistedRequestsAndLifecycleEvidence(t *testing.T) {
+	store := New(t.TempDir())
+	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	end := start.Add(72 * time.Hour)
+
+	profiles := []RunnerProfile{
+		{
+			Name: "default", Labels: []string{"self-hosted", "base"},
+			RequiredLabels: []string{"base"}, TemplateID: "default-template",
+			Priority: 10, Enabled: true, DefaultAvailable: true,
+		},
+		{
+			Name: "enabled-only", Labels: []string{"self-hosted", "extra"},
+			RequiredLabels: []string{"extra"}, TemplateID: "enabled-template",
+			Priority: 20, Enabled: true,
+		},
+		{
+			Name: "legacy", Labels: []string{"self-hosted", "overlap"},
+			RequiredLabels: []string{"overlap"}, TemplateID: "legacy-template",
+			Priority: 10, Enabled: true,
+		},
+		{
+			Name: "higher", Labels: []string{"self-hosted", "overlap"},
+			RequiredLabels: []string{"overlap"}, TemplateID: "higher-template",
+			Priority: 20, Enabled: true,
+		},
+	}
+	for _, profile := range profiles {
+		if _, err := store.UpsertProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
+		RepositoryFullName: "owner/repo", ProfileName: "legacy", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "same", jobID: 1, repository: "owner/repo", requestedLabels: []string{"base"},
+		profileName: "default", createdAt: start.Add(time.Hour), fullLifecycle: true,
+	})
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "enabled-only", jobID: 2, repository: "owner/other", requestedLabels: []string{"extra"},
+		profileName: "", createdAt: start.Add(2 * time.Hour),
+	})
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "different", jobID: 3, repository: "owner/repo", requestedLabels: []string{"overlap"},
+		profileName: "legacy", createdAt: start.Add(3 * time.Hour),
+	})
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "malformed", jobID: 4, repository: "owner/repo", requestedLabels: []string{"base"},
+		profileName: "default", createdAt: start.Add(4 * time.Hour),
+	})
+	db, err := store.(*DBStore).dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&runnerRequestRecord{}).Where("id = ?", "malformed").
+		Update("requested_labels_json", `{"unterminated"`).Error; err != nil {
+		t.Fatal(err)
+	}
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "end-exclusive", jobID: 5, repository: "owner/repo", requestedLabels: []string{"base"},
+		profileName: "default", createdAt: end,
+	})
+	if _, err := store.AppendAuditEvent(AuditEvent{
+		Actor: "admin_api", Action: "profile.update", ResourceType: "runner_profile",
+		ResourceID: "default", CreatedAt: start.Add(6 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendAuditEvent(AuditEvent{
+		Actor: "admin_api", Action: "runner.retry", ResourceType: "runner_request",
+		ResourceID: "same", CreatedAt: start.Add(7 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := store.CatalogMigrationReadiness(start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.WindowStart != start || report.WindowEnd != end {
+		t.Fatalf("window = %s..%s, want %s..%s", report.WindowStart, report.WindowEnd, start, end)
+	}
+	if got := report.Replay; got.RequestCount != 4 || got.DistinctInputCount != 4 ||
+		got.SameRequests != 1 || got.LegacyOnlyRequests != 0 || got.EnabledOnlyRequests != 1 ||
+		got.DifferentProfileRequests != 1 || got.ErrorRequests != 1 || got.Truncated {
+		t.Fatalf("replay summary = %#v", got)
+	}
+	if len(report.CatalogChanges) != 1 || report.CatalogChanges[0].Action != "profile.update" || report.CatalogChangesTruncated {
+		t.Fatalf("catalog changes = %#v truncated=%v", report.CatalogChanges, report.CatalogChangesTruncated)
+	}
+	if len(report.Specs) != 4 {
+		t.Fatalf("spec evidence count = %d, want 4", len(report.Specs))
+	}
+	defaultEvidence := catalogReadinessSpecByName(t, report.Specs, "default")
+	if !reflect.DeepEqual(defaultEvidence.WorkflowLabels, []string{"base"}) ||
+		defaultEvidence.RequestCount != 2 || defaultEvidence.RegisteredRequests != 1 ||
+		defaultEvidence.CompletedRequests != 1 || defaultEvidence.CleanupFinalizedRequests != 1 {
+		t.Fatalf("default lifecycle evidence = %#v", defaultEvidence)
+	}
+	if defaultEvidence.Latest == nil || defaultEvidence.Latest.RequestID != "same" ||
+		defaultEvidence.Latest.WorkflowJobID != 1 || defaultEvidence.Latest.GitHubJobURL != "https://github.example.test/jobs/1" {
+		t.Fatalf("latest lifecycle evidence = %#v", defaultEvidence.Latest)
+	}
+	if got := catalogReadinessSpecByName(t, report.Specs, "enabled-only"); got.CleanupFinalizedRequests != 0 || got.Latest != nil {
+		t.Fatalf("missing lifecycle evidence = %#v", got)
+	}
+	if len(report.ReplaySamples) != 3 {
+		t.Fatalf("replay samples = %#v, want enabled-only, different, and malformed", report.ReplaySamples)
+	}
+}
+
+type catalogReadinessRequestFixture struct {
+	id              string
+	jobID           int64
+	repository      string
+	requestedLabels []string
+	profileName     string
+	createdAt       time.Time
+	fullLifecycle   bool
+}
+
+func createCatalogReadinessRequest(t *testing.T, store Store, fixture catalogReadinessRequestFixture) {
+	t.Helper()
+	created, st, err := store.CreateRequest(RunnerRequest{
+		ID: fixture.id, Source: "webhook", JobID: fixture.jobID,
+		RepositoryFullName: fixture.repository,
+		RequestedLabels:    append([]string(nil), fixture.requestedLabels...),
+		Labels:             append([]string(nil), fixture.requestedLabels...),
+		ProfileName:        fixture.profileName,
+		RunnerName:         "e2b-" + fixture.id,
+		CreatedAt:          fixture.createdAt,
+	}, nil)
+	if err != nil || !created {
+		t.Fatalf("create request %q: created=%v err=%v", fixture.id, created, err)
+	}
+	if !fixture.fullLifecycle {
+		return
+	}
+	st.Status = StatusCompleted
+	st.RunningAt = fixture.createdAt.Add(time.Minute)
+	st.AssignedJobID = fixture.jobID
+	st.AssignedJobName = "job-" + fixture.id
+	st.GitHubJobURL = fmt.Sprintf("https://github.example.test/jobs/%d", fixture.jobID)
+	st.CompletedAt = fixture.createdAt.Add(10 * time.Minute)
+	if err := store.WriteState(st); err != nil {
+		t.Fatalf("complete request %q: %v", fixture.id, err)
+	}
+	db, err := store.(*DBStore).dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&runnerRequestRecord{}).Where("id = ?", fixture.id).
+		Update("github_job_url", st.GitHubJobURL).Error; err != nil {
+		t.Fatalf("set github job URL for request %q: %v", fixture.id, err)
+	}
+}
+
+func catalogReadinessSpecByName(t *testing.T, specs []RunnerSpecLifecycleEvidence, name string) RunnerSpecLifecycleEvidence {
+	t.Helper()
+	for _, spec := range specs {
+		if spec.Name == name {
+			return spec
+		}
+	}
+	t.Fatalf("spec evidence %q not found in %#v", name, specs)
+	return RunnerSpecLifecycleEvidence{}
 }
