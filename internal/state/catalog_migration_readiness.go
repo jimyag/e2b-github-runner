@@ -66,7 +66,11 @@ func (s *DBStore) CatalogMigrationReadiness(start, end time.Time) (CatalogMigrat
 	if err != nil {
 		return CatalogMigrationReadiness{}, err
 	}
-	report := CatalogMigrationReadiness{WindowStart: start, WindowEnd: end}
+	report := CatalogMigrationReadiness{
+		WindowStart:   start,
+		WindowEnd:     end,
+		ReplaySamples: []CatalogMatchReplaySample{},
+	}
 	err = db.Transaction(func(tx *gorm.DB) error {
 		snapshot, err := loadCatalogMatchSnapshot(tx)
 		if err != nil {

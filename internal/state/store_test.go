@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -5175,6 +5176,25 @@ func TestCatalogMigrationReadinessRejectsInvalidWindow(t *testing.T) {
 	now := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
 	if _, err := store.CatalogMigrationReadiness(now, now); err == nil {
 		t.Fatal("expected an invalid readiness window to fail")
+	}
+}
+
+func TestCatalogMigrationReadinessReturnsStableEmptyCollections(t *testing.T) {
+	store := New(t.TempDir())
+	end := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	report, err := store.CatalogMigrationReadiness(end.Add(-72*time.Hour), end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ReplaySamples == nil || report.Specs == nil || report.CatalogChanges == nil {
+		t.Fatalf("readiness collections must encode as arrays: %#v", report)
+	}
+	payload, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(payload, []byte(`"replay_samples":[]`)) {
+		t.Fatalf("readiness JSON does not contain a stable replay_samples array: %s", payload)
 	}
 }
 
