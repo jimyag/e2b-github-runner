@@ -623,6 +623,8 @@ The service imports `github.com/jimmicro/pprof`. After startup it generates `.pp
 ```bash
 curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/pprof | jq
 curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
+curl -fsS -b "$COOKIE_JAR" \
+  'http://127.0.0.1:25500/diagnostics/catalog-migration-readiness?window_hours=72' | jq
 ```
 
 `/diagnostics/pprof` returns:
@@ -633,7 +635,11 @@ curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
 - GitHub auth mode, `app`, `token`, or `basic`;
 - recent failed runner requests.
 
-`/diagnostics/vars` proxies the local pprof service's `GET /debug/vars`, so you can read expvar metrics directly. Current metrics cover profile current/busy/idle/pending/desired, retry/lease, create/stop counts and durations, GitHub API calls, runner registration/cleanup, and workflow job queued/started/completed, conclusion, failure, queue duration, and run duration.
+`/diagnostics/vars` serves the current runnerd process's expvar registry directly. It never selects a discovered pprof address file, so a stale artifact from an older process cannot hide the current metrics. Current metrics cover profile current/busy/idle/pending/desired, retry/lease, create/stop counts and durations, GitHub API calls, runner registration/cleanup, and workflow job queued/started/completed, conclusion, failure, queue duration, and run duration.
+
+The Admin Diagnostics page also loads the catalog migration readiness endpoint. It replays distinct repository/label inputs from persisted runner requests against both the Release A legacy Group/Policy matcher and the enabled-Spec matcher, weighting the result by historical request count. The default 72-hour window can be changed to 7 or 30 days. The report is evaluated in one read-only repeatable-read database transaction, caps replay at 5,000 distinct inputs, and blocks rather than claims parity if the result is truncated or malformed.
+
+For every currently enabled Runner Spec, the same report displays durable request, registration, completion, and cleanup-finalized counts plus the latest successful GitHub Job link. `cleanup finalized` means runnerd reached persisted `completed` only after Sandbox stop and GitHub runner removal or confirmed absence. GitHub-hosted jobs whose labels do not select runnerd, such as a lone `ubuntu-latest`, may contribute a `same` no-match replay result but never satisfy an enabled Spec's lifecycle row. The automated gate passes only when the window is at least 72 hours, no catalog/Sandbox mutation audit event exists in the window, historical matching has strict parity, and every enabled Spec has full lifecycle evidence. Backup/restore verification, continuous-service observation, and confirmation that workflow labels were unchanged remain explicit operator sign-offs; the UI does not infer or complete them.
 
 ## 11. Official References
 

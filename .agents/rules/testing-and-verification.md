@@ -62,6 +62,7 @@ RUNNERD_MYSQL_TEST_DSN='<dedicated mysql test DSN>' \
 - For broad server/API behavior, run `go test ./...`.
 - For pre-merge confidence, run `task test`; it rebuilds UI assets, runs Bun UI tests, and runs Go tests with race and coverage.
 - For ordinary-user Jobs authorization, cover shared installations with different repository access, exact installation/repository pair matching, filtering before the database limit, list/detail/group/log/terminal consistency, missing or rejected GitHub user tokens, inaccessible linked installations, and short-lived access-cache behavior.
+- For catalog-migration readiness changes, prove historical replay weighting, all matcher classifications, malformed/truncated fail-closed behavior, end-exclusive windows, catalog audit freeze detection, and lifecycle evidence for enabled Specs. Keep current-process expvar separate from persisted evidence and never turn automated gates into backup/restore, continuity, or workflow-label sign-offs.
 
 ## UI
 

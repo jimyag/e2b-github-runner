@@ -609,6 +609,8 @@ curl -fsS -b "$COOKIE_JAR" \
 ```bash
 curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/pprof | jq
 curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
+curl -fsS -b "$COOKIE_JAR" \
+  'http://127.0.0.1:25500/diagnostics/catalog-migration-readiness?window_hours=72' | jq
 ```
 
 `/diagnostics/pprof` 会返回：
@@ -619,7 +621,11 @@ curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
 - GitHub 鉴权模式（app、token 或 basic）
 - 最近失败的 runner request
 
-`/diagnostics/vars` 会代理本地 pprof 服务的 `GET /debug/vars`，可以直接看到 expvar 指标摘要。当前指标覆盖 profile current/busy/idle/pending/desired、retry/lease、create/stop 次数与耗时、GitHub API 调用、runner 注册/清理，以及 workflow job queued/started/completed、conclusion、failure、queue duration 和 run duration。
+`/diagnostics/vars` 会直接返回当前 runnerd 进程的 expvar registry，不再选择发现到的 pprof address file，因此旧进程留下的 stale artifact 不会遮蔽当前指标。当前指标覆盖 profile current/busy/idle/pending/desired、retry/lease、create/stop 次数与耗时、GitHub API 调用、runner 注册/清理，以及 workflow job queued/started/completed、conclusion、failure、queue duration 和 run duration。
+
+Admin Diagnostics 页面还会加载 catalog migration readiness 接口。它从已持久化的 runner requests 中提取不同的 repository/label 输入，分别使用 Release A 的旧 Group/Policy matcher 与 enabled-Spec matcher 回放，并按历史 request 数量加权统计结果。默认观察 72 小时，也可切换到 7 天或 30 天。整个报告在一次 read-only repeatable-read database transaction 中生成，最多回放 5,000 组不同输入；一旦截断或遇到无法解析的数据，门禁会阻塞，不会误报 parity。
+
+同一报告会为每个当前启用的 Runner Spec 展示持久化的 request、registration、completion、cleanup-finalized 数量，以及最近一条成功 GitHub Job 链接。`cleanup finalized` 表示 runnerd 只有在 Sandbox 已停止、GitHub runner 已删除或确认不存在后，才把 request 持久化为 `completed`。未选择 runnerd 的 GitHub-hosted job（例如只带 `ubuntu-latest`）可能形成 `same` 的 no-match 回放结果，但不能计入任何启用 Spec 的生命周期证据。自动门禁仅在观察窗口至少 72 小时、窗口内没有 catalog/Sandbox 变更审计事件、历史 matcher 严格一致、并且每个启用 Spec 都有完整生命周期证据时通过。备份恢复验证、服务连续运行观察、workflow labels 未修改仍是明确的人工签字项；UI 不会推断或自动完成这些事项。
 
 ## 11. 官方参考
 
