@@ -108,7 +108,14 @@ export function ReleaseReadinessSection({ request }: { request: RequestFunction 
                 size="sm"
                 variant={windowHours === window.hours ? "default" : "outline"}
                 aria-pressed={windowHours === window.hours}
-                onClick={() => setWindowHours(window.hours)}
+                onClick={() => {
+                  if (windowHours === window.hours) return
+                  requestGeneration.current += 1
+                  setReport(null)
+                  setError("")
+                  setLoading(true)
+                  setWindowHours(window.hours)
+                }}
               >
                 {t(window.key)}
               </Button>

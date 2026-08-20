@@ -215,8 +215,8 @@ func populateCatalogMigrationLifecycle(
 	if err := tx.Model(&runnerRequestRecord{}).
 		Select(`profile_name, COUNT(*) AS request_count,
 			SUM(CASE WHEN running_at IS NOT NULL AND (assigned_job_id <> 0 OR assigned_job_name <> '') THEN 1 ELSE 0 END) AS registered_requests,
-			SUM(CASE WHEN status = ? AND completed_at IS NOT NULL AND (assigned_job_id <> 0 OR assigned_job_name <> '') THEN 1 ELSE 0 END) AS completed_requests,
-			SUM(CASE WHEN status = ? AND completed_at IS NOT NULL AND (assigned_job_id <> 0 OR assigned_job_name <> '') THEN 1 ELSE 0 END) AS cleanup_finalized_requests`, StatusCompleted, StatusCompleted).
+			SUM(CASE WHEN status = ? AND running_at IS NOT NULL AND completed_at IS NOT NULL AND (assigned_job_id <> 0 OR assigned_job_name <> '') THEN 1 ELSE 0 END) AS completed_requests,
+			SUM(CASE WHEN status = ? AND running_at IS NOT NULL AND completed_at IS NOT NULL AND (assigned_job_id <> 0 OR assigned_job_name <> '') THEN 1 ELSE 0 END) AS cleanup_finalized_requests`, StatusCompleted, StatusCompleted).
 		Where("queued_at >= ? AND queued_at < ? AND profile_name <> ''", start, end).
 		Group("profile_name").
 		Scan(&aggregates).Error; err != nil {
@@ -238,7 +238,7 @@ func populateCatalogMigrationLifecycle(
 		aggregate := aggregatesByProfile[profile.Name]
 		evidence := RunnerSpecLifecycleEvidence{
 			Name:                     profile.Name,
-			WorkflowLabels:           append([]string(nil), profile.RequiredLabels...),
+			WorkflowLabels:           catalogMigrationWorkflowLabels(profile),
 			RequestCount:             aggregate.RequestCount,
 			RegisteredRequests:       aggregate.RegisteredRequests,
 			CompletedRequests:        aggregate.CompletedRequests,
@@ -264,7 +264,7 @@ func latestCatalogMigrationLifecycleExample(
 	var record runnerRequestRecord
 	err := tx.Select(runnerRequestListSelectColumns).
 		Where("queued_at >= ? AND queued_at < ?", start, end).
-		Where("profile_name = ? AND status = ? AND completed_at IS NOT NULL", profileName, StatusCompleted).
+		Where("profile_name = ? AND status = ? AND running_at IS NOT NULL AND completed_at IS NOT NULL", profileName, StatusCompleted).
 		Where("assigned_job_id <> 0 OR assigned_job_name <> ''").
 		Order("completed_at DESC, id ASC").
 		First(&record).Error
@@ -285,6 +285,14 @@ func latestCatalogMigrationLifecycleExample(
 		CompletedAt:        state.CompletedAt,
 		CleanupFinalizedAt: state.CompletedAt,
 	}, nil
+}
+
+func catalogMigrationWorkflowLabels(profile RunnerProfile) []string {
+	labels := profile.RequiredLabels
+	if len(labels) == 0 {
+		labels = profile.Labels
+	}
+	return append([]string(nil), labels...)
 }
 
 func populateCatalogMigrationChanges(

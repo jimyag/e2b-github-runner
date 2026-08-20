@@ -181,6 +181,24 @@ describe("ReleaseReadinessSection", () => {
     ])
   })
 
+  test("does not present a previous report under a newly selected window when loading fails", async () => {
+    let attempts = 0
+    const { container } = await mountReadiness(async () => {
+      attempts++
+      if (attempts === 1) return readinessFixture("72-hour-spec")
+      throw new Error("seven-day evidence unavailable")
+    })
+    await settle()
+    expect(container.textContent).toContain("72-hour-spec")
+
+    await click(button(container, "7 days"))
+    await settle()
+
+    expect(container.textContent).toContain("seven-day evidence unavailable")
+    expect(container.textContent).not.toContain("72-hour-spec")
+    expect(container.textContent).not.toContain("Automated evidence passed")
+  })
+
   test("shows a scoped error and retries the readiness request", async () => {
     let attempts = 0
     const { container } = await mountReadiness(async () => {

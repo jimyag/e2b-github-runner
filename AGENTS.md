@@ -18,6 +18,7 @@ Use this guide for future Codex or agent work in this repository.
 - Runtime state can use sqlite, Postgres, or MySQL. Do not document multi-instance support until two runnerd processes have been verified against the same database.
 - State schema is defined mostly by GORM tags in `internal/state/records.go`; startup migration runs a narrow legacy compatibility pass and then `AutoMigrate` in `internal/state/db.go`. Existing SQLite `runner_requests` and `runner_profiles` tables are the exceptions: migrate their missing model columns and indexes additively because generic table recreation can erase ALTER-added runner-request values or legacy runner-profile rows and custom indexes. GORM foreign-key creation is disabled intentionally, so preserve the foreign-keyless schema convention unless a separately tested migration changes it. Legacy account preference/secret tables without scope columns are intentionally reset; operator docs must warn about Sandbox reconfiguration and GitHub reauthentication before installation sync.
 - Runner specs, runner groups, and repository policies are admin API/UI data, not `runnerd.yaml` fields.
+- Catalog/Sandbox mutations used by the Release B freeze gate must persist their audit event before changing data and fail closed if audit persistence fails. Managed catalog reconciliation records its audit event in the same database transaction.
 - Runner Spec matching must preserve
   `required_labels ⊆ job_labels ⊆ labels`. Managed Ubuntu defaults require
   both `qiniu` and the exact OS label; never broaden them to accept partial

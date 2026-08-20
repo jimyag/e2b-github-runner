@@ -112,7 +112,7 @@ Check:
 - Recent failure summaries are empty or understood.
 - The Release A readiness panel reports a window of at least 72 hours, no replay truncation or malformed inputs, strict legacy/enabled-Spec parity, and registration/completion/cleanup evidence for every enabled Spec.
 - Every expected production label family appears as an enabled Spec row. Missing traffic remains visibly blocked; generate a normal workflow job with the existing `runs-on` labels rather than editing catalog data to manufacture evidence.
-- Catalog/Sandbox changes remain frozen during the selected window. Separately record the backup/restore check, continuous-service observation, and unchanged-workflow-label sign-offs; automated green status alone is not Release B authorization.
+- Catalog/Sandbox changes remain frozen during the selected window. A readiness-relevant mutation must fail without changing its target when its audit event cannot be persisted; a mutation attempt that reaches the write phase may conservatively restart the freeze window. Separately record the backup/restore check, continuous-service observation, and unchanged-workflow-label sign-offs; automated green status alone is not Release B authorization.
 
 ## 3. Runner Catalog
 

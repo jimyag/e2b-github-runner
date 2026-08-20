@@ -1517,11 +1517,33 @@ func (s *Server) ensureRepositoryAllowsProfile(repositoryFullName string, profil
 }
 
 func (s *Server) recordAudit(actor, action, resourceType, resourceID string, payload any) {
+	event, err := s.appendAuditEvent(actor, action, resourceType, resourceID, payload)
+	if err != nil {
+		s.logger.Error("append audit event", "action", action, "resource_type", resourceType, "resource_id", resourceID, "error", err)
+		return
+	}
+	s.logger.Info("audit event recorded", "id", event.ID, "actor", actor, "action", action, "resource_type", resourceType, "resource_id", resourceID)
+}
+
+func (s *Server) requireMutationAudit(w http.ResponseWriter, actor, action, resourceType, resourceID string, payload any) bool {
+	event, err := s.appendAuditEvent(actor, action, resourceType, resourceID, payload)
+	if err != nil {
+		s.logger.Error("append required mutation audit event", "action", action, "resource_type", resourceType, "resource_id", resourceID, "error", err)
+		writeError(w, http.StatusInternalServerError, "persist mutation audit: "+err.Error())
+		return false
+	}
+	s.logger.Info("required mutation audit event recorded", "id", event.ID, "actor", actor, "action", action, "resource_type", resourceType, "resource_id", resourceID)
+	return true
+}
+
+func (s *Server) appendAuditEvent(actor, action, resourceType, resourceID string, payload any) (state.AuditEvent, error) {
 	var payloadJSON string
 	if payload != nil {
-		if data, err := json.Marshal(payload); err == nil {
-			payloadJSON = string(data)
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return state.AuditEvent{}, fmt.Errorf("marshal audit payload: %w", err)
 		}
+		payloadJSON = string(data)
 	}
 	event, err := s.store.AppendAuditEvent(state.AuditEvent{
 		Actor:        actor,
@@ -1532,10 +1554,9 @@ func (s *Server) recordAudit(actor, action, resourceType, resourceID string, pay
 		CreatedAt:    time.Now().UTC(),
 	})
 	if err != nil {
-		s.logger.Error("append audit event", "action", action, "resource_type", resourceType, "resource_id", resourceID, "error", err)
-		return
+		return state.AuditEvent{}, err
 	}
-	s.logger.Info("audit event recorded", "id", event.ID, "actor", actor, "action", action, "resource_type", resourceType, "resource_id", resourceID)
+	return event, nil
 }
 
 func repositoryPatternMatches(pattern, repository string) bool {

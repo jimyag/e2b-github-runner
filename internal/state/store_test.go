@@ -5120,6 +5120,78 @@ func TestCatalogMigrationReadinessReplaysPersistedRequestsAndLifecycleEvidence(t
 	}
 }
 
+func TestCatalogMigrationReadinessRequiresRegisteredRunnerForFullLifecycleEvidence(t *testing.T) {
+	store := New(t.TempDir())
+	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	end := start.Add(72 * time.Hour)
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "skipped", Labels: []string{"self-hosted", "skipped"},
+		RequiredLabels: []string{"skipped"}, TemplateID: "skipped-template",
+		Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "skipped-before-sandbox", jobID: 99, repository: "owner/repo",
+		requestedLabels: []string{"skipped"}, profileName: "skipped", createdAt: start.Add(time.Hour),
+	})
+	st, err := store.ReadState("skipped-before-sandbox")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = StatusCompleted
+	st.AssignedJobID = 99
+	st.AssignedJobName = "skipped-job"
+	st.CompletedAt = start.Add(2 * time.Hour)
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := store.CatalogMigrationReadiness(start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := catalogReadinessSpecByName(t, report.Specs, "skipped")
+	if evidence.RegisteredRequests != 0 || evidence.CompletedRequests != 0 ||
+		evidence.CleanupFinalizedRequests != 0 || evidence.Latest != nil {
+		t.Fatalf("skipped request counted as full lifecycle evidence: %#v", evidence)
+	}
+}
+
+func TestCatalogMigrationReadinessUsesAdvertisedLabelsWhenRequiredLabelsAreEmpty(t *testing.T) {
+	store := New(t.TempDir())
+	labels := []string{"self-hosted", "e2b", "custom-spec"}
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "custom-spec", Labels: labels, RequiredLabels: []string{},
+		TemplateID: "custom-template", Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	end := time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC)
+	report, err := store.CatalogMigrationReadiness(end.Add(-72*time.Hour), end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := catalogReadinessSpecByName(t, report.Specs, "custom-spec").WorkflowLabels; !reflect.DeepEqual(got, labels) {
+		t.Fatalf("workflow labels = %#v, want advertised labels %#v", got, labels)
+	}
+}
+
+func TestReconcileManagedProfilesRecordsCatalogMutationAudit(t *testing.T) {
+	store := New(t.TempDir())
+	profile := managedProfileForReconciliation("managed-audit", 1)
+	if conflicts, err := store.ReconcileManagedProfiles([]RunnerProfile{profile}); err != nil || len(conflicts) != 0 {
+		t.Fatalf("reconcile managed profile: conflicts=%#v err=%v", conflicts, err)
+	}
+	events, err := store.ListAuditEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Action != "profile.reconcile" || events[0].ResourceID != profile.Name {
+		t.Fatalf("managed reconciliation audit events = %#v", events)
+	}
+}
+
 func TestCatalogMigrationReadinessTruncatesBoundedEvidence(t *testing.T) {
 	store := New(t.TempDir())
 	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)

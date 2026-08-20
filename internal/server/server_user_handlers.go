@@ -474,6 +474,17 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 		Key:       accountPreferenceKeySandboxService,
 		ValueJSON: string(valueJSON),
 	}
+	auditPayload := map[string]any{
+		"mode":           mode,
+		"api_url":        value.APIURL,
+		"api_key_update": apiKey != "",
+	}
+	if mode == sandboxPreferenceModeInherit {
+		auditPayload["source_account_id"] = value.SourceAccountID
+	}
+	if !s.requireMutationAudit(w, "github:"+session.Subject, "sandbox.configure", scope.Type, strconv.FormatInt(scope.ID, 10), auditPayload) {
+		return
+	}
 	if mode == sandboxPreferenceModeInherit {
 		_, err = s.store.UpsertAccountPreferenceAndDeleteSecret(preference, state.AccountSecret{
 			ScopeType: scope.Type,
@@ -487,15 +498,6 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	auditPayload := map[string]any{
-		"mode":           mode,
-		"api_url":        value.APIURL,
-		"api_key_update": apiKey != "",
-	}
-	if mode == sandboxPreferenceModeInherit {
-		auditPayload["source_account_id"] = value.SourceAccountID
-	}
-	s.recordAudit("github:"+session.Subject, "sandbox.configure", scope.Type, strconv.FormatInt(scope.ID, 10), auditPayload)
 	response, err := s.accountPreferencesResponse(scope, account.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -524,11 +526,13 @@ func (s *Server) handleUserDeleteSandboxAPIKey(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusForbidden, "Sandbox service for this GitHub account is managed by its owner")
 		return
 	}
+	if !s.requireMutationAudit(w, "github:"+session.Subject, "sandbox_api_key.delete", scope.Type, strconv.FormatInt(scope.ID, 10), nil) {
+		return
+	}
 	if err := s.store.DeleteAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeSandboxAPIKey); err != nil && !errors.Is(err, state.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.recordAudit("github:"+session.Subject, "sandbox_api_key.delete", scope.Type, strconv.FormatInt(scope.ID, 10), nil)
 	response, err := s.accountPreferencesResponse(scope, account.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

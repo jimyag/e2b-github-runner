@@ -977,6 +977,57 @@ type diagnosticsReadinessStore struct {
 	end    time.Time
 }
 
+type auditFailingStore struct {
+	state.Store
+}
+
+func (s *auditFailingStore) AppendAuditEvent(state.AuditEvent) (state.AuditEvent, error) {
+	return state.AuditEvent{}, errors.New("audit unavailable")
+}
+
+func TestCatalogMutationFailsClosedWhenAuditCannotBePersisted(t *testing.T) {
+	baseStore := state.New(t.TempDir())
+	if _, err := baseStore.UpsertProfile(state.RunnerProfile{
+		Name: "audit-protected", Labels: []string{"self-hosted", "audit-protected"},
+		RequiredLabels: []string{"audit-protected"}, TemplateID: "audit-template",
+		MaxConcurrency: 1, Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, &auditFailingStore{Store: baseStore}, "http://example.test", &fakeSandbox{})
+	req := adminRequest(http.MethodPatch, "/runner_specs/audit-protected", strings.NewReader(`{"enabled":false}`))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("PATCH profile with unavailable audit: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	profile, err := baseStore.GetProfile("audit-protected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !profile.Enabled {
+		t.Fatal("profile mutation committed even though its audit event could not be persisted")
+	}
+}
+
+func TestSandboxMutationFailsClosedWhenAuditCannotBePersisted(t *testing.T) {
+	baseStore := state.New(t.TempDir())
+	srv := newTestServer(t, &auditFailingStore{Store: baseStore}, "http://example.test", &fakeSandbox{})
+	req := adminRequest(
+		http.MethodPut,
+		"/admin/api/sandbox-service-default",
+		strings.NewReader(`{"enabled":false,"api_url":"https://sandbox.example.test"}`),
+	)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("PUT Sandbox default with unavailable audit: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := baseStore.GetSandboxServiceDefault(); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("Sandbox default mutation committed even though its audit event could not be persisted: %v", err)
+	}
+}
+
 func (s *diagnosticsReadinessStore) CatalogMigrationReadiness(start, end time.Time) (state.CatalogMigrationReadiness, error) {
 	s.start = start
 	s.end = end

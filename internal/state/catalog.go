@@ -184,6 +184,9 @@ func (s *DBStore) ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedP
 				if err := tx.Create(&record).Error; err != nil {
 					return err
 				}
+				if err := appendManagedProfileReconciliationAudit(tx, profile, now); err != nil {
+					return err
+				}
 				continue
 			}
 
@@ -224,6 +227,10 @@ func (s *DBStore) ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedP
 						ExistingManagedBy: current.ManagedBy,
 					})
 				}
+				continue
+			}
+			if err := appendManagedProfileReconciliationAudit(tx, profile, now); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -232,6 +239,24 @@ func (s *DBStore) ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedP
 		return nil, err
 	}
 	return conflicts, nil
+}
+
+func appendManagedProfileReconciliationAudit(tx *gorm.DB, profile RunnerProfile, now time.Time) error {
+	payload, err := json.Marshal(map[string]any{
+		"managed_by":       profile.ManagedBy,
+		"catalog_revision": profile.CatalogRevision,
+	})
+	if err != nil {
+		return err
+	}
+	return tx.Create(&auditEventRecord{
+		Actor:        "runnerd_startup",
+		Action:       "profile.reconcile",
+		ResourceType: "runner_profile",
+		ResourceID:   profile.Name,
+		PayloadJSON:  string(payload),
+		CreatedAt:    now,
+	}).Error
 }
 
 func marshalProfileLabels(profile RunnerProfile) (string, string, error) {

@@ -117,6 +117,14 @@ func (s *Server) handleAdminSaveSandboxServiceDefault(w http.ResponseWriter, r *
 		writeError(w, http.StatusBadRequest, "api_key is required")
 		return
 	}
+	if !s.requireMutationAudit(w, "github:"+session.Subject, "sandbox_default.configure", "sandbox_service_default", "global", map[string]any{
+		"enabled":        defaultConfig.Enabled,
+		"audience_mode":  defaultConfig.AudienceMode,
+		"api_url":        defaultConfig.APIURL,
+		"api_key_update": apiKey != "",
+	}) {
+		return
+	}
 
 	var saved state.SandboxServiceDefault
 	if input.Enabled && apiKey == "" {
@@ -132,12 +140,6 @@ func (s *Server) handleAdminSaveSandboxServiceDefault(w http.ResponseWriter, r *
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.recordAudit("github:"+session.Subject, "sandbox_default.configure", "sandbox_service_default", "global", map[string]any{
-		"enabled":        saved.Enabled,
-		"audience_mode":  saved.AudienceMode,
-		"api_url":        saved.APIURL,
-		"api_key_update": apiKey != "",
-	})
 	s.writeAdminSandboxServiceDefaultResponse(w, saved)
 }
 
@@ -146,11 +148,13 @@ func (s *Server) handleAdminDeleteSandboxServiceDefaultAPIKey(w http.ResponseWri
 		return
 	}
 	session, _ := s.adminSessionFromRequest(r)
+	if !s.requireMutationAudit(w, "github:"+session.Subject, "sandbox_default.api_key.delete", "sandbox_service_default", "global", nil) {
+		return
+	}
 	if err := s.store.DeleteSandboxServiceDefaultAPIKey(); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.recordAudit("github:"+session.Subject, "sandbox_default.api_key.delete", "sandbox_service_default", "global", nil)
 	defaultConfig, err := s.store.GetSandboxServiceDefault()
 	if err != nil {
 		if errors.Is(err, state.ErrNotFound) {
@@ -196,22 +200,25 @@ func (s *Server) handleAdminAddSandboxServiceDefaultAudience(w http.ResponseWrit
 		writeError(w, http.StatusBadGateway, "resolve GitHub account: "+err.Error())
 		return
 	}
-	audience, err := s.store.UpsertSandboxServiceDefaultAudience(state.SandboxServiceDefaultAudience{
+	requestedAudience := state.SandboxServiceDefaultAudience{
 		GitHubAccountID: account.ID,
 		AccountType:     account.Type,
 		AccountLogin:    account.Login,
 		AccountName:     account.Name,
 		AccountAvatar:   account.AvatarURL,
-	})
-	if err != nil {
+	}
+	resourceID := requestedAudience.AccountType + ":" + strconv.FormatInt(requestedAudience.GitHubAccountID, 10)
+	if !s.requireMutationAudit(w, "github:"+session.Subject, "sandbox_default.audience.add", "sandbox_service_default_audience", resourceID, map[string]any{
+		"github_account_id": requestedAudience.GitHubAccountID,
+		"account_type":      requestedAudience.AccountType,
+		"account_login":     requestedAudience.AccountLogin,
+	}) {
+		return
+	}
+	if _, err := s.store.UpsertSandboxServiceDefaultAudience(requestedAudience); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.recordAudit("github:"+session.Subject, "sandbox_default.audience.add", "sandbox_service_default_audience", strconv.FormatInt(audience.ID, 10), map[string]any{
-		"github_account_id": audience.GitHubAccountID,
-		"account_type":      audience.AccountType,
-		"account_login":     audience.AccountLogin,
-	})
 	defaultConfig, err := s.store.GetSandboxServiceDefault()
 	if err != nil && !errors.Is(err, state.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -230,11 +237,13 @@ func (s *Server) handleAdminDeleteSandboxServiceDefaultAudience(w http.ResponseW
 		writeError(w, http.StatusBadRequest, "valid audience id is required")
 		return
 	}
+	if !s.requireMutationAudit(w, "github:"+session.Subject, "sandbox_default.audience.delete", "sandbox_service_default_audience", strconv.FormatInt(id, 10), nil) {
+		return
+	}
 	if err := s.store.DeleteSandboxServiceDefaultAudience(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.recordAudit("github:"+session.Subject, "sandbox_default.audience.delete", "sandbox_service_default_audience", strconv.FormatInt(id, 10), nil)
 	defaultConfig, err := s.store.GetSandboxServiceDefault()
 	if err != nil && !errors.Is(err, state.ErrNotFound) {
 		writeError(w, http.StatusInternalServerError, err.Error())

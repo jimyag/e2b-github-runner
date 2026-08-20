@@ -625,7 +625,9 @@ curl -fsS -b "$COOKIE_JAR" \
 
 Admin Diagnostics 页面还会加载 catalog migration readiness 接口。它从已持久化的 runner requests 中提取不同的 repository/label 输入，分别使用 Release A 的旧 Group/Policy matcher 与 enabled-Spec matcher 回放，并按历史 request 数量加权统计结果。默认观察 72 小时，也可切换到 7 天或 30 天。整个报告在一次 read-only repeatable-read database transaction 中生成，最多回放 5,000 组不同输入；一旦截断或遇到无法解析的数据，门禁会阻塞，不会误报 parity。
 
-同一报告会为每个当前启用的 Runner Spec 展示持久化的 request、registration、completion、cleanup-finalized 数量，以及最近一条成功 GitHub Job 链接。`cleanup finalized` 表示 runnerd 只有在 Sandbox 已停止、GitHub runner 已删除或确认不存在后，才把 request 持久化为 `completed`。未选择 runnerd 的 GitHub-hosted job（例如只带 `ubuntu-latest`）可能形成 `same` 的 no-match 回放结果，但不能计入任何启用 Spec 的生命周期证据。自动门禁仅在观察窗口至少 72 小时、窗口内没有 catalog/Sandbox 变更审计事件、历史 matcher 严格一致、并且每个启用 Spec 都有完整生命周期证据时通过。备份恢复验证、服务连续运行观察、workflow labels 未修改仍是明确的人工签字项；UI 不会推断或自动完成这些事项。
+同一报告会为每个当前启用的 Runner Spec 展示持久化的 request、registration、completion、cleanup-finalized 数量，以及最近一条成功 GitHub Job 链接。completion 与 cleanup 证据要求此前已经持久化 runner registration；在创建 Sandbox 前被跳过的 request 不能满足完整生命周期证据。没有单独配置 `required_labels` 的自定义 Spec 会以其声明的 `labels` 作为 workflow label 证据展示。`cleanup finalized` 表示 runnerd 只有在 Sandbox 已停止、GitHub runner 已删除或确认不存在后，才把 request 持久化为 `completed`。未选择 runnerd 的 GitHub-hosted job（例如只带 `ubuntu-latest`）可能形成 `same` 的 no-match 回放结果，但不能计入任何启用 Spec 的生命周期证据。
+
+自动门禁仅在观察窗口至少 72 小时、窗口内没有 catalog/Sandbox 变更审计事件、历史 matcher 严格一致、并且每个启用 Spec 都有完整生命周期证据时通过。与 readiness 有关的 catalog 和 Sandbox handler 会先持久化审计事件，再执行数据写入；审计持久化失败时会拒绝变更。managed catalog reconciliation 则在同一数据库事务中写入 `profile.reconcile`。因此，一个已经进入写入阶段的变更尝试即使后续数据写入失败，也可能重新开始冻结观察窗口；这是有意采用的保守策略。备份恢复验证、服务连续运行观察、workflow labels 未修改仍是明确的人工签字项；UI 不会推断或自动完成这些事项。
 
 ## 11. 官方参考
 
