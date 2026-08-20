@@ -358,7 +358,7 @@ Completed verification on 2026-08-20:
 - The production SQLite snapshot replay and dedicated PostgreSQL/MySQL tests were not run locally because their opt-in environment variables were unset; the existing CI catalog-backends job remains the real-dialect gate.
 - Final review confirmed no schema migration, no production configuration mutation, admin-only API authorization, bounded evidence, and Release A continuing to return the legacy matcher result. It also found and fixed the clean-report `replay_samples: null` contract before completion.
 
-- [ ] **Step 5: Push the branch and verify remote parity**
+- [x] **Step 5: Push the branch and verify remote parity**
 
 ```bash
 git push -u origin feat/admin-release-readiness
