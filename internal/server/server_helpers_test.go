@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -762,6 +763,25 @@ func TestPatchRepositoryPolicyReturns400ForInvalidID(t *testing.T) {
 
 // ---------- handleDiagnosticsPprof ----------
 
+type diagnosticsBoundedStore struct {
+	state.Store
+	listStatesCalls    int
+	recentFailedCalls  int
+	recentFailedLimit  int
+	recentFailedStates []state.RunnerState
+}
+
+func (s *diagnosticsBoundedStore) ListStates() ([]state.RunnerState, error) {
+	s.listStatesCalls++
+	return nil, errors.New("diagnostics must not scan all runner states")
+}
+
+func (s *diagnosticsBoundedStore) ListRecentFailedStates(limit int) ([]state.RunnerState, error) {
+	s.recentFailedCalls++
+	s.recentFailedLimit = limit
+	return append([]state.RunnerState(nil), s.recentFailedStates...), nil
+}
+
 func TestDiagnosticsPprofEndpointRequiresAuth(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
@@ -793,6 +813,39 @@ func TestDiagnosticsPprofEndpointReturnsJSON(t *testing.T) {
 	}
 	if _, ok := body["github"]; !ok {
 		t.Error("GET /diagnostics/pprof: missing 'github' field in response")
+	}
+}
+
+func TestDiagnosticsPprofEndpointUsesBoundedRecentFailures(t *testing.T) {
+	store := &diagnosticsBoundedStore{
+		Store: state.New(t.TempDir()),
+		recentFailedStates: []state.RunnerState{
+			{ID: "failed-latest", Status: state.StatusFailed},
+			{ID: "failed-previous", Status: state.StatusFailed},
+		},
+	}
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+
+	req := adminRequest(http.MethodGet, "/diagnostics/pprof", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /diagnostics/pprof: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if store.listStatesCalls != 0 {
+		t.Fatalf("ListStates calls = %d, want 0", store.listStatesCalls)
+	}
+	if store.recentFailedCalls != 1 || store.recentFailedLimit != 5 {
+		t.Fatalf("ListRecentFailedStates calls = %d limit = %d, want 1 call with limit 5", store.recentFailedCalls, store.recentFailedLimit)
+	}
+	var body struct {
+		RecentFailures []state.RunnerState `json:"recent_failures"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("GET /diagnostics/pprof: invalid JSON: %v", err)
+	}
+	if len(body.RecentFailures) != 2 || body.RecentFailures[0].ID != "failed-latest" || body.RecentFailures[1].ID != "failed-previous" {
+		t.Fatalf("recent_failures = %#v, want bounded store result", body.RecentFailures)
 	}
 }
 
