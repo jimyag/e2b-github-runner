@@ -22,6 +22,7 @@ var catalogMigrationAttemptSelectColumns = []string{
 	"workflow_job_id",
 	"workflow_run_id",
 	"github_job_url",
+	"pull_request_number",
 	"github_context_backfilled",
 	"repository_full_name",
 	"requested_labels_json",

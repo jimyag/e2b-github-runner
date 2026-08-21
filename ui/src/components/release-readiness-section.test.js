@@ -247,6 +247,20 @@ describe("ReleaseReadinessSection", () => {
     ])
   })
 
+  test("keeps disclosure targets unique when Spec names normalize alike", async () => {
+    const fixture = readinessFixture()
+    fixture.specs.push({
+      ...structuredClone(fixture.specs[0]),
+      name: "qiniu-ubuntu-24/04",
+    })
+    const { container } = await mountReadiness(async () => fixture)
+    await settle()
+
+    const controls = [...container.querySelectorAll('button[aria-controls^="release-attempts-"]')]
+      .map((element) => element.getAttribute("aria-controls"))
+    expect(new Set(controls).size).toBe(2)
+  })
+
   test("does not present a previous report under a newly selected window when loading fails", async () => {
     let attempts = 0
     const { container } = await mountReadiness(async () => {

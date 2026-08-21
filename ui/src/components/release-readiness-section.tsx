@@ -201,9 +201,9 @@ export function ReleaseReadinessSection({ request }: { request: RequestFunction 
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {report.specs.map((spec) => {
+                    {report.specs.map((spec, specIndex) => {
                       const expanded = expandedSpecName === spec.name
-                      const detailID = `release-attempts-${spec.name.replace(/[^a-zA-Z0-9_-]/g, "-")}`
+                      const detailID = `release-attempts-${spec.name.replace(/[^a-zA-Z0-9_-]/g, "-")}-${specIndex}`
                       return (
                         <Fragment key={spec.name}>
                           <TableRow className={cn(expanded && "bg-muted/35")}>

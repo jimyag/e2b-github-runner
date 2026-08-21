@@ -5464,7 +5464,10 @@ func TestCatalogMigrationReadinessIncludesBoundedRecentAttempts(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.Model(&runnerRequestRecord{}).Where("id = ?", latest.ID).
-		Update("github_job_url", latest.GitHubJobURL).Error; err != nil {
+		Updates(map[string]any{
+			"github_job_url":      latest.GitHubJobURL,
+			"pull_request_number": 123,
+		}).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -5484,7 +5487,7 @@ func TestCatalogMigrationReadinessIncludesBoundedRecentAttempts(t *testing.T) {
 	}
 	got := attempts[0]
 	if got.RepositoryFullName != "owner/repo-5" || got.Status != StatusFailed ||
-		got.WorkflowJobID != 105 || got.GitHubJobURL != "https://github.example.test/jobs/105" ||
+		got.WorkflowJobID != 105 || got.GitHubJobURL != "https://github.example.test/jobs/105?pr=123" ||
 		!reflect.DeepEqual(got.RequestedLabels, []string{"diagnostic", "variant-5"}) ||
 		got.FailureStage != "sandbox_create" || got.FailureReason != "sandbox_capacity" ||
 		got.QueuedAt != start.Add(6*time.Hour) || got.RegisteredAt != nil || got.CompletedAt != nil {
