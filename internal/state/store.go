@@ -26,6 +26,7 @@ var (
 	ErrNotFound                            = errors.New("state record not found")
 	ErrRetryNotAllowed                     = errors.New("retry not allowed for current state")
 	ErrSandboxServiceDefaultAPIKeyRequired = errors.New("sandbox service default api key is required")
+	ErrAuditEventPersistence               = errors.New("audit event persistence failed")
 )
 
 type RunnerRequest struct {
@@ -468,6 +469,7 @@ type SandboxServiceDefaultStore interface {
 
 type AuditStore interface {
 	AppendAuditEvent(event AuditEvent) (AuditEvent, error)
+	ApplyMutationWithAudit(event AuditEvent, mutation func(Store) error) (AuditEvent, error)
 	ListAuditEvents(limit int) ([]AuditEvent, error)
 }
 

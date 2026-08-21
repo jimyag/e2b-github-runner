@@ -111,18 +111,19 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
-State migration and the shadow catalog matcher also have an opt-in real-dialect
-compatibility gate. Both DSNs must point to dedicated disposable databases
-whose names end in `_test`: the tests refuse other database names, then drop
-and recreate runnerd state tables. They cover fresh schema creation, repeated
-migration with preserved catalog rows, and legacy catalog tables present,
-empty, and absent.
+State migration, the shadow catalog matcher, and audited catalog mutations also
+have an opt-in real-dialect compatibility gate. Both DSNs must point to
+dedicated disposable databases whose names end in `_test`: the tests refuse
+other database names, then drop and recreate runnerd state tables. They cover
+fresh schema creation, repeated migration with preserved catalog rows, legacy
+catalog tables present, empty, and absent, and atomic mutation/audit commit and
+rollback behavior.
 
 ```bash
 RUNNERD_CATALOG_BACKEND_TESTS=1 \
 RUNNERD_POSTGRES_TEST_DSN='host=127.0.0.1 user=runnerd password=runnerd dbname=runnerd_test port=5432 sslmode=disable' \
 RUNNERD_MYSQL_TEST_DSN='runnerd:runnerd@tcp(127.0.0.1:3306)/runnerd_test' \
-  go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+  go test ./internal/state -run 'Test(ApplyMutationWithAudit|CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
 ```
 
 Restart recovery has focused tests that do not require a live sandbox:
@@ -641,7 +642,7 @@ The Admin Diagnostics page also loads the catalog migration readiness endpoint. 
 
 For every currently enabled Runner Spec, the same report displays durable request, registration, completion, and cleanup-finalized counts plus the latest successful GitHub Job link. Completion and cleanup evidence require that runner registration was persisted first; a request skipped before Sandbox creation cannot satisfy a full lifecycle row. Custom Specs with no separate `required_labels` display their advertised `labels` as the workflow-label evidence. `cleanup finalized` means runnerd reached persisted `completed` only after Sandbox stop and GitHub runner removal or confirmed absence. GitHub-hosted jobs whose labels do not select runnerd, such as a lone `ubuntu-latest`, may contribute a `same` no-match replay result but never satisfy an enabled Spec's lifecycle row.
 
-The automated gate passes only when the window is at least 72 hours, no catalog/Sandbox mutation audit event exists in the window, historical matching has strict parity, and every enabled Spec has full lifecycle evidence. Readiness-relevant catalog and Sandbox handlers persist their audit event before the write and reject the mutation when audit persistence fails; managed catalog reconciliation records `profile.reconcile` in the same database transaction. A mutation attempt that reaches the write phase can therefore restart the freeze window even if the later data write fails, which is intentionally conservative. Backup/restore verification, continuous-service observation, and confirmation that workflow labels were unchanged remain explicit operator sign-offs; the UI does not infer or complete them.
+The automated gate passes only when the window is at least 72 hours, no catalog/Sandbox mutation audit event exists in the window, historical matching has strict parity, and every enabled Spec has full lifecycle evidence. Readiness-relevant catalog and Sandbox mutations commit their data change and audit event atomically: a rejected mutation leaves no audit event, while an audit persistence failure rolls back the data change. Managed catalog reconciliation records `profile.reconcile` under the same rule. Backup/restore verification, continuous-service observation, and confirmation that workflow labels were unchanged remain explicit operator sign-offs; the UI does not infer or complete them.
 
 ## 11. Official References
 

@@ -284,11 +284,15 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		Enabled:          enabled,
 		DefaultAvailable: input.DefaultAvailable != nil && *input.DefaultAvailable,
 	}
-	if !s.requireMutationAudit(w, "admin_api", "profile.create", "runner_profile", strings.TrimSpace(requestedProfile.Name), requestedProfile) {
-		return
-	}
-	profile, err := s.store.UpsertProfile(requestedProfile)
+	var profile state.RunnerProfile
+	err = s.applyMutationWithAudit("admin_api", "profile.create", "runner_profile", strings.TrimSpace(requestedProfile.Name), requestedProfile, func(tx state.Store) error {
+		profile, err = tx.UpsertProfile(requestedProfile)
+		return err
+	})
 	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		s.logger.Info("profile create rejected", "name", input.Name, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -368,11 +372,15 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 	if input.DefaultAvailable != nil {
 		current.DefaultAvailable = *input.DefaultAvailable
 	}
-	if !s.requireMutationAudit(w, "admin_api", "profile.update", "runner_profile", current.Name, current) {
-		return
-	}
-	profile, err := s.store.UpsertProfile(current)
+	var profile state.RunnerProfile
+	err = s.applyMutationWithAudit("admin_api", "profile.update", "runner_profile", current.Name, current, func(tx state.Store) error {
+		profile, err = tx.UpsertProfile(current)
+		return err
+	})
 	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		s.logger.Info("profile update rejected", "name", current.Name, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -416,11 +424,16 @@ func (s *Server) handlePatchManagedProfile(w http.ResponseWriter, current state.
 	if input.Enabled != nil {
 		current.Enabled = *input.Enabled
 	}
-	if !s.requireMutationAudit(w, "admin_api", "profile.update", "runner_profile", current.Name, current) {
-		return
-	}
-	profile, err := s.store.UpsertProfile(current)
+	var profile state.RunnerProfile
+	err := s.applyMutationWithAudit("admin_api", "profile.update", "runner_profile", current.Name, current, func(tx state.Store) error {
+		var mutationErr error
+		profile, mutationErr = tx.UpsertProfile(current)
+		return mutationErr
+	})
 	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		s.logger.Info("managed profile update rejected", "name", current.Name, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -482,10 +495,13 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 		)
 		return
 	}
-	if !s.requireMutationAudit(w, "admin_api", "profile.delete", "runner_profile", name, map[string]any{"status": "delete_requested"}) {
-		return
-	}
-	if err := s.store.DeleteProfile(name); err != nil {
+	err = s.applyMutationWithAudit("admin_api", "profile.delete", "runner_profile", name, map[string]any{"status": "deleted"}, func(tx state.Store) error {
+		return tx.DeleteProfile(name)
+	})
+	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		s.logger.Error("delete profile", "name", name, "error", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -526,11 +542,16 @@ func (s *Server) handleCreateRunnerGroup(w http.ResponseWriter, r *http.Request)
 		SpecNames:   input.SpecNames,
 		Enabled:     enabled,
 	}
-	if !s.requireMutationAudit(w, "admin_api", "runner_group.create", "runner_group", strings.TrimSpace(requestedGroup.Name), requestedGroup) {
-		return
-	}
-	group, err := s.store.UpsertRunnerGroup(requestedGroup)
+	var group state.RunnerGroup
+	err := s.applyMutationWithAudit("admin_api", "runner_group.create", "runner_group", strings.TrimSpace(requestedGroup.Name), requestedGroup, func(tx state.Store) error {
+		var mutationErr error
+		group, mutationErr = tx.UpsertRunnerGroup(requestedGroup)
+		return mutationErr
+	})
 	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		s.logger.Info("runner group create rejected", "name", input.Name, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -574,11 +595,15 @@ func (s *Server) handlePatchRunnerGroup(w http.ResponseWriter, r *http.Request) 
 	if input.Enabled != nil {
 		current.Enabled = *input.Enabled
 	}
-	if !s.requireMutationAudit(w, "admin_api", "runner_group.update", "runner_group", current.Name, current) {
-		return
-	}
-	group, err := s.store.UpsertRunnerGroup(current)
+	var group state.RunnerGroup
+	err = s.applyMutationWithAudit("admin_api", "runner_group.update", "runner_group", current.Name, current, func(tx state.Store) error {
+		group, err = tx.UpsertRunnerGroup(current)
+		return err
+	})
 	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		s.logger.Info("runner group update rejected", "name", current.Name, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -592,10 +617,13 @@ func (s *Server) handleDeleteRunnerGroup(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	name := r.PathValue("name")
-	if !s.requireMutationAudit(w, "admin_api", "runner_group.delete", "runner_group", name, map[string]any{"status": "delete_requested"}) {
-		return
-	}
-	if err := s.store.DeleteRunnerGroup(name); err != nil {
+	err := s.applyMutationWithAudit("admin_api", "runner_group.delete", "runner_group", name, map[string]any{"status": "deleted"}, func(tx state.Store) error {
+		return tx.DeleteRunnerGroup(name)
+	})
+	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		s.logger.Error("delete runner group", "name", name, "error", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -636,11 +664,16 @@ func (s *Server) handleCreateRepositoryPolicy(w http.ResponseWriter, r *http.Req
 		RunnerGroupName:    input.RunnerGroupName,
 		Enabled:            enabled,
 	}
-	if !s.requireMutationAudit(w, "admin_api", "repository_policy.create", "repository_policy", strings.TrimSpace(requestedPolicy.RepositoryFullName), requestedPolicy) {
-		return
-	}
-	policy, err := s.store.UpsertRepositoryPolicy(requestedPolicy)
+	var policy state.RepositoryPolicy
+	err := s.applyMutationWithAudit("admin_api", "repository_policy.create", "repository_policy", strings.TrimSpace(requestedPolicy.RepositoryFullName), requestedPolicy, func(tx state.Store) error {
+		var mutationErr error
+		policy, mutationErr = tx.UpsertRepositoryPolicy(requestedPolicy)
+		return mutationErr
+	})
 	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		s.logger.Info("repository policy create rejected", "repository", input.RepositoryFullName, "profile", input.ProfileName, "runner_group", input.RunnerGroupName, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -687,11 +720,15 @@ func (s *Server) handlePatchRepositoryPolicy(w http.ResponseWriter, r *http.Requ
 	if input.Enabled != nil {
 		existing.Enabled = *input.Enabled
 	}
-	if !s.requireMutationAudit(w, "admin_api", "repository_policy.update", "repository_policy", strconv.FormatInt(existing.ID, 10), existing) {
-		return
-	}
-	policy, err := s.store.UpsertRepositoryPolicy(existing)
+	var policy state.RepositoryPolicy
+	err = s.applyMutationWithAudit("admin_api", "repository_policy.update", "repository_policy", strconv.FormatInt(existing.ID, 10), existing, func(tx state.Store) error {
+		policy, err = tx.UpsertRepositoryPolicy(existing)
+		return err
+	})
 	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		s.logger.Info("repository policy update rejected", "id", id, "repository", existing.RepositoryFullName, "profile", existing.ProfileName, "runner_group", existing.RunnerGroupName, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -710,10 +747,13 @@ func (s *Server) handleDeleteRepositoryPolicy(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "invalid policy id")
 		return
 	}
-	if !s.requireMutationAudit(w, "admin_api", "repository_policy.delete", "repository_policy", strconv.FormatInt(id, 10), map[string]any{"status": "delete_requested"}) {
-		return
-	}
-	if err := s.store.DeleteRepositoryPolicy(id); err != nil {
+	err = s.applyMutationWithAudit("admin_api", "repository_policy.delete", "repository_policy", strconv.FormatInt(id, 10), map[string]any{"status": "deleted"}, func(tx state.Store) error {
+		return tx.DeleteRepositoryPolicy(id)
+	})
+	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		s.logger.Error("delete repository policy", "id", id, "error", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

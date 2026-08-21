@@ -985,6 +985,37 @@ func (s *auditFailingStore) AppendAuditEvent(state.AuditEvent) (state.AuditEvent
 	return state.AuditEvent{}, errors.New("audit unavailable")
 }
 
+func (s *auditFailingStore) ApplyMutationWithAudit(state.AuditEvent, func(state.Store) error) (state.AuditEvent, error) {
+	return state.AuditEvent{}, fmt.Errorf("%w: audit unavailable", state.ErrAuditEventPersistence)
+}
+
+func TestRejectedCatalogMutationDoesNotPersistAudit(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	before, err := store.ListAuditEvents(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := adminRequest(http.MethodPost, "/runner_specs", strings.NewReader(`{
+		"name":"rejected-audit",
+		"labels":["self-hosted"],
+		"required_labels":["missing"],
+		"template_id":"audit-template"
+	}`))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST invalid profile: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	after, err := store.ListAuditEvents(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("rejected profile mutation persisted an audit event: before=%d after=%d latest=%#v", len(before), len(after), after[0])
+	}
+}
+
 func TestCatalogMutationFailsClosedWhenAuditCannotBePersisted(t *testing.T) {
 	baseStore := state.New(t.TempDir())
 	if _, err := baseStore.UpsertProfile(state.RunnerProfile{

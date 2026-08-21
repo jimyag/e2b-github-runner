@@ -117,22 +117,26 @@ func (s *Server) handleAdminSaveSandboxServiceDefault(w http.ResponseWriter, r *
 		writeError(w, http.StatusBadRequest, "api_key is required")
 		return
 	}
-	if !s.requireMutationAudit(w, "github:"+session.Subject, "sandbox_default.configure", "sandbox_service_default", "global", map[string]any{
+	auditPayload := map[string]any{
 		"enabled":        defaultConfig.Enabled,
 		"audience_mode":  defaultConfig.AudienceMode,
 		"api_url":        defaultConfig.APIURL,
 		"api_key_update": apiKey != "",
-	}) {
-		return
 	}
 
 	var saved state.SandboxServiceDefault
-	if input.Enabled && apiKey == "" {
-		saved, err = s.store.UpdateSandboxServiceDefaultPreservingAPIKey(defaultConfig)
-	} else {
-		saved, err = s.store.UpsertSandboxServiceDefault(defaultConfig)
-	}
+	err = s.applyMutationWithAudit("github:"+session.Subject, "sandbox_default.configure", "sandbox_service_default", "global", auditPayload, func(tx state.Store) error {
+		if input.Enabled && apiKey == "" {
+			saved, err = tx.UpdateSandboxServiceDefaultPreservingAPIKey(defaultConfig)
+		} else {
+			saved, err = tx.UpsertSandboxServiceDefault(defaultConfig)
+		}
+		return err
+	})
 	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		if errors.Is(err, state.ErrSandboxServiceDefaultAPIKeyRequired) {
 			writeError(w, http.StatusBadRequest, "api_key is required")
 			return
@@ -148,10 +152,13 @@ func (s *Server) handleAdminDeleteSandboxServiceDefaultAPIKey(w http.ResponseWri
 		return
 	}
 	session, _ := s.adminSessionFromRequest(r)
-	if !s.requireMutationAudit(w, "github:"+session.Subject, "sandbox_default.api_key.delete", "sandbox_service_default", "global", nil) {
-		return
-	}
-	if err := s.store.DeleteSandboxServiceDefaultAPIKey(); err != nil {
+	err := s.applyMutationWithAudit("github:"+session.Subject, "sandbox_default.api_key.delete", "sandbox_service_default", "global", nil, func(tx state.Store) error {
+		return tx.DeleteSandboxServiceDefaultAPIKey()
+	})
+	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -208,14 +215,19 @@ func (s *Server) handleAdminAddSandboxServiceDefaultAudience(w http.ResponseWrit
 		AccountAvatar:   account.AvatarURL,
 	}
 	resourceID := requestedAudience.AccountType + ":" + strconv.FormatInt(requestedAudience.GitHubAccountID, 10)
-	if !s.requireMutationAudit(w, "github:"+session.Subject, "sandbox_default.audience.add", "sandbox_service_default_audience", resourceID, map[string]any{
+	auditPayload := map[string]any{
 		"github_account_id": requestedAudience.GitHubAccountID,
 		"account_type":      requestedAudience.AccountType,
 		"account_login":     requestedAudience.AccountLogin,
-	}) {
-		return
 	}
-	if _, err := s.store.UpsertSandboxServiceDefaultAudience(requestedAudience); err != nil {
+	err = s.applyMutationWithAudit("github:"+session.Subject, "sandbox_default.audience.add", "sandbox_service_default_audience", resourceID, auditPayload, func(tx state.Store) error {
+		_, mutationErr := tx.UpsertSandboxServiceDefaultAudience(requestedAudience)
+		return mutationErr
+	})
+	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -237,10 +249,13 @@ func (s *Server) handleAdminDeleteSandboxServiceDefaultAudience(w http.ResponseW
 		writeError(w, http.StatusBadRequest, "valid audience id is required")
 		return
 	}
-	if !s.requireMutationAudit(w, "github:"+session.Subject, "sandbox_default.audience.delete", "sandbox_service_default_audience", strconv.FormatInt(id, 10), nil) {
-		return
-	}
-	if err := s.store.DeleteSandboxServiceDefaultAudience(id); err != nil {
+	err = s.applyMutationWithAudit("github:"+session.Subject, "sandbox_default.audience.delete", "sandbox_service_default_audience", strconv.FormatInt(id, 10), nil, func(tx state.Store) error {
+		return tx.DeleteSandboxServiceDefaultAudience(id)
+	})
+	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

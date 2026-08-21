@@ -110,7 +110,7 @@ curl -fsS -b "$COOKIE_JAR" \
 - Recent failure summaries 为空，或每一项都已理解。
 - Release A readiness 面板的观察窗口至少达到 72 小时，不存在 replay 截断或 malformed input，旧 matcher 与 enabled-Spec matcher 严格一致，并且每个启用 Spec 都有 registration、completion、cleanup 证据。
 - 每个预期的生产 label family 都应显示为一行启用 Spec。没有流量时保持阻塞；应使用现有 `runs-on` labels 触发正常 workflow job，而不是修改 catalog 数据来制造证据。
-- 所选窗口内保持 catalog/Sandbox 配置冻结。readiness 相关变更在审计事件无法持久化时必须失败且不能改变目标数据；一个已经进入写入阶段的变更尝试可能保守地重新开始冻结窗口。备份恢复检查、服务连续运行观察、workflow labels 未修改仍需分别记录人工签字；仅有自动门禁全绿并不等于已授权 Release B。
+- 所选窗口内保持 catalog/Sandbox 配置冻结。readiness 相关 mutation 必须在同一事务中提交数据变更与审计事件：被拒绝的 mutation 不留下审计证据，审计持久化失败时目标数据保持不变。备份恢复检查、服务连续运行观察、workflow labels 未修改仍需分别记录人工签字；仅有自动门禁全绿并不等于已授权 Release B。
 
 ## 3. Runner Catalog
 

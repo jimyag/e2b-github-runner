@@ -45,15 +45,15 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
-For schema or migration changes that affect Postgres or MySQL, also run the
-opt-in real-dialect tests against dedicated disposable databases whose names
-end in `_test`:
+For schema, migration, or audited-mutation transaction changes that affect
+Postgres or MySQL, also run the opt-in real-dialect tests against dedicated
+disposable databases whose names end in `_test`:
 
 ```bash
 RUNNERD_CATALOG_BACKEND_TESTS=1 \
 RUNNERD_POSTGRES_TEST_DSN='<dedicated postgres test DSN>' \
 RUNNERD_MYSQL_TEST_DSN='<dedicated mysql test DSN>' \
-  go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+  go test ./internal/state -run 'Test(ApplyMutationWithAudit|CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
 ```
 
 ## Go Server Or API
@@ -62,7 +62,7 @@ RUNNERD_MYSQL_TEST_DSN='<dedicated mysql test DSN>' \
 - For broad server/API behavior, run `go test ./...`.
 - For pre-merge confidence, run `task test`; it rebuilds UI assets, runs Bun UI tests, and runs Go tests with race and coverage.
 - For ordinary-user Jobs authorization, cover shared installations with different repository access, exact installation/repository pair matching, filtering before the database limit, list/detail/group/log/terminal consistency, missing or rejected GitHub user tokens, inaccessible linked installations, and short-lived access-cache behavior.
-- For catalog-migration readiness changes, prove historical replay weighting, all matcher classifications, malformed/truncated fail-closed behavior, end-exclusive windows, catalog audit freeze detection, registration-backed lifecycle evidence for enabled Specs, and advertised-label fallback for custom Specs without required labels. Readiness-relevant catalog/Sandbox mutations must persist audit evidence before writing and fail closed when that audit cannot be persisted; managed reconciliation must audit in the same transaction. Keep current-process expvar separate from persisted evidence and never turn automated gates into backup/restore, continuity, or workflow-label sign-offs.
+- For catalog-migration readiness changes, prove historical replay weighting, all matcher classifications, malformed/truncated fail-closed behavior, end-exclusive windows, catalog audit freeze detection, registration-backed lifecycle evidence for enabled Specs, and advertised-label fallback for custom Specs without required labels. Readiness-relevant catalog/Sandbox mutations and managed reconciliation must commit their data change and audit evidence atomically: rejected mutations leave no audit event, while audit failures roll back the mutation. Keep current-process expvar separate from persisted evidence and never turn automated gates into backup/restore, continuity, or workflow-label sign-offs.
 
 ## UI
 

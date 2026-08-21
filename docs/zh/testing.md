@@ -107,16 +107,17 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
-State migration 和 shadow catalog matcher 还提供 opt-in 的真实方言兼容性门禁。
-两个 DSN 必须指向名称以 `_test` 结尾的专用、可丢弃数据库；测试会拒绝其他数据库
-名称，然后删除并重建 runnerd state tables。覆盖范围包括 fresh schema 创建、保留
-catalog rows 的重复迁移，以及 legacy catalog tables 存在、为空和不存在三种状态。
+State migration、shadow catalog matcher 和带审计的 catalog mutation 还提供
+opt-in 的真实方言兼容性门禁。两个 DSN 必须指向名称以 `_test` 结尾的专用、
+可丢弃数据库；测试会拒绝其他数据库名称，然后删除并重建 runnerd state tables。
+覆盖范围包括 fresh schema 创建、保留 catalog rows 的重复迁移、legacy catalog
+tables 存在、为空和不存在三种状态，以及 mutation 与 audit 的原子提交和回滚。
 
 ```bash
 RUNNERD_CATALOG_BACKEND_TESTS=1 \
 RUNNERD_POSTGRES_TEST_DSN='host=127.0.0.1 user=runnerd password=runnerd dbname=runnerd_test port=5432 sslmode=disable' \
 RUNNERD_MYSQL_TEST_DSN='runnerd:runnerd@tcp(127.0.0.1:3306)/runnerd_test' \
-  go test ./internal/state -run 'Test(CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+  go test ./internal/state -run 'Test(ApplyMutationWithAudit|CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
 ```
 
 服务重启恢复有一组不依赖真实 Sandbox 的定向测试：
@@ -627,7 +628,7 @@ Admin Diagnostics 页面还会加载 catalog migration readiness 接口。它从
 
 同一报告会为每个当前启用的 Runner Spec 展示持久化的 request、registration、completion、cleanup-finalized 数量，以及最近一条成功 GitHub Job 链接。completion 与 cleanup 证据要求此前已经持久化 runner registration；在创建 Sandbox 前被跳过的 request 不能满足完整生命周期证据。没有单独配置 `required_labels` 的自定义 Spec 会以其声明的 `labels` 作为 workflow label 证据展示。`cleanup finalized` 表示 runnerd 只有在 Sandbox 已停止、GitHub runner 已删除或确认不存在后，才把 request 持久化为 `completed`。未选择 runnerd 的 GitHub-hosted job（例如只带 `ubuntu-latest`）可能形成 `same` 的 no-match 回放结果，但不能计入任何启用 Spec 的生命周期证据。
 
-自动门禁仅在观察窗口至少 72 小时、窗口内没有 catalog/Sandbox 变更审计事件、历史 matcher 严格一致、并且每个启用 Spec 都有完整生命周期证据时通过。与 readiness 有关的 catalog 和 Sandbox handler 会先持久化审计事件，再执行数据写入；审计持久化失败时会拒绝变更。managed catalog reconciliation 则在同一数据库事务中写入 `profile.reconcile`。因此，一个已经进入写入阶段的变更尝试即使后续数据写入失败，也可能重新开始冻结观察窗口；这是有意采用的保守策略。备份恢复验证、服务连续运行观察、workflow labels 未修改仍是明确的人工签字项；UI 不会推断或自动完成这些事项。
+自动门禁仅在观察窗口至少 72 小时、窗口内没有 catalog/Sandbox 变更审计事件、历史 matcher 严格一致、并且每个启用 Spec 都有完整生命周期证据时通过。与 readiness 有关的 catalog 和 Sandbox mutation 会在同一数据库事务中提交数据变更与审计事件：被拒绝的 mutation 不会留下审计事件，审计持久化失败则会回滚数据变更。managed catalog reconciliation 写入 `profile.reconcile` 时也遵循同一规则。备份恢复验证、服务连续运行观察、workflow labels 未修改仍是明确的人工签字项；UI 不会推断或自动完成这些事项。
 
 ## 11. 官方参考
 

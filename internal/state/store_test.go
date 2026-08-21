@@ -3366,6 +3366,90 @@ func TestCompareProfileMatchesSQLBackends(t *testing.T) {
 	}
 }
 
+func TestApplyMutationWithAuditSQLBackends(t *testing.T) {
+	if os.Getenv("RUNNERD_CATALOG_BACKEND_TESTS") != "1" {
+		t.Skip("set RUNNERD_CATALOG_BACKEND_TESTS=1 with dedicated Postgres and MySQL test databases")
+	}
+	for _, backend := range []struct {
+		name string
+		dsn  string
+	}{
+		{name: BackendPostgres, dsn: os.Getenv("RUNNERD_POSTGRES_TEST_DSN")},
+		{name: BackendMySQL, dsn: os.Getenv("RUNNERD_MYSQL_TEST_DSN")},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			if strings.TrimSpace(backend.dsn) == "" {
+				t.Fatalf("dedicated %s test DSN is required", backend.name)
+			}
+			setupStore := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: false,
+			}).(*DBStore)
+			setupDB, err := setupStore.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireCatalogMatcherTestDatabase(t, setupDB, backend.name)
+			resetSQLBackendTestTables(t, setupDB)
+			defer func() {
+				resetSQLBackendTestTables(t, setupDB)
+				closeTestDB(t, setupDB)
+			}()
+
+			store := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: true,
+			}).(*DBStore)
+			if err := store.Ensure(); err != nil {
+				t.Fatalf("migrate %s state schema: %v", backend.name, err)
+			}
+			db, err := store.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer closeTestDB(t, db)
+			if _, err := store.UpsertProfile(RunnerProfile{
+				Name: "atomic-spec", Labels: []string{"self-hosted", "atomic"},
+				RequiredLabels: []string{"atomic"}, TemplateID: "atomic-template", Enabled: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			event, err := store.ApplyMutationWithAudit(AuditEvent{
+				Actor: "admin_api", Action: "runner_group.create", ResourceType: "runner_group", ResourceID: "atomic-group",
+			}, func(tx Store) error {
+				_, mutationErr := tx.UpsertRunnerGroup(RunnerGroup{
+					Name: "atomic-group", SpecNames: []string{"atomic-spec"}, Enabled: true,
+				})
+				return mutationErr
+			})
+			if err != nil || event.ID == 0 {
+				t.Fatalf("%s atomic group mutation: event=%#v err=%v", backend.name, event, err)
+			}
+			if _, err := store.GetRunnerGroup("atomic-group"); err != nil {
+				t.Fatalf("%s atomic group not committed: %v", backend.name, err)
+			}
+
+			if err := db.Migrator().DropTable(&auditEventRecord{}); err != nil {
+				t.Fatal(err)
+			}
+			_, err = store.ApplyMutationWithAudit(AuditEvent{
+				Actor: "admin_api", Action: "profile.create", ResourceType: "runner_profile", ResourceID: "rolled-back-spec",
+			}, func(tx Store) error {
+				_, mutationErr := tx.UpsertProfile(RunnerProfile{
+					Name: "rolled-back-spec", Labels: []string{"self-hosted", "rollback"},
+					RequiredLabels: []string{"rollback"}, TemplateID: "rollback-template", Enabled: true,
+				})
+				return mutationErr
+			})
+			if !errors.Is(err, ErrAuditEventPersistence) {
+				t.Fatalf("%s audit failure = %v", backend.name, err)
+			}
+			if _, err := store.GetProfile("rolled-back-spec"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("%s mutation committed despite audit failure: %v", backend.name, err)
+			}
+		})
+	}
+}
+
 func registerSQLBackendTestCleanup(t *testing.T, backend, dsn string) {
 	t.Helper()
 	t.Cleanup(func() {
@@ -4184,6 +4268,92 @@ func TestAuditEventsCanBeListed(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Action != "runner.retry" {
 		t.Fatalf("unexpected audit events: %#v", events)
+	}
+}
+
+func TestApplyMutationWithAuditCommitsMutationAndAuditTogether(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	var saved RunnerProfile
+	event, err := store.ApplyMutationWithAudit(AuditEvent{
+		Actor: "admin_api", Action: "profile.create", ResourceType: "runner_profile", ResourceID: "atomic-profile",
+	}, func(tx Store) error {
+		var mutationErr error
+		saved, mutationErr = tx.UpsertProfile(RunnerProfile{
+			Name: "atomic-profile", Labels: []string{"self-hosted", "atomic"},
+			RequiredLabels: []string{"atomic"}, TemplateID: "atomic-template", Enabled: true,
+		})
+		return mutationErr
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Name != "atomic-profile" || event.ID == 0 {
+		t.Fatalf("atomic mutation result: profile=%#v event=%#v", saved, event)
+	}
+	events, err := store.ListAuditEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0] != event {
+		t.Fatalf("audit events = %#v, want %#v", events, event)
+	}
+}
+
+func TestApplyMutationWithAuditDoesNotAuditRejectedMutation(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	_, err := store.ApplyMutationWithAudit(AuditEvent{
+		Actor: "admin_api", Action: "profile.create", ResourceType: "runner_profile", ResourceID: "invalid-profile",
+	}, func(tx Store) error {
+		_, mutationErr := tx.UpsertProfile(RunnerProfile{
+			Name: "invalid-profile", Labels: []string{"self-hosted"},
+			RequiredLabels: []string{"missing"}, TemplateID: "invalid-template", Enabled: true,
+		})
+		return mutationErr
+	})
+	if err == nil || !strings.Contains(err.Error(), "required labels must be a subset") {
+		t.Fatalf("rejected mutation error = %v", err)
+	}
+	if _, err := store.GetProfile("invalid-profile"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rejected profile persisted: %v", err)
+	}
+	events, err := store.ListAuditEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("rejected mutation audit events = %#v", events)
+	}
+}
+
+func TestApplyMutationWithAuditRollsBackMutationWhenAuditFails(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TRIGGER fail_profile_mutation_audit
+		BEFORE INSERT ON audit_events
+		WHEN NEW.action = 'profile.create'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced mutation audit failure');
+		END`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.ApplyMutationWithAudit(AuditEvent{
+		Actor: "admin_api", Action: "profile.create", ResourceType: "runner_profile", ResourceID: "rolled-back-profile",
+	}, func(tx Store) error {
+		_, mutationErr := tx.UpsertProfile(RunnerProfile{
+			Name: "rolled-back-profile", Labels: []string{"self-hosted", "rollback"},
+			RequiredLabels: []string{"rollback"}, TemplateID: "rollback-template", Enabled: true,
+		})
+		return mutationErr
+	})
+	if !errors.Is(err, ErrAuditEventPersistence) || !strings.Contains(err.Error(), "forced mutation audit failure") {
+		t.Fatalf("audit persistence error = %v", err)
+	}
+	if _, err := store.GetProfile("rolled-back-profile"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("profile committed despite audit failure: %v", err)
 	}
 }
 
