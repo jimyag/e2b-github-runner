@@ -204,14 +204,29 @@ type RunnerSpecLifecycleExample struct {
 	CleanupFinalizedAt time.Time `json:"cleanup_finalized_at"`
 }
 
+type RunnerSpecLifecycleAttempt struct {
+	RequestID          string     `json:"request_id"`
+	RepositoryFullName string     `json:"repository_full_name"`
+	Status             string     `json:"status"`
+	WorkflowJobID      int64      `json:"workflow_job_id,omitempty"`
+	GitHubJobURL       string     `json:"github_job_url,omitempty"`
+	RequestedLabels    []string   `json:"requested_labels"`
+	FailureStage       string     `json:"failure_stage,omitempty"`
+	FailureReason      string     `json:"failure_reason,omitempty"`
+	QueuedAt           time.Time  `json:"queued_at"`
+	RegisteredAt       *time.Time `json:"registered_at,omitempty"`
+	CompletedAt        *time.Time `json:"completed_at,omitempty"`
+}
+
 type RunnerSpecLifecycleEvidence struct {
-	Name                     string                      `json:"name"`
-	WorkflowLabels           []string                    `json:"workflow_labels"`
-	RequestCount             int64                       `json:"request_count"`
-	RegisteredRequests       int64                       `json:"registered_requests"`
-	CompletedRequests        int64                       `json:"completed_requests"`
-	CleanupFinalizedRequests int64                       `json:"cleanup_finalized_requests"`
-	Latest                   *RunnerSpecLifecycleExample `json:"latest,omitempty"`
+	Name                     string                       `json:"name"`
+	WorkflowLabels           []string                     `json:"workflow_labels"`
+	RequestCount             int64                        `json:"request_count"`
+	RegisteredRequests       int64                        `json:"registered_requests"`
+	CompletedRequests        int64                        `json:"completed_requests"`
+	CleanupFinalizedRequests int64                        `json:"cleanup_finalized_requests"`
+	Latest                   *RunnerSpecLifecycleExample  `json:"latest,omitempty"`
+	RecentAttempts           []RunnerSpecLifecycleAttempt `json:"recent_attempts"`
 }
 
 type CatalogMigrationReadiness struct {

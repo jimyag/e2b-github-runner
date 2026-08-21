@@ -9,7 +9,7 @@ This file tracks active project work. Completed behavior should move into `READM
 - Add an effective-config diagnostics view or config validation workflow if operators need to inspect runtime config from the UI.
 - Verify DB lease behavior with two runnerd processes sharing the same database before documenting multi-instance support.
 - Decide whether expvar diagnostics need a Prometheus/export adapter or histogram-style latency views for deployment observability.
-- Do not start the Release B matcher cutover until Admin Diagnostics shows at least 72 hours of untruncated historical parity and full lifecycle evidence for every enabled production Spec, and operators have separately recorded backup/restore, continuous-service, and unchanged-workflow-label sign-offs.
+- Do not start the Release B matcher cutover until Admin Diagnostics shows at least 72 hours of untruncated historical parity and full lifecycle evidence for every enabled production Spec. Use the bounded recent-attempt drill-down to resolve no-traffic and pre-registration failures without changing workflow labels or production Catalog/Sandbox data, and separately record backup/restore, continuous-service, and unchanged-workflow-label sign-offs.
 - After the `ui-production-smoke` check has reported on `main`, enable it as a required status check in branch protection; the repository currently has no required status checks.
 - Define a privacy-safe documentation activation funnel for `/docs` (guide entry, hosted/deploy path selection, and first successful job) before adding analytics; do not collect repository names, workflow names, credentials, or log content.
 - Decide production credential ownership, approval, and rotation before adding

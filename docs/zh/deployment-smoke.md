@@ -109,7 +109,8 @@ curl -fsS -b "$COOKIE_JAR" \
 - 当 local pprof service 可用时，可以看到 pprof discovery files 和 dump scripts。
 - Recent failure summaries 为空，或每一项都已理解。
 - Release A readiness 面板的观察窗口至少达到 72 小时，不存在 replay 截断或 malformed input，旧 matcher 与 enabled-Spec matcher 严格一致，并且每个启用 Spec 都有 registration、completion、cleanup 证据。
-- 每个预期的生产 label family 都应显示为一行启用 Spec。没有流量时保持阻塞；应使用现有 `runs-on` labels 触发正常 workflow job，而不是修改 catalog 数据来制造证据。
+- 每个预期的生产 label family 都应显示为一行启用 Spec。处理阻塞项前先展开 **检查尝试记录**：空列表表示所选窗口内没有请求匹配该 Spec；已有请求但缺少 registration 证据时，界面会展示持久化的状态、失败阶段/原因、labels、时间以及可用的 GitHub Job 链接。列表只保留最新 5 次尝试，不包含 credentials、webhook payload、logs 或原始内部错误字段。
+- 保持现有 workflow 的 `runs-on` labels 不变。只有理解界面展示的失败原因后，才使用正常的受控 workflow job 补充证据；不要通过修改 Catalog 或 Sandbox 数据制造 lifecycle evidence。
 - 所选窗口内保持 catalog/Sandbox 配置冻结。readiness 相关 mutation 必须在同一事务中提交数据变更与审计事件：被拒绝的 mutation 不留下审计证据，审计持久化失败时目标数据保持不变。备份恢复检查、服务连续运行观察、workflow labels 未修改仍需分别记录人工签字；仅有自动门禁全绿并不等于已授权 Release B。
 
 ## 3. Runner Catalog

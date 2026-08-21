@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { AlertTriangle, CheckCircle2, ExternalLink, Loader2, RefreshCw } from "lucide-react"
+import { Fragment, useCallback, useEffect, useRef, useState } from "react"
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import {
@@ -7,8 +7,11 @@ import {
   type CatalogMigrationManualRequirement,
   type CatalogMigrationReadiness,
   type CatalogMatchReplaySample,
+  type RunnerSpecLifecycleAttempt,
+  type RunnerSpecLifecycleEvidence,
 } from "@/admin-types"
 import { formatTime } from "@/admin-format"
+import { StatusBadge } from "@/components/admin-shared"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -26,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { cn } from "@/lib/utils"
 
 type RequestFunction = (url: string, options?: RequestInit) => Promise<unknown>
 
@@ -61,6 +65,7 @@ export function ReleaseReadinessSection({ request }: { request: RequestFunction 
   const [report, setReport] = useState<CatalogMigrationReadiness | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
+  const [expandedSpecName, setExpandedSpecName] = useState("")
   const requestGeneration = useRef(0)
 
   const load = useCallback(async () => {
@@ -71,6 +76,7 @@ export function ReleaseReadinessSection({ request }: { request: RequestFunction 
       const next = await request(`/diagnostics/catalog-migration-readiness?window_hours=${windowHours}`)
       if (generation !== requestGeneration.current) return
       setReport(next as CatalogMigrationReadiness)
+      setExpandedSpecName("")
     } catch (loadError) {
       if (generation !== requestGeneration.current) return
       setError(loadError instanceof Error ? loadError.message : t("admin.releaseReadinessLoadFailed"))
@@ -191,39 +197,67 @@ export function ReleaseReadinessSection({ request }: { request: RequestFunction 
                       <TableHead className="text-right">{t("admin.releaseCompleted")}</TableHead>
                       <TableHead className="text-right">{t("admin.releaseCleanupFinalized")}</TableHead>
                       <TableHead>{t("admin.releaseLatestEvidence")}</TableHead>
+                      <TableHead>{t("admin.releaseInvestigation")}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {report.specs.map((spec) => (
-                      <TableRow key={spec.name}>
-                        <TableCell>
-                          <div className="flex items-center gap-2 font-medium">
-                            {spec.cleanup_finalized_requests > 0
-                              ? <CheckCircle2 className="size-4 text-emerald-600" aria-hidden="true" />
-                              : <AlertTriangle className="size-4 text-destructive" aria-hidden="true" />}
-                            {spec.name}
-                          </div>
-                        </TableCell>
-                        <TableCell className="font-mono text-xs">{spec.workflow_labels.join(", ") || "-"}</TableCell>
-                        <TableCell className="text-right tabular-nums">{spec.request_count}</TableCell>
-                        <TableCell className="text-right tabular-nums">{spec.registered_requests}</TableCell>
-                        <TableCell className="text-right tabular-nums">{spec.completed_requests}</TableCell>
-                        <TableCell className="text-right tabular-nums">{spec.cleanup_finalized_requests}</TableCell>
-                        <TableCell>
-                          {spec.latest ? (
-                            <div className="space-y-1 text-xs">
-                              {spec.latest.github_job_url ? (
-                                <a className="inline-flex items-center gap-1 text-primary hover:underline" href={spec.latest.github_job_url} target="_blank" rel="noreferrer">
-                                  {spec.latest.request_id}
-                                  <ExternalLink className="size-3" aria-hidden="true" />
-                                </a>
-                              ) : <span>{spec.latest.request_id}</span>}
-                              <div className="text-muted-foreground">{formatTime(spec.latest.cleanup_finalized_at, i18n.resolvedLanguage)}</div>
-                            </div>
-                          ) : <span className="text-xs text-muted-foreground">{t("admin.releaseMissingEvidence")}</span>}
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {report.specs.map((spec) => {
+                      const expanded = expandedSpecName === spec.name
+                      const detailID = `release-attempts-${spec.name.replace(/[^a-zA-Z0-9_-]/g, "-")}`
+                      return (
+                        <Fragment key={spec.name}>
+                          <TableRow className={cn(expanded && "bg-muted/35")}>
+                            <TableCell>
+                              <div className="flex items-center gap-2 font-medium">
+                                {spec.cleanup_finalized_requests > 0
+                                  ? <CheckCircle2 className="size-4 text-emerald-600" aria-hidden="true" />
+                                  : <AlertTriangle className="size-4 text-destructive" aria-hidden="true" />}
+                                {spec.name}
+                              </div>
+                            </TableCell>
+                            <TableCell className="font-mono text-xs">{spec.workflow_labels.join(", ") || "-"}</TableCell>
+                            <TableCell className="text-right tabular-nums">{spec.request_count}</TableCell>
+                            <TableCell className="text-right tabular-nums">{spec.registered_requests}</TableCell>
+                            <TableCell className="text-right tabular-nums">{spec.completed_requests}</TableCell>
+                            <TableCell className="text-right tabular-nums">{spec.cleanup_finalized_requests}</TableCell>
+                            <TableCell>
+                              {spec.latest ? (
+                                <div className="space-y-1 text-xs">
+                                  {spec.latest.github_job_url ? (
+                                    <a className="inline-flex items-center gap-1 text-primary hover:underline" href={spec.latest.github_job_url} target="_blank" rel="noreferrer">
+                                      {spec.latest.request_id}
+                                      <ExternalLink className="size-3" aria-hidden="true" />
+                                    </a>
+                                  ) : <span>{spec.latest.request_id}</span>}
+                                  <div className="text-muted-foreground">{formatTime(spec.latest.cleanup_finalized_at, i18n.resolvedLanguage)}</div>
+                                </div>
+                              ) : <span className="text-xs text-muted-foreground">{t("admin.releaseMissingEvidence")}</span>}
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                aria-expanded={expanded}
+                                aria-controls={detailID}
+                                aria-label={t("admin.releaseInspectAttemptsFor", { spec: spec.name })}
+                                onClick={() => setExpandedSpecName(expanded ? "" : spec.name)}
+                              >
+                                {expanded ? <ChevronDown aria-hidden="true" /> : <ChevronRight aria-hidden="true" />}
+                                {t("admin.releaseInspectAttempts")}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                          {expanded ? (
+                            <TableRow id={detailID} className="hover:bg-transparent">
+                              <TableCell colSpan={8} className="bg-muted/15 p-4">
+                                <RecentAttempts spec={spec} />
+                              </TableCell>
+                            </TableRow>
+                          ) : null}
+                        </Fragment>
+                      )
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -260,6 +294,69 @@ export function ReleaseReadinessSection({ request }: { request: RequestFunction 
       ) : null}
     </section>
   )
+}
+
+function RecentAttempts({ spec }: { spec: RunnerSpecLifecycleEvidence }) {
+  const { t, i18n } = useTranslation()
+  if (spec.recent_attempts.length === 0) {
+    return (
+      <div className="rounded-md border border-dashed bg-background p-4 text-sm text-muted-foreground">
+        {t("admin.releaseNoAttempts")}
+      </div>
+    )
+  }
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="text-sm font-semibold">{t("admin.releaseRecentAttempts")}</div>
+        <div className="text-xs text-muted-foreground">
+          {t("admin.releaseRecentAttemptsDescription", { shown: spec.recent_attempts.length, total: spec.request_count })}
+        </div>
+      </div>
+      <div className="grid gap-3 xl:grid-cols-2">
+        {spec.recent_attempts.map((attempt) => (
+          <div key={attempt.request_id} className={cn("rounded-md border border-l-4 bg-background p-3", attemptAccentClass(attempt))}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <StatusBadge status={attempt.status} />
+              {attempt.github_job_url ? (
+                <a className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline" href={attempt.github_job_url} target="_blank" rel="noreferrer">
+                  {attempt.request_id}
+                  <ExternalLink className="size-3" aria-hidden="true" />
+                </a>
+              ) : <span className="font-mono text-xs">{attempt.request_id}</span>}
+            </div>
+            <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+              <AttemptField label={t("admin.repository")} value={attempt.repository_full_name || "-"} />
+              <AttemptField label={t("admin.releaseAttemptQueued")} value={formatTime(attempt.queued_at, i18n.resolvedLanguage)} />
+              <AttemptField label={t("admin.releaseWorkflowLabels")} value={attempt.requested_labels.join(", ") || "-"} mono />
+              <AttemptField
+                label={t("admin.releaseAttemptFailure")}
+                value={[attempt.failure_stage, attempt.failure_reason].filter(Boolean).join(" · ") || "-"}
+                danger={Boolean(attempt.failure_stage || attempt.failure_reason)}
+              />
+              {attempt.registered_at ? <AttemptField label={t("admin.releaseAttemptRegistered")} value={formatTime(attempt.registered_at, i18n.resolvedLanguage)} /> : null}
+              {attempt.completed_at ? <AttemptField label={t("admin.releaseAttemptCompleted")} value={formatTime(attempt.completed_at, i18n.resolvedLanguage)} /> : null}
+            </dl>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function AttemptField({ label, value, mono = false, danger = false }: { label: string, value: string, mono?: boolean, danger?: boolean }) {
+  return (
+    <div>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className={cn("mt-0.5 break-words font-medium", mono && "font-mono", danger && "text-destructive")}>{value}</dd>
+    </div>
+  )
+}
+
+function attemptAccentClass(attempt: RunnerSpecLifecycleAttempt) {
+  if (attempt.status === "failed") return "border-l-destructive"
+  if (attempt.status === "completed") return "border-l-emerald-600"
+  return "border-l-amber-500"
 }
 
 function ReplaySamplesCard({ report }: { report: CatalogMigrationReadiness }) {

@@ -140,6 +140,20 @@ export type RunnerSpecLifecycleExample = {
   cleanup_finalized_at: string
 }
 
+export type RunnerSpecLifecycleAttempt = {
+  request_id: string
+  repository_full_name: string
+  status: RunnerStatus
+  workflow_job_id?: number
+  github_job_url?: string
+  requested_labels: string[]
+  failure_stage?: string
+  failure_reason?: string
+  queued_at: string
+  registered_at?: string
+  completed_at?: string
+}
+
 export type RunnerSpecLifecycleEvidence = {
   name: string
   workflow_labels: string[]
@@ -148,6 +162,7 @@ export type RunnerSpecLifecycleEvidence = {
   completed_requests: number
   cleanup_finalized_requests: number
   latest?: RunnerSpecLifecycleExample
+  recent_attempts: RunnerSpecLifecycleAttempt[]
 }
 
 export type CatalogMigrationReadiness = {
