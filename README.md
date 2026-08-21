@@ -277,7 +277,7 @@ The built-in web UI provides:
 
 | Route | Description |
 | --- | --- |
-| `/admin/` | Dashboard with diagnostics, metrics, and recent failures |
+| `/admin/` | Dashboard with diagnostics, metrics, recent failures, and durable Release A migration readiness evidence |
 | `/admin/accounts` | Account management — list, search, and change roles |
 | `/admin/sandbox_service` | Sandbox service configuration |
 

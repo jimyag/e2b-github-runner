@@ -245,6 +245,33 @@ func (s *DBStore) ListStates() ([]RunnerState, error) {
 	return states, nil
 }
 
+func (s *DBStore) ListRecentFailedStates(limit int) ([]RunnerState, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	var records []runnerRequestRecord
+	if err := db.
+		Select(runnerRequestListSelectColumns).
+		Where("status = ?", StatusFailed).
+		Order("queued_at DESC, id ASC").
+		Limit(limit).
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	states := make([]RunnerState, 0, len(records))
+	for _, record := range records {
+		states = append(states, recordToState(record))
+	}
+	return states, nil
+}
+
 func (s *DBStore) ListActiveStates() ([]RunnerState, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {

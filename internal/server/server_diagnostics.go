@@ -1,9 +1,11 @@
 package server
 
 import (
-	"io"
+	"encoding/json"
+	"expvar"
 	"net/http"
-	"strings"
+	"strconv"
+	"time"
 
 	"github.com/qiniu/ci-runner/internal/redact"
 	"github.com/qiniu/ci-runner/internal/state"
@@ -19,19 +21,10 @@ func (s *Server) handleDiagnosticsPprof(w http.ResponseWriter, r *http.Request) 
 		DumpScript  string `json:"dump_script"`
 	}
 	addresses, scripts := discoverPprofArtifacts()
-	states, err := s.store.ListStates()
+	failures, err := s.store.ListRecentFailedStates(5)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
-	}
-	failures := make([]state.RunnerState, 0, 5)
-	for _, st := range states {
-		if st.Status == state.StatusFailed {
-			failures = append(failures, st)
-			if len(failures) == 5 {
-				break
-			}
-		}
 	}
 	out := make([]artifact, 0, len(addresses))
 	for i := range addresses {
@@ -67,21 +60,104 @@ func (s *Server) handleDiagnosticsVars(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	addresses, _ := discoverPprofArtifacts()
-	if len(addresses) == 0 {
-		writeError(w, http.StatusNotFound, "pprof endpoint not discovered")
+	expvar.Handler().ServeHTTP(w, r)
+}
+
+type catalogMigrationGate struct {
+	Code   string `json:"code"`
+	Passed bool   `json:"passed"`
+}
+
+type catalogMigrationCurrentProcess struct {
+	StartedAt          time.Time        `json:"started_at"`
+	CatalogMatchCounts map[string]int64 `json:"catalog_match_counts"`
+}
+
+type catalogMigrationReadinessResponse struct {
+	state.CatalogMigrationReadiness
+	AutomatedGatesPassed bool                           `json:"automated_gates_passed"`
+	Gates                []catalogMigrationGate         `json:"gates"`
+	ManualRequirements   []string                       `json:"manual_requirements"`
+	CurrentProcess       catalogMigrationCurrentProcess `json:"current_process"`
+}
+
+func (s *Server) handleCatalogMigrationReadiness(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
 		return
 	}
-	resp, err := s.diagnostics.Get(strings.TrimRight(addresses[0].Address, "/") + "/debug/vars")
+	hours := 72
+	if raw := r.URL.Query().Get("window_hours"); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 720 {
+			writeError(w, http.StatusBadRequest, "window_hours must be an integer from 1 through 720")
+			return
+		}
+		hours = value
+	}
+	end := time.Now().UTC()
+	start := end.Add(-time.Duration(hours) * time.Hour)
+	report, err := s.store.CatalogMigrationReadiness(start, end)
 	if err != nil {
-		writeError(w, http.StatusBadGateway, err.Error())
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		writeError(w, http.StatusBadGateway, resp.Status)
-		return
+	gates := catalogMigrationGates(report)
+	automatedGatesPassed := true
+	for _, gate := range gates {
+		automatedGatesPassed = automatedGatesPassed && gate.Passed
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_, _ = io.Copy(w, resp.Body)
+	writeJSON(w, http.StatusOK, catalogMigrationReadinessResponse{
+		CatalogMigrationReadiness: report,
+		AutomatedGatesPassed:      automatedGatesPassed,
+		Gates:                     gates,
+		ManualRequirements: []string{
+			"backup_restore_verified",
+			"continuous_service_observation",
+			"workflow_labels_unchanged",
+		},
+		CurrentProcess: catalogMigrationCurrentProcess{
+			StartedAt:          s.startedAt,
+			CatalogMatchCounts: currentCatalogMatchCounts(),
+		},
+	})
+}
+
+func catalogMigrationGates(report state.CatalogMigrationReadiness) []catalogMigrationGate {
+	windowPassed := report.WindowEnd.Sub(report.WindowStart) >= 72*time.Hour
+	catalogPassed := !report.CatalogChangesTruncated && len(report.CatalogChanges) == 0
+	replay := report.Replay
+	parityPassed := replay.RequestCount > 0 && !replay.Truncated && replay.ErrorRequests == 0 &&
+		replay.LegacyOnlyRequests == 0 && replay.EnabledOnlyRequests == 0 &&
+		replay.DifferentProfileRequests == 0 && replay.SameRequests == replay.RequestCount
+	lifecyclePassed := len(report.Specs) > 0
+	for _, spec := range report.Specs {
+		lifecyclePassed = lifecyclePassed && spec.CleanupFinalizedRequests > 0
+	}
+	return []catalogMigrationGate{
+		{Code: "window_at_least_72_hours", Passed: windowPassed},
+		{Code: "catalog_unchanged", Passed: catalogPassed},
+		{Code: "matcher_parity", Passed: parityPassed},
+		{Code: "all_enabled_specs_full_lifecycle", Passed: lifecyclePassed},
+	}
+}
+
+func currentCatalogMatchCounts() map[string]int64 {
+	counts := map[string]int64{
+		"same":              0,
+		"legacy_only":       0,
+		"enabled_only":      0,
+		"different_profile": 0,
+	}
+	value := expvar.Get("e2b_runner_catalog_match_migration_total")
+	if value == nil {
+		return counts
+	}
+	var published map[string]int64
+	if err := json.Unmarshal([]byte(value.String()), &published); err != nil {
+		return counts
+	}
+	for key := range counts {
+		counts[key] = published[key]
+	}
+	return counts
 }

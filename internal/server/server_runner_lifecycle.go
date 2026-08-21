@@ -241,17 +241,7 @@ func (s *Server) matchProfileForAdmission(repository string, labels []string) (s
 	}
 	legacyName := matchedProfileName(comparison.Legacy)
 	enabledName := matchedProfileName(comparison.Enabled)
-	result := "same"
-	switch {
-	case comparison.Legacy.Profile != nil && comparison.Enabled.Profile == nil:
-		result = "legacy_only"
-	case comparison.Legacy.Profile == nil && comparison.Enabled.Profile != nil:
-		result = "enabled_only"
-	case comparison.Legacy.Profile != nil && comparison.Enabled.Profile != nil && legacyName != enabledName:
-		result = "different_profile"
-	case legacyName == enabledName && comparison.Legacy.Reason != comparison.Enabled.Reason:
-		result = "different_profile"
-	}
+	result := comparison.Result()
 	metrics.RecordCatalogMatchComparison(legacyName, enabledName, result)
 	if result != "same" {
 		s.logger.Warn(
@@ -941,8 +931,15 @@ func (s *Server) recoverActiveRunner(ctx context.Context, st state.RunnerState, 
 		hasJob = false
 	}
 	if hasJob && strings.EqualFold(strings.TrimSpace(job.Status), "completed") {
-		_, _, err := s.stopRunner(ctx, st.ID, job)
-		return err
+		latest, _, err := s.stopRunner(ctx, st.ID, job)
+		if err != nil {
+			return err
+		}
+		if latest.Status != state.StatusCreating && latest.Status != state.StatusRunning {
+			return nil
+		}
+		st = latest
+		stateVersion = latest.Version
 	}
 
 	timeout := s.remainingSandboxTimeout(st, time.Now().UTC())
@@ -1128,6 +1125,23 @@ func (s *Server) stopRunner(ctx context.Context, id string, job github.WorkflowJ
 		return state.RunnerState{}, false, err
 	}
 	s.logger.Info("runner stop requested", "id", id, "status", st.Status, "sandbox_id", st.SandboxID, "pid", st.ProcessPID, "job_id", job.ID)
+	if workflowJobStopConflictsWithAssignment(st, job) {
+		s.logger.Warn(
+			"runner stop deferred because runner ownership is unresolved or different",
+			"id", id,
+			"workflow_job_id", st.WorkflowJobID,
+			"assigned_job_id", st.AssignedJobID,
+			"assigned_job_name", st.AssignedJobName,
+			"completed_job_id", job.ID,
+		)
+		s.store.AppendLog(id, "control.log", []byte(fmt.Sprintf(
+			"runner stop deferred: workflow job %d completed while runner assignment is id=%d name=%q\n",
+			job.ID,
+			st.AssignedJobID,
+			st.AssignedJobName,
+		)))
+		return st, false, nil
+	}
 	if st.Status == state.StatusCompleted {
 		recorded := false
 		if shouldRecordAssignedJob(st, job) {
@@ -1508,6 +1522,23 @@ func shouldRecordAssignedJob(st state.RunnerState, job github.WorkflowJob) bool 
 	return st.AssignedJobID != job.ID || st.AssignedJobName != job.Name
 }
 
+// workflowJobStopConflictsWithAssignment reports whether a completed workflow
+// job must not stop or reassign this runner because its actual job ownership is
+// unresolved or already points at a different job. A matching non-empty
+// runner_name is authoritative and makes the completion safe to apply.
+func workflowJobStopConflictsWithAssignment(st state.RunnerState, job github.WorkflowJob) bool {
+	if job.ID == 0 {
+		return false
+	}
+	if runnerName := strings.TrimSpace(job.RunnerName); runnerName != "" && runnerName == strings.TrimSpace(st.RunnerName) {
+		return false
+	}
+	if st.AssignedJobID != 0 {
+		return st.AssignedJobID != job.ID
+	}
+	return st.AssignedJobName == runnerJobStartedMarker && st.WorkflowJobID == job.ID
+}
+
 func workflowJobMismatch(st state.RunnerState, job github.WorkflowJob) bool {
 	return st.WorkflowJobID != 0 && job.ID != 0 && st.WorkflowJobID != job.ID
 }
@@ -1690,25 +1721,55 @@ func (s *Server) ensureRepositoryAllowsProfile(repositoryFullName string, profil
 }
 
 func (s *Server) recordAudit(actor, action, resourceType, resourceID string, payload any) {
+	event, err := auditEventFor(actor, action, resourceType, resourceID, payload)
+	if err == nil {
+		event, err = s.store.AppendAuditEvent(event)
+	}
+	if err != nil {
+		s.logger.Error("append audit event", "action", action, "resource_type", resourceType, "resource_id", resourceID, "error", err)
+		return
+	}
+	s.logger.Info("audit event recorded", "id", event.ID, "actor", actor, "action", action, "resource_type", resourceType, "resource_id", resourceID)
+}
+
+func (s *Server) applyMutationWithAudit(actor, action, resourceType, resourceID string, payload any, mutation func(state.Store) error) error {
+	event, err := auditEventFor(actor, action, resourceType, resourceID, payload)
+	if err != nil {
+		return fmt.Errorf("%w: %w", state.ErrAuditEventPersistence, err)
+	}
+	event, err = s.store.ApplyMutationWithAudit(event, mutation)
+	if err != nil {
+		return err
+	}
+	s.logger.Info("required mutation audit event recorded", "id", event.ID, "actor", actor, "action", action, "resource_type", resourceType, "resource_id", resourceID)
+	return nil
+}
+
+func auditEventFor(actor, action, resourceType, resourceID string, payload any) (state.AuditEvent, error) {
 	var payloadJSON string
 	if payload != nil {
-		if data, err := json.Marshal(payload); err == nil {
-			payloadJSON = string(data)
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return state.AuditEvent{}, fmt.Errorf("marshal audit payload: %w", err)
 		}
+		payloadJSON = string(data)
 	}
-	event, err := s.store.AppendAuditEvent(state.AuditEvent{
+	return state.AuditEvent{
 		Actor:        actor,
 		Action:       action,
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		PayloadJSON:  payloadJSON,
 		CreatedAt:    time.Now().UTC(),
-	})
-	if err != nil {
-		s.logger.Error("append audit event", "action", action, "resource_type", resourceType, "resource_id", resourceID, "error", err)
-		return
+	}, nil
+}
+
+func writeMutationAuditError(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, state.ErrAuditEventPersistence) {
+		return false
 	}
-	s.logger.Info("audit event recorded", "id", event.ID, "actor", actor, "action", action, "resource_type", resourceType, "resource_id", resourceID)
+	writeError(w, http.StatusInternalServerError, "persist mutation audit: "+err.Error())
+	return true
 }
 
 func repositoryPatternMatches(pattern, repository string) bool {

@@ -171,6 +171,15 @@ jq \
       },
       {
         category: "Release smoke",
+        upstream_name: "Cloudflare DNS",
+        status: "provided",
+        verification: (
+          "test \"$(cat /etc/resolv.conf)\" = "
+          + "\"$(printf \"%s\\n\" \"nameserver 1.1.1.1\" \"nameserver 1.0.0.1\")\""
+        )
+      },
+      {
+        category: "Release smoke",
         upstream_name: "runner writable NVM home",
         status: "provided",
         verification: $nvm_smoke_command

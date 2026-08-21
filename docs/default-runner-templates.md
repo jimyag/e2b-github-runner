@@ -166,6 +166,11 @@ The Dockerfiles keep `bootstrap`, `platform`, `node`, `toolchain`, and
 Template version metadata is applied after provisioning, and the runner-owned
 NVM copy is isolated between `toolchain` and `runtime`, so either change keeps
 the heavy installer layers reusable.
+After those layers, each Dockerfile writes the final `/etc/resolv.conf` with
+Cloudflare `1.1.1.1` and `1.0.0.1` before switching to the unprivileged runner
+user. Keeping this override late avoids invalidating the heavy provisioning
+layers. Release smoke checks the exact two-line resolver file in a real
+Sandbox before publication.
 Before `platform`, each Dockerfile downloads the checksum-pinned AWS SAM
 archive in independent 16 MiB-or-smaller Range layers. Completed chunks remain
 cacheable across a service timeout under `/opt/qiniu-runner-build-cache`;

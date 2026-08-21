@@ -34,6 +34,7 @@ type Server struct {
 	diagnostics *http.Client
 	cacheSTS    *http.Client
 	terminals   *terminalHub
+	startedAt   time.Time
 
 	admissionMu sync.Mutex
 	locks       [64]sync.Mutex
@@ -179,6 +180,7 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		diagnostics:               &http.Client{Timeout: 5 * time.Second},
 		cacheSTS:                  &http.Client{Timeout: 30 * time.Second},
 		terminals:                 newTerminalHub(logger),
+		startedAt:                 time.Now().UTC(),
 		pullTitleCache:            map[string]cachedPullTitle{},
 		workflowRunCache:          map[string]cachedWorkflowRun{},
 		userRepositoryAccessCache: map[int64]cachedUserRepositoryAccess{},
@@ -444,6 +446,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /runner_policies/{id}", s.handleDeleteRepositoryPolicy)
 	s.mux.HandleFunc("GET /diagnostics/pprof", s.handleDiagnosticsPprof)
 	s.mux.HandleFunc("GET /diagnostics/vars", s.handleDiagnosticsVars)
+	s.mux.HandleFunc("GET /diagnostics/catalog-migration-readiness", s.handleCatalogMigrationReadiness)
 }
 
 func (s *Server) handleAdminRedirect(w http.ResponseWriter, r *http.Request) {

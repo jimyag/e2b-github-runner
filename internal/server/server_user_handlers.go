@@ -661,19 +661,6 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 		Key:       accountPreferenceKeySandboxService,
 		ValueJSON: string(valueJSON),
 	}
-	if mode == sandboxPreferenceModeInherit {
-		_, err = s.store.UpsertAccountPreferenceAndDeleteSecret(preference, state.AccountSecret{
-			ScopeType: scope.Type,
-			ScopeID:   scope.ID,
-			KeyType:   state.AccountSecretTypeSandboxAPIKey,
-		})
-	} else {
-		_, _, err = s.store.UpsertAccountPreferenceAndSecret(preference, secret)
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
 	auditPayload := map[string]any{
 		"mode":           mode,
 		"api_url":        value.APIURL,
@@ -682,7 +669,25 @@ func (s *Server) handleUserSaveSandboxConfig(w http.ResponseWriter, r *http.Requ
 	if mode == sandboxPreferenceModeInherit {
 		auditPayload["source_account_id"] = value.SourceAccountID
 	}
-	s.recordAudit("github:"+session.Subject, "sandbox.configure", scope.Type, strconv.FormatInt(scope.ID, 10), auditPayload)
+	err = s.applyMutationWithAudit("github:"+session.Subject, "sandbox.configure", scope.Type, strconv.FormatInt(scope.ID, 10), auditPayload, func(tx state.Store) error {
+		if mode == sandboxPreferenceModeInherit {
+			_, err = tx.UpsertAccountPreferenceAndDeleteSecret(preference, state.AccountSecret{
+				ScopeType: scope.Type,
+				ScopeID:   scope.ID,
+				KeyType:   state.AccountSecretTypeSandboxAPIKey,
+			})
+		} else {
+			_, _, err = tx.UpsertAccountPreferenceAndSecret(preference, secret)
+		}
+		return err
+	})
+	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	response, err := s.accountPreferencesResponse(scope, account.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -711,11 +716,20 @@ func (s *Server) handleUserDeleteSandboxAPIKey(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusForbidden, "Sandbox service for this GitHub account is managed by its owner")
 		return
 	}
-	if err := s.store.DeleteAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeSandboxAPIKey); err != nil && !errors.Is(err, state.ErrNotFound) {
+	err = s.applyMutationWithAudit("github:"+session.Subject, "sandbox_api_key.delete", scope.Type, strconv.FormatInt(scope.ID, 10), nil, func(tx state.Store) error {
+		mutationErr := tx.DeleteAccountSecret(scope.Type, scope.ID, state.AccountSecretTypeSandboxAPIKey)
+		if errors.Is(mutationErr, state.ErrNotFound) {
+			return nil
+		}
+		return mutationErr
+	})
+	if err != nil {
+		if writeMutationAuditError(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.recordAudit("github:"+session.Subject, "sandbox_api_key.delete", scope.Type, strconv.FormatInt(scope.ID, 10), nil)
 	response, err := s.accountPreferencesResponse(scope, account.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
