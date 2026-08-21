@@ -2013,6 +2013,46 @@ func TestRunnerRequestListIndexSupportsNewestPageOrder(t *testing.T) {
 	}
 }
 
+func TestRunnerRequestProfileListIndexSupportsNewestPageOrder(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const indexName = "idx_runner_requests_profile_queued_id"
+	if !db.Migrator().HasIndex(&runnerRequestRecord{}, indexName) {
+		t.Fatalf("expected runner request profile ordering index %s", indexName)
+	}
+
+	var plan []struct {
+		Detail string `gorm:"column:detail"`
+	}
+	if err := db.Raw(`
+		EXPLAIN QUERY PLAN
+		SELECT id, queued_at
+		FROM runner_requests
+		WHERE profile_name = ?
+		  AND queued_at >= ?
+		  AND queued_at < ?
+		ORDER BY queued_at DESC, id ASC
+		LIMIT 5
+	`, "github-runner-ubuntu-24-04", time.Now().Add(-30*24*time.Hour), time.Now()).Scan(&plan).Error; err != nil {
+		t.Fatal(err)
+	}
+	var details []string
+	for _, step := range plan {
+		details = append(details, step.Detail)
+	}
+	joined := strings.Join(details, "\n")
+	if !strings.Contains(joined, indexName) {
+		t.Fatalf("expected profile list query to use ordering index, plan:\n%s", joined)
+	}
+	if strings.Contains(joined, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("profile list query still sorts through a temporary B-tree, plan:\n%s", joined)
+	}
+}
+
 func TestRunnerRequestAuthorizedListIndexSupportsNewestPageOrder(t *testing.T) {
 	store := New(t.TempDir()).(*DBStore)
 	db, err := store.dbOrEnsure()
@@ -4729,6 +4769,7 @@ func TestMigratePreservesAdditiveRunnerRequestColumns(t *testing.T) {
 	for _, indexName := range []string{
 		"idx_runner_requests_queued_id",
 		"idx_runner_requests_github_installation_queued_id",
+		"idx_runner_requests_profile_queued_id",
 	} {
 		if !db.Migrator().HasIndex(&runnerRequestRecord{}, indexName) {
 			t.Fatalf("expected runner request list ordering index %s after additive migration", indexName)

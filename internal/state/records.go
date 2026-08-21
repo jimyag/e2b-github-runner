@@ -3,7 +3,7 @@ package state
 import "time"
 
 type runnerRequestRecord struct {
-	ID                      string     `gorm:"column:id;primaryKey;index:idx_runner_requests_queued_id,priority:2,sort:asc;index:idx_runner_requests_github_installation_queued_id,priority:3,sort:asc"`
+	ID                      string     `gorm:"column:id;primaryKey;index:idx_runner_requests_queued_id,priority:2,sort:asc;index:idx_runner_requests_github_installation_queued_id,priority:3,sort:asc;index:idx_runner_requests_profile_queued_id,priority:3,sort:asc"`
 	Source                  string     `gorm:"column:source;not null"`
 	WorkflowJobID           *int64     `gorm:"column:workflow_job_id;uniqueIndex:idx_runner_requests_workflow_job_id"`
 	GitHubInstallationID    int64      `gorm:"column:github_installation_id;index:idx_runner_requests_github_installation_updated;index:idx_runner_requests_github_installation_queued,priority:1;index:idx_runner_requests_github_installation_queued_id,priority:1"`
@@ -18,7 +18,7 @@ type runnerRequestRecord struct {
 	RepositoryFullName      string     `gorm:"column:repository_full_name;index:idx_runner_requests_repository_pr,priority:1;index:idx_runner_requests_repository_head,priority:1"`
 	RequestedLabelsJSON     string     `gorm:"column:requested_labels_json"`
 	LabelsJSON              string     `gorm:"column:labels_json;not null"`
-	ProfileName             string     `gorm:"column:profile_name"`
+	ProfileName             string     `gorm:"column:profile_name;index:idx_runner_requests_profile_queued_id,priority:1"`
 	RunnerGroup             string     `gorm:"column:runner_group"`
 	RunnerName              string     `gorm:"column:runner_name;not null"`
 	Status                  string     `gorm:"column:status;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_status_retry_queue;index:idx_runner_requests_lease_expiry"`
@@ -37,7 +37,7 @@ type runnerRequestRecord struct {
 	AssignedJobName         string     `gorm:"column:assigned_job_name"`
 	Error                   string     `gorm:"column:error"`
 	GitHubPayloadJSON       string     `gorm:"column:github_payload_json;type:text"`
-	QueuedAt                time.Time  `gorm:"column:queued_at;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_status_retry_queue;index:idx_runner_requests_github_installation_queued,priority:2;index:idx_runner_requests_queued_id,priority:1,sort:desc;index:idx_runner_requests_github_installation_queued_id,priority:2,sort:desc"`
+	QueuedAt                time.Time  `gorm:"column:queued_at;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_status_retry_queue;index:idx_runner_requests_github_installation_queued,priority:2;index:idx_runner_requests_queued_id,priority:1,sort:desc;index:idx_runner_requests_github_installation_queued_id,priority:2,sort:desc;index:idx_runner_requests_profile_queued_id,priority:2,sort:desc"`
 	LastAttemptAt           *time.Time `gorm:"column:last_attempt_at"`
 	NextRetryAt             *time.Time `gorm:"column:next_retry_at;index:idx_runner_requests_status_retry_queue"`
 	CreatingAt              *time.Time `gorm:"column:creating_at"`
