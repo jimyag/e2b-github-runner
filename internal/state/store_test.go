@@ -5290,6 +5290,51 @@ func TestCatalogMigrationReadinessReplaysPersistedRequestsAndLifecycleEvidence(t
 	}
 }
 
+func TestCatalogMigrationReadinessRejectsNullRequestedLabels(t *testing.T) {
+	store := New(t.TempDir())
+	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	end := start.Add(72 * time.Hour)
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "empty-label-profile", Labels: []string{"self-hosted"}, TemplateID: "empty-label-template",
+		Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
+		RepositoryFullName: "owner/repo", ProfileName: "empty-label-profile", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "null-labels", jobID: 1, repository: "owner/repo", createdAt: start.Add(time.Hour),
+	})
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "empty-labels", jobID: 2, repository: "owner/repo", createdAt: start.Add(2 * time.Hour),
+	})
+	db, err := store.(*DBStore).dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&runnerRequestRecord{}).Where("id = ?", "empty-labels").
+		Update("requested_labels_json", `[]`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := store.CatalogMigrationReadiness(start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Replay; got.RequestCount != 2 || got.DistinctInputCount != 2 ||
+		got.SameRequests != 1 || got.ErrorRequests != 1 {
+		t.Fatalf("replay summary = %#v, want one empty-array parity and one null-label error", got)
+	}
+	if len(report.ReplaySamples) != 1 || report.ReplaySamples[0].Result != "error" ||
+		!strings.Contains(report.ReplaySamples[0].Error, "JSON array") {
+		t.Fatalf("null-label replay sample = %#v", report.ReplaySamples)
+	}
+}
+
 func TestCatalogMigrationReadinessRequiresRegisteredRunnerForFullLifecycleEvidence(t *testing.T) {
 	store := New(t.TempDir())
 	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)

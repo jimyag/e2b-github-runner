@@ -119,7 +119,11 @@ func populateCatalogMigrationReplay(
 	report.Replay.DistinctInputCount = len(inputs)
 	for _, input := range inputs {
 		var labels []string
-		if err := json.Unmarshal([]byte(input.RequestedLabelsJSON), &labels); err != nil {
+		decodeErr := json.Unmarshal([]byte(input.RequestedLabelsJSON), &labels)
+		if decodeErr == nil && labels == nil {
+			decodeErr = fmt.Errorf("expected JSON array, got null")
+		}
+		if decodeErr != nil {
 			report.Replay.ErrorRequests += input.RequestCount
 			appendCatalogMigrationReplaySample(report, CatalogMatchReplaySample{
 				RepositoryFullName: input.RepositoryFullName,
@@ -127,7 +131,7 @@ func populateCatalogMigrationReplay(
 				FirstSeenAt:        input.FirstSeenAt.Time,
 				LastSeenAt:         input.LastSeenAt.Time,
 				Result:             "error",
-				Error:              "decode requested labels: " + err.Error(),
+				Error:              "decode requested labels: " + decodeErr.Error(),
 			})
 			continue
 		}
