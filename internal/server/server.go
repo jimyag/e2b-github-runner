@@ -31,8 +31,8 @@ type Server struct {
 	mux         *http.ServeMux
 	slots       chan struct{}
 	oauth       *http.Client
-	diagnostics *http.Client
 	terminals   *terminalHub
+	startedAt   time.Time
 
 	admissionMu sync.Mutex
 	locks       [64]sync.Mutex
@@ -164,8 +164,8 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		slots:                     make(chan struct{}, cfg.MaxConcurrentRunners),
 		queueNotify:               make(chan struct{}, 1),
 		oauth:                     &http.Client{Timeout: 10 * time.Second},
-		diagnostics:               &http.Client{Timeout: 5 * time.Second},
 		terminals:                 newTerminalHub(logger),
+		startedAt:                 time.Now().UTC(),
 		pullTitleCache:            map[string]cachedPullTitle{},
 		userRepositoryAccessCache: map[int64]cachedUserRepositoryAccess{},
 		userRepositoryAccessEpoch: map[int64]uint64{},
@@ -427,6 +427,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /runner_policies/{id}", s.handleDeleteRepositoryPolicy)
 	s.mux.HandleFunc("GET /diagnostics/pprof", s.handleDiagnosticsPprof)
 	s.mux.HandleFunc("GET /diagnostics/vars", s.handleDiagnosticsVars)
+	s.mux.HandleFunc("GET /diagnostics/catalog-migration-readiness", s.handleCatalogMigrationReadiness)
 }
 
 func (s *Server) handleAdminRedirect(w http.ResponseWriter, r *http.Request) {

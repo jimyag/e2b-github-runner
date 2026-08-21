@@ -480,6 +480,34 @@ func (s *DBStore) AppendAuditEvent(event AuditEvent) (AuditEvent, error) {
 	return appendAuditEvent(db, event)
 }
 
+// ApplyMutationWithAudit commits a state mutation and its audit evidence in one transaction.
+func (s *DBStore) ApplyMutationWithAudit(event AuditEvent, mutation func(Store) error) (AuditEvent, error) {
+	if mutation == nil {
+		return AuditEvent{}, fmt.Errorf("mutation is required")
+	}
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return AuditEvent{}, err
+	}
+	var saved AuditEvent
+	err = db.Transaction(func(tx *gorm.DB) error {
+		transactionStore := &DBStore{opts: s.opts, db: tx, migrated: true}
+		if err := mutation(transactionStore); err != nil {
+			return err
+		}
+		var auditErr error
+		saved, auditErr = appendAuditEvent(tx, event)
+		if auditErr != nil {
+			return fmt.Errorf("%w: %w", ErrAuditEventPersistence, auditErr)
+		}
+		return nil
+	})
+	if err != nil {
+		return AuditEvent{}, err
+	}
+	return saved, nil
+}
+
 func appendAuditEvent(db *gorm.DB, event AuditEvent) (AuditEvent, error) {
 	record := auditEventRecord{
 		Actor:        strings.TrimSpace(event.Actor),

@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next"
 import { formatTime, runnerStatusLabel } from "@/admin-format"
 import { activeStatuses, logNames, type RunnerState, type RunnerStatus } from "@/admin-types"
 import { Detail, StatusBadge } from "@/components/admin-shared"
+import type { AppTFunction } from "@/i18n"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -457,7 +458,7 @@ export function RunnerRequestsSection({
   )
 }
 
-function sandboxConfigSourceDisplay(source: string | undefined, t: ReturnType<typeof useTranslation>["t"]) {
+function sandboxConfigSourceDisplay(source: string | undefined, t: AppTFunction) {
   switch (source) {
     case "installation": return t("admin.configInstallation")
     case "account": return t("admin.configAccount")

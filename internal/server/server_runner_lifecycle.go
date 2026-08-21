@@ -76,17 +76,7 @@ func (s *Server) matchProfileForAdmission(repository string, labels []string) (s
 	}
 	legacyName := matchedProfileName(comparison.Legacy)
 	enabledName := matchedProfileName(comparison.Enabled)
-	result := "same"
-	switch {
-	case comparison.Legacy.Profile != nil && comparison.Enabled.Profile == nil:
-		result = "legacy_only"
-	case comparison.Legacy.Profile == nil && comparison.Enabled.Profile != nil:
-		result = "enabled_only"
-	case comparison.Legacy.Profile != nil && comparison.Enabled.Profile != nil && legacyName != enabledName:
-		result = "different_profile"
-	case legacyName == enabledName && comparison.Legacy.Reason != comparison.Enabled.Reason:
-		result = "different_profile"
-	}
+	result := comparison.Result()
 	metrics.RecordCatalogMatchComparison(legacyName, enabledName, result)
 	if result != "same" {
 		s.logger.Warn(
@@ -1527,25 +1517,55 @@ func (s *Server) ensureRepositoryAllowsProfile(repositoryFullName string, profil
 }
 
 func (s *Server) recordAudit(actor, action, resourceType, resourceID string, payload any) {
+	event, err := auditEventFor(actor, action, resourceType, resourceID, payload)
+	if err == nil {
+		event, err = s.store.AppendAuditEvent(event)
+	}
+	if err != nil {
+		s.logger.Error("append audit event", "action", action, "resource_type", resourceType, "resource_id", resourceID, "error", err)
+		return
+	}
+	s.logger.Info("audit event recorded", "id", event.ID, "actor", actor, "action", action, "resource_type", resourceType, "resource_id", resourceID)
+}
+
+func (s *Server) applyMutationWithAudit(actor, action, resourceType, resourceID string, payload any, mutation func(state.Store) error) error {
+	event, err := auditEventFor(actor, action, resourceType, resourceID, payload)
+	if err != nil {
+		return fmt.Errorf("%w: %w", state.ErrAuditEventPersistence, err)
+	}
+	event, err = s.store.ApplyMutationWithAudit(event, mutation)
+	if err != nil {
+		return err
+	}
+	s.logger.Info("required mutation audit event recorded", "id", event.ID, "actor", actor, "action", action, "resource_type", resourceType, "resource_id", resourceID)
+	return nil
+}
+
+func auditEventFor(actor, action, resourceType, resourceID string, payload any) (state.AuditEvent, error) {
 	var payloadJSON string
 	if payload != nil {
-		if data, err := json.Marshal(payload); err == nil {
-			payloadJSON = string(data)
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return state.AuditEvent{}, fmt.Errorf("marshal audit payload: %w", err)
 		}
+		payloadJSON = string(data)
 	}
-	event, err := s.store.AppendAuditEvent(state.AuditEvent{
+	return state.AuditEvent{
 		Actor:        actor,
 		Action:       action,
 		ResourceType: resourceType,
 		ResourceID:   resourceID,
 		PayloadJSON:  payloadJSON,
 		CreatedAt:    time.Now().UTC(),
-	})
-	if err != nil {
-		s.logger.Error("append audit event", "action", action, "resource_type", resourceType, "resource_id", resourceID, "error", err)
-		return
+	}, nil
+}
+
+func writeMutationAuditError(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, state.ErrAuditEventPersistence) {
+		return false
 	}
-	s.logger.Info("audit event recorded", "id", event.ID, "actor", actor, "action", action, "resource_type", resourceType, "resource_id", resourceID)
+	writeError(w, http.StatusInternalServerError, "persist mutation audit: "+err.Error())
+	return true
 }
 
 func repositoryPatternMatches(pattern, repository string) bool {

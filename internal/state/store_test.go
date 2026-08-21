@@ -1,6 +1,7 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -3309,6 +3310,24 @@ func TestCompareProfileMatchesSQLBackends(t *testing.T) {
 			store = migrated
 			db = migratedDB
 			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+			windowEnd := time.Now().UTC().Add(time.Minute)
+			windowStart := windowEnd.Add(-time.Hour)
+			created, _, err := store.CreateRequest(RunnerRequest{
+				ID: "catalog-readiness-" + backend.name, Source: "webhook", JobID: 991,
+				RepositoryFullName: "owner/repo", RequestedLabels: []string{"policy-selected"},
+				Labels: []string{"policy-selected"}, ProfileName: "policy-selected",
+				CreatedAt: windowStart.Add(time.Minute),
+			}, nil)
+			if err != nil || !created {
+				t.Fatalf("create %s catalog readiness request: created=%v err=%v", backend.name, created, err)
+			}
+			readiness, err := store.CatalogMigrationReadiness(windowStart, windowEnd)
+			if err != nil {
+				t.Fatalf("%s catalog migration readiness: %v", backend.name, err)
+			}
+			if readiness.Replay.RequestCount != 1 || readiness.Replay.SameRequests != 1 || readiness.Replay.Truncated {
+				t.Fatalf("%s catalog migration replay = %#v", backend.name, readiness.Replay)
+			}
 			groups, err := store.ListRunnerGroups()
 			if err != nil || len(groups) != 1 || groups[0].Name != "policy-group" {
 				t.Fatalf("existing %s groups after migration = %#v, err=%v", backend.name, groups, err)
@@ -3343,6 +3362,90 @@ func TestCompareProfileMatchesSQLBackends(t *testing.T) {
 				}
 			}
 			assertProfileComparison(t, store, "owner/repo", []string{"policy-selected"}, "policy-selected")
+		})
+	}
+}
+
+func TestApplyMutationWithAuditSQLBackends(t *testing.T) {
+	if os.Getenv("RUNNERD_CATALOG_BACKEND_TESTS") != "1" {
+		t.Skip("set RUNNERD_CATALOG_BACKEND_TESTS=1 with dedicated Postgres and MySQL test databases")
+	}
+	for _, backend := range []struct {
+		name string
+		dsn  string
+	}{
+		{name: BackendPostgres, dsn: os.Getenv("RUNNERD_POSTGRES_TEST_DSN")},
+		{name: BackendMySQL, dsn: os.Getenv("RUNNERD_MYSQL_TEST_DSN")},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			if strings.TrimSpace(backend.dsn) == "" {
+				t.Fatalf("dedicated %s test DSN is required", backend.name)
+			}
+			setupStore := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: false,
+			}).(*DBStore)
+			setupDB, err := setupStore.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			requireCatalogMatcherTestDatabase(t, setupDB, backend.name)
+			resetSQLBackendTestTables(t, setupDB)
+			defer func() {
+				resetSQLBackendTestTables(t, setupDB)
+				closeTestDB(t, setupDB)
+			}()
+
+			store := NewWithOptions(Options{
+				Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: true,
+			}).(*DBStore)
+			if err := store.Ensure(); err != nil {
+				t.Fatalf("migrate %s state schema: %v", backend.name, err)
+			}
+			db, err := store.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer closeTestDB(t, db)
+			if _, err := store.UpsertProfile(RunnerProfile{
+				Name: "atomic-spec", Labels: []string{"self-hosted", "atomic"},
+				RequiredLabels: []string{"atomic"}, TemplateID: "atomic-template", Enabled: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			event, err := store.ApplyMutationWithAudit(AuditEvent{
+				Actor: "admin_api", Action: "runner_group.create", ResourceType: "runner_group", ResourceID: "atomic-group",
+			}, func(tx Store) error {
+				_, mutationErr := tx.UpsertRunnerGroup(RunnerGroup{
+					Name: "atomic-group", SpecNames: []string{"atomic-spec"}, Enabled: true,
+				})
+				return mutationErr
+			})
+			if err != nil || event.ID == 0 {
+				t.Fatalf("%s atomic group mutation: event=%#v err=%v", backend.name, event, err)
+			}
+			if _, err := store.GetRunnerGroup("atomic-group"); err != nil {
+				t.Fatalf("%s atomic group not committed: %v", backend.name, err)
+			}
+
+			if err := db.Migrator().DropTable(&auditEventRecord{}); err != nil {
+				t.Fatal(err)
+			}
+			_, err = store.ApplyMutationWithAudit(AuditEvent{
+				Actor: "admin_api", Action: "profile.create", ResourceType: "runner_profile", ResourceID: "rolled-back-spec",
+			}, func(tx Store) error {
+				_, mutationErr := tx.UpsertProfile(RunnerProfile{
+					Name: "rolled-back-spec", Labels: []string{"self-hosted", "rollback"},
+					RequiredLabels: []string{"rollback"}, TemplateID: "rollback-template", Enabled: true,
+				})
+				return mutationErr
+			})
+			if !errors.Is(err, ErrAuditEventPersistence) {
+				t.Fatalf("%s audit failure = %v", backend.name, err)
+			}
+			if _, err := store.GetProfile("rolled-back-spec"); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("%s mutation committed despite audit failure: %v", backend.name, err)
+			}
 		})
 	}
 }
@@ -4168,6 +4271,92 @@ func TestAuditEventsCanBeListed(t *testing.T) {
 	}
 }
 
+func TestApplyMutationWithAuditCommitsMutationAndAuditTogether(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	var saved RunnerProfile
+	event, err := store.ApplyMutationWithAudit(AuditEvent{
+		Actor: "admin_api", Action: "profile.create", ResourceType: "runner_profile", ResourceID: "atomic-profile",
+	}, func(tx Store) error {
+		var mutationErr error
+		saved, mutationErr = tx.UpsertProfile(RunnerProfile{
+			Name: "atomic-profile", Labels: []string{"self-hosted", "atomic"},
+			RequiredLabels: []string{"atomic"}, TemplateID: "atomic-template", Enabled: true,
+		})
+		return mutationErr
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.Name != "atomic-profile" || event.ID == 0 {
+		t.Fatalf("atomic mutation result: profile=%#v event=%#v", saved, event)
+	}
+	events, err := store.ListAuditEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0] != event {
+		t.Fatalf("audit events = %#v, want %#v", events, event)
+	}
+}
+
+func TestApplyMutationWithAuditDoesNotAuditRejectedMutation(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	_, err := store.ApplyMutationWithAudit(AuditEvent{
+		Actor: "admin_api", Action: "profile.create", ResourceType: "runner_profile", ResourceID: "invalid-profile",
+	}, func(tx Store) error {
+		_, mutationErr := tx.UpsertProfile(RunnerProfile{
+			Name: "invalid-profile", Labels: []string{"self-hosted"},
+			RequiredLabels: []string{"missing"}, TemplateID: "invalid-template", Enabled: true,
+		})
+		return mutationErr
+	})
+	if err == nil || !strings.Contains(err.Error(), "required labels must be a subset") {
+		t.Fatalf("rejected mutation error = %v", err)
+	}
+	if _, err := store.GetProfile("invalid-profile"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("rejected profile persisted: %v", err)
+	}
+	events, err := store.ListAuditEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("rejected mutation audit events = %#v", events)
+	}
+}
+
+func TestApplyMutationWithAuditRollsBackMutationWhenAuditFails(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TRIGGER fail_profile_mutation_audit
+		BEFORE INSERT ON audit_events
+		WHEN NEW.action = 'profile.create'
+		BEGIN
+			SELECT RAISE(ABORT, 'forced mutation audit failure');
+		END`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = store.ApplyMutationWithAudit(AuditEvent{
+		Actor: "admin_api", Action: "profile.create", ResourceType: "runner_profile", ResourceID: "rolled-back-profile",
+	}, func(tx Store) error {
+		_, mutationErr := tx.UpsertProfile(RunnerProfile{
+			Name: "rolled-back-profile", Labels: []string{"self-hosted", "rollback"},
+			RequiredLabels: []string{"rollback"}, TemplateID: "rollback-template", Enabled: true,
+		})
+		return mutationErr
+	})
+	if !errors.Is(err, ErrAuditEventPersistence) || !strings.Contains(err.Error(), "forced mutation audit failure") {
+		t.Fatalf("audit persistence error = %v", err)
+	}
+	if _, err := store.GetProfile("rolled-back-profile"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("profile committed despite audit failure: %v", err)
+	}
+}
+
 func TestRunnerStateDerivesGitHubJobLinkFromWorkflowJobPayload(t *testing.T) {
 	store := New(t.TempDir()).(*DBStore)
 	payload := []byte(`{
@@ -4919,4 +5108,436 @@ func TestMigrateSQLiteRunnerRequestSnapshot(t *testing.T) {
 		t.Fatalf("second migration changed runner request data: first=%#v second=%#v", afterFirstStart, afterSecondStart)
 	}
 	t.Logf("runner request migration counts: before=%#v after=%#v", before, afterSecondStart)
+}
+
+func TestProfileMatchComparisonResult(t *testing.T) {
+	profile := func(name string) *RunnerProfile { return &RunnerProfile{Name: name} }
+	tests := []struct {
+		name       string
+		comparison ProfileMatchComparison
+		want       string
+	}{
+		{
+			name: "same selected profile",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Profile: profile("shared")},
+				Enabled: ProfileMatch{Profile: profile("shared")},
+			},
+			want: "same",
+		},
+		{
+			name: "legacy only",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Profile: profile("legacy")},
+				Enabled: ProfileMatch{Reason: "profile_labels_not_matched"},
+			},
+			want: "legacy_only",
+		},
+		{
+			name: "enabled only",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Reason: "profile_not_allowed"},
+				Enabled: ProfileMatch{Profile: profile("enabled")},
+			},
+			want: "enabled_only",
+		},
+		{
+			name: "different selected profiles",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Profile: profile("legacy")},
+				Enabled: ProfileMatch{Profile: profile("enabled")},
+			},
+			want: "different_profile",
+		},
+		{
+			name: "different no match reasons",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Reason: "profile_not_allowed"},
+				Enabled: ProfileMatch{Reason: "profile_labels_not_matched"},
+			},
+			want: "different_profile",
+		},
+		{
+			name: "same no match reason",
+			comparison: ProfileMatchComparison{
+				Legacy:  ProfileMatch{Reason: "profile_labels_not_matched"},
+				Enabled: ProfileMatch{Reason: "profile_labels_not_matched"},
+			},
+			want: "same",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.comparison.Result(); got != tt.want {
+				t.Fatalf("Result() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCatalogMigrationReadinessReplaysPersistedRequestsAndLifecycleEvidence(t *testing.T) {
+	store := New(t.TempDir())
+	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	end := start.Add(72 * time.Hour)
+
+	profiles := []RunnerProfile{
+		{
+			Name: "default", Labels: []string{"self-hosted", "base"},
+			RequiredLabels: []string{"base"}, TemplateID: "default-template",
+			Priority: 10, Enabled: true, DefaultAvailable: true,
+		},
+		{
+			Name: "enabled-only", Labels: []string{"self-hosted", "extra"},
+			RequiredLabels: []string{"extra"}, TemplateID: "enabled-template",
+			Priority: 20, Enabled: true,
+		},
+		{
+			Name: "legacy", Labels: []string{"self-hosted", "overlap"},
+			RequiredLabels: []string{"overlap"}, TemplateID: "legacy-template",
+			Priority: 10, Enabled: true,
+		},
+		{
+			Name: "higher", Labels: []string{"self-hosted", "overlap"},
+			RequiredLabels: []string{"overlap"}, TemplateID: "higher-template",
+			Priority: 20, Enabled: true,
+		},
+	}
+	for _, profile := range profiles {
+		if _, err := store.UpsertProfile(profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
+		RepositoryFullName: "owner/repo", ProfileName: "legacy", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "same", jobID: 1, repository: "owner/repo", requestedLabels: []string{"base"},
+		profileName: "default", createdAt: start.Add(time.Hour), fullLifecycle: true,
+	})
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "enabled-only", jobID: 2, repository: "owner/other", requestedLabels: []string{"extra"},
+		profileName: "", createdAt: start.Add(2 * time.Hour),
+	})
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "different", jobID: 3, repository: "owner/repo", requestedLabels: []string{"overlap"},
+		profileName: "legacy", createdAt: start.Add(3 * time.Hour),
+	})
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "malformed", jobID: 4, repository: "owner/repo", requestedLabels: []string{"base"},
+		profileName: "default", createdAt: start.Add(4 * time.Hour),
+	})
+	db, err := store.(*DBStore).dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&runnerRequestRecord{}).Where("id = ?", "malformed").
+		Update("requested_labels_json", `{"unterminated"`).Error; err != nil {
+		t.Fatal(err)
+	}
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "end-exclusive", jobID: 5, repository: "owner/repo", requestedLabels: []string{"base"},
+		profileName: "default", createdAt: end,
+	})
+	if _, err := store.AppendAuditEvent(AuditEvent{
+		Actor: "admin_api", Action: "profile.update", ResourceType: "runner_profile",
+		ResourceID: "default", CreatedAt: start.Add(6 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendAuditEvent(AuditEvent{
+		Actor: "admin_api", Action: "runner.retry", ResourceType: "runner_request",
+		ResourceID: "same", CreatedAt: start.Add(7 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := store.CatalogMigrationReadiness(start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.WindowStart != start || report.WindowEnd != end {
+		t.Fatalf("window = %s..%s, want %s..%s", report.WindowStart, report.WindowEnd, start, end)
+	}
+	if got := report.Replay; got.RequestCount != 4 || got.DistinctInputCount != 4 ||
+		got.SameRequests != 1 || got.LegacyOnlyRequests != 0 || got.EnabledOnlyRequests != 1 ||
+		got.DifferentProfileRequests != 1 || got.ErrorRequests != 1 || got.Truncated {
+		t.Fatalf("replay summary = %#v", got)
+	}
+	if len(report.CatalogChanges) != 1 || report.CatalogChanges[0].Action != "profile.update" || report.CatalogChangesTruncated {
+		t.Fatalf("catalog changes = %#v truncated=%v", report.CatalogChanges, report.CatalogChangesTruncated)
+	}
+	if len(report.Specs) != 4 {
+		t.Fatalf("spec evidence count = %d, want 4", len(report.Specs))
+	}
+	defaultEvidence := catalogReadinessSpecByName(t, report.Specs, "default")
+	if !reflect.DeepEqual(defaultEvidence.WorkflowLabels, []string{"base"}) ||
+		defaultEvidence.RequestCount != 2 || defaultEvidence.RegisteredRequests != 1 ||
+		defaultEvidence.CompletedRequests != 1 || defaultEvidence.CleanupFinalizedRequests != 1 {
+		t.Fatalf("default lifecycle evidence = %#v", defaultEvidence)
+	}
+	if defaultEvidence.Latest == nil || defaultEvidence.Latest.RequestID != "same" ||
+		defaultEvidence.Latest.WorkflowJobID != 1 || defaultEvidence.Latest.GitHubJobURL != "https://github.example.test/jobs/1" {
+		t.Fatalf("latest lifecycle evidence = %#v", defaultEvidence.Latest)
+	}
+	if got := catalogReadinessSpecByName(t, report.Specs, "enabled-only"); got.CleanupFinalizedRequests != 0 || got.Latest != nil {
+		t.Fatalf("missing lifecycle evidence = %#v", got)
+	}
+	if len(report.ReplaySamples) != 3 {
+		t.Fatalf("replay samples = %#v, want enabled-only, different, and malformed", report.ReplaySamples)
+	}
+}
+
+func TestCatalogMigrationReadinessRejectsNullRequestedLabels(t *testing.T) {
+	store := New(t.TempDir())
+	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	end := start.Add(72 * time.Hour)
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "empty-label-profile", Labels: []string{"self-hosted"}, TemplateID: "empty-label-template",
+		Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
+		RepositoryFullName: "owner/repo", ProfileName: "empty-label-profile", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "null-labels", jobID: 1, repository: "owner/repo", createdAt: start.Add(time.Hour),
+	})
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "empty-labels", jobID: 2, repository: "owner/repo", createdAt: start.Add(2 * time.Hour),
+	})
+	db, err := store.(*DBStore).dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&runnerRequestRecord{}).Where("id = ?", "empty-labels").
+		Update("requested_labels_json", `[]`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := store.CatalogMigrationReadiness(start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Replay; got.RequestCount != 2 || got.DistinctInputCount != 2 ||
+		got.SameRequests != 1 || got.ErrorRequests != 1 {
+		t.Fatalf("replay summary = %#v, want one empty-array parity and one null-label error", got)
+	}
+	if len(report.ReplaySamples) != 1 || report.ReplaySamples[0].Result != "error" ||
+		!strings.Contains(report.ReplaySamples[0].Error, "JSON array") {
+		t.Fatalf("null-label replay sample = %#v", report.ReplaySamples)
+	}
+}
+
+func TestCatalogMigrationReadinessRequiresRegisteredRunnerForFullLifecycleEvidence(t *testing.T) {
+	store := New(t.TempDir())
+	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	end := start.Add(72 * time.Hour)
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "skipped", Labels: []string{"self-hosted", "skipped"},
+		RequiredLabels: []string{"skipped"}, TemplateID: "skipped-template",
+		Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "skipped-before-sandbox", jobID: 99, repository: "owner/repo",
+		requestedLabels: []string{"skipped"}, profileName: "skipped", createdAt: start.Add(time.Hour),
+	})
+	st, err := store.ReadState("skipped-before-sandbox")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Status = StatusCompleted
+	st.AssignedJobID = 99
+	st.AssignedJobName = "skipped-job"
+	st.CompletedAt = start.Add(2 * time.Hour)
+	if err := store.WriteState(st); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := store.CatalogMigrationReadiness(start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := catalogReadinessSpecByName(t, report.Specs, "skipped")
+	if evidence.RegisteredRequests != 0 || evidence.CompletedRequests != 0 ||
+		evidence.CleanupFinalizedRequests != 0 || evidence.Latest != nil {
+		t.Fatalf("skipped request counted as full lifecycle evidence: %#v", evidence)
+	}
+}
+
+func TestCatalogMigrationReadinessUsesAdvertisedLabelsWhenRequiredLabelsAreEmpty(t *testing.T) {
+	store := New(t.TempDir())
+	labels := []string{"self-hosted", "e2b", "custom-spec"}
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "custom-spec", Labels: labels, RequiredLabels: []string{},
+		TemplateID: "custom-template", Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	end := time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC)
+	report, err := store.CatalogMigrationReadiness(end.Add(-72*time.Hour), end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := catalogReadinessSpecByName(t, report.Specs, "custom-spec").WorkflowLabels; !reflect.DeepEqual(got, labels) {
+		t.Fatalf("workflow labels = %#v, want advertised labels %#v", got, labels)
+	}
+}
+
+func TestReconcileManagedProfilesRecordsCatalogMutationAudit(t *testing.T) {
+	store := New(t.TempDir())
+	profile := managedProfileForReconciliation("managed-audit", 1)
+	if conflicts, err := store.ReconcileManagedProfiles([]RunnerProfile{profile}); err != nil || len(conflicts) != 0 {
+		t.Fatalf("reconcile managed profile: conflicts=%#v err=%v", conflicts, err)
+	}
+	events, err := store.ListAuditEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Action != "profile.reconcile" || events[0].ResourceID != profile.Name {
+		t.Fatalf("managed reconciliation audit events = %#v", events)
+	}
+}
+
+func TestCatalogMigrationReadinessTruncatesBoundedEvidence(t *testing.T) {
+	store := New(t.TempDir())
+	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	end := start.Add(72 * time.Hour)
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "default", Labels: []string{"self-hosted", "base"},
+		RequiredLabels: []string{"base"}, TemplateID: "default-template",
+		Priority: 10, Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.(*DBStore).dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := make([]runnerRequestRecord, maxCatalogMigrationReplayInputs+1)
+	for i := range records {
+		records[i] = runnerRequestRecord{
+			ID: fmt.Sprintf("bounded-%04d", i), Source: "webhook",
+			RepositoryFullName:  fmt.Sprintf("owner/repo-%04d", i),
+			RequestedLabelsJSON: `["base"]`, LabelsJSON: `["base"]`,
+			RunnerName: fmt.Sprintf("runner-%04d", i), Status: string(StatusQueued),
+			QueuedAt: start.Add(time.Hour), UpdatedAt: start.Add(time.Hour),
+		}
+	}
+	if err := db.CreateInBatches(records, 100).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i <= maxCatalogMigrationChanges; i++ {
+		if _, err := store.AppendAuditEvent(AuditEvent{
+			Actor: "admin_api", Action: "profile.update", ResourceType: "runner_profile",
+			ResourceID: fmt.Sprintf("spec-%03d", i), CreatedAt: start.Add(2 * time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := store.CatalogMigrationReadiness(start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Replay.Truncated || report.Replay.RequestCount != maxCatalogMigrationReplayInputs+1 ||
+		report.Replay.DistinctInputCount != maxCatalogMigrationReplayInputs ||
+		report.Replay.SameRequests != maxCatalogMigrationReplayInputs {
+		t.Fatalf("bounded replay = %#v", report.Replay)
+	}
+	if !report.CatalogChangesTruncated || len(report.CatalogChanges) != maxCatalogMigrationChanges {
+		t.Fatalf("bounded catalog changes = %d truncated=%v", len(report.CatalogChanges), report.CatalogChangesTruncated)
+	}
+}
+
+func TestCatalogMigrationReadinessRejectsInvalidWindow(t *testing.T) {
+	store := New(t.TempDir())
+	now := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	if _, err := store.CatalogMigrationReadiness(now, now); err == nil {
+		t.Fatal("expected an invalid readiness window to fail")
+	}
+}
+
+func TestCatalogMigrationReadinessReturnsStableEmptyCollections(t *testing.T) {
+	store := New(t.TempDir())
+	end := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	report, err := store.CatalogMigrationReadiness(end.Add(-72*time.Hour), end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ReplaySamples == nil || report.Specs == nil || report.CatalogChanges == nil {
+		t.Fatalf("readiness collections must encode as arrays: %#v", report)
+	}
+	payload, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(payload, []byte(`"replay_samples":[]`)) {
+		t.Fatalf("readiness JSON does not contain a stable replay_samples array: %s", payload)
+	}
+}
+
+type catalogReadinessRequestFixture struct {
+	id              string
+	jobID           int64
+	repository      string
+	requestedLabels []string
+	profileName     string
+	createdAt       time.Time
+	fullLifecycle   bool
+}
+
+func createCatalogReadinessRequest(t *testing.T, store Store, fixture catalogReadinessRequestFixture) {
+	t.Helper()
+	created, st, err := store.CreateRequest(RunnerRequest{
+		ID: fixture.id, Source: "webhook", JobID: fixture.jobID,
+		RepositoryFullName: fixture.repository,
+		RequestedLabels:    append([]string(nil), fixture.requestedLabels...),
+		Labels:             append([]string(nil), fixture.requestedLabels...),
+		ProfileName:        fixture.profileName,
+		RunnerName:         "e2b-" + fixture.id,
+		CreatedAt:          fixture.createdAt,
+	}, nil)
+	if err != nil || !created {
+		t.Fatalf("create request %q: created=%v err=%v", fixture.id, created, err)
+	}
+	if !fixture.fullLifecycle {
+		return
+	}
+	st.Status = StatusCompleted
+	st.RunningAt = fixture.createdAt.Add(time.Minute)
+	st.AssignedJobID = fixture.jobID
+	st.AssignedJobName = "job-" + fixture.id
+	st.GitHubJobURL = fmt.Sprintf("https://github.example.test/jobs/%d", fixture.jobID)
+	st.CompletedAt = fixture.createdAt.Add(10 * time.Minute)
+	if err := store.WriteState(st); err != nil {
+		t.Fatalf("complete request %q: %v", fixture.id, err)
+	}
+	db, err := store.(*DBStore).dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&runnerRequestRecord{}).Where("id = ?", fixture.id).
+		Update("github_job_url", st.GitHubJobURL).Error; err != nil {
+		t.Fatalf("set github job URL for request %q: %v", fixture.id, err)
+	}
+}
+
+func catalogReadinessSpecByName(t *testing.T, specs []RunnerSpecLifecycleEvidence, name string) RunnerSpecLifecycleEvidence {
+	t.Helper()
+	for _, spec := range specs {
+		if spec.Name == name {
+			return spec
+		}
+	}
+	t.Fatalf("spec evidence %q not found in %#v", name, specs)
+	return RunnerSpecLifecycleEvidence{}
 }

@@ -3,9 +3,11 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"expvar"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -940,9 +942,15 @@ func TestNewIDGeneratesUniqueValues(t *testing.T) {
 	}
 }
 
-// ---------- handleDiagnosticsVars - no pprof endpoint discovered ----------
+// ---------- handleDiagnosticsVars ----------
 
-func TestDiagnosticsVarsReturns404WhenNoPprofEndpoint(t *testing.T) {
+func TestDiagnosticsVariablesUseCurrentProcessWithoutPprofDiscovery(t *testing.T) {
+	const variableName = "runnerd_diagnostics_current_process_test"
+	variable, ok := expvar.Get(variableName).(*expvar.String)
+	if !ok {
+		variable = expvar.NewString(variableName)
+	}
+	variable.Set("current-process")
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
 
@@ -950,9 +958,191 @@ func TestDiagnosticsVarsReturns404WhenNoPprofEndpoint(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
 
-	// Without a running pprof server, discoverPprofArtifacts() returns empty
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("GET /diagnostics/vars: expected 404 (no pprof), got %d body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /diagnostics/vars: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(rec.Body.Bytes(), &values); err != nil {
+		t.Fatalf("GET /diagnostics/vars returned invalid JSON: %v", err)
+	}
+	if got := string(values[variableName]); got != `"current-process"` {
+		t.Fatalf("GET /diagnostics/vars %s = %s", variableName, got)
+	}
+}
+
+type diagnosticsReadinessStore struct {
+	state.Store
+	report state.CatalogMigrationReadiness
+	start  time.Time
+	end    time.Time
+}
+
+type auditFailingStore struct {
+	state.Store
+}
+
+func (s *auditFailingStore) AppendAuditEvent(state.AuditEvent) (state.AuditEvent, error) {
+	return state.AuditEvent{}, errors.New("audit unavailable")
+}
+
+func (s *auditFailingStore) ApplyMutationWithAudit(state.AuditEvent, func(state.Store) error) (state.AuditEvent, error) {
+	return state.AuditEvent{}, fmt.Errorf("%w: audit unavailable", state.ErrAuditEventPersistence)
+}
+
+func TestRejectedCatalogMutationDoesNotPersistAudit(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	before, err := store.ListAuditEvents(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := adminRequest(http.MethodPost, "/runner_specs", strings.NewReader(`{
+		"name":"rejected-audit",
+		"labels":["self-hosted"],
+		"required_labels":["missing"],
+		"template_id":"audit-template"
+	}`))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST invalid profile: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	after, err := store.ListAuditEvents(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("rejected profile mutation persisted an audit event: before=%d after=%d latest=%#v", len(before), len(after), after[0])
+	}
+}
+
+func TestCatalogMutationFailsClosedWhenAuditCannotBePersisted(t *testing.T) {
+	baseStore := state.New(t.TempDir())
+	if _, err := baseStore.UpsertProfile(state.RunnerProfile{
+		Name: "audit-protected", Labels: []string{"self-hosted", "audit-protected"},
+		RequiredLabels: []string{"audit-protected"}, TemplateID: "audit-template",
+		MaxConcurrency: 1, Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, &auditFailingStore{Store: baseStore}, "http://example.test", &fakeSandbox{})
+	req := adminRequest(http.MethodPatch, "/runner_specs/audit-protected", strings.NewReader(`{"enabled":false}`))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("PATCH profile with unavailable audit: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	profile, err := baseStore.GetProfile("audit-protected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !profile.Enabled {
+		t.Fatal("profile mutation committed even though its audit event could not be persisted")
+	}
+}
+
+func TestSandboxMutationFailsClosedWhenAuditCannotBePersisted(t *testing.T) {
+	baseStore := state.New(t.TempDir())
+	srv := newTestServer(t, &auditFailingStore{Store: baseStore}, "http://example.test", &fakeSandbox{})
+	req := adminRequest(
+		http.MethodPut,
+		"/admin/api/sandbox-service-default",
+		strings.NewReader(`{"enabled":false,"api_url":"https://sandbox.example.test"}`),
+	)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("PUT Sandbox default with unavailable audit: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := baseStore.GetSandboxServiceDefault(); !errors.Is(err, state.ErrNotFound) {
+		t.Fatalf("Sandbox default mutation committed even though its audit event could not be persisted: %v", err)
+	}
+}
+
+func (s *diagnosticsReadinessStore) CatalogMigrationReadiness(start, end time.Time) (state.CatalogMigrationReadiness, error) {
+	s.start = start
+	s.end = end
+	s.report.WindowStart = start
+	s.report.WindowEnd = end
+	return s.report, nil
+}
+
+func TestDiagnosticsCatalogMigrationReadinessReturnsAutomatedAndManualGates(t *testing.T) {
+	baseStore := state.New(t.TempDir())
+	store := &diagnosticsReadinessStore{
+		Store: baseStore,
+		report: state.CatalogMigrationReadiness{
+			Replay: state.CatalogMatchReplaySummary{RequestCount: 12, DistinctInputCount: 3, SameRequests: 12},
+			Specs: []state.RunnerSpecLifecycleEvidence{
+				{Name: "qiniu-ubuntu-24.04", WorkflowLabels: []string{"qiniu", "ubuntu-24.04"}, CleanupFinalizedRequests: 1},
+			},
+		},
+	}
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+
+	req := adminRequest(http.MethodGet, "/diagnostics/catalog-migration-readiness?window_hours=72", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET readiness: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := store.end.Sub(store.start); got != 72*time.Hour {
+		t.Fatalf("readiness window = %s, want 72h", got)
+	}
+	var response struct {
+		AutomatedGatesPassed bool `json:"automated_gates_passed"`
+		Gates                []struct {
+			Code   string `json:"code"`
+			Passed bool   `json:"passed"`
+		} `json:"gates"`
+		ManualRequirements []string `json:"manual_requirements"`
+		CurrentProcess     struct {
+			StartedAt          time.Time        `json:"started_at"`
+			CatalogMatchCounts map[string]int64 `json:"catalog_match_counts"`
+		} `json:"current_process"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.AutomatedGatesPassed {
+		t.Fatalf("automated gates did not pass: %#v", response.Gates)
+	}
+	wantGateCodes := []string{"window_at_least_72_hours", "catalog_unchanged", "matcher_parity", "all_enabled_specs_full_lifecycle"}
+	if len(response.Gates) != len(wantGateCodes) {
+		t.Fatalf("gates = %#v", response.Gates)
+	}
+	for i, want := range wantGateCodes {
+		if response.Gates[i].Code != want || !response.Gates[i].Passed {
+			t.Fatalf("gate %d = %#v, want %q passed", i, response.Gates[i], want)
+		}
+	}
+	wantManual := []string{"backup_restore_verified", "continuous_service_observation", "workflow_labels_unchanged"}
+	if !reflect.DeepEqual(response.ManualRequirements, wantManual) {
+		t.Fatalf("manual requirements = %#v, want %#v", response.ManualRequirements, wantManual)
+	}
+	if response.CurrentProcess.StartedAt.IsZero() || response.CurrentProcess.CatalogMatchCounts == nil {
+		t.Fatalf("current process evidence = %#v", response.CurrentProcess)
+	}
+}
+
+func TestDiagnosticsCatalogMigrationReadinessRejectsInvalidWindowsAndRequiresAdmin(t *testing.T) {
+	store := &diagnosticsReadinessStore{Store: state.New(t.TempDir())}
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	for _, value := range []string{"0", "721", "invalid"} {
+		t.Run(value, func(t *testing.T) {
+			req := adminRequest(http.MethodGet, "/diagnostics/catalog-migration-readiness?window_hours="+value, nil)
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("window_hours=%s: status=%d body=%s", value, rec.Code, rec.Body.String())
+			}
+		})
+	}
+	req := httptest.NewRequest(http.MethodGet, "/diagnostics/catalog-migration-readiness", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated readiness status=%d", rec.Code)
 	}
 }
 

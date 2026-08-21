@@ -215,7 +215,7 @@ label 组合，不包含 provider template ID、credential、endpoint，也不�
 
 | 路由                     | 说明                           |
 | ------------------------ | ------------------------------ |
-| `/admin/`                | 仪表盘：诊断、指标、最近失败   |
+| `/admin/`                | 仪表盘：诊断、指标、最近失败与 Release A 持久化迁移证据 |
 | `/admin/accounts`        | 账户管理：列表、搜索、角色变更 |
 | `/admin/sandbox_service` | Sandbox 服务配置               |
 

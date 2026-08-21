@@ -225,12 +225,12 @@ git commit -m "feat(runner): shadow policy-free spec matching"
 ### Task 3: Deploy Release A and prove live equivalence
 
 **Files:**
-- No repository file changes.
+- Admin Diagnostics contains the read-only observation UI and API added after Release A.
 - Read-only production database export and deployment logs are external evidence and must not be committed.
 
 **Interfaces:**
-- Consumes: `e2b_runner_catalog_match_migration_total` and structured comparison logs.
-- Produces: a signed-off migration evidence record containing database backup identity, catalog snapshot, traffic window, and comparison counts.
+- Consumes: Admin Diagnostics historical replay, per-Spec lifecycle evidence, current-process `e2b_runner_catalog_match_migration_total`, and the manual operator checks below.
+- Produces: a signed-off migration evidence record containing database backup identity, catalog snapshot, traffic window, historical comparison counts, and all enabled-Spec lifecycle evidence.
 
 - [ ] **Step 1: Export the production database before deployment**
 
@@ -284,7 +284,7 @@ Do not edit Specs, Group, Policies, Sandbox Service, or workflows during the obs
 
 - [ ] **Step 4: Observe at least 72 hours and cover every distinct production label family**
 
-The gate is not time alone. The window must include successful jobs for all five managed labels and all five custom labels. Use existing workflows or disposable test PRs with unchanged production label syntax.
+The gate is not time alone. Open Admin Diagnostics and select the 72-hour (or longer) Release A readiness window. Every enabled production Spec must show at least one registered, completed, and cleanup-finalized request. The current production catalog should therefore expose rows for all five managed labels and all five custom labels. Use existing workflows or disposable test PRs with unchanged production label syntax; do not edit Runner Specs, Groups, Policies, Sandbox Service, or `runs-on` labels to manufacture evidence.
 
 - [ ] **Step 5: Require strict parity before cutover**
 
@@ -298,7 +298,9 @@ successful runner registration exists for every production label family
 no increase in admission, profile_lookup, template_resolution, or sandbox_create failures
 ```
 
-`enabled_only` is expected only for installations that previously had non-default specs not covered by a Policy. It broadens availability but does not break an existing workflow. Current production should also have `enabled_only = 0` because every spec is already default-available.
+Use the historical replay counts in Admin Diagnostics as the durable source across restarts. Require `same = request_count`, with `legacy_only = 0`, `enabled_only = 0`, `different_profile = 0`, `errors = 0`, and `truncated = false`. Current-process counters are supplemental only.
+
+`enabled_only` is expected only for installations that previously had non-default specs not covered by a Policy. It broadens availability but does not break an existing workflow. Current production should also have `enabled_only = 0` because every spec is already default-available. The automated panel does not replace the manual backup/restore, continuous-service, and unchanged-workflow-label sign-offs.
 
 - [ ] **Step 6: Stop the rollout if parity fails**
 
