@@ -111,7 +111,8 @@ Check:
 - pprof discovery files and dump scripts are visible when the local pprof service is available.
 - Recent failure summaries are empty or understood.
 - The Release A readiness panel reports a window of at least 72 hours, no replay truncation or malformed inputs, strict legacy/enabled-Spec parity, and registration/completion/cleanup evidence for every enabled Spec.
-- Every expected production label family appears as an enabled Spec row. Missing traffic remains visibly blocked; generate a normal workflow job with the existing `runs-on` labels rather than editing catalog data to manufacture evidence.
+- Every expected production label family appears as an enabled Spec row. Expand **Inspect attempts** for a blocked Spec before taking action: an empty list means no request matched that Spec in the selected window, while a request without registration evidence exposes its persisted status, failure stage/reason, labels, timestamps, and GitHub Job link when available. The list is deliberately limited to the five newest attempts and excludes credentials, webhook payloads, logs, and raw internal error fields.
+- Preserve the existing workflow `runs-on` labels. Only after the displayed failure has been understood should an operator generate a normal controlled workflow job; do not edit Catalog or Sandbox data to manufacture lifecycle evidence.
 - Catalog/Sandbox changes remain frozen during the selected window. A readiness-relevant mutation must commit its data change and audit event atomically: rejected mutations leave no audit evidence, and audit persistence failures leave the target unchanged. Separately record the backup/restore check, continuous-service observation, and unchanged-workflow-label sign-offs; automated green status alone is not Release B authorization.
 
 ## 3. Runner Catalog

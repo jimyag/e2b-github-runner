@@ -1074,7 +1074,14 @@ func TestDiagnosticsCatalogMigrationReadinessReturnsAutomatedAndManualGates(t *t
 		report: state.CatalogMigrationReadiness{
 			Replay: state.CatalogMatchReplaySummary{RequestCount: 12, DistinctInputCount: 3, SameRequests: 12},
 			Specs: []state.RunnerSpecLifecycleEvidence{
-				{Name: "qiniu-ubuntu-24.04", WorkflowLabels: []string{"qiniu", "ubuntu-24.04"}, CleanupFinalizedRequests: 1},
+				{
+					Name: "qiniu-ubuntu-24.04", WorkflowLabels: []string{"qiniu", "ubuntu-24.04"}, CleanupFinalizedRequests: 1,
+					RecentAttempts: []state.RunnerSpecLifecycleAttempt{{
+						RequestID: "attempt-24", RepositoryFullName: "owner/repo", Status: state.StatusFailed,
+						FailureStage: "sandbox_create", FailureReason: "sandbox_capacity", QueuedAt: time.Date(2026, 8, 20, 1, 0, 0, 0, time.UTC),
+					}},
+				},
+				{Name: "qiniu-ubuntu-slim", WorkflowLabels: []string{"qiniu", "ubuntu-slim"}, CleanupFinalizedRequests: 1, RecentAttempts: []state.RunnerSpecLifecycleAttempt{}},
 			},
 		},
 	}
@@ -1095,7 +1102,8 @@ func TestDiagnosticsCatalogMigrationReadinessReturnsAutomatedAndManualGates(t *t
 			Code   string `json:"code"`
 			Passed bool   `json:"passed"`
 		} `json:"gates"`
-		ManualRequirements []string `json:"manual_requirements"`
+		ManualRequirements []string                            `json:"manual_requirements"`
+		Specs              []state.RunnerSpecLifecycleEvidence `json:"specs"`
 		CurrentProcess     struct {
 			StartedAt          time.Time        `json:"started_at"`
 			CatalogMatchCounts map[string]int64 `json:"catalog_match_counts"`
@@ -1119,6 +1127,17 @@ func TestDiagnosticsCatalogMigrationReadinessReturnsAutomatedAndManualGates(t *t
 	wantManual := []string{"backup_restore_verified", "continuous_service_observation", "workflow_labels_unchanged"}
 	if !reflect.DeepEqual(response.ManualRequirements, wantManual) {
 		t.Fatalf("manual requirements = %#v, want %#v", response.ManualRequirements, wantManual)
+	}
+	if len(response.Specs) != 2 || len(response.Specs[0].RecentAttempts) != 1 {
+		t.Fatalf("spec attempt evidence = %#v", response.Specs)
+	}
+	attempt := response.Specs[0].RecentAttempts[0]
+	if attempt.RequestID != "attempt-24" || attempt.Status != state.StatusFailed ||
+		attempt.FailureStage != "sandbox_create" || attempt.FailureReason != "sandbox_capacity" {
+		t.Fatalf("serialized attempt evidence = %#v", attempt)
+	}
+	if response.Specs[1].RecentAttempts == nil {
+		t.Fatalf("empty recent attempt evidence must remain an array: %#v", response.Specs[1])
 	}
 	if response.CurrentProcess.StartedAt.IsZero() || response.CurrentProcess.CatalogMatchCounts == nil {
 		t.Fatalf("current process evidence = %#v", response.CurrentProcess)

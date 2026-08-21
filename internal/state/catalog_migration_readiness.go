@@ -14,7 +14,27 @@ const (
 	maxCatalogMigrationReplayInputs  = 5000
 	maxCatalogMigrationReplaySamples = 20
 	maxCatalogMigrationChanges       = 100
+	maxCatalogMigrationAttempts      = 5
 )
+
+var catalogMigrationAttemptSelectColumns = []string{
+	"id",
+	"workflow_job_id",
+	"workflow_run_id",
+	"github_job_url",
+	"pull_request_number",
+	"github_context_backfilled",
+	"repository_full_name",
+	"requested_labels_json",
+	"status",
+	"failure_stage",
+	"failure_reason",
+	"assigned_job_id",
+	"assigned_job_name",
+	"queued_at",
+	"running_at",
+	"completed_at",
+}
 
 type catalogMigrationReplayInput struct {
 	RepositoryFullName  string                    `gorm:"column:repository_full_name"`
@@ -247,7 +267,13 @@ func populateCatalogMigrationLifecycle(
 			RegisteredRequests:       aggregate.RegisteredRequests,
 			CompletedRequests:        aggregate.CompletedRequests,
 			CleanupFinalizedRequests: aggregate.CleanupFinalizedRequests,
+			RecentAttempts:           []RunnerSpecLifecycleAttempt{},
 		}
+		recentAttempts, err := recentCatalogMigrationLifecycleAttempts(tx, profile.Name, start, end)
+		if err != nil {
+			return err
+		}
+		evidence.RecentAttempts = recentAttempts
 		if aggregate.CleanupFinalizedRequests > 0 {
 			latest, err := latestCatalogMigrationLifecycleExample(tx, profile.Name, start, end)
 			if err != nil {
@@ -258,6 +284,56 @@ func populateCatalogMigrationLifecycle(
 		report.Specs = append(report.Specs, evidence)
 	}
 	return nil
+}
+
+func recentCatalogMigrationLifecycleAttempts(
+	tx *gorm.DB,
+	profileName string,
+	start, end time.Time,
+) ([]RunnerSpecLifecycleAttempt, error) {
+	var records []runnerRequestRecord
+	if err := tx.Select(catalogMigrationAttemptSelectColumns).
+		Where("queued_at >= ? AND queued_at < ?", start, end).
+		Where("profile_name = ?", profileName).
+		Order("queued_at DESC, id ASC").
+		Limit(maxCatalogMigrationAttempts).
+		Find(&records).Error; err != nil {
+		return nil, err
+	}
+	attempts := make([]RunnerSpecLifecycleAttempt, 0, len(records))
+	for _, record := range records {
+		requestedLabels, _ := labelsFromJSON(record.RequestedLabelsJSON)
+		githubLinks := githubLinksFromRecord(record)
+		attempts = append(attempts, RunnerSpecLifecycleAttempt{
+			RequestID:          record.ID,
+			RepositoryFullName: record.RepositoryFullName,
+			Status:             record.Status,
+			WorkflowJobID:      pointerToInt64(record.WorkflowJobID),
+			GitHubJobURL:       githubLinks.jobURL,
+			RequestedLabels:    append([]string{}, requestedLabels...),
+			FailureStage:       record.FailureStage,
+			FailureReason:      record.FailureReason,
+			QueuedAt:           record.QueuedAt,
+			RegisteredAt:       catalogMigrationRegistrationTime(record),
+			CompletedAt:        catalogMigrationOptionalTime(record.CompletedAt),
+		})
+	}
+	return attempts, nil
+}
+
+func catalogMigrationRegistrationTime(record runnerRequestRecord) *time.Time {
+	if record.AssignedJobID == 0 && record.AssignedJobName == "" {
+		return nil
+	}
+	return catalogMigrationOptionalTime(record.RunningAt)
+}
+
+func catalogMigrationOptionalTime(value *time.Time) *time.Time {
+	if value == nil || value.IsZero() {
+		return nil
+	}
+	timestamp := value.UTC()
+	return &timestamp
 }
 
 func latestCatalogMigrationLifecycleExample(

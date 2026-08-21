@@ -116,6 +116,13 @@ test("renders durable Release A evidence in Admin Diagnostics", async ({ page })
     "href",
     "https://github.com/qiniu/ci-runner/actions/runs/1/job/42",
   )
+  await readiness.getByRole("button", { name: "Inspect attempts for qiniu-ubuntu-24.04" }).click()
+  await expect(readiness.getByText("fixture/repository-failed", { exact: true })).toBeVisible()
+  await expect(readiness.getByText("sandbox_create · sandbox_capacity", { exact: true })).toBeVisible()
+  await expect(readiness.getByRole("link", { name: "fixture-attempt" })).toHaveAttribute(
+    "href",
+    "https://github.com/fixture/repository-failed/actions/runs/2/job/84",
+  )
   await page.waitForTimeout(postRenderObservationMs)
   diagnostics.expectClean()
 })
@@ -357,6 +364,17 @@ function readinessFixture(): CatalogMigrationReadiness {
         completed_at: "2026-08-19T00:10:00Z",
         cleanup_finalized_at: "2026-08-19T00:10:00Z",
       },
+      recent_attempts: [{
+        request_id: "fixture-attempt",
+        repository_full_name: "fixture/repository-failed",
+        status: "failed",
+        workflow_job_id: 84,
+        github_job_url: "https://github.com/fixture/repository-failed/actions/runs/2/job/84",
+        requested_labels: ["qiniu", "ubuntu-24.04"],
+        failure_stage: "sandbox_create",
+        failure_reason: "sandbox_capacity",
+        queued_at: "2026-08-19T02:00:00Z",
+      }],
     }],
     catalog_changes: [],
     catalog_changes_truncated: false,

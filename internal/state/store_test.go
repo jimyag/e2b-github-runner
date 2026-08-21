@@ -2013,6 +2013,46 @@ func TestRunnerRequestListIndexSupportsNewestPageOrder(t *testing.T) {
 	}
 }
 
+func TestRunnerRequestProfileListIndexSupportsNewestPageOrder(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const indexName = "idx_runner_requests_profile_queued_id"
+	if !db.Migrator().HasIndex(&runnerRequestRecord{}, indexName) {
+		t.Fatalf("expected runner request profile ordering index %s", indexName)
+	}
+
+	var plan []struct {
+		Detail string `gorm:"column:detail"`
+	}
+	if err := db.Raw(`
+		EXPLAIN QUERY PLAN
+		SELECT id, queued_at
+		FROM runner_requests
+		WHERE profile_name = ?
+		  AND queued_at >= ?
+		  AND queued_at < ?
+		ORDER BY queued_at DESC, id ASC
+		LIMIT 5
+	`, "github-runner-ubuntu-24-04", time.Now().Add(-30*24*time.Hour), time.Now()).Scan(&plan).Error; err != nil {
+		t.Fatal(err)
+	}
+	var details []string
+	for _, step := range plan {
+		details = append(details, step.Detail)
+	}
+	joined := strings.Join(details, "\n")
+	if !strings.Contains(joined, indexName) {
+		t.Fatalf("expected profile list query to use ordering index, plan:\n%s", joined)
+	}
+	if strings.Contains(joined, "USE TEMP B-TREE FOR ORDER BY") {
+		t.Fatalf("profile list query still sorts through a temporary B-tree, plan:\n%s", joined)
+	}
+}
+
 func TestRunnerRequestAuthorizedListIndexSupportsNewestPageOrder(t *testing.T) {
 	store := New(t.TempDir()).(*DBStore)
 	db, err := store.dbOrEnsure()
@@ -3327,6 +3367,10 @@ func TestCompareProfileMatchesSQLBackends(t *testing.T) {
 			}
 			if readiness.Replay.RequestCount != 1 || readiness.Replay.SameRequests != 1 || readiness.Replay.Truncated {
 				t.Fatalf("%s catalog migration replay = %#v", backend.name, readiness.Replay)
+			}
+			evidence := catalogReadinessSpecByName(t, readiness.Specs, "policy-selected")
+			if len(evidence.RecentAttempts) != 1 || evidence.RecentAttempts[0].RequestID != "catalog-readiness-"+backend.name {
+				t.Fatalf("%s catalog migration recent attempts = %#v", backend.name, evidence.RecentAttempts)
 			}
 			groups, err := store.ListRunnerGroups()
 			if err != nil || len(groups) != 1 || groups[0].Name != "policy-group" {
@@ -4725,6 +4769,7 @@ func TestMigratePreservesAdditiveRunnerRequestColumns(t *testing.T) {
 	for _, indexName := range []string{
 		"idx_runner_requests_queued_id",
 		"idx_runner_requests_github_installation_queued_id",
+		"idx_runner_requests_profile_queued_id",
 	} {
 		if !db.Migrator().HasIndex(&runnerRequestRecord{}, indexName) {
 			t.Fatalf("expected runner request list ordering index %s after additive migration", indexName)
@@ -5373,6 +5418,162 @@ func TestCatalogMigrationReadinessRequiresRegisteredRunnerForFullLifecycleEviden
 	}
 }
 
+func TestCatalogMigrationReadinessIncludesBoundedRecentAttempts(t *testing.T) {
+	store := New(t.TempDir())
+	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	end := start.Add(72 * time.Hour)
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "diagnostic", Labels: []string{"self-hosted", "diagnostic"},
+		RequiredLabels: []string{"diagnostic"}, TemplateID: "diagnostic-template",
+		Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "before-window", jobID: 90, repository: "owner/before",
+		requestedLabels: []string{"diagnostic"}, profileName: "diagnostic", createdAt: start.Add(-time.Second),
+	})
+	for i := 0; i < 6; i++ {
+		createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+			id: fmt.Sprintf("attempt-%d", i), jobID: int64(100 + i), repository: fmt.Sprintf("owner/repo-%d", i),
+			requestedLabels: []string{"diagnostic", fmt.Sprintf("variant-%d", i)},
+			profileName:     "diagnostic", createdAt: start.Add(time.Duration(i+1) * time.Hour),
+		})
+	}
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "end-exclusive-attempt", jobID: 200, repository: "owner/end",
+		requestedLabels: []string{"diagnostic"}, profileName: "diagnostic", createdAt: end,
+	})
+
+	latest, err := store.ReadState("attempt-5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest.Status = StatusFailed
+	latest.FailureStage = "sandbox_create"
+	latest.FailureReason = "sandbox_capacity"
+	latest.GitHubJobURL = "https://github.example.test/jobs/105"
+	latest.FailedAt = start.Add(6*time.Hour + time.Minute)
+	latest.UpdatedAt = latest.FailedAt
+	if err := store.WriteState(latest); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.(*DBStore).dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&runnerRequestRecord{}).Where("id = ?", latest.ID).
+		Updates(map[string]any{
+			"github_job_url":      latest.GitHubJobURL,
+			"pull_request_number": 123,
+		}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := store.CatalogMigrationReadiness(start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := catalogReadinessSpecByName(t, report.Specs, "diagnostic").RecentAttempts
+	wantIDs := []string{"attempt-5", "attempt-4", "attempt-3", "attempt-2", "attempt-1"}
+	if got := len(attempts); got != len(wantIDs) {
+		t.Fatalf("recent attempt count = %d, want %d: %#v", got, len(wantIDs), attempts)
+	}
+	for i, wantID := range wantIDs {
+		if attempts[i].RequestID != wantID {
+			t.Fatalf("recent attempt %d = %q, want %q", i, attempts[i].RequestID, wantID)
+		}
+	}
+	got := attempts[0]
+	if got.RepositoryFullName != "owner/repo-5" || got.Status != StatusFailed ||
+		got.WorkflowJobID != 105 || got.GitHubJobURL != "https://github.example.test/jobs/105?pr=123" ||
+		!reflect.DeepEqual(got.RequestedLabels, []string{"diagnostic", "variant-5"}) ||
+		got.FailureStage != "sandbox_create" || got.FailureReason != "sandbox_capacity" ||
+		got.QueuedAt != start.Add(6*time.Hour) || got.RegisteredAt != nil || got.CompletedAt != nil {
+		t.Fatalf("latest diagnostic attempt = %#v", got)
+	}
+}
+
+func TestCatalogMigrationReadinessRecentAttemptsKeepRequestedLabelsAsArray(t *testing.T) {
+	store := New(t.TempDir())
+	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	end := start.Add(72 * time.Hour)
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "malformed-labels", Labels: []string{"self-hosted", "malformed-labels"},
+		RequiredLabels: []string{"malformed-labels"}, TemplateID: "malformed-labels-template",
+		Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+		id: "null-label-attempt", jobID: 300, repository: "owner/repo",
+		profileName: "malformed-labels", createdAt: start.Add(time.Hour),
+	})
+
+	report, err := store.CatalogMigrationReadiness(start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := catalogReadinessSpecByName(t, report.Specs, "malformed-labels").RecentAttempts
+	if len(attempts) != 1 || attempts[0].RequestedLabels == nil || len(attempts[0].RequestedLabels) != 0 {
+		t.Fatalf("requested labels must remain an empty array: %#v", attempts)
+	}
+	payload, err := json.Marshal(attempts[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(payload, []byte(`"requested_labels":[]`)) {
+		t.Fatalf("attempt JSON does not contain a stable requested_labels array: %s", payload)
+	}
+}
+
+func TestCatalogMigrationReadinessRecentAttemptsUseRegistrationEvidencePredicate(t *testing.T) {
+	store := New(t.TempDir())
+	start := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	end := start.Add(72 * time.Hour)
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "registration", Labels: []string{"self-hosted", "registration"},
+		RequiredLabels: []string{"registration"}, TemplateID: "registration-template",
+		Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for index, id := range []string{"runner-process-only", "job-accepted"} {
+		createCatalogReadinessRequest(t, store, catalogReadinessRequestFixture{
+			id: id, jobID: int64(400 + index), repository: "owner/repo",
+			requestedLabels: []string{"registration"}, profileName: "registration",
+			createdAt: start.Add(time.Duration(index+1) * time.Hour),
+		})
+		st, err := store.ReadState(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Status = StatusRunning
+		if id == "job-accepted" {
+			st.AssignedJobName = "accepted-job"
+		}
+		if err := store.WriteState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	report, err := store.CatalogMigrationReadiness(start, end)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := catalogReadinessSpecByName(t, report.Specs, "registration")
+	if evidence.RegisteredRequests != 1 || len(evidence.RecentAttempts) != 2 {
+		t.Fatalf("registration evidence = %#v", evidence)
+	}
+	if evidence.RecentAttempts[0].RequestID != "job-accepted" || evidence.RecentAttempts[0].RegisteredAt == nil {
+		t.Fatalf("accepted job must retain registration time: %#v", evidence.RecentAttempts[0])
+	}
+	if evidence.RecentAttempts[1].RequestID != "runner-process-only" || evidence.RecentAttempts[1].RegisteredAt != nil {
+		t.Fatalf("runner process without job evidence must not appear registered: %#v", evidence.RecentAttempts[1])
+	}
+}
+
 func TestCatalogMigrationReadinessUsesAdvertisedLabelsWhenRequiredLabelsAreEmpty(t *testing.T) {
 	store := New(t.TempDir())
 	labels := []string{"self-hosted", "e2b", "custom-spec"}
@@ -5469,6 +5670,13 @@ func TestCatalogMigrationReadinessRejectsInvalidWindow(t *testing.T) {
 func TestCatalogMigrationReadinessReturnsStableEmptyCollections(t *testing.T) {
 	store := New(t.TempDir())
 	end := time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC)
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name: "no-attempts", Labels: []string{"self-hosted", "no-attempts"},
+		RequiredLabels: []string{"no-attempts"}, TemplateID: "no-attempts-template",
+		Enabled: true, DefaultAvailable: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	report, err := store.CatalogMigrationReadiness(end.Add(-72*time.Hour), end)
 	if err != nil {
 		t.Fatal(err)
@@ -5482,6 +5690,9 @@ func TestCatalogMigrationReadinessReturnsStableEmptyCollections(t *testing.T) {
 	}
 	if !bytes.Contains(payload, []byte(`"replay_samples":[]`)) {
 		t.Fatalf("readiness JSON does not contain a stable replay_samples array: %s", payload)
+	}
+	if !bytes.Contains(payload, []byte(`"recent_attempts":[]`)) {
+		t.Fatalf("readiness JSON does not contain a stable recent_attempts array: %s", payload)
 	}
 }
 

@@ -77,6 +77,17 @@ function readinessFixture(specName = "qiniu-ubuntu-24.04") {
         completed_at: "2026-08-19T01:10:00Z",
         cleanup_finalized_at: "2026-08-19T01:10:00Z",
       },
+      recent_attempts: [{
+        request_id: "attempt-24",
+        repository_full_name: "owner/failing-repo",
+        status: "failed",
+        workflow_job_id: 84,
+        github_job_url: "https://github.com/owner/failing-repo/actions/runs/2/job/84",
+        requested_labels: ["qiniu", "ubuntu-24.04"],
+        failure_stage: "sandbox_create",
+        failure_reason: "sandbox_capacity",
+        queued_at: "2026-08-19T02:00:00Z",
+      }],
     }],
     catalog_changes: [],
     catalog_changes_truncated: false,
@@ -179,6 +190,75 @@ describe("ReleaseReadinessSection", () => {
       "/diagnostics/catalog-migration-readiness?window_hours=72",
       "/diagnostics/catalog-migration-readiness?window_hours=168",
     ])
+  })
+
+  test("expands recent request attempts with failure context and safe job evidence", async () => {
+    const { container } = await mountReadiness(async () => readinessFixture())
+    await settle()
+
+    await click(button(container, "Inspect attempts"))
+
+    expect(container.textContent).toContain("owner/failing-repo")
+    expect(container.textContent).toContain("attempt-24")
+    expect(container.textContent).toContain("Failed")
+    expect(container.textContent).toContain("sandbox_create")
+    expect(container.textContent).toContain("sandbox_capacity")
+    expect(container.textContent).toContain("qiniu, ubuntu-24.04")
+    expect(container.querySelector('a[href="https://github.com/owner/failing-repo/actions/runs/2/job/84"]')).not.toBeNull()
+  })
+
+  test("distinguishes a no-traffic Spec from failed recent attempts", async () => {
+    const fixture = readinessFixture("qiniu-ubuntu-slim")
+    fixture.specs[0].request_count = 0
+    fixture.specs[0].registered_requests = 0
+    fixture.specs[0].completed_requests = 0
+    fixture.specs[0].cleanup_finalized_requests = 0
+    delete fixture.specs[0].latest
+    fixture.specs[0].recent_attempts = []
+    const { container } = await mountReadiness(async () => fixture)
+    await settle()
+
+    await click(button(container, "Inspect attempts"))
+
+    expect(container.textContent).toContain("No requests matched this Runner Spec in the selected window.")
+    expect(container.textContent).not.toContain("sandbox_capacity")
+  })
+
+  test("gives each Spec investigation button a unique accessible name", async () => {
+    const fixture = readinessFixture()
+    fixture.specs.push({
+      ...structuredClone(fixture.specs[0]),
+      name: "qiniu-ubuntu-slim",
+      workflow_labels: ["qiniu", "ubuntu-slim"],
+      request_count: 0,
+      registered_requests: 0,
+      completed_requests: 0,
+      cleanup_finalized_requests: 0,
+      recent_attempts: [],
+    })
+    delete fixture.specs[1].latest
+    const { container } = await mountReadiness(async () => fixture)
+    await settle()
+
+    const investigationButtons = [...container.querySelectorAll('button[aria-controls^="release-attempts-"]')]
+    expect(investigationButtons.map((element) => element.getAttribute("aria-label"))).toEqual([
+      "Inspect attempts for qiniu-ubuntu-24.04",
+      "Inspect attempts for qiniu-ubuntu-slim",
+    ])
+  })
+
+  test("keeps disclosure targets unique when Spec names normalize alike", async () => {
+    const fixture = readinessFixture()
+    fixture.specs.push({
+      ...structuredClone(fixture.specs[0]),
+      name: "qiniu-ubuntu-24/04",
+    })
+    const { container } = await mountReadiness(async () => fixture)
+    await settle()
+
+    const controls = [...container.querySelectorAll('button[aria-controls^="release-attempts-"]')]
+      .map((element) => element.getAttribute("aria-controls"))
+    expect(new Set(controls).size).toBe(2)
   })
 
   test("does not present a previous report under a newly selected window when loading fails", async () => {
