@@ -5,11 +5,11 @@ This file tracks active project work. Completed behavior should move into `READM
 ## Active Roadmap
 
 - Decide whether GitHub token and basic auth remain supported compatibility modes or should be removed in favor of GitHub App-only operation.
-- Decide whether ordinary-user Activity repositories should include repository-policy configuration rows in addition to repositories observed from runner jobs.
 - Add an effective-config diagnostics view or config validation workflow if operators need to inspect runtime config from the UI.
 - Verify DB lease behavior with two runnerd processes sharing the same database before documenting multi-instance support.
 - Decide whether expvar diagnostics need a Prometheus/export adapter or histogram-style latency views for deployment observability.
-- Do not start the Release B matcher cutover until Admin Diagnostics shows at least 72 hours of untruncated historical parity and full lifecycle evidence for every enabled production Spec. Use the bounded recent-attempt drill-down to resolve no-traffic and pre-registration failures without changing workflow labels or production Catalog/Sandbox data, and separately record backup/restore, continuous-service, and unchanged-workflow-label sign-offs.
+- Do not deploy the implemented Release B matcher cutover until Admin Diagnostics shows at least 72 hours of untruncated historical parity and the agreed production lifecycle evidence, with backup/restore, continuous-service, and unchanged-workflow-label sign-offs recorded separately. Do not combine the deployment with Catalog, Sandbox, workflow-label, or GitHub App permission changes.
+- After Release B has completed its rollback window, implement Release C separately: remove the read-only Runner Group/Policy compatibility APIs, state models, and obsolete tables with cross-dialect migration coverage. Keep `runner_profiles.default_available` until a separately tested SQLite-safe column-removal path exists.
 - After the `ui-production-smoke` check has reported on `main`, enable it as a required status check in branch protection; the repository currently has no required status checks.
 - Define a privacy-safe documentation activation funnel for `/docs` (guide entry, hosted/deploy path selection, and first successful job) before adding analytics; do not collect repository names, workflow names, credentials, or log content.
 - Decide production credential ownership, approval, and rotation before adding

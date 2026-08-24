@@ -169,7 +169,7 @@ curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
 curl -fsS -X POST https://<runnerd-host>/runner_specs \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"name":"deployment-custom","labels":["self-hosted","deployment-custom"],"required_labels":["deployment-custom"],"template_id":"<private-template-id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
+  -d '{"name":"deployment-custom","labels":["self-hosted","deployment-custom"],"required_labels":["deployment-custom"],"template_id":"<private-template-id>","max_concurrency":1,"enabled":true}' | jq
 ```
 
 ## 4. Webhook Delivery

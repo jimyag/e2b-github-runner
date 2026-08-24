@@ -169,28 +169,31 @@ its own advertised and required labels instead.
 
 runnerd handles `queued`, `in_progress`, and `completed` actions. For `workflow_run`, it lists all queued jobs in the run and enqueues any matching jobs not already seen.
 
-## Runner Specs & Policies
+## Runner Specs & Matching
 
-Runner specs, runner groups, and repository policies are managed through the admin API and console — not through `runnerd.yaml`.
+Runner specs are managed through the admin API and console — not through `runnerd.yaml`. Every enabled spec is eligible for repositories admitted by `github.allowed_repositories`; labels select the spec.
 
 - **Managed Runner Spec**: runnerd reconciles five built-in specs for
   `ubuntu-slim`, `ubuntu-22.04`, `ubuntu-24.04`, preview `ubuntu-26.04`, and
   `ubuntu-latest`. Their catalog labels, required labels, public template name,
-  priority, and availability are managed by runnerd. Operators retain
+  and priority are managed by runnerd. Operators retain
   `enabled`, `max_concurrency`, and `min_idle`.
 - **Custom Runner Spec**: an operator-owned spec with an explicit
   `template_id`, advertised labels, and optional required labels and
   `runner_group`. Saving it does not call Sandbox to validate the template.
-- **Runner Group**: when a spec sets `runner_group`, runnerd creates an organization-level runner in that group; otherwise it creates a repository-level runner.
+- **GitHub Runner Group**: when a spec sets `runner_group`, runnerd creates an organization-level runner in that GitHub group; otherwise it creates a repository-level runner. This is not the retired internal Runner Group model.
 
 > **⚠️ Personal accounts:** `runner_group` requires the organization-level GitHub API. If the repository belongs to a personal account (not an organization), leave `runner_group` **empty** — otherwise runner registration will fail with a 404 error.
-- **Repository Policy**: grants a specific repository access to additional specs beyond the defaults.
-
 Matching always enforces `required_labels ⊆ job_labels ⊆ labels`. Managed
 Ubuntu specs therefore require both `qiniu` and the exact OS label: neither
 `[ubuntu-24.04]` nor `[qiniu]` is sufficient. Removing `qiniu` from a workflow
 prevents managed-default routing; an operator can also disable an individual
 managed spec in Admin without changing its reconciled catalog identity.
+
+Internal Runner Groups and Repository Policies are retired. Their legacy admin
+GET APIs remain read-only for one compatibility release, while mutations return
+`410 Gone`; their database rows remain intact so the previous application image
+can be restored without a schema rollback.
 
 Managed specs store a stable public template name. Immediately before runner
 creation, runnerd resolves that name against the repository owner's scoped

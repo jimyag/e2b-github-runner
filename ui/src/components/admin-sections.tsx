@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next"
 import {
   type AuditEvent,
   type DiagnosticsSummary,
-  type RunnerPolicy,
   type RunnerSpec,
   type RunnerSpecMatch,
   type RunnerState,
@@ -33,15 +32,11 @@ import {
 export function OverviewSection({
   runners,
   runnerSpecs,
-  runnerPolicies,
   onEditRunnerSpec,
-  onEditPolicy,
 }: {
   runners: RunnerState[]
   runnerSpecs: RunnerSpec[]
-  runnerPolicies: RunnerPolicy[]
   onEditRunnerSpec: (runnerSpec: RunnerSpec) => void
-  onEditPolicy: (policy: RunnerPolicy) => void
 }) {
   const { t } = useTranslation()
   return (
@@ -70,12 +65,10 @@ export function OverviewSection({
       </Card>
       <Card>
         <CardHeader>
-          <CardTitle>{t("admin.runnerSpecsAndPolicies")}</CardTitle>
-          <CardDescription>{t("admin.routingRules")}</CardDescription>
+          <CardTitle>{t("admin.runnerSpecs")}</CardTitle>
+          <CardDescription>{t("admin.specsDescription")}</CardDescription>
         </CardHeader>
-        <CardContent className="grid gap-4 lg:grid-cols-2">
-          <div className="space-y-3">
-            <div className="text-sm font-medium">{t("admin.runnerSpecs")}</div>
+        <CardContent className="space-y-3">
             {runnerSpecs.map((runnerSpec) => (
               <div
                 key={runnerSpec.name}
@@ -88,20 +81,6 @@ export function OverviewSection({
                 </div>
               </div>
             ))}
-          </div>
-          <div className="space-y-3">
-            <div className="text-sm font-medium">{t("admin.runnerPolicies")}</div>
-            {runnerPolicies.map((policy) => (
-              <div
-                key={policy.id}
-                className="min-w-0 rounded-md border p-3 text-sm"
-                onClick={() => onEditPolicy(policy)}
-              >
-                <div className="truncate font-medium">{policy.repository_full_name}</div>
-                <div className="truncate text-xs text-muted-foreground">{policy.runner_spec_name}</div>
-              </div>
-            ))}
-          </div>
         </CardContent>
       </Card>
     </div>

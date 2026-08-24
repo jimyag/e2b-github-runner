@@ -230,7 +230,7 @@ flowchart LR
 | 计算资源 | Qiniu 沙箱 | Firecracker 微型虚拟机 (microVM) | Kubernetes Pod |
 | 状态事实源 | SQLite/Postgres/MySQL 数据库 | 服务管理的连接池状态 | Kubernetes API / CRD 状态 |
 | 调度输入 | GitHub Webhooks + 管理 API | 连接池期望/当前状态 | 伸缩组/监听器调和 |
-| Runner 选择 | Runner 规格、组、策略、标签匹配 | 连接池/配置选择 | Runner 组和伸缩组 |
+| Runner 选择 | 已启用 Runner Spec 与标签匹配 | 连接池/配置选择 | Runner 组和伸缩组 |
 | 鉴权方式 | GitHub App、Token 或 Basic 鉴权 | GitHub App | GitHub App / scale set 鉴权 |
 | 诊断信息 | 管理端诊断 + pprof/expvar | 连接池指标 | 控制器/工作流指标 |
 | 运维范围 | 适用于 Qiniu 沙箱 Runner 的轻量级服务 | 专用的虚拟机 Runner 平台 | 完整的 Kubernetes 原生控制器 |
@@ -243,10 +243,10 @@ Admission 使用 GitHub webhook payload 中的 repository 和 labels。Runner re
 
 - webhook HMAC signature 有效；
 - 如果配置了 `github.allowed_repositories`，repository 被允许；
-- runner spec 或 runner group/policy 可以满足 job labels；
+- 已启用 Runner Spec 满足 `required_labels ⊆ job_labels ⊆ labels`；
 - 匹配到的 spec 已启用。
 
-`runner_specs.default_available: true` 让 spec 对允许的已安装仓库全局可用。Repository policies 可以给具体 repositories 或 repository patterns 授权额外 specs 或 groups。当 spec 包含 GitHub runner group 时，runnerd 会为 job repository owner 创建 organization runner，并传入该 group 作为 `--runnergroup`。
+通过仓库 allowlist 检查后，所有已启用 Runner Spec 都可参与标签匹配。内部 Runner Group 和 Repository Policy 不再参与 admission；`runner_specs.default_available` 在 Release B 中仅作为回滚兼容列保留。当 spec 包含 GitHub runner group 时，runnerd 会为 job repository owner 创建 organization runner，并传入该 group 作为 `--runnergroup`。
 
 Capacity 在 worker 启动 queued request 时检查。超过 global 或 per-spec concurrency limits 的 requests 会保持 `queued` 并稍后重试。Transient placement/rate-limit signals 会作为 queue deferrals，而不是 hard failures。
 
