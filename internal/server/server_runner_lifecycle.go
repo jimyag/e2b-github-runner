@@ -96,7 +96,9 @@ func (s *Server) enqueueRunnerRequest(req state.RunnerRequest, payload []byte) (
 }
 
 func (s *Server) rejectAdmission(req state.RunnerRequest, payload []byte, reason string) (state.RunnerState, error) {
-	created, st, err := s.store.CreateRequest(req, payload)
+	// CreateRejectedRequest relies on database uniqueness for duplicate deliveries
+	// and inserts the terminal state without exposing a queued row.
+	created, st, err := s.store.CreateRejectedRequest(req, payload, reason)
 	if err != nil {
 		return state.RunnerState{}, err
 	}
@@ -105,13 +107,6 @@ func (s *Server) rejectAdmission(req state.RunnerRequest, payload []byte, reason
 		return st, nil
 	}
 	metrics.RecordRunnerRequest(req.RepositoryFullName, req.ProfileName, req.Source, "rejected")
-	st.Status = state.StatusFailed
-	st.FailureStage = "admission"
-	st.FailureReason = reason
-	st.Error = "runner admission rejected"
-	if err := s.store.WriteState(st); err != nil {
-		return state.RunnerState{}, err
-	}
 	s.store.AppendLog(req.ID, "control.log", []byte("runner admission rejected: "+reason+"\n"))
 	s.logger.Info("runner admission rejected and recorded", "id", req.ID, "repository", req.RepositoryFullName, "reason", reason)
 	metrics.RecordWorkflowFailure(req.RepositoryFullName, "unknown", req.RunnerName, req.ProfileName, "admission", reason)

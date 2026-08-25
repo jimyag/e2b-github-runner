@@ -270,6 +270,7 @@ type SandboxServiceDefaultAudience struct {
 type RunnerRequestStore interface {
 	Ensure() error
 	CreateRequest(req RunnerRequest, payload []byte) (bool, RunnerState, error)
+	CreateRejectedRequest(req RunnerRequest, payload []byte, reason string) (bool, RunnerState, error)
 	ReadRequest(id string) (RunnerRequest, error)
 	ReadState(id string) (RunnerState, error)
 	WriteState(st RunnerState) error
