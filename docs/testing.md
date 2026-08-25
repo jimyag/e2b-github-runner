@@ -403,6 +403,13 @@ curl -fsS -X POST http://127.0.0.1:25500/runner_specs \
   -d '{"name":"custom-ubuntu","labels":["self-hosted","custom-ubuntu"],"required_labels":["custom-ubuntu"],"template_id":"<template id>","max_concurrency":1,"enabled":true}' | jq
 ```
 
+Runner Spec names are trimmed single-path-segment identifiers. New names must
+not contain `/` and must not equal `.` or `..`; rejected creates return
+`400 Bad Request` without committing the profile or its audit event. Startup
+and matching continue to tolerate historical rows with those names, but
+runnerd does not rename or delete them automatically and their single-resource
+management URLs are not guaranteed to survive reverse-proxy path normalization.
+
 Manually create a runner:
 
 ```bash

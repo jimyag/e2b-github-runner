@@ -159,6 +159,120 @@ func TestReconcileManagedProfilesCreatesMissingProfile(t *testing.T) {
 	}
 }
 
+func TestReconcileManagedProfilesRejectsPathUnsafeName(t *testing.T) {
+	for _, name := range []string{"managed/spec", ".", ".."} {
+		t.Run(name, func(t *testing.T) {
+			store := New(t.TempDir())
+			valid := managedProfileForReconciliation("qiniu-ubuntu-24.04", 1)
+			invalid := managedProfileForReconciliation(name, 1)
+
+			if _, err := store.ReconcileManagedProfiles([]RunnerProfile{valid, invalid}); err == nil ||
+				!strings.Contains(err.Error(), "profile name must not contain '/' or be '.' or '..'") {
+				t.Fatalf("ReconcileManagedProfiles(%q) error = %v, want path-safe name rejection", name, err)
+			}
+			if _, err := store.GetProfile(valid.Name); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("valid profile survived rejected reconciliation: %v", err)
+			}
+			if _, err := store.GetProfile(name); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("path-unsafe profile was reconciled: %v", err)
+			}
+			events, err := store.ListAuditEvents(10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(events) != 0 {
+				t.Fatalf("rejected reconciliation audit events = %#v, want none", events)
+			}
+		})
+	}
+}
+
+func TestLegacyPathUnsafeProfileRemainsReadableAndMatchable(t *testing.T) {
+	for _, legacyName := range []string{"legacy/unsafe", ".", ".."} {
+		t.Run(legacyName, func(t *testing.T) {
+			databaseURL := filepath.Join(t.TempDir(), "runnerd.db")
+			store := NewWithOptions(Options{
+				Backend:        BackendSQLite,
+				DatabaseDSN:    databaseURL,
+				MigrateOnStart: true,
+			}).(*DBStore)
+			created, err := store.UpsertProfile(RunnerProfile{
+				Name:           "legacy-safe-name",
+				Labels:         []string{"self-hosted", "legacy-path"},
+				RequiredLabels: []string{"legacy-path"},
+				TemplateID:     "legacy-template",
+				MaxConcurrency: 2,
+				Priority:       200,
+				Enabled:        true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			db, err := store.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := db.Model(&runnerProfileRecord{}).
+				Where("name = ?", created.Name).
+				UpdateColumn("name", legacyName)
+			if result.Error != nil {
+				t.Fatal(result.Error)
+			}
+			if result.RowsAffected != 1 {
+				t.Fatalf("renamed legacy fixture rows = %d, want 1", result.RowsAffected)
+			}
+			closeTestDB(t, db)
+
+			restarted := NewWithOptions(Options{
+				Backend:        BackendSQLite,
+				DatabaseDSN:    databaseURL,
+				MigrateOnStart: true,
+			}).(*DBStore)
+			if err := restarted.Ensure(); err != nil {
+				t.Fatalf("restart with legacy path-unsafe profile: %v", err)
+			}
+			managed := managedProfileForReconciliation("qiniu-ubuntu-24.04", 1)
+			if conflicts, err := restarted.ReconcileManagedProfiles([]RunnerProfile{managed}); err != nil || len(conflicts) != 0 {
+				t.Fatalf("reconcile with legacy path-unsafe profile: conflicts=%#v error=%v", conflicts, err)
+			}
+
+			got, err := restarted.GetProfile(legacyName)
+			if err != nil {
+				t.Fatalf("GetProfile(%q): %v", legacyName, err)
+			}
+			if got.Name != legacyName || got.TemplateID != created.TemplateID ||
+				!reflect.DeepEqual(got.Labels, created.Labels) ||
+				!reflect.DeepEqual(got.RequiredLabels, created.RequiredLabels) ||
+				!got.CreatedAt.Equal(created.CreatedAt) || !got.UpdatedAt.Equal(created.UpdatedAt) {
+				t.Fatalf("legacy profile changed across restart/reconciliation: got=%#v created=%#v", got, created)
+			}
+			profiles, err := restarted.ListProfiles()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(profiles) != 2 {
+				t.Fatalf("profiles after reconciliation = %#v, want legacy and managed profiles", profiles)
+			}
+			match, err := restarted.MatchProfile("owner/repo", []string{"legacy-path"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if match.Profile == nil || match.Profile.Name != legacyName {
+				t.Fatalf("legacy path-unsafe profile match = %#v, want %q", match, legacyName)
+			}
+			events, err := restarted.ListAuditEvents(10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, event := range events {
+				if event.ResourceID == legacyName {
+					t.Fatalf("legacy profile produced an automatic repair audit event: %#v", event)
+				}
+			}
+		})
+	}
+}
+
 func TestReconcileManagedProfilesUpdatesCatalogFieldsAndPreservesOperatorFields(t *testing.T) {
 	store := New(t.TempDir())
 	createdAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)

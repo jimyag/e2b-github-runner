@@ -38,6 +38,8 @@ task test
 
 Old-schema upgrade coverage is required when adding required columns, changing uniqueness semantics, or altering relationship constraints. Fresh sqlite creation is not enough. Existing SQLite `runner_requests` and `runner_profiles` migrations are additive-only; non-additive changes require an explicit compatibility helper instead of generic table recreation. Assert preserved Installation ID, Sandbox snapshot fields, and `updated_at` values where migration promises preservation; preserve runner-profile rows and existing indexes while adding all missing model fields; and assert explicit data reset where the compatibility contract requires reconfiguration. For production snapshots, compare total rows plus populated `github_installation_id`, `sandbox_api_url`, `sandbox_api_key_encrypted`, and `sandbox_config_source` counts across two consecutive starts.
 
+For Runner Spec name validation, cover both `UpsertProfile` and managed reconciliation. Reject newly written names containing `/` or equal to `.` or `..` without committing profile or audit state, and prove historical rows with those names still survive startup migration, remain listable/readable/matchable, and are not automatically repaired.
+
 Use the state-only snapshot gate when a production export is available:
 
 ```bash
