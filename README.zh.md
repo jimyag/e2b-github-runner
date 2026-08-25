@@ -169,29 +169,29 @@ advertised labels 和 required labels。
 
 runnerd 处理 `queued`、`in_progress` 和 `completed` 动作。对于 `workflow_run` 事件，runnerd 会列出该 run 下所有排队 job，并将尚未入队的匹配 job 创建 runner request。
 
-## Runner Spec 与 Policy
+## Runner Spec 与匹配
 
-Runner spec、runner group 和 repository policy 通过管理 API 和控制台管理，**不在** `runnerd.yaml` 中配置。
+Runner spec 通过管理 API 和控制台管理，**不在** `runnerd.yaml` 中配置。所有已启用 spec 都可供 `github.allowed_repositories` 放行的仓库按标签匹配。
 
 - **Managed Runner Spec**：runnerd 会协调 `ubuntu-slim`、`ubuntu-22.04`、
   `ubuntu-24.04`、预览版 `ubuntu-26.04` 和 `ubuntu-latest` 这 5 个内置
-  specs。catalog labels、required labels、公共模板名称、priority 和
-  availability 由 runnerd 管理；operator 仍可控制 `enabled`、
+  specs。catalog labels、required labels、公共模板名称和 priority
+  由 runnerd 管理；operator 仍可控制 `enabled`、
   `max_concurrency` 和 `min_idle`。
 - **自定义 Runner Spec**：由 operator 管理，保存显式 `template_id`、
   advertised labels、可选 required labels 和 `runner_group`。保存时不会调用
   Sandbox 验证模板。
-- **Runner Group**：spec 设置了 `runner_group` 时，runnerd 创建组织级 runner；否则创建仓库级 runner。
+- **GitHub Runner Group**：spec 设置了 `runner_group` 时，runnerd 会在该 GitHub Group 中创建组织级 runner；否则创建仓库级 runner。它不是已退役的内部 Runner Group 模型。
 
 > **⚠️ 个人账号注意：** `runner_group` 需要调用组织级 GitHub API。如果仓库属于个人账号（而非组织），必须将 `runner_group` 留**空**，否则 runner 注册会返回 404 错误。
-
-- **Repository Policy**：为特定仓库授权访问默认之外的额外 spec。
 
 匹配始终遵守 `required_labels ⊆ job_labels ⊆ labels`。因此，managed Ubuntu
 spec 同时要求 `qiniu` 和准确的操作系统 label；`[ubuntu-24.04]` 或 `[qiniu]`
 都不能单独匹配。workflow 移除 `qiniu` 后不会选择 managed defaults；operator
 也可以在 Admin 中单独禁用某个 managed spec，而不改变 runnerd 协调的 catalog
 identity。
+
+内部 Runner Group 和 Repository Policy 已退役。旧 Admin GET API 会只读保留一个兼容版本，写操作统一返回 `410 Gone`；数据库记录暂时保留，因此回滚旧应用镜像时不需要回滚 schema。
 
 Managed spec 保存稳定的公共模板名称。runnerd 会在创建 Runner 前，使用
 repository owner 对应的 scoped Sandbox endpoint 解析该名称，因此不同区域可以

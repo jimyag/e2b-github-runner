@@ -57,7 +57,7 @@ describe("public site documentation catalog", () => {
       expect(markdown).toContain("/opt/actions-runner/config.sh")
       expect(markdown).toContain("command -v bash base64 install cp mkdir id")
       expect(markdown).toContain("sudo -E -u runner")
-      expect(markdown).toContain("default_available")
+      expect(markdown).toContain("enabled")
       expect(markdown).toContain("required labels")
     }
   })

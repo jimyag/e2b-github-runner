@@ -3293,6 +3293,35 @@ func TestCompareProfileMatchesReturnsCatalogMetadataLookupError(t *testing.T) {
 	}
 }
 
+func TestMatchProfileDoesNotDependOnLegacyCatalogMetadata(t *testing.T) {
+	for _, tableName := range []string{"repository_policies", "runner_groups", "runner_group_specs"} {
+		t.Run(tableName, func(t *testing.T) {
+			store := New(t.TempDir()).(*DBStore)
+			if _, err := store.UpsertProfile(RunnerProfile{
+				Name: "enabled", Labels: []string{"self-hosted", "e2b"},
+				TemplateID: "enabled", MaxConcurrency: 1, Enabled: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			db, err := store.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			faultDB := db.Session(&gorm.Session{NewDB: true})
+			faultDB.Statement.ConnPool = &catalogMetadataFailingPool{ConnPool: db.Statement.ConnPool, tableName: tableName}
+			store.db = faultDB
+
+			match, err := store.MatchProfile("owner/repo", []string{"self-hosted", "e2b"})
+			if err != nil {
+				t.Fatalf("MatchProfile returned legacy metadata error: %v", err)
+			}
+			if match.Profile == nil || match.Profile.Name != "enabled" || match.Reason != "" {
+				t.Fatalf("MatchProfile = %#v, want enabled Spec", match)
+			}
+		})
+	}
+}
+
 func TestCompareProfileMatchesSQLBackends(t *testing.T) {
 	if os.Getenv("RUNNERD_CATALOG_BACKEND_TESTS") != "1" {
 		t.Skip("set RUNNERD_CATALOG_BACKEND_TESTS=1 with dedicated Postgres and MySQL test databases")
@@ -3764,7 +3793,7 @@ func TestCompareProfileMatchesEnabledCatalogOrderingAndNoMatch(t *testing.T) {
 	}
 }
 
-func TestMatchProfilePreservesLegacyReasonForDanglingPolicyTarget(t *testing.T) {
+func TestMatchProfileIgnoresDanglingLegacyPolicyTarget(t *testing.T) {
 	store := New(t.TempDir())
 	if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
 		RepositoryFullName: "owner/repo",
@@ -3779,18 +3808,55 @@ func TestMatchProfilePreservesLegacyReasonForDanglingPolicyTarget(t *testing.T) 
 		t.Fatal(err)
 	}
 	if match.Profile != nil || match.Reason != "profile_labels_not_matched" {
-		t.Fatalf("dangling Policy match = %#v, want the legacy profile_labels_not_matched reason", match)
+		t.Fatalf("dangling Policy match = %#v, want profile_labels_not_matched", match)
 	}
 }
 
-func TestMatchProfileReturnsReasonWhenPolicyMissing(t *testing.T) {
+func TestMatchProfileUsesEnabledSpecWithoutPolicy(t *testing.T) {
 	store := New(t.TempDir())
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name:             "private-before-release-b",
+		Labels:           []string{"self-hosted", "e2b"},
+		TemplateID:       "base",
+		MaxConcurrency:   10,
+		Enabled:          true,
+		DefaultAvailable: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	match, err := store.MatchProfile("owner/repo", []string{"self-hosted", "e2b"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if match.Profile != nil || match.Reason != "profile_not_allowed" {
-		t.Fatalf("unexpected match result: %#v", match)
+	if match.Profile == nil || match.Profile.Name != "private-before-release-b" || match.Reason != "" {
+		t.Fatalf("enabled-Spec match = %#v, want private-before-release-b", match)
+	}
+}
+
+func TestMatchProfileRejectsDisabledSpecEvenWithLegacyPolicy(t *testing.T) {
+	store := New(t.TempDir())
+	if _, err := store.UpsertProfile(RunnerProfile{
+		Name:           "disabled",
+		Labels:         []string{"self-hosted", "disabled"},
+		TemplateID:     "base",
+		MaxConcurrency: 10,
+		Enabled:        false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
+		RepositoryFullName: "owner/repo",
+		ProfileName:        "disabled",
+		Enabled:            true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	match, err := store.MatchProfile("owner/repo", []string{"self-hosted", "disabled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if match.Profile != nil || match.Reason != "profile_labels_not_matched" {
+		t.Fatalf("disabled Spec match = %#v, want profile_labels_not_matched", match)
 	}
 }
 
@@ -3996,10 +4062,11 @@ func TestProductionRunnerCatalogFixtureFreezesExactInternalGroupAndDirectPolicie
 		{"outside has no direct policy", "outside/example", []string{"self-hosted", "e2b"}, "", "profile_not_allowed"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			match, err := store.MatchProfile(tt.repository, tt.labels)
+			comparison, err := store.CompareProfileMatches(tt.repository, tt.labels)
 			if err != nil {
 				t.Fatal(err)
 			}
+			match := comparison.Legacy
 			if tt.wantSpec == "" {
 				if match.Profile != nil || match.Reason != tt.wantReason {
 					t.Fatalf("MatchProfile(%q, %#v) = %#v, want reason %q", tt.repository, tt.labels, match, tt.wantReason)
@@ -4023,11 +4090,16 @@ func TestRunnerCatalogFixtureKeepsLegacyAndPolicyFreeBriefCasesEquivalent(t *tes
 		t.Fatal(err)
 	}
 	for _, labels := range fixture.BriefCompatibilityLabelSets {
-		legacy, err := store.MatchProfile("qbox/legacy-production-replay", labels)
+		comparison, err := store.CompareProfileMatches("qbox/legacy-production-replay", labels)
 		if err != nil {
 			t.Fatal(err)
 		}
-		enabled := selectEnabledFixtureProfile(profiles, labels)
+		legacy := comparison.Legacy
+		enabled := comparison.Enabled.Profile
+		wantEnabled := selectEnabledFixtureProfile(profiles, labels)
+		if (enabled == nil) != (wantEnabled == nil) || enabled != nil && enabled.Name != wantEnabled.Name {
+			t.Fatalf("enabled matcher=%#v fixture selector=%#v, want same selected spec", enabled, wantEnabled)
+		}
 		if legacy.Profile == nil && enabled == nil {
 			if legacy.Reason != "profile_labels_not_matched" {
 				t.Fatalf("MatchProfile(%#v) reason = %q, want profile_labels_not_matched", labels, legacy.Reason)

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -74,8 +73,8 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "profile not found")
 			return
 		}
-		if err := s.ensureRepositoryAllowsProfile(repositoryFullName, profile, labels); err != nil {
-			s.logger.Info("manual runner repository policy rejected", "id", id, "repository", repositoryFullName, "profile", profileName, "labels", labels, "error", err)
+		if err := validateRequestedProfile(profile, labels); err != nil {
+			s.logger.Info("manual runner profile rejected", "id", id, "repository", repositoryFullName, "profile", profileName, "labels", labels, "error", err)
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -272,6 +271,10 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	if input.Enabled != nil {
 		enabled = *input.Enabled
 	}
+	defaultAvailable := true
+	if input.DefaultAvailable != nil {
+		defaultAvailable = *input.DefaultAvailable
+	}
 	requestedProfile := state.RunnerProfile{
 		Name:             input.Name,
 		Labels:           input.Labels,
@@ -282,7 +285,7 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		MinIdle:          intValue(input.MinIdle),
 		Priority:         intValue(input.Priority),
 		Enabled:          enabled,
-		DefaultAvailable: input.DefaultAvailable != nil && *input.DefaultAvailable,
+		DefaultAvailable: defaultAvailable,
 	}
 	var profile state.RunnerProfile
 	err = s.applyMutationWithAudit("admin_api", "profile.create", "runner_profile", strings.TrimSpace(requestedProfile.Name), requestedProfile, func(tx state.Store) error {
@@ -511,10 +514,25 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+func writeRetiredCatalogHeaders(w http.ResponseWriter) {
+	w.Header().Set("Deprecation", "true")
+	w.Header().Set("Link", `</admin/runner_specs>; rel="successor-version"`)
+	// A Sunset date would be misleading until the Release C rollout is scheduled.
+}
+
+func (s *Server) handleRetiredCatalogMutation(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdminAuth(w, r) {
+		return
+	}
+	writeRetiredCatalogHeaders(w)
+	writeError(w, http.StatusGone, "Runner Groups and Runner Policies are retired; manage Runner Specs instead")
+}
+
 func (s *Server) handleListRunnerGroups(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
+	writeRetiredCatalogHeaders(w)
 	groups, err := s.store.ListRunnerGroups()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -523,47 +541,11 @@ func (s *Server) handleListRunnerGroups(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, groups)
 }
 
-func (s *Server) handleCreateRunnerGroup(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdminAuth(w, r) {
-		return
-	}
-	var input upsertRunnerGroupRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid runner group payload")
-		return
-	}
-	enabled := true
-	if input.Enabled != nil {
-		enabled = *input.Enabled
-	}
-	requestedGroup := state.RunnerGroup{
-		Name:        input.Name,
-		Description: input.Description,
-		SpecNames:   input.SpecNames,
-		Enabled:     enabled,
-	}
-	var group state.RunnerGroup
-	err := s.applyMutationWithAudit("admin_api", "runner_group.create", "runner_group", strings.TrimSpace(requestedGroup.Name), requestedGroup, func(tx state.Store) error {
-		var mutationErr error
-		group, mutationErr = tx.UpsertRunnerGroup(requestedGroup)
-		return mutationErr
-	})
-	if err != nil {
-		if writeMutationAuditError(w, err) {
-			return
-		}
-		s.logger.Info("runner group create rejected", "name", input.Name, "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.logger.Info("runner group created", "name", group.Name, "specs", group.SpecNames, "enabled", group.Enabled)
-	writeJSON(w, http.StatusCreated, group)
-}
-
 func (s *Server) handleGetRunnerGroup(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
+	writeRetiredCatalogHeaders(w)
 	group, err := s.store.GetRunnerGroup(r.PathValue("name"))
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runner group not found")
@@ -572,70 +554,11 @@ func (s *Server) handleGetRunnerGroup(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, group)
 }
 
-func (s *Server) handlePatchRunnerGroup(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdminAuth(w, r) {
-		return
-	}
-	current, err := s.store.GetRunnerGroup(r.PathValue("name"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runner group not found")
-		return
-	}
-	var input upsertRunnerGroupRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid runner group payload")
-		return
-	}
-	if input.Description != "" {
-		current.Description = input.Description
-	}
-	if input.SpecNames != nil {
-		current.SpecNames = input.SpecNames
-	}
-	if input.Enabled != nil {
-		current.Enabled = *input.Enabled
-	}
-	var group state.RunnerGroup
-	err = s.applyMutationWithAudit("admin_api", "runner_group.update", "runner_group", current.Name, current, func(tx state.Store) error {
-		group, err = tx.UpsertRunnerGroup(current)
-		return err
-	})
-	if err != nil {
-		if writeMutationAuditError(w, err) {
-			return
-		}
-		s.logger.Info("runner group update rejected", "name", current.Name, "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.logger.Info("runner group updated", "name", group.Name, "specs", group.SpecNames, "enabled", group.Enabled)
-	writeJSON(w, http.StatusOK, group)
-}
-
-func (s *Server) handleDeleteRunnerGroup(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdminAuth(w, r) {
-		return
-	}
-	name := r.PathValue("name")
-	err := s.applyMutationWithAudit("admin_api", "runner_group.delete", "runner_group", name, map[string]any{"status": "deleted"}, func(tx state.Store) error {
-		return tx.DeleteRunnerGroup(name)
-	})
-	if err != nil {
-		if writeMutationAuditError(w, err) {
-			return
-		}
-		s.logger.Error("delete runner group", "name", name, "error", err)
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	s.logger.Info("runner group deleted", "name", name)
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
 func (s *Server) handleListRepositoryPolicies(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAdminAuth(w, r) {
 		return
 	}
+	writeRetiredCatalogHeaders(w)
 	s.refreshMetrics()
 	policies, err := s.store.ListRepositoryPolicies()
 	if err != nil {
@@ -643,124 +566,6 @@ func (s *Server) handleListRepositoryPolicies(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeJSON(w, http.StatusOK, policies)
-}
-
-func (s *Server) handleCreateRepositoryPolicy(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdminAuth(w, r) {
-		return
-	}
-	var input upsertRepositoryPolicyRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid repository policy payload")
-		return
-	}
-	enabled := true
-	if input.Enabled != nil {
-		enabled = *input.Enabled
-	}
-	requestedPolicy := state.RepositoryPolicy{
-		RepositoryFullName: input.RepositoryFullName,
-		ProfileName:        input.ProfileName,
-		RunnerGroupName:    input.RunnerGroupName,
-		Enabled:            enabled,
-	}
-	var policy state.RepositoryPolicy
-	err := s.applyMutationWithAudit("admin_api", "repository_policy.create", "repository_policy", strings.TrimSpace(requestedPolicy.RepositoryFullName), requestedPolicy, func(tx state.Store) error {
-		var mutationErr error
-		policy, mutationErr = tx.UpsertRepositoryPolicy(requestedPolicy)
-		return mutationErr
-	})
-	if err != nil {
-		if writeMutationAuditError(w, err) {
-			return
-		}
-		s.logger.Info("repository policy create rejected", "repository", input.RepositoryFullName, "profile", input.ProfileName, "runner_group", input.RunnerGroupName, "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.logger.Info("repository policy created", "id", policy.ID, "repository", policy.RepositoryFullName, "profile", policy.ProfileName, "runner_group", policy.RunnerGroupName, "enabled", policy.Enabled)
-	s.refreshMetrics()
-	writeJSON(w, http.StatusCreated, policy)
-}
-
-func (s *Server) handlePatchRepositoryPolicy(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdminAuth(w, r) {
-		return
-	}
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid policy id")
-		return
-	}
-	existing, err := s.store.GetRepositoryPolicy(id)
-	if errors.Is(err, state.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "repository policy not found")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	var input upsertRepositoryPolicyRequest
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid repository policy payload")
-		return
-	}
-	if input.RepositoryFullName != "" {
-		existing.RepositoryFullName = input.RepositoryFullName
-	}
-	if input.ProfileName != "" {
-		existing.ProfileName = input.ProfileName
-		existing.RunnerGroupName = ""
-	}
-	if input.RunnerGroupName != "" {
-		existing.RunnerGroupName = input.RunnerGroupName
-		existing.ProfileName = ""
-	}
-	if input.Enabled != nil {
-		existing.Enabled = *input.Enabled
-	}
-	var policy state.RepositoryPolicy
-	err = s.applyMutationWithAudit("admin_api", "repository_policy.update", "repository_policy", strconv.FormatInt(existing.ID, 10), existing, func(tx state.Store) error {
-		policy, err = tx.UpsertRepositoryPolicy(existing)
-		return err
-	})
-	if err != nil {
-		if writeMutationAuditError(w, err) {
-			return
-		}
-		s.logger.Info("repository policy update rejected", "id", id, "repository", existing.RepositoryFullName, "profile", existing.ProfileName, "runner_group", existing.RunnerGroupName, "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.logger.Info("repository policy updated", "id", policy.ID, "repository", policy.RepositoryFullName, "profile", policy.ProfileName, "runner_group", policy.RunnerGroupName, "enabled", policy.Enabled)
-	s.refreshMetrics()
-	writeJSON(w, http.StatusOK, policy)
-}
-
-func (s *Server) handleDeleteRepositoryPolicy(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdminAuth(w, r) {
-		return
-	}
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid policy id")
-		return
-	}
-	err = s.applyMutationWithAudit("admin_api", "repository_policy.delete", "repository_policy", strconv.FormatInt(id, 10), map[string]any{"status": "deleted"}, func(tx state.Store) error {
-		return tx.DeleteRepositoryPolicy(id)
-	})
-	if err != nil {
-		if writeMutationAuditError(w, err) {
-			return
-		}
-		s.logger.Error("delete repository policy", "id", id, "error", err)
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	s.logger.Info("repository policy deleted", "id", id)
-	s.refreshMetrics()
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) handleMatchProfile(w http.ResponseWriter, r *http.Request) {

@@ -8,8 +8,6 @@ import { AuditSection, DiagnosticsSection, MatchSection, OverviewSection } from 
 import { AccessDeniedPage, NotFoundPage, SessionErrorPage, SessionLoadingPage, SignInPage } from "@/components/auth-pages"
 import { LandingPage } from "@/components/landing-page"
 import { RunnerJobDetail } from "@/components/runner-job-detail"
-import { RunnerGroupsSection } from "@/components/runner-groups-section"
-import { RunnerPoliciesSection } from "@/components/runner-policies-section"
 import { RunnerRequestsSection } from "@/components/runner-requests-section"
 import { RunnerSpecsSection } from "@/components/runner-specs-section"
 import { SandboxServiceDefaultSection } from "@/components/sandbox-service-default-section"
@@ -36,8 +34,6 @@ import {
   type GitHubAppConfig,
   type GitHubInstallation,
   type ProductTourOnboarding,
-  type RunnerGroup,
-  type RunnerPolicy,
   type RunnerSpec,
   type RunnerSpecMatch,
   type RunnerState,
@@ -99,8 +95,6 @@ type UserRunnerPage = {
 const adminResourcePaths: Record<AdminDataResource, string> = {
   runner_requests: "/runner_requests?limit=100&offset=0",
   runner_specs: "/runner_specs",
-  runner_groups: "/runner_groups",
-  runner_policies: "/runner_policies",
   audit_events: "/audit-events",
 }
 
@@ -114,8 +108,6 @@ function updateAdminResource(
   setters: {
     setRunners: (value: RunnerState[]) => void
     setRunnerSpecs: (value: RunnerSpec[]) => void
-    setRunnerGroups: (value: RunnerGroup[]) => void
-    setRunnerPolicies: (value: RunnerPolicy[]) => void
     setAuditEvents: (value: AuditEvent[]) => void
   }
 ) {
@@ -126,12 +118,6 @@ function updateAdminResource(
       break
     case "runner_specs":
       setters.setRunnerSpecs(items as RunnerSpec[])
-      break
-    case "runner_groups":
-      setters.setRunnerGroups(items as RunnerGroup[])
-      break
-    case "runner_policies":
-      setters.setRunnerPolicies(items as RunnerPolicy[])
       break
     case "audit_events":
       setters.setAuditEvents(items as AuditEvent[])
@@ -148,8 +134,6 @@ function App() {
   const [section, setSectionState] = useState<AdminSection>(() => sectionFromPath())
   const [runners, setRunners] = useState<RunnerState[]>([])
   const [runnerSpecs, setRunnerSpecs] = useState<RunnerSpec[]>([])
-  const [runnerGroups, setRunnerGroups] = useState<RunnerGroup[]>([])
-  const [runnerPolicies, setRunnerPolicies] = useState<RunnerPolicy[]>([])
   const [selectedID, setSelectedID] = useState("")
   const [selectedLog, setSelectedLog] = useState<(typeof logNames)[number]>("control.log")
   const [logText, setLogText] = useState<LocalizedLogText>({ kind: "text", text: "" })
@@ -423,8 +407,6 @@ function App() {
             })
           },
           setRunnerSpecs,
-          setRunnerGroups,
-          setRunnerPolicies,
           setAuditEvents,
         })
       }
@@ -646,34 +628,14 @@ function App() {
   const {
     runnerSpecOpen,
     editingRunnerSpec,
-    runnerGroupOpen,
-    runnerPolicyOpen,
     runnerSpecForm,
-    runnerGroupForm,
-    runnerPolicyForm,
     setRunnerSpecOpen,
-    setRunnerGroupOpen,
-    setRunnerPolicyOpen,
     setRunnerSpecForm,
-    setRunnerGroupForm,
-    setPolicyForm,
-    groupNamesForSpec,
     resetRunnerSpecForm,
-    resetRunnerGroupForm,
-    createRunnerPolicy,
     saveRunnerSpec,
     loadRunnerSpecIntoForm,
     deleteRunnerSpec,
-    saveRunnerGroup,
-    loadRunnerGroupIntoForm,
-    deleteRunnerGroup,
-    savePolicy,
-    loadPolicyIntoForm,
-    deletePolicy,
   } = useRunnerCatalog({
-    runnerSpecs,
-    runnerGroups,
-    setRunnerPolicies,
     request,
     loadAll,
     setSection,
@@ -820,8 +782,6 @@ function App() {
     })
     setRunners([])
     setRunnerSpecs([])
-    setRunnerGroups([])
-    setRunnerPolicies([])
     setAuditEvents([])
     setUserRunners([])
     setUserRunnerTotal(0)
@@ -1096,9 +1056,7 @@ function App() {
             <OverviewSection
               runners={runners}
               runnerSpecs={runnerSpecs}
-              runnerPolicies={runnerPolicies}
               onEditRunnerSpec={loadRunnerSpecIntoForm}
-              onEditPolicy={loadPolicyIntoForm}
             />
           ) : null}
 
@@ -1148,7 +1106,6 @@ function App() {
             <RunnerSpecsSection
               loading={loading}
               runnerSpecs={runnerSpecs}
-              runnerGroups={runnerGroups}
               runnerSpecOpen={runnerSpecOpen}
               editingRunnerSpec={editingRunnerSpec}
               runnerSpecForm={runnerSpecForm}
@@ -1159,42 +1116,6 @@ function App() {
               onSubmitRunnerSpec={saveRunnerSpec}
               onEditRunnerSpec={loadRunnerSpecIntoForm}
               onDeleteRunnerSpec={(name) => void deleteRunnerSpec(name)}
-              groupNamesForSpec={groupNamesForSpec}
-            />
-          ) : null}
-
-          {section === "runner_groups" ? (
-            <RunnerGroupsSection
-              loading={loading}
-              runnerGroups={runnerGroups}
-              runnerSpecs={runnerSpecs}
-              runnerGroupOpen={runnerGroupOpen}
-              runnerGroupForm={runnerGroupForm}
-              onRefresh={() => void loadAll()}
-              onResetRunnerGroupForm={resetRunnerGroupForm}
-              onRunnerGroupOpenChange={setRunnerGroupOpen}
-              onRunnerGroupFormChange={setRunnerGroupForm}
-              onSubmitRunnerGroup={saveRunnerGroup}
-              onEditRunnerGroup={loadRunnerGroupIntoForm}
-              onDeleteRunnerGroup={(name) => void deleteRunnerGroup(name)}
-            />
-          ) : null}
-
-          {section === "runner_policies" ? (
-            <RunnerPoliciesSection
-              loading={loading}
-              runnerPolicies={runnerPolicies}
-              runnerSpecs={runnerSpecs}
-              runnerGroups={runnerGroups}
-              runnerPolicyOpen={runnerPolicyOpen}
-              runnerPolicyForm={runnerPolicyForm}
-              onRefresh={() => void loadAll()}
-              onCreateRunnerPolicy={createRunnerPolicy}
-              onRunnerPolicyOpenChange={setRunnerPolicyOpen}
-              onRunnerPolicyFormChange={setPolicyForm}
-              onSubmitRunnerPolicy={savePolicy}
-              onEditRunnerPolicy={loadPolicyIntoForm}
-              onDeleteRunnerPolicy={(id) => void deletePolicy(id)}
             />
           ) : null}
 

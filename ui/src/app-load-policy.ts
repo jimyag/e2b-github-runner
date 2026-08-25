@@ -7,8 +7,6 @@ export const userRunnerHistoryWindow = 500
 export type AdminDataResource =
   | "runner_requests"
   | "runner_specs"
-  | "runner_groups"
-  | "runner_policies"
   | "audit_events"
 
 export type UserDataResource = "github_app" | "runner_requests" | "preferences" | "onboarding"
@@ -34,12 +32,10 @@ export function createLatestUserLoadGate() {
 }
 
 const adminResourcesBySection: Record<AdminSection, readonly AdminDataResource[]> = {
-  overview: ["runner_requests", "runner_specs", "runner_policies"],
+  overview: ["runner_requests", "runner_specs"],
   accounts: [],
   runner_requests: ["runner_requests", "runner_specs"],
-  runner_specs: ["runner_specs", "runner_groups"],
-  runner_groups: ["runner_groups", "runner_specs"],
-  runner_policies: ["runner_policies", "runner_specs", "runner_groups"],
+  runner_specs: ["runner_specs"],
   sandbox_service: [],
   match: [],
   audit: ["audit_events"],

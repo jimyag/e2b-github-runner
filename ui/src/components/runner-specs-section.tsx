@@ -2,7 +2,7 @@ import { type Dispatch, type FormEvent, type SetStateAction } from "react"
 import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { type RunnerGroup, type RunnerSpec } from "@/admin-types"
+import { type RunnerSpec } from "@/admin-types"
 import i18n from "@/i18n"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -39,23 +39,19 @@ export type RunnerSpecFormState = {
   required_labels: string
   template_id: string
   runner_group: string
-  group_names: string[]
   max_concurrency: string
   min_idle: string
   priority: string
   enabled: boolean
-  default_available: boolean
 }
 
 export function RunnerSpecDialogForm({
-  runnerGroups,
   editingRunnerSpec,
   runnerSpecForm,
   onRunnerSpecFormChange,
   onRunnerSpecOpenChange,
   onSubmitRunnerSpec,
 }: {
-  runnerGroups: RunnerGroup[]
   editingRunnerSpec: RunnerSpec | null
   runnerSpecForm: RunnerSpecFormState
   onRunnerSpecFormChange: Dispatch<SetStateAction<RunnerSpecFormState>>
@@ -155,33 +151,6 @@ export function RunnerSpecDialogForm({
         </div>
       </div>
 
-      <fieldset className="grid gap-2 rounded-md border p-3" disabled={managed}>
-        <legend className="px-1 text-sm font-medium">{t("admin.internalRunnerGroups")}</legend>
-        {runnerGroups.length === 0 ? (
-          <div className="text-sm text-muted-foreground">{t("admin.noInternalGroups")}</div>
-        ) : (
-          runnerGroups.map((group) => (
-            <label key={group.name} className="flex items-center gap-2 text-sm">
-              <input
-                id={`runner-spec-group-${group.name}`}
-                type="checkbox"
-                checked={runnerSpecForm.group_names.includes(group.name)}
-                onChange={(event) =>
-                  onRunnerSpecFormChange((current) => ({
-                    ...current,
-                    group_names: event.target.checked
-                      ? [...current.group_names, group.name]
-                      : current.group_names.filter((name) => name !== group.name),
-                  }))
-                }
-                disabled={managed}
-              />
-              {group.name}
-            </label>
-          ))
-        )}
-      </fieldset>
-
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="grid gap-2">
           <Label htmlFor="runner-spec-max-concurrency">{t("admin.maxConcurrency")}</Label>
@@ -231,18 +200,6 @@ export function RunnerSpecDialogForm({
           />
           {t("common.enabled")}
         </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            id="runner-spec-default-available"
-            type="checkbox"
-            checked={runnerSpecForm.default_available}
-            onChange={(event) =>
-              onRunnerSpecFormChange((current) => ({ ...current, default_available: event.target.checked }))
-            }
-            disabled={managed}
-          />
-          {t("admin.globallyAvailable")}
-        </label>
       </div>
 
       <DialogFooter>
@@ -258,7 +215,6 @@ export function RunnerSpecDialogForm({
 export function RunnerSpecsSection({
   loading,
   runnerSpecs,
-  runnerGroups,
   runnerSpecOpen,
   editingRunnerSpec,
   runnerSpecForm,
@@ -269,11 +225,9 @@ export function RunnerSpecsSection({
   onSubmitRunnerSpec,
   onEditRunnerSpec,
   onDeleteRunnerSpec,
-  groupNamesForSpec,
 }: {
   loading: boolean
   runnerSpecs: RunnerSpec[]
-  runnerGroups: RunnerGroup[]
   runnerSpecOpen: boolean
   editingRunnerSpec: RunnerSpec | null
   runnerSpecForm: RunnerSpecFormState
@@ -284,7 +238,6 @@ export function RunnerSpecsSection({
   onSubmitRunnerSpec: (event: FormEvent<HTMLFormElement>) => void
   onEditRunnerSpec: (runnerSpec: RunnerSpec) => void
   onDeleteRunnerSpec: (name: string) => void
-  groupNamesForSpec: (specName: string) => string[]
 }) {
   const t = i18n.t
   return (
@@ -326,8 +279,6 @@ export function RunnerSpecsSection({
                 <TableHead>{t("common.labels")}</TableHead>
                 <TableHead>{t("common.template")}</TableHead>
                 <TableHead>{t("admin.githubGroup")}</TableHead>
-                <TableHead>{t("sidebar.runnerGroups")}</TableHead>
-                <TableHead>{t("admin.default")}</TableHead>
                 <TableHead>{t("admin.limit")}</TableHead>
                 <TableHead className="w-44">
                   <span className="sr-only">{t("common.actions")}</span>
@@ -357,8 +308,6 @@ export function RunnerSpecsSection({
                     </div>
                   </TableCell>
                   <TableCell><div className="max-w-[220px] truncate">{runnerSpec.runner_group || "-"}</div></TableCell>
-                  <TableCell><div className="max-w-[260px] truncate">{groupNamesForSpec(runnerSpec.name).join(", ") || "-"}</div></TableCell>
-                  <TableCell>{runnerSpec.default_available ? t("common.yes") : t("common.no")}</TableCell>
                   <TableCell>{runnerSpec.max_concurrency}</TableCell>
                   <TableCell>
                     <div className="flex justify-end gap-2">
@@ -405,7 +354,6 @@ export function RunnerSpecsSection({
             <DialogDescription>{t("admin.specDialogDescription")}</DialogDescription>
           </DialogHeader>
           <RunnerSpecDialogForm
-            runnerGroups={runnerGroups}
             editingRunnerSpec={editingRunnerSpec}
             runnerSpecForm={runnerSpecForm}
             onRunnerSpecFormChange={onRunnerSpecFormChange}

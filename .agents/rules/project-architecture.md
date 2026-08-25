@@ -30,11 +30,11 @@
 - Ordinary-user Jobs authorization is repository-level, not installation-level. Resolve the user's repository intersection for every account-linked GitHub App installation with the stored GitHub user access token, preserve exact `(github_installation_id, repository_full_name)` pairs, filter before query limits, and reuse the same authorization for lists, details, groups, logs, and terminals. Missing or rejected user tokens must fail closed; an inaccessible installation contributes no authorized repositories.
 - Token and basic auth still exist as compatibility modes; their long-term product status is undecided.
 - GitHub Enterprise Server is not supported. Config validation rejects `github.api_base_url` values other than `https://api.github.com`.
-- Runner specs, runner groups, and repository policies are admin API/UI data, not `runnerd.yaml` fields.
+- Runner Specs are admin API/UI data, not `runnerd.yaml` fields. Internal Runner Groups and Repository Policies are retired in Release B: keep only authenticated read compatibility and rollback state until Release C; never use them for admission.
 - Sandbox credential precedence is request snapshot, installation custom/inherited config, eligible personal account config, enabled and audience-eligible admin default, then not configured. Corrupt scoped config must fail instead of falling through.
 - Admin default audience mode is `all` or `selected`. Selected entries match the repository owner's stable GitHub numeric account ID and account type, never the workflow actor or organization membership; an empty selected audience matches nobody.
 - Admin audience additions resolve a typed GitHub login to canonical stable ID/type through GitHub before persistence; login remains display metadata. Installation sync and runtime GitHub App lookup both populate the separate installation-owner cache used for selected-audience matching.
-- `github.allowed_repositories` limits admitted repositories before runner spec/policy matching.
+- `github.allowed_repositories` limits admitted repositories before enabled Runner Spec label matching.
 
 ## State And Migrations
 

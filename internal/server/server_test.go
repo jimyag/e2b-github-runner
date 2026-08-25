@@ -133,9 +133,17 @@ type blockingSandboxDefaultStore struct {
 
 type profileMatchComparisonStore struct {
 	state.Store
+	match      state.ProfileMatch
+	matchErr   error
+	matchCalls int
 	comparison state.ProfileMatchComparison
 	err        error
 	calls      int
+}
+
+func (s *profileMatchComparisonStore) MatchProfile(repository string, labels []string) (state.ProfileMatch, error) {
+	s.matchCalls++
+	return s.match, s.matchErr
 }
 
 func (s *profileMatchComparisonStore) CompareProfileMatches(repository string, labels []string) (state.ProfileMatchComparison, error) {
@@ -143,7 +151,7 @@ func (s *profileMatchComparisonStore) CompareProfileMatches(repository string, l
 	return s.comparison, s.err
 }
 
-func TestMatchProfileForAdmissionClassifiesShadowResultAndReturnsLegacy(t *testing.T) {
+func TestMatchProfileForAdmissionClassifiesComparisonAndReturnsEnabled(t *testing.T) {
 	profile := func(name string) *state.RunnerProfile {
 		return &state.RunnerProfile{Name: name, TemplateID: "must-not-appear-in-log"}
 	}
@@ -161,7 +169,11 @@ func TestMatchProfileForAdmissionClassifiesShadowResultAndReturnsLegacy(t *testi
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			store := &profileMatchComparisonStore{Store: state.New(t.TempDir()), comparison: tt.comparison}
+			store := &profileMatchComparisonStore{
+				Store:      state.New(t.TempDir()),
+				match:      tt.comparison.Enabled,
+				comparison: tt.comparison,
+			}
 			var logs bytes.Buffer
 			srv := &Server{store: store, logger: slog.New(slog.NewJSONHandler(&logs, nil))}
 			before := expvarMapInt(t, "e2b_runner_catalog_match_migration_total", tt.result)
@@ -170,11 +182,14 @@ func TestMatchProfileForAdmissionClassifiesShadowResultAndReturnsLegacy(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(match, tt.comparison.Legacy) {
-				t.Fatalf("admission match = %#v, want legacy %#v", match, tt.comparison.Legacy)
+			if !reflect.DeepEqual(match, tt.comparison.Enabled) {
+				t.Fatalf("admission match = %#v, want enabled %#v", match, tt.comparison.Enabled)
 			}
 			if store.calls != 1 {
 				t.Fatalf("CompareProfileMatches calls = %d, want 1", store.calls)
+			}
+			if store.matchCalls != 1 {
+				t.Fatalf("MatchProfile calls = %d, want 1", store.matchCalls)
 			}
 			if got := expvarMapInt(t, "e2b_runner_catalog_match_migration_total", tt.result); got != before+1 {
 				t.Fatalf("comparison metric %q = %d, want %d", tt.result, got, before+1)
@@ -206,12 +221,30 @@ func TestMatchProfileForAdmissionClassifiesShadowResultAndReturnsLegacy(t *testi
 	}
 }
 
-func TestMatchProfileForAdmissionReturnsComparisonError(t *testing.T) {
+func TestMatchProfileForAdmissionReturnsEnabledMatchWhenComparisonFails(t *testing.T) {
 	wantErr := errors.New("catalog snapshot failed")
-	store := &profileMatchComparisonStore{Store: state.New(t.TempDir()), err: wantErr}
-	srv := &Server{store: store, logger: slog.Default()}
-	if _, err := srv.matchProfileForAdmission("owner/repo", []string{"self-hosted"}); !errors.Is(err, wantErr) {
-		t.Fatalf("matchProfileForAdmission error = %v, want %v", err, wantErr)
+	wantMatch := state.ProfileMatch{
+		RepositoryFullName: "owner/repo",
+		Labels:             []string{"self-hosted"},
+		Profile:            &state.RunnerProfile{Name: "enabled"},
+	}
+	store := &profileMatchComparisonStore{Store: state.New(t.TempDir()), match: wantMatch, err: wantErr}
+	var logs bytes.Buffer
+	srv := &Server{store: store, logger: slog.New(slog.NewJSONHandler(&logs, nil))}
+	match, err := srv.matchProfileForAdmission("owner/repo", []string{"self-hosted"})
+	if err != nil {
+		t.Fatalf("matchProfileForAdmission error = %v, want nil", err)
+	}
+	if !reflect.DeepEqual(match, wantMatch) {
+		t.Fatalf("matchProfileForAdmission = %#v, want %#v", match, wantMatch)
+	}
+	if store.matchCalls != 1 || store.calls != 1 {
+		t.Fatalf("matcher calls = MatchProfile:%d CompareProfileMatches:%d, want 1 each", store.matchCalls, store.calls)
+	}
+	for _, want := range []string{"catalog profile comparison failed", "owner/repo", wantErr.Error()} {
+		if !strings.Contains(logs.String(), want) {
+			t.Fatalf("comparison failure log %q does not contain %q", logs.String(), want)
+		}
 	}
 }
 
@@ -6684,37 +6717,6 @@ func TestWorkflowJobQueuedAtCapacityIsRecorded(t *testing.T) {
 	}
 }
 
-func TestProfileAndRepositoryPolicyEndpoints(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	profileBody := bytes.NewBufferString(`{"name":"large","labels":["self-hosted","e2b","large"],"template_id":"large","runner_group":"large","max_concurrency":5,"min_idle":1,"priority":10,"enabled":true}`)
-	req := adminRequest(http.MethodPost, "/runner_specs", profileBody)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("unexpected create profile status: %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	policyBody := bytes.NewBufferString(`{"repository_full_name":"o/heavy","runner_spec_name":"large","enabled":true}`)
-	req = adminRequest(http.MethodPost, "/runner_policies", policyBody)
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("unexpected create policy status: %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	req = adminRequest(http.MethodPost, "/runner_specs/match", bytes.NewBufferString(`{"repository_full_name":"o/heavy","labels":["self-hosted","e2b","large"]}`))
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("unexpected match status: %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"name":"large"`) {
-		t.Fatalf("expected large profile in match response, got %s", rec.Body.String())
-	}
-}
-
 func TestCreateProfileStoresTemplateWithoutSandboxValidation(t *testing.T) {
 	store := state.New(t.TempDir())
 	fake := &fakeSandbox{}
@@ -6739,6 +6741,34 @@ func TestCreateProfileStoresTemplateWithoutSandboxValidation(t *testing.T) {
 	}
 	if got := fake.templateValidationCount(); got != 0 {
 		t.Fatalf("sandbox template validations = %d, want 0", got)
+	}
+}
+
+func TestCreateProfileDefaultsLegacyAvailabilityForRollback(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+
+	req := adminRequest(http.MethodPost, "/runner_specs", bytes.NewBufferString(
+		`{"name":"rollback-compatible","labels":["self-hosted","rollback-compatible"],"required_labels":["rollback-compatible"],"template_id":"template","max_concurrency":1,"enabled":true}`,
+	))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusCreated)
+	}
+	profile, err := store.GetProfile("rollback-compatible")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !profile.DefaultAvailable {
+		t.Fatalf("default_available = false, want true for old-binary rollback")
+	}
+	comparison, err := store.CompareProfileMatches("o/rollback", []string{"self-hosted", "rollback-compatible"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comparison.Legacy.Profile == nil || comparison.Legacy.Profile.Name != profile.Name {
+		t.Fatalf("legacy match = %#v, want rollback-compatible", comparison.Legacy)
 	}
 }
 
@@ -7265,46 +7295,7 @@ func managedProfileForServerTest() state.RunnerProfile {
 	}
 }
 
-func TestRunnerGroupAndRepositoryPolicyEndpoints(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	profileBody := bytes.NewBufferString(`{"name":"large","labels":["self-hosted","e2b","large"],"template_id":"large","max_concurrency":5,"enabled":true}`)
-	req := adminRequest(http.MethodPost, "/runner_specs", profileBody)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("unexpected create profile status: %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	groupBody := bytes.NewBufferString(`{"name":"ubuntu-2404","spec_names":["large"],"enabled":true}`)
-	req = adminRequest(http.MethodPost, "/runner_groups", groupBody)
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("unexpected create group status: %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	policyBody := bytes.NewBufferString(`{"repository_full_name":"o/heavy","runner_group_name":"ubuntu-2404","enabled":true}`)
-	req = adminRequest(http.MethodPost, "/runner_policies", policyBody)
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("unexpected create group policy status: %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	req = adminRequest(http.MethodPost, "/runner_specs/match", bytes.NewBufferString(`{"repository_full_name":"o/heavy","labels":["self-hosted","e2b","large"]}`))
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("unexpected match status: %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"name":"large"`) {
-		t.Fatalf("expected large profile through group policy, got %s", rec.Body.String())
-	}
-}
-
-func TestManualExplicitProfileMustRespectRepositoryPolicy(t *testing.T) {
+func TestManualExplicitProfileUsesEnabledSpecWithoutRepositoryPolicy(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
 
@@ -7319,8 +7310,21 @@ func TestManualExplicitProfileMustRespectRepositoryPolicy(t *testing.T) {
 	req = adminRequest(http.MethodPost, "/runner_requests", bytes.NewBufferString(`{"id":"manual-large","repository_full_name":"o/blocked","runner_spec_name":"large"}`))
 	rec = httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("enabled explicit spec without Policy: status = %d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusAccepted)
+	}
+
+	req = adminRequest(http.MethodPatch, "/runner_specs/large", bytes.NewBufferString(`{"enabled":false}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("disable spec: status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	req = adminRequest(http.MethodPost, "/runner_requests", bytes.NewBufferString(`{"id":"manual-large-disabled","repository_full_name":"o/blocked","runner_spec_name":"large"}`))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected policy rejection, got %d body=%s", rec.Code, rec.Body.String())
+		t.Fatalf("disabled explicit spec: status = %d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusBadRequest)
 	}
 }
 

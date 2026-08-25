@@ -500,8 +500,20 @@ func (s *DBStore) DeleteRepositoryPolicy(id int64) error {
 }
 
 func (s *DBStore) MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error) {
-	comparison, err := s.CompareProfileMatches(repositoryFullName, labels)
-	return comparison.Legacy, err
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return ProfileMatch{}, err
+	}
+	var profiles []RunnerProfile
+	err = db.Transaction(func(tx *gorm.DB) error {
+		var loadErr error
+		profiles, loadErr = loadRunnerProfilesForMatch(tx)
+		return loadErr
+	}, catalogSnapshotTxOptions)
+	if err != nil {
+		return ProfileMatch{}, err
+	}
+	return profileMatchFromCandidates(repositoryFullName, labels, profiles), nil
 }
 
 func (s *DBStore) CompareProfileMatches(repositoryFullName string, labels []string) (ProfileMatchComparison, error) {
@@ -529,18 +541,11 @@ type catalogMatchSnapshot struct {
 
 func loadCatalogMatchSnapshot(tx *gorm.DB) (catalogMatchSnapshot, error) {
 	var snapshot catalogMatchSnapshot
-	var profileRecords []runnerProfileRecord
-	if err := tx.Order("priority DESC, name ASC").Find(&profileRecords).Error; err != nil {
+	profiles, err := loadRunnerProfilesForMatch(tx)
+	if err != nil {
 		return catalogMatchSnapshot{}, err
 	}
-	snapshot.profiles = make([]RunnerProfile, 0, len(profileRecords))
-	for _, record := range profileRecords {
-		profile, err := recordToProfile(record)
-		if err != nil {
-			return catalogMatchSnapshot{}, err
-		}
-		snapshot.profiles = append(snapshot.profiles, profile)
-	}
+	snapshot.profiles = profiles
 
 	hasPolicies, err := catalogTableExists(tx, repositoryPolicyRecord{}.TableName())
 	if err != nil {
@@ -590,6 +595,22 @@ func loadCatalogMatchSnapshot(tx *gorm.DB) (catalogMatchSnapshot, error) {
 		}
 	}
 	return snapshot, nil
+}
+
+func loadRunnerProfilesForMatch(tx *gorm.DB) ([]RunnerProfile, error) {
+	var profileRecords []runnerProfileRecord
+	if err := tx.Order("priority DESC, name ASC").Find(&profileRecords).Error; err != nil {
+		return nil, err
+	}
+	profiles := make([]RunnerProfile, 0, len(profileRecords))
+	for _, record := range profileRecords {
+		profile, err := recordToProfile(record)
+		if err != nil {
+			return nil, err
+		}
+		profiles = append(profiles, profile)
+	}
+	return profiles, nil
 }
 
 func (snapshot catalogMatchSnapshot) compare(repositoryFullName string, labels []string) ProfileMatchComparison {

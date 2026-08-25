@@ -72,24 +72,6 @@ export type RunnerSpec = {
   updated_at: string
 }
 
-export type RunnerPolicy = {
-  id: number
-  repository_full_name: string
-  runner_spec_name?: string
-  runner_group_name?: string
-  enabled: boolean
-  created_at: string
-}
-
-export type RunnerGroup = {
-  name: string
-  description?: string
-  spec_names: string[]
-  enabled: boolean
-  created_at: string
-  updated_at: string
-}
-
 export type RunnerSpecMatch = {
   repository_full_name: string
   labels: string[]
@@ -376,8 +358,6 @@ export const adminSections = [
   "accounts",
   "runner_requests",
   "runner_specs",
-  "runner_groups",
-  "runner_policies",
   "sandbox_service",
   "match",
   "audit",

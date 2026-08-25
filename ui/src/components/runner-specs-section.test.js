@@ -29,19 +29,16 @@ const managedForm = {
   required_labels: managedSpec.required_labels.join(","),
   template_id: managedSpec.template_id,
   runner_group: "",
-  group_names: [],
   max_concurrency: String(managedSpec.max_concurrency),
   min_idle: String(managedSpec.min_idle),
   priority: String(managedSpec.priority),
   enabled: managedSpec.enabled,
-  default_available: managedSpec.default_available,
 }
 
 function sectionProps(overrides = {}) {
   return {
     loading: false,
     runnerSpecs: [managedSpec],
-    runnerGroups: [],
     runnerSpecOpen: false,
     editingRunnerSpec: null,
     runnerSpecForm: managedForm,
@@ -52,7 +49,6 @@ function sectionProps(overrides = {}) {
     onSubmitRunnerSpec: () => {},
     onEditRunnerSpec: () => {},
     onDeleteRunnerSpec: () => {},
-    groupNamesForSpec: () => [],
     ...overrides,
   }
 }
@@ -82,6 +78,8 @@ describe("RunnerSpecsSection", () => {
     expect(html).toContain("Default template")
     expect(html).toContain(managedSpec.default_template_name)
     expect(html).not.toContain(managedSpec.template_id)
+    expect(html).not.toContain("Internal runner groups")
+    expect(html).not.toContain("Globally available")
     expect(html).toContain(`aria-label="Edit ${managedSpec.name}"`)
     expect(html).toContain(">Edit</button>")
     expect(html).not.toContain(">Delete<")
@@ -93,18 +91,8 @@ describe("RunnerSpecsSection", () => {
 
     const html = renderToStaticMarkup(
       createElement(RunnerSpecsModule.RunnerSpecDialogForm, {
-        runnerGroups: [
-          {
-            name: "production",
-            description: "",
-            spec_names: [managedSpec.name],
-            enabled: true,
-            created_at: "2026-07-27T00:00:00Z",
-            updated_at: "2026-07-27T00:00:00Z",
-          },
-        ],
         editingRunnerSpec: managedSpec,
-        runnerSpecForm: { ...managedForm, group_names: ["production"] },
+        runnerSpecForm: managedForm,
         onRunnerSpecFormChange: () => {},
         onRunnerSpecOpenChange: () => {},
         onSubmitRunnerSpec: () => {},
@@ -119,9 +107,7 @@ describe("RunnerSpecsSection", () => {
       "runner-spec-required-labels",
       "runner-spec-default-template",
       "runner-spec-github-group",
-      "runner-spec-group-production",
       "runner-spec-priority",
-      "runner-spec-default-available",
     ]) {
       expect(isDisabledInput(html, id)).toBe(true)
     }
@@ -165,20 +151,9 @@ describe("runner spec submission", () => {
         requests.push({ url, options })
         return {}
       },
-      runnerGroups: [
-        {
-          name: "production",
-          description: "",
-          spec_names: [],
-          enabled: true,
-          created_at: "2026-07-27T00:00:00Z",
-          updated_at: "2026-07-27T00:00:00Z",
-        },
-      ],
       editingRunnerSpec: managedSpec,
       runnerSpecForm: {
         ...managedForm,
-        group_names: ["production"],
         max_concurrency: "12",
         min_idle: "2",
         enabled: false,
@@ -209,7 +184,6 @@ describe("runner spec submission", () => {
         requests.push({ url, options })
         return {}
       },
-      runnerGroups: [],
       editingRunnerSpec: null,
       runnerSpecForm: {
         name: "large-custom",
@@ -217,12 +191,10 @@ describe("runner spec submission", () => {
         required_labels: "gpu, linux",
         template_id: "custom-template-id",
         runner_group: "qiniu-runners",
-        group_names: [],
         max_concurrency: "6",
         min_idle: "1",
         priority: "20",
         enabled: true,
-        default_available: false,
       },
       parseLabels: (value) => value.split(",").map((label) => label.trim()).filter(Boolean),
     })
@@ -243,7 +215,6 @@ describe("runner spec submission", () => {
             min_idle: 1,
             priority: 20,
             enabled: true,
-            default_available: false,
           }),
         },
       },
@@ -266,7 +237,6 @@ describe("runner spec submission", () => {
         requests.push({ url, options })
         return {}
       },
-      runnerGroups: [],
       editingRunnerSpec: customSpec,
       runnerSpecForm: {
         ...managedForm,
@@ -279,7 +249,6 @@ describe("runner spec submission", () => {
         min_idle: "3",
         priority: "30",
         enabled: false,
-        default_available: false,
       },
       parseLabels: (value) => value.split(",").map((label) => label.trim()).filter(Boolean),
     })
@@ -299,7 +268,6 @@ describe("runner spec submission", () => {
             min_idle: 3,
             priority: 30,
             enabled: false,
-            default_available: false,
           }),
         },
       },

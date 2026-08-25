@@ -102,20 +102,6 @@ type patchProfileRequest struct {
 
 const managedRunnerSpecErrorCode = "managed_runner_spec"
 
-type upsertRepositoryPolicyRequest struct {
-	RepositoryFullName string `json:"repository_full_name"`
-	ProfileName        string `json:"runner_spec_name"`
-	RunnerGroupName    string `json:"runner_group_name"`
-	Enabled            *bool  `json:"enabled"`
-}
-
-type upsertRunnerGroupRequest struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	SpecNames   []string `json:"spec_names"`
-	Enabled     *bool    `json:"enabled"`
-}
-
 type profileMatchRequest struct {
 	RepositoryFullName string   `json:"repository_full_name"`
 	Labels             []string `json:"labels"`
@@ -417,14 +403,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PATCH /runner_specs/{name}", s.handlePatchProfile)
 	s.mux.HandleFunc("DELETE /runner_specs/{name}", s.handleDeleteProfile)
 	s.mux.HandleFunc("GET /runner_groups", s.handleListRunnerGroups)
-	s.mux.HandleFunc("POST /runner_groups", s.handleCreateRunnerGroup)
+	s.mux.HandleFunc("POST /runner_groups", s.handleRetiredCatalogMutation)
 	s.mux.HandleFunc("GET /runner_groups/{name}", s.handleGetRunnerGroup)
-	s.mux.HandleFunc("PATCH /runner_groups/{name}", s.handlePatchRunnerGroup)
-	s.mux.HandleFunc("DELETE /runner_groups/{name}", s.handleDeleteRunnerGroup)
+	s.mux.HandleFunc("PATCH /runner_groups/{name}", s.handleRetiredCatalogMutation)
+	s.mux.HandleFunc("DELETE /runner_groups/{name}", s.handleRetiredCatalogMutation)
 	s.mux.HandleFunc("GET /runner_policies", s.handleListRepositoryPolicies)
-	s.mux.HandleFunc("POST /runner_policies", s.handleCreateRepositoryPolicy)
-	s.mux.HandleFunc("PATCH /runner_policies/{id}", s.handlePatchRepositoryPolicy)
-	s.mux.HandleFunc("DELETE /runner_policies/{id}", s.handleDeleteRepositoryPolicy)
+	s.mux.HandleFunc("POST /runner_policies", s.handleRetiredCatalogMutation)
+	s.mux.HandleFunc("PATCH /runner_policies/{id}", s.handleRetiredCatalogMutation)
+	s.mux.HandleFunc("DELETE /runner_policies/{id}", s.handleRetiredCatalogMutation)
 	s.mux.HandleFunc("GET /diagnostics/pprof", s.handleDiagnosticsPprof)
 	s.mux.HandleFunc("GET /diagnostics/vars", s.handleDiagnosticsVars)
 	s.mux.HandleFunc("GET /diagnostics/catalog-migration-readiness", s.handleCatalogMigrationReadiness)
@@ -436,6 +422,11 @@ func (s *Server) handleAdminRedirect(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/admin/")
+	retiredName := strings.TrimSuffix(name, "/")
+	if retiredName == "runner_groups" || retiredName == "runner_policies" {
+		http.Redirect(w, r, "/admin/runner_specs", http.StatusTemporaryRedirect)
+		return
+	}
 	s.handleUI(w, r, name)
 }
 

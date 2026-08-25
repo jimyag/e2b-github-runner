@@ -104,11 +104,11 @@ Sign in as a runnerd administrator, open `/admin/runner_specs`, and create a cus
 - advertised labels such as `self-hosted`, `linux`, `x64`, and `acme-linux-x64`;
 - required labels containing `acme-linux-x64`;
 - the exact template ID from the target Sandbox region;
-- an optional runner group for an organization repository, left blank for a personal repository;
+- an optional GitHub Runner Group for an organization repository, left blank for a personal repository;
 - suitable `max_concurrency`, `min_idle`, and priority values;
 - `enabled` turned on.
 
-Keep `default_available` off for the first rollout and add a Repository Policy for the intended repository. Turn it on only when every repository should be allowed to use the spec.
+Every enabled spec is eligible for an admitted repository when its workflow labels match. Use unique required labels and add them only to the intended workflows; runnerd no longer uses an internal Runner Group, Repository Policy, or `default_available` to authorize the spec.
 
 Saving a custom spec does not validate the template. A wrong ID, region mismatch, missing runtime file, or inaccessible image will surface when runnerd tries to create and register a runner.
 
@@ -136,8 +136,8 @@ Dispatch the workflow, then open Jobs in Qiniu CI Runner. A successful result sh
 
 ## Roll out safely and troubleshoot
 
-Start with one repository and one manually dispatched smoke workflow. Increase concurrency or grant more Repository Policies only after the job has completed and the Sandbox was cleaned up.
+Start by adding the unique labels to one repository and one manually dispatched smoke workflow. Increase concurrency or add the labels to more workflows only after the job has completed and the Sandbox was cleaned up.
 
-If the job stays queued, compare the job labels, required labels, advertised labels, `enabled`, `default_available`, and Repository Policy. If runner creation fails, confirm the effective account or organization Sandbox endpoint, template ID, and `Status: ready`. For runtime failures, re-run the remote template checks and inspect runnerd logs.
+If the job stays queued, compare the job labels, required labels, advertised labels, and `enabled`. If runner creation fails, confirm the effective account or organization Sandbox endpoint, template ID, and `Status: ready`. For runtime failures, re-run the remote template checks and inspect runnerd logs.
 
 When a rebuild produces a new template ID, update the custom Runner Spec before the next job. Continue with [Troubleshooting](/docs/troubleshooting) for symptom-based checks.

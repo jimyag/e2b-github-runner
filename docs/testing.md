@@ -196,7 +196,7 @@ github:
     password: <token or password>
 ```
 
-No global repo/org mode is required. Webhooks use `repository.full_name` from the payload. runnerd creates repository runners by default. If the matched runner spec sets GitHub `runner_group`, runnerd creates an organization runner for the repository owner and passes the group as `--runnergroup` during GitHub runner registration. Specs with `runner_specs.default_available: true` are available to all repositories by default; `runner_policies` are only needed to grant a repository or repository wildcard an additional special spec, for example `jimyag/*` or `jimyag/template-repository`.
+No global repo/org mode is required. Webhooks use `repository.full_name` from the payload. runnerd creates repository runners by default. If the matched runner spec sets GitHub `runner_group`, runnerd creates an organization runner for the repository owner and passes the group as `--runnergroup` during GitHub runner registration. Admission selects from all enabled Runner Specs after the repository allowlist check; internal Runner Groups, Repository Policies, and `default_available` do not affect matching.
 
 ## 3. Start The Service
 
@@ -401,7 +401,7 @@ backward-compatible explicit-template path:
 curl -fsS -X POST http://127.0.0.1:25500/runner_specs \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"name":"custom-ubuntu","labels":["self-hosted","custom-ubuntu"],"required_labels":["custom-ubuntu"],"template_id":"<template id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
+  -d '{"name":"custom-ubuntu","labels":["self-hosted","custom-ubuntu"],"required_labels":["custom-ubuntu"],"template_id":"<template id>","max_concurrency":1,"enabled":true}' | jq
 ```
 
 Manually create a runner:

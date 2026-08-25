@@ -70,9 +70,19 @@ func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallatio
 }
 
 func (s *Server) matchProfileForAdmission(repository string, labels []string) (state.ProfileMatch, error) {
-	comparison, err := s.store.CompareProfileMatches(repository, labels)
+	match, err := s.store.MatchProfile(repository, labels)
 	if err != nil {
 		return state.ProfileMatch{}, err
+	}
+	comparison, err := s.store.CompareProfileMatches(repository, labels)
+	if err != nil {
+		s.logger.Warn(
+			"catalog profile comparison failed",
+			"repository", repository,
+			"labels", append([]string(nil), labels...),
+			"error", err,
+		)
+		return match, nil
 	}
 	legacyName := matchedProfileName(comparison.Legacy)
 	enabledName := matchedProfileName(comparison.Enabled)
@@ -90,7 +100,7 @@ func (s *Server) matchProfileForAdmission(repository string, labels []string) (s
 			"enabled_reason", comparison.Enabled.Reason,
 		)
 	}
-	return comparison.Legacy, nil
+	return match, nil
 }
 
 func matchedProfileName(match state.ProfileMatch) string {
@@ -1469,46 +1479,9 @@ func (s *Server) profileAtCapacityFor(profile state.RunnerProfile) (bool, error)
 	return inFlight >= profile.MaxConcurrency, nil
 }
 
-func (s *Server) ensureRepositoryAllowsProfile(repositoryFullName string, profile state.RunnerProfile, requestedLabels []string) error {
-	policies, err := s.store.ListRepositoryPolicies()
-	if err != nil {
-		return err
-	}
-	groups, err := s.store.ListRunnerGroups()
-	if err != nil {
-		return err
-	}
-	groupsByName := make(map[string]state.RunnerGroup, len(groups))
-	for _, group := range groups {
-		groupsByName[group.Name] = group
-	}
-	allowed := profile.DefaultAvailable
-	for _, policy := range policies {
-		if !policy.Enabled || !repositoryPatternMatches(policy.RepositoryFullName, repositoryFullName) {
-			continue
-		}
-		if policy.ProfileName == profile.Name {
-			allowed = true
-			break
-		}
-		if policy.RunnerGroupName != "" {
-			group, ok := groupsByName[policy.RunnerGroupName]
-			if !ok || !group.Enabled {
-				continue
-			}
-			for _, specName := range group.SpecNames {
-				if specName == profile.Name {
-					allowed = true
-					break
-				}
-			}
-			if allowed {
-				break
-			}
-		}
-	}
-	if !allowed {
-		return fmt.Errorf("profile %q is not allowed for repository %q", profile.Name, repositoryFullName)
+func validateRequestedProfile(profile state.RunnerProfile, requestedLabels []string) error {
+	if !profile.Enabled {
+		return fmt.Errorf("profile %q is disabled", profile.Name)
 	}
 	if len(requestedLabels) > 0 && !github.LabelsMatch(requestedLabels, profile.Labels) {
 		return fmt.Errorf("requested labels do not satisfy profile %q", profile.Name)
@@ -1566,21 +1539,6 @@ func writeMutationAuditError(w http.ResponseWriter, err error) bool {
 	}
 	writeError(w, http.StatusInternalServerError, "persist mutation audit: "+err.Error())
 	return true
-}
-
-func repositoryPatternMatches(pattern, repository string) bool {
-	pattern = strings.TrimSpace(pattern)
-	repository = strings.TrimSpace(repository)
-	if pattern == "" || repository == "" {
-		return false
-	}
-	if pattern == repository {
-		return true
-	}
-	if strings.HasSuffix(pattern, "/*") {
-		return strings.HasPrefix(repository, strings.TrimSuffix(pattern, "*"))
-	}
-	return false
 }
 
 func isActiveStatus(status string) bool {
