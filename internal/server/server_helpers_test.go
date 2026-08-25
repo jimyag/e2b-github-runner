@@ -475,6 +475,8 @@ func TestReleaseCRemovesRetiredCatalogAPIs(t *testing.T) {
 		{http.MethodPost, "/runner_policies", `{}`},
 		{http.MethodPatch, "/runner_policies/1", `{}`},
 		{http.MethodDelete, "/runner_policies/1", ""},
+		{http.MethodGet, "/diagnostics/catalog-migration-readiness", ""},
+		{http.MethodGet, "/diagnostics/catalog-migration-readiness/", ""},
 		{http.MethodOptions, "/runner_groups/group", ""},
 		{"PURGE", "/runner_policies/1", ""},
 	}

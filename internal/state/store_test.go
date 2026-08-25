@@ -828,6 +828,48 @@ func TestCreateRequestIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestCreateRejectedRequestIsNeverRunnable(t *testing.T) {
+	store := New(t.TempDir())
+	req := RunnerRequest{
+		ID:                 "rejected",
+		Source:             "github_webhook",
+		JobID:              12345,
+		RepositoryFullName: "o/r",
+		RequestedLabels:    []string{"ubuntu-latest"},
+		Labels:             []string{"ubuntu-latest"},
+		RunnerName:         "e2b-rejected",
+	}
+	created, st, err := store.CreateRejectedRequest(req, []byte(`{"workflow_job":{"id":12345}}`), "profile_labels_not_matched")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created {
+		t.Fatal("expected rejected request to be created")
+	}
+	if st.Status != StatusFailed || st.FailureStage != "admission" || st.FailureReason != "profile_labels_not_matched" {
+		t.Fatalf("unexpected rejected state: %#v", st)
+	}
+	if st.Error != "runner admission rejected" || st.FailedAt.IsZero() {
+		t.Fatalf("rejected state is missing terminal failure details: %#v", st)
+	}
+
+	_, _, claimed, err := store.ClaimNextRunnable("worker", time.Now().UTC().Add(time.Minute), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claimed {
+		t.Fatal("rejected request must never be visible to the runnable queue")
+	}
+
+	created, duplicate, err := store.CreateRejectedRequest(req, nil, "different_reason")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created || duplicate.Status != StatusFailed || duplicate.FailureReason != "profile_labels_not_matched" {
+		t.Fatalf("duplicate rejection must reuse the original terminal state: created=%v state=%#v", created, duplicate)
+	}
+}
+
 func TestCreateRequestConflictingWorkflowJobReturnsExistingState(t *testing.T) {
 	store := New(t.TempDir())
 	_, st, err := store.CreateRequest(RunnerRequest{

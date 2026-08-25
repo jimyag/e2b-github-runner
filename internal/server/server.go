@@ -197,7 +197,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func isRetiredCatalogAPIPath(path string) bool {
 	return path == "/runner_groups" || strings.HasPrefix(path, "/runner_groups/") ||
-		path == "/runner_policies" || strings.HasPrefix(path, "/runner_policies/")
+		path == "/runner_policies" || strings.HasPrefix(path, "/runner_policies/") ||
+		path == "/diagnostics/catalog-migration-readiness" || strings.HasPrefix(path, "/diagnostics/catalog-migration-readiness/")
 }
 
 type loggingResponseWriter struct {
