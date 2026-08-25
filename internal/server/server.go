@@ -422,7 +422,8 @@ func (s *Server) handleAdminRedirect(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/admin/")
-	if name == "runner_groups" || name == "runner_policies" {
+	retiredName := strings.TrimSuffix(name, "/")
+	if retiredName == "runner_groups" || retiredName == "runner_policies" {
 		http.Redirect(w, r, "/admin/runner_specs", http.StatusTemporaryRedirect)
 		return
 	}

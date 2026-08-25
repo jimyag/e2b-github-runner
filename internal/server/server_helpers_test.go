@@ -441,7 +441,12 @@ func TestRetiredAdminCatalogRoutesRedirectToRunnerSpecs(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
 
-	for _, path := range []string{"/admin/runner_groups", "/admin/runner_policies"} {
+	for _, path := range []string{
+		"/admin/runner_groups",
+		"/admin/runner_groups/",
+		"/admin/runner_policies",
+		"/admin/runner_policies/",
+	} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
