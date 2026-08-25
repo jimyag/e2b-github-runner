@@ -162,7 +162,6 @@ erDiagram
   RUNNER_PROFILES {
     string name PK
     string template_id
-    bool default_available
     int max_concurrency
   }
   ACCOUNTS {
@@ -246,7 +245,7 @@ Admission 使用 GitHub webhook payload 中的 repository 和 labels。Runner re
 - 已启用 Runner Spec 满足 `required_labels ⊆ job_labels ⊆ labels`；
 - 匹配到的 spec 已启用。
 
-通过仓库 allowlist 检查后，所有已启用 Runner Spec 都可参与标签匹配。内部 Runner Group 和 Repository Policy 不再参与 admission；`runner_specs.default_available` 在 Release B 中仅作为回滚兼容列保留。当 spec 包含 GitHub runner group 时，runnerd 会为 job repository owner 创建 organization runner，并传入该 group 作为 `--runnergroup`。
+通过仓库 allowlist 检查后，所有已启用 Runner Spec 都可参与标签匹配。内部 Runner Group 和 Repository Policy 已不存在于应用模型中；其遗留数据库表仅为回滚保持原样。当 spec 包含 GitHub runner group 时，runnerd 会为 job repository owner 创建 organization runner，并传入该 group 作为 `--runnergroup`。
 
 Capacity 在 worker 启动 queued request 时检查。超过 global 或 per-spec concurrency limits 的 requests 会保持 `queued` 并稍后重试。Transient placement/rate-limit signals 会作为 queue deferrals，而不是 hard failures。
 

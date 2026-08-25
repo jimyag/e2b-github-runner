@@ -352,7 +352,6 @@ func TestRunnerProfileManagedCatalogFieldsRoundTrip(t *testing.T) {
 		DefaultTemplateName: "ubuntu-24.04",
 		MaxConcurrency:      5,
 		Enabled:             true,
-		DefaultAvailable:    true,
 		ManagedBy:           "runnerd",
 		CatalogRevision:     7,
 	}
@@ -440,13 +439,12 @@ func TestUpsertProfilePersistsNilRequiredLabelsAsEmptyJSONArray(t *testing.T) {
 func TestManagedRunnerProfileRequiredLabelsMatch(t *testing.T) {
 	store := New(t.TempDir())
 	profile := RunnerProfile{
-		Name:             "managed-ubuntu-24.04",
-		Labels:           []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-24.04"},
-		RequiredLabels:   []string{"qiniu", "ubuntu-24.04"},
-		TemplateID:       "template-24.04",
-		MaxConcurrency:   5,
-		Enabled:          true,
-		DefaultAvailable: true,
+		Name:           "managed-ubuntu-24.04",
+		Labels:         []string{"self-hosted", "linux", "x64", "qiniu", "ubuntu-24.04"},
+		RequiredLabels: []string{"qiniu", "ubuntu-24.04"},
+		TemplateID:     "template-24.04",
+		MaxConcurrency: 5,
+		Enabled:        true,
 	}
 	if _, err := store.UpsertProfile(profile); err != nil {
 		t.Fatal(err)
@@ -491,162 +489,6 @@ func TestUpsertProfileRejectsRequiredLabelsOutsideAdvertisedLabels(t *testing.T)
 
 	if _, err := store.UpsertProfile(profile); err == nil {
 		t.Fatal("expected required labels outside advertised labels to be rejected")
-	}
-}
-
-// ---------- RunnerGroups ----------
-
-func TestListRunnerGroupsAndGetRunnerGroup(t *testing.T) {
-	store := New(t.TempDir())
-
-	// Create the specs that the group will reference
-	for _, name := range []string{"grp-spec-a", "grp-spec-b"} {
-		if _, err := store.UpsertProfile(RunnerProfile{
-			Name:           name,
-			Labels:         []string{"sl"},
-			TemplateID:     "base",
-			MaxConcurrency: 1,
-			Enabled:        true,
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	if _, err := store.UpsertRunnerGroup(RunnerGroup{
-		Name:      "test-group",
-		SpecNames: []string{"grp-spec-a", "grp-spec-b"},
-		Enabled:   true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// GetRunnerGroup
-	got, err := store.GetRunnerGroup("test-group")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Name != "test-group" || len(got.SpecNames) != 2 {
-		t.Errorf("GetRunnerGroup: got %#v", got)
-	}
-
-	// ListRunnerGroups
-	groups, err := store.ListRunnerGroups()
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, g := range groups {
-		if g.Name == "test-group" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("ListRunnerGroups: expected test-group not found")
-	}
-}
-
-func TestDeleteRunnerGroupRemovesGroup(t *testing.T) {
-	store := New(t.TempDir())
-
-	if _, err := store.UpsertProfile(RunnerProfile{
-		Name:           "del-grp-spec",
-		Labels:         []string{"sl"},
-		TemplateID:     "base",
-		MaxConcurrency: 1,
-		Enabled:        true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := store.UpsertRunnerGroup(RunnerGroup{
-		Name:      "del-group",
-		SpecNames: []string{"del-grp-spec"},
-		Enabled:   true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := store.DeleteRunnerGroup("del-group"); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := store.GetRunnerGroup("del-group"); err == nil {
-		t.Error("expected error reading deleted runner group, got nil")
-	}
-}
-
-// ---------- RepositoryPolicies ----------
-
-func TestListRepositoryPoliciesReturnsInserted(t *testing.T) {
-	store := New(t.TempDir())
-
-	if _, err := store.UpsertProfile(RunnerProfile{
-		Name:           "pol-profile",
-		Labels:         []string{"sl"},
-		TemplateID:     "base",
-		MaxConcurrency: 1,
-		Enabled:        true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
-		RepositoryFullName: "org/repo-pol",
-		ProfileName:        "pol-profile",
-		Enabled:            true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	policies, err := store.ListRepositoryPolicies()
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, p := range policies {
-		if p.RepositoryFullName == "org/repo-pol" && p.ProfileName == "pol-profile" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("ListRepositoryPolicies: expected policy not found")
-	}
-}
-
-func TestDeleteRepositoryPolicyRemovesPolicy(t *testing.T) {
-	store := New(t.TempDir())
-
-	if _, err := store.UpsertProfile(RunnerProfile{
-		Name:           "del-pol-profile",
-		Labels:         []string{"sl"},
-		TemplateID:     "base",
-		MaxConcurrency: 1,
-		Enabled:        true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	policy, err := store.UpsertRepositoryPolicy(RepositoryPolicy{
-		RepositoryFullName: "org/del-repo",
-		ProfileName:        "del-pol-profile",
-		Enabled:            true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := store.DeleteRepositoryPolicy(policy.ID); err != nil {
-		t.Fatal(err)
-	}
-
-	policies, err := store.ListRepositoryPolicies()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range policies {
-		if p.ID == policy.ID {
-			t.Errorf("expected deleted policy to be gone, but found: %#v", p)
-		}
 	}
 }
 

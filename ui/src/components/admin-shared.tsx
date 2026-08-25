@@ -1,11 +1,11 @@
 import { type ReactNode } from "react"
 import { AlertCircle, CheckCircle2, Clock3, Loader2, Play, Square } from "lucide-react"
 
-import { type RunnerStatus } from "@/admin-types"
+import { type RunnerDisplayStatus } from "@/admin-types"
 import { runnerStatusLabel } from "@/admin-format"
 import { Badge } from "@/components/ui/badge"
 
-export function StatusBadge({ status }: { status: RunnerStatus }) {
+export function StatusBadge({ status }: { status: RunnerDisplayStatus }) {
   if (status === "running") {
     return (
       <Badge variant="success">
@@ -17,6 +17,14 @@ export function StatusBadge({ status }: { status: RunnerStatus }) {
   if (status === "failed") {
     return (
       <Badge variant="danger">
+        <AlertCircle />
+        {runnerStatusLabel(status)}
+      </Badge>
+    )
+  }
+  if (status === "unmatched") {
+    return (
+      <Badge variant="secondary">
         <AlertCircle />
         {runnerStatusLabel(status)}
       </Badge>

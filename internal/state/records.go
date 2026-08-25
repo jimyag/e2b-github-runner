@@ -91,41 +91,6 @@ type legacyRunnerProfileDefaultAvailableColumn struct {
 
 func (legacyRunnerProfileDefaultAvailableColumn) TableName() string { return "runner_profiles" }
 
-type runnerGroupRecord struct {
-	Name        string    `gorm:"column:name;primaryKey"`
-	Description string    `gorm:"column:description"`
-	Enabled     bool      `gorm:"column:enabled;not null"`
-	CreatedAt   time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt   time.Time `gorm:"column:updated_at;not null"`
-}
-
-func (runnerGroupRecord) TableName() string { return "runner_groups" }
-
-type runnerGroupSpecRecord struct {
-	GroupName string    `gorm:"column:group_name;primaryKey"`
-	SpecName  string    `gorm:"column:spec_name;primaryKey;index:idx_runner_group_specs_spec"`
-	CreatedAt time.Time `gorm:"column:created_at;not null"`
-}
-
-func (runnerGroupSpecRecord) TableName() string { return "runner_group_specs" }
-
-type repositoryPolicyRecord struct {
-	ID                 int64     `gorm:"column:id;primaryKey;autoIncrement"`
-	RepositoryFullName string    `gorm:"column:repository_full_name;not null;uniqueIndex:idx_repository_policies_unique,length:191"`
-	ProfileName        string    `gorm:"column:profile_name;not null;uniqueIndex:idx_repository_policies_unique,length:191"`
-	RunnerGroupName    string    `gorm:"column:runner_group_name;not null;default:'';uniqueIndex:idx_repository_policies_unique,length:191"`
-	Enabled            bool      `gorm:"column:enabled;not null"`
-	CreatedAt          time.Time `gorm:"column:created_at;not null"`
-}
-
-func (repositoryPolicyRecord) TableName() string { return "repository_policies" }
-
-type legacyRepositoryPolicyRunnerGroupNameColumn struct {
-	RunnerGroupName string `gorm:"column:runner_group_name;not null;default:''"`
-}
-
-func (legacyRepositoryPolicyRunnerGroupNameColumn) TableName() string { return "repository_policies" }
-
 type auditEventRecord struct {
 	ID           int64     `gorm:"column:id;primaryKey;autoIncrement"`
 	Actor        string    `gorm:"column:actor;not null"`

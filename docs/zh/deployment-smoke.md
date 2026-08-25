@@ -98,8 +98,8 @@ https://<runnerd-host>/admin/accounts
 ```bash
 curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/pprof | jq
 curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/vars | jq
-curl -fsS -b "$COOKIE_JAR" \
-  'https://<runnerd-host>/diagnostics/catalog-migration-readiness?window_hours=72' | jq
+test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runnerd-host>/runner_groups)" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runnerd-host>/runner_policies)" = 404
 ```
 
 检查：
@@ -108,10 +108,10 @@ curl -fsS -b "$COOKIE_JAR" \
 - `state.database` 指向预期的 sqlite、Postgres 或 MySQL 数据库。
 - 当 local pprof service 可用时，可以看到 pprof discovery files 和 dump scripts。
 - Recent failure summaries 为空，或每一项都已理解。
-- Release A readiness 面板的观察窗口至少达到 72 小时，不存在 replay 截断或 malformed input，旧 matcher 与 enabled-Spec matcher 严格一致，并且每个启用 Spec 都有 registration、completion、cleanup 证据。
-- 每个预期的生产 label family 都应显示为一行启用 Spec。处理阻塞项前先展开 **检查尝试记录**：空列表表示所选窗口内没有请求匹配该 Spec；已有请求但缺少 registration 证据时，界面会展示持久化的状态、失败阶段/原因、labels、时间以及可用的 GitHub Job 链接。列表只保留最新 5 次尝试，不包含 credentials、webhook payload、logs 或原始内部错误字段。
-- 保持现有 workflow 的 `runs-on` labels 不变。只有理解界面展示的失败原因后，才使用正常的受控 workflow job 补充证据；不要通过修改 Catalog 或 Sandbox 数据制造 lifecycle evidence。
-- 所选窗口内保持 catalog/Sandbox 配置冻结。readiness 相关 mutation 必须在同一事务中提交数据变更与审计事件：被拒绝的 mutation 不留下审计证据，审计持久化失败时目标数据保持不变。备份恢复检查、服务连续运行观察、workflow labels 未修改仍需分别记录人工签字；仅有自动门禁全绿并不等于已授权 Release B。
+- 已退役的 Runner Group 和 Policy API 返回 `404`；`/admin/runner_groups` 与 `/admin/runner_policies` 仍会安全重定向到 Runner Specs。
+- 持久化为 `failed` 且 `failure_stage=admission`、`failure_reason=profile_labels_not_matched` 的 Runner 请求显示为**未匹配**，不计入失败指标，可单独筛选，也不显示重试操作；真正的失败请求仍显示为**失败**，并在适用时允许重试。
+- 现有 workflow `runs-on` labels 和已启用 Runner Spec 的匹配行为保持不变。Release C 部署不得同时修改 Catalog 或 Sandbox 配置。
+- 遗留的 `runner_groups`、`runner_group_specs` 和 `repository_policies` 表保持原样用于回滚；删除它们必须安排后续独立授权的数据库维护窗口。
 
 ## 3. Runner Catalog
 

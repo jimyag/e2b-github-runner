@@ -162,7 +162,6 @@ erDiagram
   RUNNER_PROFILES {
     string name PK
     string template_id
-    bool default_available
     int max_concurrency
   }
   ACCOUNTS {
@@ -246,7 +245,7 @@ Admission uses the GitHub webhook payload repository and labels. A runner reques
 - an enabled Runner Spec satisfies `required_labels ⊆ job_labels ⊆ labels`;
 - the matched spec is enabled.
 
-After the repository allowlist check, every enabled Runner Spec is eligible for label matching. Internal Runner Groups and Repository Policies no longer participate in admission; `runner_specs.default_available` remains only as a rollback-compatibility column during Release B. When a spec includes a GitHub runner group, runnerd creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
+After the repository allowlist check, every enabled Runner Spec is eligible for label matching. Internal Runner Groups and Repository Policies no longer exist in the application model; their legacy database tables remain untouched only for rollback. When a spec includes a GitHub runner group, runnerd creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
 
 Capacity is checked later when the worker starts a queued request. Requests above global or per-spec concurrency limits remain `queued` and are retried later. Transient placement/rate-limit signals are treated as queue deferrals instead of hard failures.
 

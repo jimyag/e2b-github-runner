@@ -51,6 +51,58 @@ function renderSelectedRunner() {
   )
 }
 
+function renderUnmatchedRunner() {
+  const runner = {
+    id: "runner-unmatched",
+    status: "failed",
+    failure_stage: "admission",
+    failure_reason: "profile_labels_not_matched",
+    runner_name: "e2b-runner-unmatched",
+    repository_full_name: "owner/repo",
+    updated_at: "2026-08-25T01:02:03Z",
+    created_at: "2026-08-25T01:02:03Z",
+  }
+  return renderToStaticMarkup(
+    createElement(RunnerRequestsSection, {
+      hasAccess: true,
+      loading: false,
+      runners: [runner],
+      filteredRunners: [runner],
+      selected: runner,
+      selectedID: runner.id,
+      selectedLog: "control.log",
+      logText: "",
+      createID: "",
+      createRepository: "",
+      createRunnerSpec: "",
+      createLabels: "",
+      createRunnerOpen: false,
+      runnerStatusFilter: "unmatched",
+      runnerRepositoryFilter: "all",
+      runnerSpecFilter: "all",
+      runnerRepositories: ["owner/repo"],
+      runnerSpecNames: [],
+      onRefresh: () => {},
+      onResetCreateRunnerForm: () => {},
+      onCreateRunnerOpenChange: () => {},
+      onCreateRunnerSubmit: () => {},
+      onCreateIDChange: () => {},
+      onCreateRepositoryChange: () => {},
+      onCreateRunnerSpecChange: () => {},
+      onCreateLabelsChange: () => {},
+      onStatusFilterChange: () => {},
+      onRepositoryFilterChange: () => {},
+      onRunnerSpecFilterChange: () => {},
+      onSelectRunner: () => {},
+      onRetryRunner: () => {},
+      onStopRunner: () => {},
+      onCopySelectedID: () => {},
+      onLoadLog: () => {},
+      onSelectedLogChange: () => {},
+    }),
+  )
+}
+
 describe("RunnerRequestsSection", () => {
   test("labels completed_at as a completed time", async () => {
     await i18n.changeLanguage("zh")
@@ -58,6 +110,18 @@ describe("RunnerRequestsSection", () => {
       const html = renderSelectedRunner()
       expect(html).toContain("完成时间")
       expect(html).not.toContain("已完成2026")
+    } finally {
+      await i18n.changeLanguage("en")
+    }
+  })
+
+  test("shows admission label rejection as unmatched without retry actions", async () => {
+    await i18n.changeLanguage("zh")
+    try {
+      const html = renderUnmatchedRunner()
+      expect(html).toContain("未匹配")
+      expect(html).not.toContain("重试请求")
+      expect(html).not.toContain("</svg>重试</button>")
     } finally {
       await i18n.changeLanguage("en")
     }

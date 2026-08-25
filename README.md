@@ -190,10 +190,10 @@ Ubuntu specs therefore require both `qiniu` and the exact OS label: neither
 prevents managed-default routing; an operator can also disable an individual
 managed spec in Admin without changing its reconciled catalog identity.
 
-Internal Runner Groups and Repository Policies are retired. Their legacy admin
-GET APIs remain read-only for one compatibility release, while mutations return
-`410 Gone`; their database rows remain intact so the previous application image
-can be restored without a schema rollback.
+Internal Runner Groups and Repository Policies have been removed. Their legacy
+management APIs now return `404 Not Found`, while old Admin bookmarks redirect
+to Runner Specs. Existing legacy database tables and rows are left untouched so
+the previous application image can still be restored without a schema rollback.
 
 Managed specs store a stable public template name. Immediately before runner
 creation, runnerd resolves that name against the repository owner's scoped
@@ -222,7 +222,7 @@ The built-in web UI provides:
 
 | Route | Description |
 | --- | --- |
-| `/admin/` | Dashboard with diagnostics, metrics, recent failures, and durable Release A migration readiness evidence |
+| `/admin/` | Dashboard with diagnostics, metrics, and recent failures |
 | `/admin/accounts` | Account management — list, search, and change roles |
 | `/admin/sandbox_service` | Sandbox service configuration |
 

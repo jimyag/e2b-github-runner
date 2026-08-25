@@ -108,7 +108,7 @@ Sign in as a runnerd administrator, open `/admin/runner_specs`, and create a cus
 - suitable `max_concurrency`, `min_idle`, and priority values;
 - `enabled` turned on.
 
-Every enabled spec is eligible for an admitted repository when its workflow labels match. Use unique required labels and add them only to the intended workflows; runnerd no longer uses an internal Runner Group, Repository Policy, or `default_available` to authorize the spec.
+Every enabled spec is eligible for an admitted repository when its workflow labels match. Use unique required labels and add them only to the intended workflows; runnerd does not use an internal Runner Group or Repository Policy to authorize the spec.
 
 Saving a custom spec does not validate the template. A wrong ID, region mismatch, missing runtime file, or inaccessible image will surface when runnerd tries to create and register a runner.
 

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -459,59 +458,32 @@ func TestRetiredAdminCatalogRoutesRedirectToRunnerSpecs(t *testing.T) {
 	}
 }
 
-func TestRetiredCatalogAPIsAreReadOnly(t *testing.T) {
+func TestReleaseCRemovesRetiredCatalogAPIs(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-	if _, err := store.UpsertRunnerGroup(state.RunnerGroup{
-		Name:      "compatibility-group",
-		SpecNames: []string{"default"},
-		Enabled:   true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, path := range []string{"/runner_groups", "/runner_groups/compatibility-group", "/runner_policies"} {
-		req := adminRequest(http.MethodGet, path, nil)
-		rec := httptest.NewRecorder()
-		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET %s: status = %d, want %d", path, rec.Code, http.StatusOK)
-		}
-		if got := rec.Header().Get("Deprecation"); got != "true" {
-			t.Errorf("GET %s: Deprecation = %q, want true", path, got)
-		}
-		if got := rec.Header().Get("Link"); got != `</admin/runner_specs>; rel="successor-version"` {
-			t.Errorf("GET %s: Link = %q", path, got)
-		}
-		if path != "/runner_policies" && !strings.Contains(rec.Body.String(), "compatibility-group") {
-			t.Errorf("GET %s did not preserve existing Group data: %s", path, rec.Body.String())
-		}
-		if path == "/runner_policies" && !strings.Contains(rec.Body.String(), "o/r") {
-			t.Errorf("GET %s did not preserve existing Policy data: %s", path, rec.Body.String())
-		}
-	}
-
 	tests := []struct {
 		method string
 		path   string
 		body   string
 	}{
+		{http.MethodGet, "/runner_groups", ""},
+		{http.MethodGet, "/runner_groups/group", ""},
+		{http.MethodGet, "/runner_policies", ""},
 		{http.MethodPost, "/runner_groups", `{}`},
 		{http.MethodPatch, "/runner_groups/group", `{}`},
 		{http.MethodDelete, "/runner_groups/group", ""},
 		{http.MethodPost, "/runner_policies", `{}`},
 		{http.MethodPatch, "/runner_policies/1", `{}`},
 		{http.MethodDelete, "/runner_policies/1", ""},
+		{http.MethodOptions, "/runner_groups/group", ""},
+		{"PURGE", "/runner_policies/1", ""},
 	}
 	for _, tt := range tests {
 		req := adminRequest(tt.method, tt.path, strings.NewReader(tt.body))
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
-		if rec.Code != http.StatusGone {
-			t.Errorf("%s %s: status = %d, want %d; body=%s", tt.method, tt.path, rec.Code, http.StatusGone, rec.Body.String())
-		}
-		if got := rec.Header().Get("Deprecation"); got != "true" {
-			t.Errorf("%s %s: Deprecation = %q, want true", tt.method, tt.path, got)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s: status = %d, want %d; body=%s", tt.method, tt.path, rec.Code, http.StatusNotFound, rec.Body.String())
 		}
 	}
 }
@@ -588,43 +560,10 @@ func TestListProfilesEndpointReturnsProfiles(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "default") {
 		t.Errorf("GET /runner_specs: expected default profile in response, got %s", rec.Body.String())
 	}
-}
-
-// ---------- handleListRunnerGroups ----------
-
-func TestListRunnerGroupsEndpointReturnsEmpty(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	req := adminRequest(http.MethodGet, "/runner_groups", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /runner_groups: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	if strings.Contains(rec.Body.String(), "default_available") {
+		t.Errorf("GET /runner_specs exposed retired default_available: %s", rec.Body.String())
 	}
 }
-
-// ---------- handleListRepositoryPolicies ----------
-
-func TestListRepositoryPoliciesEndpointReturnsDefaultPolicy(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	req := adminRequest(http.MethodGet, "/runner_policies", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /runner_policies: expected 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	// newTestServer creates a default policy for o/r
-	if !strings.Contains(rec.Body.String(), "o/r") {
-		t.Errorf("GET /runner_policies: expected o/r policy in response, got %s", rec.Body.String())
-	}
-}
-
-// ---------- handleDiagnosticsPprof ----------
 
 type diagnosticsBoundedStore struct {
 	state.Store
@@ -831,13 +770,6 @@ func TestDiagnosticsVariablesUseCurrentProcessWithoutPprofDiscovery(t *testing.T
 	}
 }
 
-type diagnosticsReadinessStore struct {
-	state.Store
-	report state.CatalogMigrationReadiness
-	start  time.Time
-	end    time.Time
-}
-
 type auditFailingStore struct {
 	state.Store
 }
@@ -882,7 +814,7 @@ func TestCatalogMutationFailsClosedWhenAuditCannotBePersisted(t *testing.T) {
 	if _, err := baseStore.UpsertProfile(state.RunnerProfile{
 		Name: "audit-protected", Labels: []string{"self-hosted", "audit-protected"},
 		RequiredLabels: []string{"audit-protected"}, TemplateID: "audit-template",
-		MaxConcurrency: 1, Enabled: true, DefaultAvailable: true,
+		MaxConcurrency: 1, Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -919,114 +851,6 @@ func TestSandboxMutationFailsClosedWhenAuditCannotBePersisted(t *testing.T) {
 		t.Fatalf("Sandbox default mutation committed even though its audit event could not be persisted: %v", err)
 	}
 }
-
-func (s *diagnosticsReadinessStore) CatalogMigrationReadiness(start, end time.Time) (state.CatalogMigrationReadiness, error) {
-	s.start = start
-	s.end = end
-	s.report.WindowStart = start
-	s.report.WindowEnd = end
-	return s.report, nil
-}
-
-func TestDiagnosticsCatalogMigrationReadinessReturnsAutomatedAndManualGates(t *testing.T) {
-	baseStore := state.New(t.TempDir())
-	store := &diagnosticsReadinessStore{
-		Store: baseStore,
-		report: state.CatalogMigrationReadiness{
-			Replay: state.CatalogMatchReplaySummary{RequestCount: 12, DistinctInputCount: 3, SameRequests: 12},
-			Specs: []state.RunnerSpecLifecycleEvidence{
-				{
-					Name: "qiniu-ubuntu-24.04", WorkflowLabels: []string{"qiniu", "ubuntu-24.04"}, CleanupFinalizedRequests: 1,
-					RecentAttempts: []state.RunnerSpecLifecycleAttempt{{
-						RequestID: "attempt-24", RepositoryFullName: "owner/repo", Status: state.StatusFailed,
-						FailureStage: "sandbox_create", FailureReason: "sandbox_capacity", QueuedAt: time.Date(2026, 8, 20, 1, 0, 0, 0, time.UTC),
-					}},
-				},
-				{Name: "qiniu-ubuntu-slim", WorkflowLabels: []string{"qiniu", "ubuntu-slim"}, CleanupFinalizedRequests: 1, RecentAttempts: []state.RunnerSpecLifecycleAttempt{}},
-			},
-		},
-	}
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	req := adminRequest(http.MethodGet, "/diagnostics/catalog-migration-readiness?window_hours=72", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET readiness: status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	if got := store.end.Sub(store.start); got != 72*time.Hour {
-		t.Fatalf("readiness window = %s, want 72h", got)
-	}
-	var response struct {
-		AutomatedGatesPassed bool `json:"automated_gates_passed"`
-		Gates                []struct {
-			Code   string `json:"code"`
-			Passed bool   `json:"passed"`
-		} `json:"gates"`
-		ManualRequirements []string                            `json:"manual_requirements"`
-		Specs              []state.RunnerSpecLifecycleEvidence `json:"specs"`
-		CurrentProcess     struct {
-			StartedAt          time.Time        `json:"started_at"`
-			CatalogMatchCounts map[string]int64 `json:"catalog_match_counts"`
-		} `json:"current_process"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if !response.AutomatedGatesPassed {
-		t.Fatalf("automated gates did not pass: %#v", response.Gates)
-	}
-	wantGateCodes := []string{"window_at_least_72_hours", "catalog_unchanged", "matcher_parity", "all_enabled_specs_full_lifecycle"}
-	if len(response.Gates) != len(wantGateCodes) {
-		t.Fatalf("gates = %#v", response.Gates)
-	}
-	for i, want := range wantGateCodes {
-		if response.Gates[i].Code != want || !response.Gates[i].Passed {
-			t.Fatalf("gate %d = %#v, want %q passed", i, response.Gates[i], want)
-		}
-	}
-	wantManual := []string{"backup_restore_verified", "continuous_service_observation", "workflow_labels_unchanged"}
-	if !reflect.DeepEqual(response.ManualRequirements, wantManual) {
-		t.Fatalf("manual requirements = %#v, want %#v", response.ManualRequirements, wantManual)
-	}
-	if len(response.Specs) != 2 || len(response.Specs[0].RecentAttempts) != 1 {
-		t.Fatalf("spec attempt evidence = %#v", response.Specs)
-	}
-	attempt := response.Specs[0].RecentAttempts[0]
-	if attempt.RequestID != "attempt-24" || attempt.Status != state.StatusFailed ||
-		attempt.FailureStage != "sandbox_create" || attempt.FailureReason != "sandbox_capacity" {
-		t.Fatalf("serialized attempt evidence = %#v", attempt)
-	}
-	if response.Specs[1].RecentAttempts == nil {
-		t.Fatalf("empty recent attempt evidence must remain an array: %#v", response.Specs[1])
-	}
-	if response.CurrentProcess.StartedAt.IsZero() || response.CurrentProcess.CatalogMatchCounts == nil {
-		t.Fatalf("current process evidence = %#v", response.CurrentProcess)
-	}
-}
-
-func TestDiagnosticsCatalogMigrationReadinessRejectsInvalidWindowsAndRequiresAdmin(t *testing.T) {
-	store := &diagnosticsReadinessStore{Store: state.New(t.TempDir())}
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-	for _, value := range []string{"0", "721", "invalid"} {
-		t.Run(value, func(t *testing.T) {
-			req := adminRequest(http.MethodGet, "/diagnostics/catalog-migration-readiness?window_hours="+value, nil)
-			rec := httptest.NewRecorder()
-			srv.ServeHTTP(rec, req)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("window_hours=%s: status=%d body=%s", value, rec.Code, rec.Body.String())
-			}
-		})
-	}
-	req := httptest.NewRequest(http.MethodGet, "/diagnostics/catalog-migration-readiness", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated readiness status=%d", rec.Code)
-	}
-}
-
-// ---------- scheduleStopRetry ----------
 
 func TestScheduleStopRetryReturnsTrueForRetryableError(t *testing.T) {
 	s := &Server{cfg: config.Config{
