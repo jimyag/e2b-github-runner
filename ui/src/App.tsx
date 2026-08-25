@@ -36,8 +36,8 @@ import {
   type ProductTourOnboarding,
   type RunnerSpec,
   type RunnerSpecMatch,
+  type RunnerDisplayStatus,
   type RunnerState,
-  type RunnerStatus,
   type SyncedGitHubInstallations,
   type UserPreferences,
 } from "@/admin-types"
@@ -60,7 +60,7 @@ import {
   type AuthSessionCheckStatus,
 } from "@/app-load-policy"
 import { useRunnerCatalog } from "@/hooks/use-runner-catalog"
-import { runnerMetrics } from "@/admin-format"
+import { runnerDisplayStatus, runnerMetrics } from "@/admin-format"
 import appI18n from "@/i18n"
 import {
   repositoryAccountLogin,
@@ -143,7 +143,7 @@ function App() {
   const [createRunnerSpec, setCreateRunnerSpec] = useState("")
   const [createLabels, setCreateLabels] = useState("self-hosted,e2b")
   const [createRunnerOpen, setCreateRunnerOpen] = useState(false)
-  const [runnerStatusFilter, setRunnerStatusFilter] = useState<RunnerStatus | "all">("all")
+  const [runnerStatusFilter, setRunnerStatusFilter] = useState<RunnerDisplayStatus | "all">("all")
   const [runnerRepositoryFilter, setRunnerRepositoryFilter] = useState("all")
   const [runnerSpecFilter, setRunnerSpecFilter] = useState("all")
   const [matchRepository, setMatchRepository] = useState("")
@@ -256,7 +256,7 @@ function App() {
   const filteredRunners = useMemo(
     () =>
       runners.filter((runner) => {
-        if (runnerStatusFilter !== "all" && runner.status !== runnerStatusFilter) return false
+        if (runnerStatusFilter !== "all" && runnerDisplayStatus(runner) !== runnerStatusFilter) return false
         if (runnerRepositoryFilter !== "all" && runner.repository_full_name !== runnerRepositoryFilter) return false
         if (runnerSpecFilter !== "all" && runner.runner_spec_name !== runnerSpecFilter) return false
         return true
@@ -1137,7 +1137,7 @@ function App() {
           {section === "audit" ? <AuditSection auditEvents={auditEvents} /> : null}
 
           {section === "diagnostics" ? (
-            <DiagnosticsSection diagnostics={diagnostics} diagnosticsVars={diagnosticsVars} request={request} />
+            <DiagnosticsSection diagnostics={diagnostics} diagnosticsVars={diagnosticsVars} />
           ) : null}
         </main>
       </SidebarInset>

@@ -3,7 +3,7 @@ import {
   type AdminAccountStats,
   type Metric,
   type RunnerState,
-  type RunnerStatus,
+  type RunnerDisplayStatus,
 } from "@/admin-types"
 import i18n from "@/i18n"
 import type { AppTFunction } from "@/i18n"
@@ -15,10 +15,22 @@ const runnerStatusKeys = {
   stopping: "common.statusStopping",
   completed: "common.statusCompleted",
   failed: "common.statusFailed",
-} as const satisfies Record<RunnerStatus, string>
+  unmatched: "common.statusUnmatched",
+} as const satisfies Record<RunnerDisplayStatus, string>
 
-export function runnerStatusLabel(status: RunnerStatus) {
+export function runnerStatusLabel(status: RunnerDisplayStatus) {
   return i18n.t(runnerStatusKeys[status])
+}
+
+export function runnerDisplayStatus(runner: RunnerState): RunnerDisplayStatus {
+  if (
+    runner.status === "failed"
+    && runner.failure_stage === "admission"
+    && runner.failure_reason === "profile_labels_not_matched"
+  ) {
+    return "unmatched"
+  }
+  return runner.status
 }
 
 export function runnerMetrics(
@@ -26,7 +38,7 @@ export function runnerMetrics(
   runnerSpecCount: number,
   t: AppTFunction,
 ): Metric[] {
-  const count = (status: RunnerStatus) => runners.filter((runner) => runner.status === status).length
+  const count = (status: RunnerDisplayStatus) => runners.filter((runner) => runnerDisplayStatus(runner) === status).length
   return [
     {
       id: "active",

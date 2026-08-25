@@ -70,44 +70,7 @@ func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallatio
 }
 
 func (s *Server) matchProfileForAdmission(repository string, labels []string) (state.ProfileMatch, error) {
-	match, err := s.store.MatchProfile(repository, labels)
-	if err != nil {
-		return state.ProfileMatch{}, err
-	}
-	comparison, err := s.store.CompareProfileMatches(repository, labels)
-	if err != nil {
-		s.logger.Warn(
-			"catalog profile comparison failed",
-			"repository", repository,
-			"labels", append([]string(nil), labels...),
-			"error", err,
-		)
-		return match, nil
-	}
-	legacyName := matchedProfileName(comparison.Legacy)
-	enabledName := matchedProfileName(comparison.Enabled)
-	result := comparison.Result()
-	metrics.RecordCatalogMatchComparison(legacyName, enabledName, result)
-	if result != "same" {
-		s.logger.Warn(
-			"catalog profile match mismatch",
-			"result", result,
-			"repository", repository,
-			"labels", append([]string(nil), labels...),
-			"legacy_profile", legacyName,
-			"legacy_reason", comparison.Legacy.Reason,
-			"enabled_profile", enabledName,
-			"enabled_reason", comparison.Enabled.Reason,
-		)
-	}
-	return match, nil
-}
-
-func matchedProfileName(match state.ProfileMatch) string {
-	if match.Profile == nil {
-		return ""
-	}
-	return match.Profile.Name
+	return s.store.MatchProfile(repository, labels)
 }
 
 func (s *Server) enqueueRunnerRequest(req state.RunnerRequest, payload []byte) (state.RunnerState, bool, error) {

@@ -318,8 +318,8 @@ func TestRunnerLifecycleRetryUsesPersistedSpecWithoutPolicyOrGroupReads(t *testi
 	if len(inputs) != 1 || inputs[0].TemplateID != "persisted-custom-template" || inputs[0].RunnerGroup != "Default" || !equalStrings(inputs[0].Labels, []string{"self-hosted", "e2b", "legacy-admitted-custom"}) {
 		t.Fatalf("retry StartRunner inputs = %#v, want persisted custom profile", inputs)
 	}
-	if store.groupReads != 0 || store.policyReads != 0 || store.matchReads != 0 || store.comparisonReads != 0 {
-		t.Fatalf("retry rematched or read retired catalog tables: group reads=%d policy reads=%d match reads=%d comparison reads=%d", store.groupReads, store.policyReads, store.matchReads, store.comparisonReads)
+	if store.matchReads != 0 {
+		t.Fatalf("retry rematched the persisted runner spec: match reads=%d", store.matchReads)
 	}
 }
 
@@ -695,30 +695,12 @@ type profileLoadRecordingStore struct {
 
 type catalogReadRejectingStore struct {
 	state.Store
-	groupReads      int
-	policyReads     int
-	matchReads      int
-	comparisonReads int
-}
-
-func (s *catalogReadRejectingStore) ListRunnerGroups() ([]state.RunnerGroup, error) {
-	s.groupReads++
-	return nil, errors.New("retry must not read internal runner groups")
-}
-
-func (s *catalogReadRejectingStore) ListRepositoryPolicies() ([]state.RepositoryPolicy, error) {
-	s.policyReads++
-	return nil, errors.New("retry must not read repository policies")
+	matchReads int
 }
 
 func (s *catalogReadRejectingStore) MatchProfile(string, []string) (state.ProfileMatch, error) {
 	s.matchReads++
 	return state.ProfileMatch{}, errors.New("retry must not rematch the persisted runner spec")
-}
-
-func (s *catalogReadRejectingStore) CompareProfileMatches(string, []string) (state.ProfileMatchComparison, error) {
-	s.comparisonReads++
-	return state.ProfileMatchComparison{}, errors.New("retry must not compare catalog matches")
 }
 
 func (s *profileLoadRecordingStore) GetProfile(name string) (state.RunnerProfile, error) {

@@ -191,7 +191,9 @@ spec 同时要求 `qiniu` 和准确的操作系统 label；`[ubuntu-24.04]` 或 
 也可以在 Admin 中单独禁用某个 managed spec，而不改变 runnerd 协调的 catalog
 identity。
 
-内部 Runner Group 和 Repository Policy 已退役。旧 Admin GET API 会只读保留一个兼容版本，写操作统一返回 `410 Gone`；数据库记录暂时保留，因此回滚旧应用镜像时不需要回滚 schema。
+内部 Runner Group 和 Repository Policy 已移除。旧管理 API 现在统一返回
+`404 Not Found`，旧 Admin 书签会重定向到 Runner Specs。遗留数据库表和记录保持
+原样，因此回滚到上一个应用镜像时不需要回滚 schema。
 
 Managed spec 保存稳定的公共模板名称。runnerd 会在创建 Runner 前，使用
 repository owner 对应的 scoped Sandbox endpoint 解析该名称，因此不同区域可以

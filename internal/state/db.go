@@ -170,9 +170,6 @@ func (s *DBStore) migrate(db *gorm.DB) error {
 	}
 	models = append(
 		models,
-		&runnerGroupRecord{},
-		&runnerGroupSpecRecord{},
-		&repositoryPolicyRecord{},
 		&auditEventRecord{},
 		&accountRecord{},
 		&oauthIdentityRecord{},
@@ -249,11 +246,6 @@ func migrateLegacySchemaColumns(db *gorm.DB) error {
 	}
 	if migrator.HasTable(&runnerProfileRecord{}) && !migrator.HasColumn(&runnerProfileRecord{}, "default_available") {
 		if err := migrator.AddColumn(&legacyRunnerProfileDefaultAvailableColumn{}, "DefaultAvailable"); err != nil {
-			return err
-		}
-	}
-	if migrator.HasTable(&repositoryPolicyRecord{}) && !migrator.HasColumn(&repositoryPolicyRecord{}, "runner_group_name") {
-		if err := migrator.AddColumn(&legacyRepositoryPolicyRunnerGroupNameColumn{}, "RunnerGroupName"); err != nil {
 			return err
 		}
 	}

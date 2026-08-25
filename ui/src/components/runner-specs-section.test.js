@@ -18,7 +18,6 @@ const managedSpec = {
   min_idle: 1,
   priority: 10,
   enabled: true,
-  default_available: true,
   created_at: "2026-07-27T00:00:00Z",
   updated_at: "2026-07-27T00:00:00Z",
 }

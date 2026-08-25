@@ -29,7 +29,6 @@ func defaultProfile(name, osLabel, templateName string) state.RunnerProfile {
 		MaxConcurrency:      10,
 		Priority:            100,
 		Enabled:             true,
-		DefaultAvailable:    true,
 		ManagedBy:           ManagerName,
 		CatalogRevision:     CurrentRevision,
 	}

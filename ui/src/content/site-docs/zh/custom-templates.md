@@ -108,7 +108,7 @@ fi
 - 合适的 `max_concurrency`、`min_idle` 和优先级；
 - 打开 `enabled`。
 
-所有已启用 spec 都可由已放行仓库按 workflow 标签匹配。请使用唯一的 required labels，并只把这些标签加入目标 workflow；runnerd 不再通过内部 Runner Group、Repository Policy 或 `default_available` 授权 spec。
+所有已启用 spec 都可由已放行仓库按 workflow 标签匹配。请使用唯一的 required labels，并只把这些标签加入目标 workflow；runnerd 不通过内部 Runner Group 或 Repository Policy 授权 spec。
 
 保存自定义 spec 时不会验证模板。ID 错误、区域不匹配、运行时文件缺失或镜像不可访问等问题，会在 runnerd 创建和注册 Runner 时暴露出来。
 

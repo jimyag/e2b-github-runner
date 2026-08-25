@@ -271,21 +271,16 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	if input.Enabled != nil {
 		enabled = *input.Enabled
 	}
-	defaultAvailable := true
-	if input.DefaultAvailable != nil {
-		defaultAvailable = *input.DefaultAvailable
-	}
 	requestedProfile := state.RunnerProfile{
-		Name:             input.Name,
-		Labels:           input.Labels,
-		RequiredLabels:   input.RequiredLabels,
-		TemplateID:       input.TemplateID,
-		RunnerGroup:      input.RunnerGroup,
-		MaxConcurrency:   input.MaxConcurrency,
-		MinIdle:          intValue(input.MinIdle),
-		Priority:         intValue(input.Priority),
-		Enabled:          enabled,
-		DefaultAvailable: defaultAvailable,
+		Name:           input.Name,
+		Labels:         input.Labels,
+		RequiredLabels: input.RequiredLabels,
+		TemplateID:     input.TemplateID,
+		RunnerGroup:    input.RunnerGroup,
+		MaxConcurrency: input.MaxConcurrency,
+		MinIdle:        intValue(input.MinIdle),
+		Priority:       intValue(input.Priority),
+		Enabled:        enabled,
 	}
 	var profile state.RunnerProfile
 	err = s.applyMutationWithAudit("admin_api", "profile.create", "runner_profile", strings.TrimSpace(requestedProfile.Name), requestedProfile, func(tx state.Store) error {
@@ -372,9 +367,6 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 	if input.Enabled != nil {
 		current.Enabled = *input.Enabled
 	}
-	if input.DefaultAvailable != nil {
-		current.DefaultAvailable = *input.DefaultAvailable
-	}
 	var profile state.RunnerProfile
 	err = s.applyMutationWithAudit("admin_api", "profile.update", "runner_profile", current.Name, current, func(tx state.Store) error {
 		profile, err = tx.UpsertProfile(current)
@@ -400,7 +392,6 @@ func (s *Server) handlePatchManagedProfile(w http.ResponseWriter, current state.
 		"template_id",
 		"runner_group",
 		"priority",
-		"default_available",
 		"default_template_name",
 		"managed_by",
 		"catalog_revision",
@@ -512,60 +503,6 @@ func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	s.logger.Info("profile deleted", "name", name)
 	s.refreshMetrics()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-func writeRetiredCatalogHeaders(w http.ResponseWriter) {
-	w.Header().Set("Deprecation", "true")
-	w.Header().Set("Link", `</admin/runner_specs>; rel="successor-version"`)
-	// A Sunset date would be misleading until the Release C rollout is scheduled.
-}
-
-func (s *Server) handleRetiredCatalogMutation(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdminAuth(w, r) {
-		return
-	}
-	writeRetiredCatalogHeaders(w)
-	writeError(w, http.StatusGone, "Runner Groups and Runner Policies are retired; manage Runner Specs instead")
-}
-
-func (s *Server) handleListRunnerGroups(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdminAuth(w, r) {
-		return
-	}
-	writeRetiredCatalogHeaders(w)
-	groups, err := s.store.ListRunnerGroups()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, groups)
-}
-
-func (s *Server) handleGetRunnerGroup(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdminAuth(w, r) {
-		return
-	}
-	writeRetiredCatalogHeaders(w)
-	group, err := s.store.GetRunnerGroup(r.PathValue("name"))
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runner group not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, group)
-}
-
-func (s *Server) handleListRepositoryPolicies(w http.ResponseWriter, r *http.Request) {
-	if !s.requireAdminAuth(w, r) {
-		return
-	}
-	writeRetiredCatalogHeaders(w)
-	s.refreshMetrics()
-	policies, err := s.store.ListRepositoryPolicies()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, policies)
 }
 
 func (s *Server) handleMatchProfile(w http.ResponseWriter, r *http.Request) {

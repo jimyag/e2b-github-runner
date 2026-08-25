@@ -15,10 +15,8 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
-	"expvar"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -129,137 +127,6 @@ type blockingSandboxDefaultStore struct {
 	getStarted  chan struct{}
 	continueGet chan struct{}
 	blockOnce   sync.Once
-}
-
-type profileMatchComparisonStore struct {
-	state.Store
-	match      state.ProfileMatch
-	matchErr   error
-	matchCalls int
-	comparison state.ProfileMatchComparison
-	err        error
-	calls      int
-}
-
-func (s *profileMatchComparisonStore) MatchProfile(repository string, labels []string) (state.ProfileMatch, error) {
-	s.matchCalls++
-	return s.match, s.matchErr
-}
-
-func (s *profileMatchComparisonStore) CompareProfileMatches(repository string, labels []string) (state.ProfileMatchComparison, error) {
-	s.calls++
-	return s.comparison, s.err
-}
-
-func TestMatchProfileForAdmissionClassifiesComparisonAndReturnsEnabled(t *testing.T) {
-	profile := func(name string) *state.RunnerProfile {
-		return &state.RunnerProfile{Name: name, TemplateID: "must-not-appear-in-log"}
-	}
-	tests := []struct {
-		name       string
-		comparison state.ProfileMatchComparison
-		result     string
-	}{
-		{name: "same", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Profile: profile("same")}, Enabled: state.ProfileMatch{Profile: profile("same")}}, result: "same"},
-		{name: "legacy only", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Profile: profile("legacy")}, Enabled: state.ProfileMatch{Reason: "profile_labels_not_matched"}}, result: "legacy_only"},
-		{name: "enabled only", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Reason: "profile_not_allowed"}, Enabled: state.ProfileMatch{Profile: profile("enabled")}}, result: "enabled_only"},
-		{name: "different profile", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Profile: profile("legacy")}, Enabled: state.ProfileMatch{Profile: profile("enabled")}}, result: "different_profile"},
-		{name: "different no-match reason", comparison: state.ProfileMatchComparison{Legacy: state.ProfileMatch{Reason: "profile_not_allowed"}, Enabled: state.ProfileMatch{Reason: "profile_labels_not_matched"}}, result: "different_profile"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			store := &profileMatchComparisonStore{
-				Store:      state.New(t.TempDir()),
-				match:      tt.comparison.Enabled,
-				comparison: tt.comparison,
-			}
-			var logs bytes.Buffer
-			srv := &Server{store: store, logger: slog.New(slog.NewJSONHandler(&logs, nil))}
-			before := expvarMapInt(t, "e2b_runner_catalog_match_migration_total", tt.result)
-
-			match, err := srv.matchProfileForAdmission("owner/repo", []string{"self-hosted", "e2b"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(match, tt.comparison.Enabled) {
-				t.Fatalf("admission match = %#v, want enabled %#v", match, tt.comparison.Enabled)
-			}
-			if store.calls != 1 {
-				t.Fatalf("CompareProfileMatches calls = %d, want 1", store.calls)
-			}
-			if store.matchCalls != 1 {
-				t.Fatalf("MatchProfile calls = %d, want 1", store.matchCalls)
-			}
-			if got := expvarMapInt(t, "e2b_runner_catalog_match_migration_total", tt.result); got != before+1 {
-				t.Fatalf("comparison metric %q = %d, want %d", tt.result, got, before+1)
-			}
-			if tt.result != "same" {
-				logText := logs.String()
-				for _, want := range []string{
-					"catalog profile match mismatch",
-					"owner/repo",
-					"self-hosted",
-					tt.result,
-					matchedProfileName(tt.comparison.Legacy),
-					matchedProfileName(tt.comparison.Enabled),
-					tt.comparison.Legacy.Reason,
-					tt.comparison.Enabled.Reason,
-				} {
-					if want == "" {
-						continue
-					}
-					if !strings.Contains(logText, want) {
-						t.Fatalf("mismatch log %q does not contain %q", logText, want)
-					}
-				}
-				if strings.Contains(logText, "must-not-appear-in-log") {
-					t.Fatalf("mismatch log leaked profile fields: %s", logText)
-				}
-			}
-		})
-	}
-}
-
-func TestMatchProfileForAdmissionReturnsEnabledMatchWhenComparisonFails(t *testing.T) {
-	wantErr := errors.New("catalog snapshot failed")
-	wantMatch := state.ProfileMatch{
-		RepositoryFullName: "owner/repo",
-		Labels:             []string{"self-hosted"},
-		Profile:            &state.RunnerProfile{Name: "enabled"},
-	}
-	store := &profileMatchComparisonStore{Store: state.New(t.TempDir()), match: wantMatch, err: wantErr}
-	var logs bytes.Buffer
-	srv := &Server{store: store, logger: slog.New(slog.NewJSONHandler(&logs, nil))}
-	match, err := srv.matchProfileForAdmission("owner/repo", []string{"self-hosted"})
-	if err != nil {
-		t.Fatalf("matchProfileForAdmission error = %v, want nil", err)
-	}
-	if !reflect.DeepEqual(match, wantMatch) {
-		t.Fatalf("matchProfileForAdmission = %#v, want %#v", match, wantMatch)
-	}
-	if store.matchCalls != 1 || store.calls != 1 {
-		t.Fatalf("matcher calls = MatchProfile:%d CompareProfileMatches:%d, want 1 each", store.matchCalls, store.calls)
-	}
-	for _, want := range []string{"catalog profile comparison failed", "owner/repo", wantErr.Error()} {
-		if !strings.Contains(logs.String(), want) {
-			t.Fatalf("comparison failure log %q does not contain %q", logs.String(), want)
-		}
-	}
-}
-
-func expvarMapInt(t *testing.T, metricName, key string) int64 {
-	t.Helper()
-	metric := expvar.Get(metricName)
-	if metric == nil {
-		t.Fatalf("expvar %s is not registered", metricName)
-	}
-	value := metric.String()
-	var values map[string]int64
-	if err := json.Unmarshal([]byte(value), &values); err != nil {
-		t.Fatalf("decode expvar %s: %v (%s)", metricName, err, value)
-	}
-	return values[key]
 }
 
 func (s *blockingSandboxDefaultStore) GetSandboxServiceDefault() (state.SandboxServiceDefault, error) {
@@ -4821,13 +4688,6 @@ func TestWebhookQueuedUsesEventRepositoryForRepoRunner(t *testing.T) {
 	defer ghServer.Close()
 
 	store := state.New(t.TempDir())
-	if _, err := store.UpsertRepositoryPolicy(state.RepositoryPolicy{
-		RepositoryFullName: "other/repo",
-		ProfileName:        "default",
-		Enabled:            true,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	fake := &fakeSandbox{}
 	srv := newTestServer(t, store, ghServer.URL, fake)
 
@@ -6744,34 +6604,6 @@ func TestCreateProfileStoresTemplateWithoutSandboxValidation(t *testing.T) {
 	}
 }
 
-func TestCreateProfileDefaultsLegacyAvailabilityForRollback(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	req := adminRequest(http.MethodPost, "/runner_specs", bytes.NewBufferString(
-		`{"name":"rollback-compatible","labels":["self-hosted","rollback-compatible"],"required_labels":["rollback-compatible"],"template_id":"template","max_concurrency":1,"enabled":true}`,
-	))
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("status = %d body=%s, want %d", rec.Code, rec.Body.String(), http.StatusCreated)
-	}
-	profile, err := store.GetProfile("rollback-compatible")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !profile.DefaultAvailable {
-		t.Fatalf("default_available = false, want true for old-binary rollback")
-	}
-	comparison, err := store.CompareProfileMatches("o/rollback", []string{"self-hosted", "rollback-compatible"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if comparison.Legacy.Profile == nil || comparison.Legacy.Profile.Name != profile.Name {
-		t.Fatalf("legacy match = %#v, want rollback-compatible", comparison.Legacy)
-	}
-}
-
 func TestCreateProfileRequiresTemplateID(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
@@ -6908,16 +6740,15 @@ func TestPatchProfileClearsExplicitEmptyFieldsAndPreservesOmittedFields(t *testi
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
 	_, err := store.UpsertProfile(state.RunnerProfile{
-		Name:             "large",
-		Labels:           []string{"self-hosted", "e2b", "large"},
-		RequiredLabels:   []string{"e2b", "large"},
-		TemplateID:       "valid-template",
-		RunnerGroup:      "gpu",
-		MaxConcurrency:   5,
-		MinIdle:          2,
-		Priority:         10,
-		Enabled:          true,
-		DefaultAvailable: true,
+		Name:           "large",
+		Labels:         []string{"self-hosted", "e2b", "large"},
+		RequiredLabels: []string{"e2b", "large"},
+		TemplateID:     "valid-template",
+		RunnerGroup:    "gpu",
+		MaxConcurrency: 5,
+		MinIdle:        2,
+		Priority:       10,
+		Enabled:        true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -6949,8 +6780,7 @@ func TestPatchProfileClearsExplicitEmptyFieldsAndPreservesOmittedFields(t *testi
 		profile.MaxConcurrency != 5 ||
 		profile.MinIdle != 2 ||
 		profile.Priority != 10 ||
-		!profile.Enabled ||
-		!profile.DefaultAvailable {
+		!profile.Enabled {
 		t.Fatalf("omitted fields changed: %#v", profile)
 	}
 }
@@ -6980,15 +6810,14 @@ func TestPatchCustomProfileRejectsManagedMetadata(t *testing.T) {
 			store := state.New(t.TempDir())
 			srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
 			want, err := store.UpsertProfile(state.RunnerProfile{
-				Name:             "large",
-				Labels:           []string{"self-hosted", "e2b", "large"},
-				RequiredLabels:   []string{"e2b", "large"},
-				TemplateID:       "custom-template",
-				MaxConcurrency:   5,
-				MinIdle:          2,
-				Priority:         10,
-				Enabled:          true,
-				DefaultAvailable: true,
+				Name:           "large",
+				Labels:         []string{"self-hosted", "e2b", "large"},
+				RequiredLabels: []string{"e2b", "large"},
+				TemplateID:     "custom-template",
+				MaxConcurrency: 5,
+				MinIdle:        2,
+				Priority:       10,
+				Enabled:        true,
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -7047,7 +6876,6 @@ func TestPatchManagedProfileAllowsOnlyOperatorControls(t *testing.T) {
 		got.DefaultTemplateName != managed.DefaultTemplateName ||
 		got.RunnerGroup != managed.RunnerGroup ||
 		got.Priority != managed.Priority ||
-		got.DefaultAvailable != managed.DefaultAvailable ||
 		got.ManagedBy != managed.ManagedBy ||
 		got.CatalogRevision != managed.CatalogRevision {
 		t.Fatalf("managed catalog fields changed: got %#v want catalog fields from %#v", got, managed)
@@ -7071,8 +6899,6 @@ func TestPatchManagedProfileRejectsProtectedFieldsByPresence(t *testing.T) {
 		{name: "runner group null", key: "runner_group", value: `null`},
 		{name: "priority value", key: "priority", value: `0`},
 		{name: "priority null", key: "priority", value: `null`},
-		{name: "default availability value", key: "default_available", value: `false`},
-		{name: "default availability null", key: "default_available", value: `null`},
 		{name: "default template name value", key: "default_template_name", value: `"client-template"`},
 		{name: "default template name null", key: "default_template_name", value: `null`},
 		{name: "managed by value", key: "managed_by", value: `"client"`},
@@ -7089,8 +6915,6 @@ func TestPatchManagedProfileRejectsProtectedFieldsByPresence(t *testing.T) {
 		{name: "mixed case runner group null", key: "Runner_Group", value: `null`},
 		{name: "mixed case priority value", key: "Priority", value: `0`},
 		{name: "mixed case priority null", key: "Priority", value: `null`},
-		{name: "mixed case default availability value", key: "Default_Available", value: `false`},
-		{name: "mixed case default availability null", key: "Default_Available", value: `null`},
 		{name: "mixed case default template name value", key: "Default_Template_Name", value: `"client-template"`},
 		{name: "mixed case default template name null", key: "Default_Template_Name", value: `null`},
 		{name: "mixed case managed by value", key: "Managed_By", value: `"client"`},
@@ -7289,13 +7113,12 @@ func managedProfileForServerTest() state.RunnerProfile {
 		MinIdle:             0,
 		Priority:            100,
 		Enabled:             true,
-		DefaultAvailable:    true,
 		ManagedBy:           "qiniu/ci-runner",
 		CatalogRevision:     1,
 	}
 }
 
-func TestManualExplicitProfileUsesEnabledSpecWithoutRepositoryPolicy(t *testing.T) {
+func TestManualExplicitProfileUsesEnabledSpec(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
 
@@ -7938,13 +7761,6 @@ func newTestServerWithLimit(t *testing.T, store state.Store, ghURL string, fake 
 		TemplateID:     "base",
 		MaxConcurrency: limit,
 		Enabled:        true,
-	}); err != nil {
-		panic(err)
-	}
-	if _, err := store.UpsertRepositoryPolicy(state.RepositoryPolicy{
-		RepositoryFullName: "o/r",
-		ProfileName:        "default",
-		Enabled:            true,
 	}); err != nil {
 		panic(err)
 	}

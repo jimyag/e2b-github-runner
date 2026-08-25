@@ -8,9 +8,8 @@ import {
   type RunnerSpecMatch,
   type RunnerState,
 } from "@/admin-types"
-import { formatTime } from "@/admin-format"
+import { formatTime, runnerDisplayStatus } from "@/admin-format"
 import { Detail, StatusBadge } from "@/components/admin-shared"
-import { ReleaseReadinessSection } from "@/components/release-readiness-section"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -55,7 +54,7 @@ export function OverviewSection({
                   {runner.runner_spec_name || "-"} · {runner.runner_name}
                 </div>
               </div>
-              <StatusBadge status={runner.status} />
+              <StatusBadge status={runnerDisplayStatus(runner)} />
             </div>
           ))}
           {runners.length === 0 ? (
@@ -199,11 +198,9 @@ export function AuditSection({ auditEvents }: { auditEvents: AuditEvent[] }) {
 export function DiagnosticsSection({
   diagnostics,
   diagnosticsVars,
-  request,
 }: {
   diagnostics: DiagnosticsSummary | null
   diagnosticsVars: string
-  request: (url: string, options?: RequestInit) => Promise<unknown>
 }) {
   const { t } = useTranslation()
   return (
@@ -263,7 +260,6 @@ export function DiagnosticsSection({
         </CardContent>
         </Card>
       </div>
-      <ReleaseReadinessSection request={request} />
     </div>
   )
 }
