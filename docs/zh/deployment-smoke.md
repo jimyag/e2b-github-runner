@@ -100,6 +100,7 @@ curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/pprof | jq
 curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/vars | jq
 test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runnerd-host>/runner_groups)" = 404
 test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runnerd-host>/runner_policies)" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/catalog-migration-readiness)" = 404
 ```
 
 检查：
@@ -108,7 +109,7 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runner
 - `state.database` 指向预期的 sqlite、Postgres 或 MySQL 数据库。
 - 当 local pprof service 可用时，可以看到 pprof discovery files 和 dump scripts。
 - Recent failure summaries 为空，或每一项都已理解。
-- 已退役的 Runner Group 和 Policy API 返回 `404`；`/admin/runner_groups` 与 `/admin/runner_policies` 仍会安全重定向到 Runner Specs。
+- 已退役的 Runner Group、Policy 及临时 catalog migration readiness API 返回 `404`；`/admin/runner_groups` 与 `/admin/runner_policies` 仍会安全重定向到 Runner Specs。
 - 持久化为 `failed` 且 `failure_stage=admission`、`failure_reason=profile_labels_not_matched` 的 Runner 请求显示为**未匹配**，不计入失败指标，可单独筛选，也不显示重试操作；真正的失败请求仍显示为**失败**，并在适用时允许重试。
 - 现有 workflow `runs-on` labels 和已启用 Runner Spec 的匹配行为保持不变。Release C 部署不得同时修改 Catalog 或 Sandbox 配置。
 - 遗留的 `runner_groups`、`runner_group_specs` 和 `repository_policies` 表保持原样用于回滚；删除它们必须安排后续独立授权的数据库维护窗口。

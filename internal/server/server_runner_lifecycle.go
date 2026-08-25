@@ -96,6 +96,8 @@ func (s *Server) enqueueRunnerRequest(req state.RunnerRequest, payload []byte) (
 }
 
 func (s *Server) rejectAdmission(req state.RunnerRequest, payload []byte, reason string) (state.RunnerState, error) {
+	// CreateRejectedRequest relies on database uniqueness for duplicate deliveries
+	// and inserts the terminal state without exposing a queued row.
 	created, st, err := s.store.CreateRejectedRequest(req, payload, reason)
 	if err != nil {
 		return state.RunnerState{}, err
