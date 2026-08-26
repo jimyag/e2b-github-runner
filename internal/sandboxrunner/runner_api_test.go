@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	qnsandbox "github.com/qiniu/go-sdk/v7/sandbox"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	qnsandbox "github.com/qiniu/go-sdk/v7/sandbox"
 )
 
 // newTestService creates an E2BService wired to the given httptest.Server.

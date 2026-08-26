@@ -38,28 +38,27 @@ import (
 )
 
 type fakeSandbox struct {
-	mu                  sync.Mutex
-	started             int
-	recovered           int
-	stopped             int
-	terminals           int
-	templateValidations int
-	startBlock          chan struct{}
-	recoverBlock        chan struct{}
-	recoverStarted      chan string
-	recoverHook         func(sandboxrunner.RecoverInput)
-	recoverContextHook  func(context.Context, sandboxrunner.RecoverInput)
-	recoverErr          error
-	recoverErrors       map[string]error
-	recoverResult       sandboxrunner.StartResult
-	recoverInput        sandboxrunner.RecoverInput
-	recoverInFlight     int
-	maxRecoverInFlight  int
-	stopErr             error
-	commandContext      context.Context
-	repositoryURL       string
-	runnerGroup         string
-	terminal            *fakeTerminalSession
+	mu                 sync.Mutex
+	started            int
+	recovered          int
+	stopped            int
+	terminals          int
+	startBlock         chan struct{}
+	recoverBlock       chan struct{}
+	recoverStarted     chan string
+	recoverHook        func(sandboxrunner.RecoverInput)
+	recoverContextHook func(context.Context, sandboxrunner.RecoverInput)
+	recoverErr         error
+	recoverErrors      map[string]error
+	recoverResult      sandboxrunner.StartResult
+	recoverInput       sandboxrunner.RecoverInput
+	recoverInFlight    int
+	maxRecoverInFlight int
+	stopErr            error
+	commandContext     context.Context
+	repositoryURL      string
+	runnerGroup        string
+	terminal           *fakeTerminalSession
 }
 
 func TestPublicTemplateCatalogIsAvailableWithoutAuthenticationOrSandboxCredentials(t *testing.T) {
@@ -140,9 +139,6 @@ func (s *blockingSandboxDefaultStore) GetSandboxServiceDefault() (state.SandboxS
 }
 
 func (f *fakeSandbox) ValidateTemplate(ctx context.Context, templateID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.templateValidations++
 	return nil
 }
 
@@ -302,12 +298,6 @@ func (f *fakeSandbox) startedCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.started
-}
-
-func (f *fakeSandbox) templateValidationCount() int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.templateValidations
 }
 
 func (f *fakeSandbox) stoppedCount() int {
