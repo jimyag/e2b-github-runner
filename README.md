@@ -169,6 +169,8 @@ its own advertised and required labels instead.
 
 runnerd handles `queued`, `in_progress`, and `completed` actions. For `workflow_run`, it lists all queued jobs in the run and enqueues any matching jobs not already seen.
 
+New runner requests, including admission rejections, store the parsed GitHub context but not the raw webhook body. The legacy `github_payload_json` column and existing values remain available for historical metadata backfill; this change does not clean up old payloads, request history, or logs.
+
 ## Runner Specs & Matching
 
 Runner specs are managed through the admin API and console — not through `runnerd.yaml`. Every enabled spec is eligible for repositories admitted by `github.allowed_repositories`; labels select the spec.

@@ -40,6 +40,7 @@
 ## State And Migrations
 
 - Runtime state can use sqlite, Postgres, or MySQL.
+- New accepted and rejected runner requests persist parsed GitHub context, not raw webhook bodies. Keep `github_payload_json` and existing values for legacy metadata/installation-ID backfill; startup must not clear them or drop the column. Historical cleanup is a separate maintenance operation, and request/log retention is unchanged.
 - Do not document multi-instance support until two runnerd processes have been verified against the same database.
 - State schema is defined mostly by GORM tags in `internal/state/records.go`.
 - Startup migration runs a narrow legacy compatibility pass in `internal/state/db.go`, then GORM `AutoMigrate`. Existing SQLite `runner_requests` and `runner_profiles` tables use additive missing-column/index migration instead of generic table recreation so ALTER-added runner-request fields and legacy runner-profile rows and indexes remain intact.

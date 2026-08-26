@@ -105,6 +105,8 @@ func (s *DBStore) createRequest(req RunnerRequest, payload []byte, status, failu
 	if err != nil {
 		return false, RunnerState{}, err
 	}
+	// Extract context in memory. New requests leave the legacy
+	// github_payload_json column empty; existing payloads remain for backfill.
 	payloadLinks := githubLinksFromPayload(runnerRequestRecord{
 		WorkflowJobID:      &req.JobID,
 		RepositoryFullName: req.RepositoryFullName,
@@ -139,7 +141,6 @@ func (s *DBStore) createRequest(req RunnerRequest, payload []byte, status, failu
 		FailureStage:            failureStage,
 		FailureReason:           failureReason,
 		Error:                   errorMessage,
-		GitHubPayloadJSON:       string(payload),
 		QueuedAt:                req.CreatedAt,
 		FailedAt:                failedAt,
 		UpdatedAt:               now,
