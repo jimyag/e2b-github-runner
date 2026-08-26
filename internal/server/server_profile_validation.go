@@ -17,6 +17,8 @@ const profileTemplateValidationTimeout = 5 * time.Second
 // validateAdminProfileTemplate runs before the audited write transaction. Admin
 // configuration is the only credential source: runtime audience/enabled flags
 // govern fallback for jobs, not an administrator's ability to inspect templates.
+// Callers must trim templateID and reject an empty value with a client error
+// before invoking this helper, alongside the other local profile constraints.
 func (s *Server) validateAdminProfileTemplate(w http.ResponseWriter, r *http.Request, templateID string) bool {
 	defaultConfig, err := s.store.GetSandboxServiceDefault()
 	if err != nil && !errors.Is(err, state.ErrNotFound) {
