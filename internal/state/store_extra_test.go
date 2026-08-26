@@ -492,6 +492,48 @@ func TestUpsertProfileRejectsRequiredLabelsOutsideAdvertisedLabels(t *testing.T)
 	}
 }
 
+func TestUpsertProfileRejectsPathUnsafeName(t *testing.T) {
+	for _, name := range []string{"owner/spec", ".", ".."} {
+		t.Run(name, func(t *testing.T) {
+			store := New(t.TempDir())
+			_, err := store.UpsertProfile(RunnerProfile{
+				Name:           name,
+				Labels:         []string{"self-hosted", "path-name"},
+				RequiredLabels: []string{"path-name"},
+				TemplateID:     "path-name-template",
+				Enabled:        true,
+			})
+			if err == nil || !strings.Contains(err.Error(), "profile name must not contain '/' or be '.' or '..'") {
+				t.Fatalf("UpsertProfile(%q) error = %v, want path-safe name rejection", name, err)
+			}
+			if _, err := store.GetProfile(name); err != ErrNotFound {
+				t.Fatalf("GetProfile(%q) after rejected upsert error = %v, want ErrNotFound", name, err)
+			}
+		})
+	}
+}
+
+func TestUpsertProfileAllowsOtherSingleSegmentNames(t *testing.T) {
+	for _, name := range []string{"custom spec", `custom\spec`, "自定义规格"} {
+		t.Run(name, func(t *testing.T) {
+			store := New(t.TempDir())
+			saved, err := store.UpsertProfile(RunnerProfile{
+				Name:           name,
+				Labels:         []string{"self-hosted", "single-segment"},
+				RequiredLabels: []string{"single-segment"},
+				TemplateID:     "single-segment-template",
+				Enabled:        true,
+			})
+			if err != nil {
+				t.Fatalf("UpsertProfile(%q): %v", name, err)
+			}
+			if saved.Name != name {
+				t.Fatalf("saved name = %q, want %q", saved.Name, name)
+			}
+		})
+	}
+}
+
 // ---------- sanitizeID / sanitizeRunnerName ----------
 
 func TestSanitizeIDReplacesPathSeparators(t *testing.T) {

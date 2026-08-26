@@ -6624,6 +6624,46 @@ func TestCreateProfileRequiresTemplateID(t *testing.T) {
 	}
 }
 
+func TestCreateProfileRejectsPathUnsafeNameAtomically(t *testing.T) {
+	for _, name := range []string{"owner/spec", ".", ".."} {
+		t.Run(name, func(t *testing.T) {
+			store := state.New(t.TempDir())
+			srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+			body, err := json.Marshal(map[string]any{
+				"name":            name,
+				"labels":          []string{"self-hosted", "path-name"},
+				"required_labels": []string{"path-name"},
+				"template_id":     "path-name-template",
+				"enabled":         true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			req := adminRequest(http.MethodPost, "/runner_specs", bytes.NewReader(body))
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), "profile name must not contain '/' or be '.' or '..'") {
+				t.Fatalf("body = %s, want path-safe name error", rec.Body.String())
+			}
+			if _, err := store.GetProfile(name); !errors.Is(err, state.ErrNotFound) {
+				t.Fatalf("rejected profile persisted: %v", err)
+			}
+			events, err := store.ListAuditEvents(10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(events) != 0 {
+				t.Fatalf("rejected profile audit events = %#v, want none", events)
+			}
+		})
+	}
+}
+
 func TestCreateProfileRejectsManagedMetadata(t *testing.T) {
 	metadataFields := []struct {
 		name  string

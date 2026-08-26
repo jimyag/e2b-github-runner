@@ -42,6 +42,7 @@
 - Do not document multi-instance support until two runnerd processes have been verified against the same database.
 - State schema is defined mostly by GORM tags in `internal/state/records.go`.
 - Startup migration runs a narrow legacy compatibility pass in `internal/state/db.go`, then GORM `AutoMigrate`. Existing SQLite `runner_requests` and `runner_profiles` tables use additive missing-column/index migration instead of generic table recreation so ALTER-added runner-request fields and legacy runner-profile rows and indexes remain intact.
+- Validate Runner Spec names at both state write boundaries after trimming: reject `/`, `.`, and `..`. Keep migration, reads, listing, and matching tolerant of historical rows with those names; do not rename, delete, disable, or otherwise repair them automatically.
 - GORM foreign-key creation is intentionally disabled. Legacy compatibility may remove old constraints or reset incompatible legacy scope tables; keep every such action narrow and covered by old-schema tests. Pre-scope account preference/secret rows are intentionally erased, requiring Sandbox reconfiguration and GitHub reauthentication before installation sync.
 - Keep old-schema upgrade tests when changing state records, GORM tags, indexes, required columns, or relationship constraints.
 - Do not reintroduce legacy `users` migration behavior unless the user explicitly asks for that compatibility path.

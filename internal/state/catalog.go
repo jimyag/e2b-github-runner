@@ -56,6 +56,9 @@ func (s *DBStore) UpsertProfile(profile RunnerProfile) (RunnerProfile, error) {
 	if profile.Name == "" {
 		return RunnerProfile{}, fmt.Errorf("profile name is required")
 	}
+	if err := validateProfileName(profile.Name); err != nil {
+		return RunnerProfile{}, err
+	}
 	if !labelsMatch(profile.RequiredLabels, profile.Labels) {
 		return RunnerProfile{}, fmt.Errorf("required labels must be a subset of labels")
 	}
@@ -127,6 +130,9 @@ func (s *DBStore) ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedP
 			profile.ManagedBy = strings.TrimSpace(profile.ManagedBy)
 			if profile.Name == "" {
 				return fmt.Errorf("profile name is required")
+			}
+			if err := validateProfileName(profile.Name); err != nil {
+				return err
 			}
 			if profile.ManagedBy == "" {
 				return fmt.Errorf("managed profile owner is required")
@@ -237,6 +243,13 @@ func (s *DBStore) ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedP
 		return nil, err
 	}
 	return conflicts, nil
+}
+
+func validateProfileName(name string) error {
+	if strings.Contains(name, "/") || name == "." || name == ".." {
+		return fmt.Errorf("profile name must not contain '/' or be '.' or '..'")
+	}
+	return nil
 }
 
 func appendManagedProfileReconciliationAudit(tx *gorm.DB, profile RunnerProfile, now time.Time) error {

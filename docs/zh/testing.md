@@ -390,6 +390,12 @@ curl -fsS -X POST http://127.0.0.1:25500/runner_specs \
   -d '{"name":"custom-ubuntu","labels":["self-hosted","custom-ubuntu"],"required_labels":["custom-ubuntu"],"template_id":"<template id>","max_concurrency":1,"enabled":true}' | jq
 ```
 
+Runner Spec 名称会先去除首尾空白，并作为单路径段标识使用。新名称不得包含
+`/`，也不得等于 `.` 或 `..`；被拒绝的创建会返回 `400 Bad Request`，且不会提交
+Runner Spec 或对应的 audit event。启动和匹配仍兼容旧库中的此类名称，但 runnerd
+不会自动重命名或删除这些记录，也不保证其单资源管理 URL 能通过反向代理的路径
+规范化。
+
 手动创建一个 runner：
 
 ```bash
