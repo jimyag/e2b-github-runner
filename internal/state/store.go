@@ -298,6 +298,7 @@ type RunnerCatalogStore interface {
 	ListProfiles() ([]RunnerProfile, error)
 	GetProfile(name string) (RunnerProfile, error)
 	UpsertProfile(profile RunnerProfile) (RunnerProfile, error)
+	UpsertProfileIfUnchanged(profile RunnerProfile, expectedUpdatedAt *time.Time) (RunnerProfile, error)
 	ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedProfileConflict, error)
 	DeleteProfile(name string) error
 	MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error)

@@ -179,8 +179,10 @@ Runner spec 通过管理 API 和控制台管理，**不在** `runnerd.yaml` 中�
   由 runnerd 管理；operator 仍可控制 `enabled`、
   `max_concurrency` 和 `min_idle`。
 - **自定义 Runner Spec**：由 operator 管理，保存显式 `template_id`、
-  advertised labels、可选 required labels 和 `runner_group`。保存时不会调用
-  Sandbox 验证模板。
+  advertised labels、可选 required labels 和 `runner_group`。新建或更换模板时，
+  使用 `/admin/sandbox_service` 配置的 endpoint 和凭据检查访问权限与可用默认构建，
+  即使运行时默认服务已禁用也可检查。未配置凭据时，只能管理内置默认 spec 或修改
+  现有 spec 的非模板参数。校验失败不会修改 spec 或审计记录；模板未变更时不访问 Sandbox。
 - **GitHub Runner Group**：spec 设置了 `runner_group` 时，runnerd 会在该 GitHub Group 中创建组织级 runner；否则创建仓库级 runner。它不是已退役的内部 Runner Group 模型。
 
 > **⚠️ 个人账号注意：** `runner_group` 需要调用组织级 GitHub API。如果仓库属于个人账号（而非组织），必须将 `runner_group` 留**空**，否则 runner 注册会返回 404 错误。

@@ -66,6 +66,14 @@ RUNNERD_MYSQL_TEST_DSN='<dedicated mysql test DSN>' \
 - For ordinary-user Jobs authorization, cover shared installations with different repository access, exact installation/repository pair matching, filtering before the database limit, list/detail/group/log/terminal consistency, missing or rejected GitHub user tokens, inaccessible linked installations, and short-lived access-cache behavior.
 - For Release C state changes, prove fresh schemas omit retired catalog tables, legacy databases leave those tables and rows untouched, repeated migration is idempotent, and Runner Spec/Sandbox mutations plus managed reconciliation commit their data change and audit evidence atomically. Rejected mutations leave no audit event, while audit failures roll back the mutation.
 
+## Admin Template Validation
+
+- Extend existing provider/server/UI tests for custom create and changed-template PATCH; use httptest with real SDK decoding, never a production validation bypass.
+- Cover configured-but-disabled/selected admin defaults, missing credentials, 404, provider 401/403/429/5xx, cancellation/deadlines, no usable default build, public hidden history, and an older uploaded default during rebuild. Do not infer readiness from arbitrary tagged build history.
+- Assert rejected writes preserve profile and audit state, including concurrent changes/deletes during provider validation and conflicts on insert-only creation, and managed/unchanged-template control edits still work without provider access. Assert UI pending state suppresses duplicate saves and failed validation retains the form for retry.
+- For conditional profile persistence, run the audited mutation/fresh schema matrix on dedicated PostgreSQL/MySQL databases, including MySQL `clientFoundRows=true`. Cover duplicate inserts, unchanged values, and revision advancement at millisecond precision even when the clock moves backwards.
+- Run `go test ./internal/state -count=1` when changing shared local profile validation, then server/provider tests, Bun tests, i18n, and production smoke for the paired public guide changes. No schema migration is needed for this flow.
+
 ## UI
 
 - Edit source under `ui/`, not generated files under `internal/server/ui/`.

@@ -347,6 +347,8 @@ export const zh = {
     deleteRunnerSpecFailed: "无法删除 Runner 规格",
     runnerSpecNamePlaceholder: "Runner 规格名称",
     templateIDPlaceholder: "模板 ID",
+    templateValidationDescription: "新建或更换模板时，使用后台配置的沙箱服务检查访问权限和可用默认构建；模板未变更时不重复检查。",
+    configureTemplateValidation: "配置沙箱服务",
     optionalGitHubRunnerGroup: "可选的 GitHub Runner 组",
     editNamedRunnerSpec: "编辑 {{name}}",
     optionalID: "可选 ID",

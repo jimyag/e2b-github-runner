@@ -180,7 +180,12 @@ Runner specs are managed through the admin API and console — not through `runn
   `enabled`, `max_concurrency`, and `min_idle`.
 - **Custom Runner Spec**: an operator-owned spec with an explicit
   `template_id`, advertised labels, and optional required labels and
-  `runner_group`. Saving it does not call Sandbox to validate the template.
+  `runner_group`. Creating it or changing its template validates access and a
+  usable default build with the endpoint/key configured at
+  `/admin/sandbox_service` (also when runtime fallback is disabled). Without
+  those credentials, only managed defaults and unchanged-template edits are
+  available. Validation failure rejects the save without a profile/audit change.
+  Updating controls without changing the template does not contact Sandbox.
 - **GitHub Runner Group**: when a spec sets `runner_group`, runnerd creates an organization-level runner in that GitHub group; otherwise it creates a repository-level runner. This is not the retired internal Runner Group model.
 
 > **⚠️ Personal accounts:** `runner_group` requires the organization-level GitHub API. If the repository belongs to a personal account (not an organization), leave `runner_group` **empty** — otherwise runner registration will fail with a 404 error.

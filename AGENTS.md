@@ -29,8 +29,16 @@ Use this guide for future Codex or agent work in this repository.
   `enabled`, `max_concurrency`, and `min_idle`. The physical
   `runner_profiles.default_available` column is an inert rollback-compatibility
   detail and must not appear in APIs or influence matching. Custom specs remain
-  operator-owned, retain explicit `template_id`, edit/delete behavior, and no
-  save-time Sandbox validation.
+  operator-owned and retain explicit `template_id` and edit/delete behavior.
+  Creating a custom spec or changing its trimmed template ID must validate using
+  the configured admin Sandbox endpoint/key only, even when runtime fallback is
+  disabled or audience-restricted. Never use user/organization credentials for
+  admin validation. Missing config or failed validation rejects without profile
+  or audit changes. Unchanged-template edits and managed controls skip remote
+  validation. Validate local fields before provider calls and keep provider I/O
+  outside the audited transaction. Use conditional profile persistence to reject
+  concurrent changes/deletes with 409 instead of restoring stale fields. Do not
+  automatically repair historical specs.
 - Resolve a managed spec's stable public template name against the
   account/organization scoped Sandbox endpoint immediately before runner
   registration. Never persist one region's default-template ID in a managed

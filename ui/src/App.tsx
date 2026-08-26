@@ -627,6 +627,7 @@ function App() {
 
   const {
     runnerSpecOpen,
+    savingRunnerSpec,
     editingRunnerSpec,
     runnerSpecForm,
     setRunnerSpecOpen,
@@ -1104,6 +1105,7 @@ function App() {
 
           {section === "runner_specs" ? (
             <RunnerSpecsSection
+              savingRunnerSpec={savingRunnerSpec}
               loading={loading}
               runnerSpecs={runnerSpecs}
               runnerSpecOpen={runnerSpecOpen}

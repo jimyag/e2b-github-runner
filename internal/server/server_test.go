@@ -26,6 +26,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -6577,30 +6578,301 @@ func TestWorkflowJobQueuedAtCapacityIsRecorded(t *testing.T) {
 	}
 }
 
-func TestCreateProfileStoresTemplateWithoutSandboxValidation(t *testing.T) {
-	store := state.New(t.TempDir())
-	fake := &fakeSandbox{}
-	srv := newTestServer(t, store, "http://example.test", fake)
-
-	profileBody := bytes.NewBufferString(`{"name":"large","labels":["self-hosted","e2b","large"],"required_labels":["e2b","large"],"template_id":"missing-template","max_concurrency":5,"enabled":true}`)
-	req := adminRequest(http.MethodPost, "/runner_specs", profileBody)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected created, got %d body=%s", rec.Code, rec.Body.String())
+// configureAdminProfileTemplateService uses real HTTP and SDK decoding; only the
+// external provider is replaced. No account or organization credential is used.
+func configureAdminProfileTemplateService(t *testing.T, srv *Server, handler http.Handler, templateIDs ...string) {
+	t.Helper()
+	if len(templateIDs) == 0 {
+		templateIDs = []string{"valid-template"}
 	}
-	profile, err := store.GetProfile("large")
+	if handler == nil {
+		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Path == "/templates" {
+				items := make([]map[string]string, 0, len(templateIDs))
+				for _, id := range templateIDs {
+					items = append(items, map[string]string{"templateID": id, "buildID": "00000000-0000-0000-0000-000000000001", "buildStatus": "uploaded"})
+				}
+				_ = json.NewEncoder(w).Encode(items)
+			} else {
+				_ = json.NewEncoder(w).Encode(map[string]any{"templateID": strings.TrimPrefix(r.URL.Path, "/templates/"), "isOwner": true, "builds": []any{}})
+			}
+		})
+	}
+	ts := httptest.NewServer(handler)
+	t.Cleanup(ts.Close)
+	encrypted, err := encryptSecret("admin-validation-key", srv.cfg.AuthEncryptionKey.Value())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profile.TemplateID != "missing-template" {
-		t.Fatalf("template id should be persisted without sandbox validation: %#v", profile)
+	// Validation uses configured credentials even if runtime fallback is
+	// disabled and the selected runtime audience is empty.
+	if _, err := srv.store.UpsertSandboxServiceDefault(state.SandboxServiceDefault{
+		Enabled: false, AudienceMode: state.SandboxServiceDefaultAudienceModeSelected,
+		APIURL: ts.URL, APIKeyEncrypted: encrypted,
+	}); err != nil {
+		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(profile.RequiredLabels, []string{"e2b", "large"}) {
-		t.Fatalf("required labels = %#v, want [e2b large]", profile.RequiredLabels)
+}
+
+func TestAdminProfileTemplateValidation(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodPatch} {
+		for _, tt := range []struct {
+			name           string
+			missingConfig  bool
+			providerStatus int
+			notReady       bool
+			unknown        bool
+			timeout        bool
+			wantStatus     int
+			wantCode       string
+		}{
+			{name: "configured disabled selected default", wantStatus: 200},
+			{name: "no admin config", missingConfig: true, wantStatus: 409, wantCode: "sandbox_service_not_configured"},
+			{name: "missing template", providerStatus: 404, wantStatus: 400, wantCode: "template_not_found"},
+			{name: "not ready", notReady: true, wantStatus: 400, wantCode: "template_not_ready"},
+			{name: "unknown default build", unknown: true, wantStatus: 502, wantCode: "template_state_unavailable"},
+			{name: "provider unauthorized", providerStatus: 401, wantStatus: 502, wantCode: "sandbox_template_access_denied"},
+			{name: "provider forbidden", providerStatus: 403, wantStatus: 502, wantCode: "sandbox_template_access_denied"},
+			{name: "provider rate limited", providerStatus: 429, wantStatus: 502, wantCode: "template_validation_unavailable"},
+			{name: "provider unavailable", providerStatus: 503, wantStatus: 502, wantCode: "template_validation_unavailable"},
+			{name: "deadline", timeout: true, wantStatus: 504, wantCode: "template_validation_timeout"},
+		} {
+			t.Run(method+"/"+tt.name, func(t *testing.T) {
+				store := state.New(t.TempDir())
+				srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+				var calls atomic.Int32
+				if !tt.missingConfig {
+					configureAdminProfileTemplateService(t, srv, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						calls.Add(1)
+						if r.Header.Get("X-API-Key") != "admin-validation-key" {
+							t.Error("validation did not use the admin key")
+						}
+						if tt.timeout {
+							<-r.Context().Done()
+							return
+						}
+						w.Header().Set("Content-Type", "application/json")
+						if tt.providerStatus != 0 {
+							w.WriteHeader(tt.providerStatus)
+							_, _ = w.Write([]byte(`{"message":"provider-secret"}`))
+							return
+						}
+						switch r.URL.Path {
+						case "/templates/valid-template":
+							_, _ = w.Write([]byte(`{"templateID":"valid-template","isOwner":true,"builds":[]}`))
+						case "/templates":
+							if tt.unknown {
+								_, _ = w.Write([]byte(`[]`))
+								return
+							}
+							id := "00000000-0000-0000-0000-000000000001"
+							if tt.notReady {
+								id = "00000000-0000-0000-0000-000000000000"
+							}
+							_, _ = fmt.Fprintf(w, `[{"templateID":"valid-template","buildID":%q,"buildStatus":"building"}]`, id)
+						default:
+							t.Errorf("unexpected provider path: %s", r.URL.Path)
+							http.NotFound(w, r)
+						}
+					}))
+				}
+				var before state.RunnerProfile
+				url := "/runner_specs"
+				if method == http.MethodPatch {
+					var err error
+					before, err = store.UpsertProfile(state.RunnerProfile{Name: "validated", TemplateID: "old-template", Labels: []string{"custom"}, Enabled: true, MaxConcurrency: 1})
+					if err != nil {
+						t.Fatal(err)
+					}
+					url += "/validated"
+				}
+				auditBefore, err := store.ListAuditEvents(100)
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := adminRequest(method, url, strings.NewReader(`{"name":"validated","labels":["custom"],"required_labels":["custom"],"template_id":" valid-template ","max_concurrency":2,"enabled":true}`))
+				if tt.timeout {
+					ctx, cancel := context.WithTimeout(req.Context(), 50*time.Millisecond)
+					defer cancel()
+					req = req.WithContext(ctx)
+				}
+				rec := httptest.NewRecorder()
+				srv.ServeHTTP(rec, req)
+				wantStatus := tt.wantStatus
+				if wantStatus == 200 && method == http.MethodPost {
+					wantStatus = 201
+				}
+				if rec.Code != wantStatus {
+					t.Fatalf("status = %d body=%s, want %d", rec.Code, rec.Body.String(), wantStatus)
+				}
+				if tt.wantCode != "" && !strings.Contains(rec.Body.String(), `"code":"`+tt.wantCode+`"`) {
+					t.Fatalf("body = %s, want code %s", rec.Body.String(), tt.wantCode)
+				}
+				for _, secret := range []string{"admin-validation-key", "provider-secret"} {
+					if strings.Contains(rec.Body.String(), secret) {
+						t.Fatal("validation response leaked a secret")
+					}
+				}
+				auditAfter, err := store.ListAuditEvents(100)
+				if err != nil {
+					t.Fatal(err)
+				}
+				after, err := store.GetProfile("validated")
+				if tt.wantStatus == 200 {
+					if err != nil || after.TemplateID != "valid-template" || after.MaxConcurrency != 2 {
+						t.Fatalf("saved profile = %#v, err=%v", after, err)
+					}
+					if len(auditAfter) != len(auditBefore)+1 {
+						t.Fatal("successful save did not commit one audit event")
+					}
+					if calls.Load() != 2 {
+						t.Fatalf("provider calls = %d, want 2", calls.Load())
+					}
+				} else {
+					if !reflect.DeepEqual(auditBefore, auditAfter) {
+						t.Fatal("rejected save changed audit events")
+					}
+					if method == http.MethodPatch {
+						if err != nil || !reflect.DeepEqual(before, after) {
+							t.Fatalf("rejected patch changed profile: %#v, %v", after, err)
+						}
+					} else if !errors.Is(err, state.ErrNotFound) {
+						t.Fatal("rejected create persisted a profile")
+					}
+				}
+			})
+		}
 	}
-	if got := fake.templateValidationCount(); got != 0 {
-		t.Fatalf("sandbox template validations = %d, want 0", got)
+}
+
+func TestPatchProfileUnchangedTemplateDoesNotRequireSandbox(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	configureAdminProfileTemplateService(t, srv, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("unchanged template edit reached Sandbox")
+		w.WriteHeader(503)
+	}))
+	for _, body := range []string{`{"enabled":false}`, `{"template_id":" base ","max_concurrency":3}`} {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, adminRequest(http.MethodPatch, "/runner_specs/default", strings.NewReader(body)))
+		if rec.Code != 200 {
+			t.Fatalf("unchanged template patch = %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+	profile, err := store.GetProfile("default")
+	if err != nil || profile.Enabled || profile.MaxConcurrency != 3 || profile.TemplateID != "base" {
+		t.Fatalf("saved controls = %#v, %v", profile, err)
+	}
+}
+
+func TestProfileTemplateValidationDoesNotOverwriteConcurrentMutation(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodPatch} {
+		for _, action := range []string{"disable", "delete"} {
+			t.Run(method+"/"+action, func(t *testing.T) {
+				store := state.New(t.TempDir())
+				srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+				started, release := make(chan struct{}), make(chan struct{})
+				var once sync.Once
+				defer once.Do(func() { close(release) })
+				configureAdminProfileTemplateService(t, srv, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					if r.URL.Path == "/templates/valid-template" {
+						close(started)
+						select {
+						case <-release:
+						case <-r.Context().Done():
+							return
+						}
+						_, _ = w.Write([]byte(`{"templateID":"valid-template","isOwner":true,"builds":[]}`))
+					} else {
+						_, _ = w.Write([]byte(`[{"templateID":"valid-template","buildID":"00000000-0000-0000-0000-000000000001"}]`))
+					}
+				}))
+				url := "/runner_specs"
+				if method == http.MethodPatch {
+					url += "/default"
+				}
+				rec := httptest.NewRecorder()
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					srv.ServeHTTP(rec, adminRequest(method, url, strings.NewReader(`{"name":"default","labels":["e2b"],"template_id":"valid-template"}`)))
+				}()
+				select {
+				case <-started:
+				case <-time.After(2 * time.Second):
+					t.Fatal("provider validation did not start")
+				}
+				otherMethod, body := http.MethodPatch, `{"enabled":false}`
+				if action == "delete" {
+					otherMethod, body = http.MethodDelete, ""
+				}
+				other := httptest.NewRecorder()
+				srv.ServeHTTP(other, adminRequest(otherMethod, "/runner_specs/default", strings.NewReader(body)))
+				if other.Code != 200 {
+					t.Fatalf("concurrent mutation: %d %s", other.Code, other.Body.String())
+				}
+				auditBefore, err := store.ListAuditEvents(100)
+				if err != nil {
+					t.Fatal(err)
+				}
+				once.Do(func() { close(release) })
+				<-done
+				if rec.Code != 409 || !strings.Contains(rec.Body.String(), `"code":"runner_spec_conflict"`) {
+					t.Fatalf("stale save = %d %s, want409", rec.Code, rec.Body.String())
+				}
+				profile, err := store.GetProfile("default")
+				if action == "delete" {
+					if !errors.Is(err, state.ErrNotFound) {
+						t.Fatal("pending save recreated deleted spec")
+					}
+				} else if err != nil || profile.Enabled || profile.TemplateID != "base" {
+					t.Fatalf("pending save overwrote controls: %#v %v", profile, err)
+				}
+				auditAfter, err := store.ListAuditEvents(100)
+				if err != nil || !reflect.DeepEqual(auditBefore, auditAfter) {
+					t.Fatal("stale save added audit event")
+				}
+			})
+		}
+	}
+}
+
+type profileValidationTransportFunc func(*http.Request) (*http.Response, error)
+
+func (f profileValidationTransportFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func TestAdminProfileTemplateValidationHasTotalDeadline(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	configureAdminProfileTemplateService(t, srv, nil)
+	var firstDeadline time.Time
+	calls := 0
+	srv.sandboxHTTP = &http.Client{Transport: profileValidationTransportFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		deadline, ok := r.Context().Deadline()
+		if !ok {
+			t.Error("admin validation has no server-side deadline")
+		}
+		if remaining := time.Until(deadline); remaining <= 0 || remaining > 5*time.Second {
+			t.Errorf("deadline remaining = %s", remaining)
+		}
+		if calls == 1 {
+			firstDeadline = deadline
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"templateID":"valid-template","isOwner":true,"builds":[]}`)), Request: r}, nil
+		}
+		if !deadline.Equal(firstDeadline) {
+			t.Error("catalog reset the total validation deadline")
+		}
+		return nil, context.DeadlineExceeded
+	})}
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, adminRequest(http.MethodPost, "/runner_specs", strings.NewReader(`{"name":"deadline","template_id":"valid-template"}`)))
+	if calls != 2 || rec.Code != 504 {
+		t.Fatalf("calls=%d response=%d %s", calls, rec.Code, rec.Body.String())
 	}
 }
 
@@ -6704,40 +6976,10 @@ func TestCreateProfileRejectsManagedMetadata(t *testing.T) {
 	}
 }
 
-func TestPatchProfileStoresTemplateWithoutSandboxValidation(t *testing.T) {
-	store := state.New(t.TempDir())
-	fake := &fakeSandbox{}
-	srv := newTestServer(t, store, "http://example.test", fake)
-
-	profileBody := bytes.NewBufferString(`{"name":"large","labels":["self-hosted","e2b","large"],"template_id":"valid-template","max_concurrency":5,"enabled":true}`)
-	req := adminRequest(http.MethodPost, "/runner_specs", profileBody)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("unexpected create profile status: %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	req = adminRequest(http.MethodPatch, "/runner_specs/large", bytes.NewBufferString(`{"template_id":"not-ready-template"}`))
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected ok, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	profile, err := store.GetProfile("large")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if profile.TemplateID != "not-ready-template" {
-		t.Fatalf("template id update should be persisted without sandbox validation: %#v", profile)
-	}
-	if got := fake.templateValidationCount(); got != 0 {
-		t.Fatalf("sandbox template validations = %d, want 0", got)
-	}
-}
-
 func TestPatchProfilePreservesAndAllowsZeroSchedulingFields(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	configureAdminProfileTemplateService(t, srv, nil, "valid-template")
 
 	profileBody := bytes.NewBufferString(`{"name":"large","labels":["self-hosted","e2b","large"],"template_id":"valid-template","max_concurrency":5,"min_idle":2,"priority":10,"enabled":true}`)
 	req := adminRequest(http.MethodPost, "/runner_specs", profileBody)
@@ -7161,6 +7403,7 @@ func managedProfileForServerTest() state.RunnerProfile {
 func TestManualExplicitProfileUsesEnabledSpec(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	configureAdminProfileTemplateService(t, srv, nil, "large")
 
 	profileBody := bytes.NewBufferString(`{"name":"large","labels":["self-hosted","e2b","large"],"template_id":"large","runner_group":"large","max_concurrency":5,"enabled":true}`)
 	req := adminRequest(http.MethodPost, "/runner_specs", profileBody)

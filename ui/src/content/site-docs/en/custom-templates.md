@@ -110,7 +110,11 @@ Sign in as a runnerd administrator, open `/admin/runner_specs`, and create a cus
 
 Every enabled spec is eligible for an admitted repository when its workflow labels match. Use unique required labels and add them only to the intended workflows; runnerd does not use an internal Runner Group or Repository Policy to authorize the spec.
 
-Saving a custom spec does not validate the template. A wrong ID, region mismatch, missing runtime file, or inaccessible image will surface when runnerd tries to create and register a runner.
+Before creating the spec, configure the administrator's Sandbox endpoint and API key at `/admin/sandbox_service`. New specs and changed template IDs are checked with those credentials for access and a usable default build. An owned template or public default template must expose a usable default build in the provider catalog; a new rebuild does not invalidate an older usable default. Public templates outside that catalog cannot have readiness confirmed and are rejected.
+
+Missing configuration, missing/unready templates, permission errors, or a failed/timed-out check prevent saving; correct the issue and retry. The dialog keeps your input. Editing controls without changing the template does not repeat the check. Managed default specs remain manageable without admin Sandbox credentials.
+
+Jobs still use the repository owner's effective Sandbox configuration. Ensure that scope can access the same template; save-time validation does not check runner binaries or replace the sandbox smoke test above.
 
 ## Use the custom labels
 

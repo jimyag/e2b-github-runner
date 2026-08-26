@@ -4,6 +4,7 @@ This file tracks active project work. Completed behavior should move into `READM
 
 ## Active Roadmap
 
+- If Runner Specs are exposed to ordinary users in the future, scope template validation to their own account/organization Sandbox credentials; do not reuse the admin save resolver. User-side Spec management is not implemented.
 - Decide whether GitHub token and basic auth remain supported compatibility modes or should be removed in favor of GitHub App-only operation.
 - Add an effective-config diagnostics view or config validation workflow if operators need to inspect runtime config from the UI.
 - Verify DB lease behavior with two runnerd processes sharing the same database before documenting multi-instance support.
