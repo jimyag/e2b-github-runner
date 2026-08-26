@@ -391,6 +391,7 @@ func TestListAuditEventsEndpointReturnsEvents(t *testing.T) {
 func TestDeleteProfileEndpointRemovesProfile(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	configureAdminProfileTemplateService(t, srv, nil, "base")
 
 	// Create the profile via the API
 	createReq := adminRequest(http.MethodPost, "/runner_specs",

@@ -66,8 +66,27 @@ runnerd 启动时会协调 5 个 Qiniu Ubuntu managed specs。其 labels、requi
 labels、稳定公共模板名称、priority 和 default availability 由 runnerd 管理，
 operator 控制的 `enabled`、`max_concurrency` 和 `min_idle` 会被保留。自定义
 spec 仍通过 Admin API/UI 管理，需要显式 `template_id`、advertised labels 和
-可选 required labels。保存自定义 spec 时不会验证模板访问权限；runnerd 使用
-对应账户或组织的 Sandbox service 配置启动 sandbox 时才会检查。
+可选 required labels。新建自定义 spec 或更换模板 ID 前，需要在
+`/admin/sandbox_service` 配置后台 Sandbox endpoint 和 API Key。校验只使用这套
+后台配置，不读取当前登录用户或组织的凭据；运行时默认服务的启用开关和 audience
+不限制管理员校验。
+`GetTemplate` 确认模板存在且可访问，再从所属团队目录或公共默认目录读取实际已上传的
+默认构建 ID。最新重建失败或仍在进行时，旧的可用默认构建仍可通过检查。详情中的
+构建历史不能直接代表可用状态：它有分页、包含其他 tag，且对非所有者隐藏。
+不在公共默认目录中的第三方公共模板无法通过该 API 确认构建状态，会返回
+`template_state_unavailable`。
+
+整个远程检查限时 5 秒。未配置后台服务返回 `409 sandbox_service_not_configured`；
+模板不存在或没有可用默认构建分别返回 `400 template_not_found`、
+`400 template_not_ready`。上游 401/403 返回 `502 sandbox_template_access_denied`，
+其他上游故障返回 `502 template_validation_unavailable`，超时或取消返回
+`504 template_validation_timeout`。应修正配置、模板或重试；检查失败不会静默放行，
+也不会将上游响应正文暴露给客户端。拒绝保存时，spec 和审计记录均保持不变。若校验期间其他操作已修改或删除该 spec，条件写入返回 `409 runner_spec_conflict`；应刷新后重试，不会覆盖较新的状态。
+
+PATCH 按去除首尾空白后的模板 ID 判断是否变更。只修改标签、容量或启用状态时不访问
+Sandbox；managed spec 的控制项也不校验模板，继续保持运行时名称解析。已有 spec
+不会被自动重新验证或禁用。实际任务仍使用所属账户或组织的 Sandbox 配置；后台检查
+通过不代表其他作用域拥有访问权限，也不证明镜像包含 Runner 程序，仍需验证真实 workflow。
 
 `database.backend` 支持 `sqlite`、`postgres` 和 `mysql`。本地开发优先使用 sqlite；共享数据库的多实例部署需要先用两个 runnerd 进程验证 lease 行为，再作为正式运行方式记录。
 

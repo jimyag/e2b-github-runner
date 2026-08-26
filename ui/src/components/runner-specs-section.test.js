@@ -140,6 +140,18 @@ describe("RunnerSpecsSection", () => {
 })
 
 describe("runner spec submission", () => {
+  test("disables the form while template validation is pending", () => {
+    const html = renderToStaticMarkup(createElement(RunnerSpecsModule.RunnerSpecDialogForm, {
+      editingRunnerSpec: null, runnerSpecForm: managedForm, savingRunnerSpec: true,
+      onRunnerSpecFormChange() {}, onRunnerSpecOpenChange() {}, onSubmitRunnerSpec() {},
+    }))
+    expect(html).toContain('aria-busy="true"')
+    expect(html).toMatch(/<fieldset[^>]*disabled/)
+    expect(html).toMatch(/<button[^>]*type="submit"[^>]*disabled/)
+    expect(html).toContain("Saving")
+    expect(html).toContain('href="/admin/sandbox_service"')
+  })
+
   test("submits a managed PATCH with only operator controls and no group updates", async () => {
     expect(typeof RunnerCatalogModule.submitRunnerSpecChanges).toBe("function")
     if (typeof RunnerCatalogModule.submitRunnerSpecChanges !== "function") return

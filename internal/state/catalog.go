@@ -47,20 +47,40 @@ func (s *DBStore) GetProfile(name string) (RunnerProfile, error) {
 	return recordToProfile(record)
 }
 
+// ValidateProfile checks local write constraints without accessing a database
+// or provider. Admin handlers reuse it before performing remote validation.
+func ValidateProfile(profile RunnerProfile) error {
+	name := strings.TrimSpace(profile.Name)
+	if name == "" {
+		return fmt.Errorf("profile name is required")
+	}
+	if err := validateProfileName(name); err != nil {
+		return err
+	}
+	if !labelsMatch(profile.RequiredLabels, profile.Labels) {
+		return fmt.Errorf("required labels must be a subset of labels")
+	}
+	return nil
+}
+
 func (s *DBStore) UpsertProfile(profile RunnerProfile) (RunnerProfile, error) {
+	return s.saveProfile(profile, false, nil)
+}
+
+// UpsertProfileIfUnchanged inserts only when absent (nil expectedUpdatedAt), or
+// updates only the version read before validation. Deleted/changed rows conflict.
+func (s *DBStore) UpsertProfileIfUnchanged(profile RunnerProfile, expectedUpdatedAt *time.Time) (RunnerProfile, error) {
+	return s.saveProfile(profile, true, expectedUpdatedAt)
+}
+
+func (s *DBStore) saveProfile(profile RunnerProfile, conditional bool, expectedUpdatedAt *time.Time) (RunnerProfile, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {
 		return RunnerProfile{}, err
 	}
 	profile.Name = strings.TrimSpace(profile.Name)
-	if profile.Name == "" {
-		return RunnerProfile{}, fmt.Errorf("profile name is required")
-	}
-	if err := validateProfileName(profile.Name); err != nil {
+	if err := ValidateProfile(profile); err != nil {
 		return RunnerProfile{}, err
-	}
-	if !labelsMatch(profile.RequiredLabels, profile.Labels) {
-		return RunnerProfile{}, fmt.Errorf("required labels must be a subset of labels")
 	}
 	labelsJSON, err := json.Marshal(profile.Labels)
 	if err != nil {
@@ -75,6 +95,13 @@ func (s *DBStore) UpsertProfile(profile RunnerProfile) (RunnerProfile, error) {
 	}
 	requiredLabelsJSONText := string(requiredLabelsJSON)
 	now := time.Now().UTC()
+	if conditional && expectedUpdatedAt != nil {
+		// MySQL persists datetime(3). Advance beyond the stored revision even
+		// for rapid saves or when the application clock moves backwards.
+		if next := expectedUpdatedAt.Add(time.Millisecond); now.Before(next) {
+			now = next
+		}
+	}
 	record := runnerProfileRecord{
 		Name:                profile.Name,
 		LabelsJSON:          string(labelsJSON),
@@ -95,25 +122,42 @@ func (s *DBStore) UpsertProfile(profile RunnerProfile) (RunnerProfile, error) {
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = now
 	}
-	if err := db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "name"}},
-		DoUpdates: clause.Assignments(map[string]any{
-			"labels_json":           record.LabelsJSON,
-			"required_labels_json":  record.RequiredLabelsJSON,
-			"template_id":           record.TemplateID,
-			"default_template_name": record.DefaultTemplateName,
-			"runner_group":          record.RunnerGroup,
-			"max_concurrency":       record.MaxConcurrency,
-			"min_idle":              record.MinIdle,
-			"priority":              record.Priority,
-			"enabled":               record.Enabled,
-			"managed_by":            record.ManagedBy,
-			"catalog_revision":      record.CatalogRevision,
-			"updated_at":            record.UpdatedAt,
-		}),
-	}).Create(&record).Error; err != nil {
-		return RunnerProfile{}, err
+	updates := map[string]any{
+		"labels_json":           record.LabelsJSON,
+		"required_labels_json":  record.RequiredLabelsJSON,
+		"template_id":           record.TemplateID,
+		"default_template_name": record.DefaultTemplateName,
+		"runner_group":          record.RunnerGroup,
+		"max_concurrency":       record.MaxConcurrency,
+		"min_idle":              record.MinIdle,
+		"priority":              record.Priority,
+		"enabled":               record.Enabled,
+		"managed_by":            record.ManagedBy,
+		"catalog_revision":      record.CatalogRevision,
+		"updated_at":            record.UpdatedAt,
 	}
+	var result *gorm.DB
+	switch {
+	case conditional && expectedUpdatedAt != nil:
+		result = db.Model(&runnerProfileRecord{}).
+			Where("name = ? AND updated_at = ?", record.Name, *expectedUpdatedAt).Updates(updates)
+	case conditional:
+		// A no-op ON CONFLICT reports success with MySQL clientFoundRows.
+		// Use a real insert and translate duplicate errors only at this boundary.
+		result = db.Create(&record)
+		if translator, ok := db.Dialector.(gorm.ErrorTranslator); ok && result.Error != nil && errors.Is(translator.Translate(result.Error), gorm.ErrDuplicatedKey) {
+			return RunnerProfile{}, ErrConflict
+		}
+	default:
+		result = db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "name"}}, DoUpdates: clause.Assignments(updates)}).Create(&record)
+	}
+	if result.Error != nil {
+		return RunnerProfile{}, result.Error
+	}
+	if conditional && result.RowsAffected == 0 {
+		return RunnerProfile{}, ErrConflict
+	}
+
 	return s.GetProfile(record.Name)
 }
 

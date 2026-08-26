@@ -248,7 +248,8 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid profile payload")
 		return
 	}
-	if strings.TrimSpace(input.TemplateID) == "" {
+	input.TemplateID = strings.TrimSpace(input.TemplateID)
+	if input.TemplateID == "" {
 		writeError(w, http.StatusBadRequest, "template_id is required")
 		return
 	}
@@ -267,6 +268,10 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	var expectedUpdatedAt *time.Time
+	if err == nil {
+		expectedUpdatedAt = &existing.UpdatedAt
+	}
 	enabled := true
 	if input.Enabled != nil {
 		enabled = *input.Enabled
@@ -282,13 +287,20 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 		Priority:       intValue(input.Priority),
 		Enabled:        enabled,
 	}
+	if err := state.ValidateProfile(requestedProfile); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !s.validateAdminProfileTemplate(w, r, requestedProfile.TemplateID) {
+		return
+	}
 	var profile state.RunnerProfile
 	err = s.applyMutationWithAudit("admin_api", "profile.create", "runner_profile", strings.TrimSpace(requestedProfile.Name), requestedProfile, func(tx state.Store) error {
-		profile, err = tx.UpsertProfile(requestedProfile)
+		profile, err = tx.UpsertProfileIfUnchanged(requestedProfile, expectedUpdatedAt)
 		return err
 	})
 	if err != nil {
-		if writeMutationAuditError(w, err) {
+		if writeProfileConflict(w, err) || writeMutationAuditError(w, err) {
 			return
 		}
 		s.logger.Info("profile create rejected", "name", input.Name, "error", err)
@@ -345,10 +357,12 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 	if input.RequiredLabels != nil {
 		current.RequiredLabels = *input.RequiredLabels
 	}
+	previousTemplateID := strings.TrimSpace(current.TemplateID)
 	if input.TemplateID != nil {
 		current.TemplateID = *input.TemplateID
 	}
-	if strings.TrimSpace(current.TemplateID) == "" {
+	current.TemplateID = strings.TrimSpace(current.TemplateID)
+	if current.TemplateID == "" {
 		writeError(w, http.StatusBadRequest, "template_id is required")
 		return
 	}
@@ -367,13 +381,20 @@ func (s *Server) handlePatchProfile(w http.ResponseWriter, r *http.Request) {
 	if input.Enabled != nil {
 		current.Enabled = *input.Enabled
 	}
+	if err := state.ValidateProfile(current); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if current.TemplateID != previousTemplateID && !s.validateAdminProfileTemplate(w, r, current.TemplateID) {
+		return
+	}
 	var profile state.RunnerProfile
 	err = s.applyMutationWithAudit("admin_api", "profile.update", "runner_profile", current.Name, current, func(tx state.Store) error {
-		profile, err = tx.UpsertProfile(current)
+		profile, err = tx.UpsertProfileIfUnchanged(current, &current.UpdatedAt)
 		return err
 	})
 	if err != nil {
-		if writeMutationAuditError(w, err) {
+		if writeProfileConflict(w, err) || writeMutationAuditError(w, err) {
 			return
 		}
 		s.logger.Info("profile update rejected", "name", current.Name, "error", err)
@@ -421,11 +442,11 @@ func (s *Server) handlePatchManagedProfile(w http.ResponseWriter, current state.
 	var profile state.RunnerProfile
 	err := s.applyMutationWithAudit("admin_api", "profile.update", "runner_profile", current.Name, current, func(tx state.Store) error {
 		var mutationErr error
-		profile, mutationErr = tx.UpsertProfile(current)
+		profile, mutationErr = tx.UpsertProfileIfUnchanged(current, &current.UpdatedAt)
 		return mutationErr
 	})
 	if err != nil {
-		if writeMutationAuditError(w, err) {
+		if writeProfileConflict(w, err) || writeMutationAuditError(w, err) {
 			return
 		}
 		s.logger.Info("managed profile update rejected", "name", current.Name, "error", err)

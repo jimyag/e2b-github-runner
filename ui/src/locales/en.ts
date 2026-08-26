@@ -347,6 +347,8 @@ export const en = {
     deleteRunnerSpecFailed: "Failed to delete runner spec",
     runnerSpecNamePlaceholder: "Runner spec name",
     templateIDPlaceholder: "Template ID",
+    templateValidationDescription: "New or changed templates are checked for access and a usable default build using the admin Sandbox service. Unchanged templates are not rechecked.",
+    configureTemplateValidation: "Configure Sandbox service",
     optionalGitHubRunnerGroup: "Optional GitHub runner group",
     editNamedRunnerSpec: "Edit {{name}}",
     optionalID: "Optional ID",

@@ -166,9 +166,23 @@ curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
 
 Expected result: only the first request selects `qiniu-ubuntu-24.04`.
 
-Create one custom regression spec with an explicit template ID and operator
-labels. Confirm saving it does not contact Sandbox, running it uses the stored
-ID, and it can still be edited and deleted:
+Configure the admin Sandbox endpoint/key at `/admin/sandbox_service`, then
+create one custom regression spec with an explicit template ID and operator
+labels. Saving must query template access and its usable default build with the
+admin credentials; running still uses the repository owner's effective Sandbox
+configuration and stored template ID. Confirm the following without disrupting
+existing jobs:
+
+- A missing template returns `400 template_not_found` with no spec/audit change.
+- A template without a usable default build returns `400 template_not_ready`.
+- Missing admin credentials return `409 sandbox_service_not_configured`;
+  managed control edits and unchanged-template custom edits remain available.
+- Provider auth/errors/timeouts reject the save with an actionable error, not a
+  false success. Retrying after correcting the template/configuration succeeds.
+- An existing usable default is accepted while a newer rebuild is in progress.
+- The custom spec can still be edited and deleted; test the real job separately.
+
+Example successful create:
 
 ```bash
 curl -fsS -X POST https://<runnerd-host>/runner_specs \

@@ -3176,6 +3176,82 @@ func TestReadLogCanReturnTail(t *testing.T) {
 	}
 }
 
+func TestProfileConditionalSave(t *testing.T) {
+	testProfileConditionalSave(t, New(t.TempDir()))
+}
+
+func testProfileConditionalSave(t *testing.T, store Store) {
+	t.Helper()
+	initial, err := store.UpsertProfileIfUnchanged(RunnerProfile{Name: "conditional-spec", TemplateID: "old", Enabled: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeAudit, err := store.ListAuditEvents(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.ApplyMutationWithAudit(AuditEvent{Actor: "test", Action: "profile.create", ResourceType: "runner_profile", ResourceID: initial.Name}, func(tx Store) error {
+		_, err := tx.UpsertProfileIfUnchanged(RunnerProfile{Name: initial.Name, TemplateID: "overwrite"}, nil)
+		return err
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate create = %v, want conflict", err)
+	}
+	unchanged, err := store.GetProfile(initial.Name)
+	if err != nil || !reflect.DeepEqual(initial, unchanged) {
+		t.Fatalf("duplicate create overwrote existing profile: %#v %v", unchanged, err)
+	}
+	afterAudit, err := store.ListAuditEvents(100)
+	if err != nil || !reflect.DeepEqual(beforeAudit, afterAudit) {
+		t.Fatal("duplicate create persisted audit")
+	}
+	// Put the stored revision just ahead of the clock so a conditional save
+	// must explicitly advance it, including at MySQL's millisecond precision.
+	db, err := store.(*DBStore).dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision := time.Now().UTC().Add(time.Minute).Truncate(time.Millisecond)
+	if err := db.Model(&runnerProfileRecord{}).Where("name = ?", initial.Name).UpdateColumn("updated_at", revision).Error; err != nil {
+		t.Fatal(err)
+	}
+	initial, err = store.GetProfile(initial.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := initial
+	updated.Enabled = false
+	updated, err = store.UpsertProfileIfUnchanged(updated, &initial.UpdatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.UpdatedAt.Before(initial.UpdatedAt.Add(time.Millisecond)) {
+		t.Fatalf("revision did not advance at database precision: before=%s after=%s", initial.UpdatedAt, updated.UpdatedAt)
+	}
+	previous := updated
+	updated, err = store.UpsertProfileIfUnchanged(updated, &previous.UpdatedAt)
+	if err != nil || !updated.UpdatedAt.After(previous.UpdatedAt) {
+		t.Fatalf("unchanged values must still advance the revision: %#v %v", updated, err)
+	}
+	initial.TemplateID = "stale"
+	if _, err := store.UpsertProfileIfUnchanged(initial, &initial.UpdatedAt); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale update = %v, want conflict", err)
+	}
+	got, err := store.GetProfile(initial.Name)
+	if err != nil || got.Enabled || got.TemplateID != "old" {
+		t.Fatalf("stale update changed record: %#v %v", got, err)
+	}
+	if err := store.DeleteProfile(initial.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpsertProfileIfUnchanged(updated, &updated.UpdatedAt); !errors.Is(err, ErrConflict) {
+		t.Fatalf("deleted update = %v, want conflict", err)
+	}
+	if _, err := store.GetProfile(initial.Name); !errors.Is(err, ErrNotFound) {
+		t.Fatal("conditional update recreated deleted record")
+	}
+}
+
 func TestApplyMutationWithAuditSQLBackends(t *testing.T) {
 	if os.Getenv("RUNNERD_CATALOG_BACKEND_TESTS") != "1" {
 		t.Skip("set RUNNERD_CATALOG_BACKEND_TESTS=1 with dedicated Postgres and MySQL test databases")
@@ -3231,7 +3307,7 @@ func TestApplyMutationWithAuditSQLBackends(t *testing.T) {
 					return mutationErr
 				}
 				profile.MaxConcurrency = 7
-				_, mutationErr = tx.UpsertProfile(profile)
+				_, mutationErr = tx.UpsertProfileIfUnchanged(profile, &profile.UpdatedAt)
 				return mutationErr
 			})
 			if err != nil || event.ID == 0 {
@@ -3242,16 +3318,18 @@ func TestApplyMutationWithAuditSQLBackends(t *testing.T) {
 				t.Fatalf("%s atomic profile mutation not committed: profile=%#v err=%v", backend.name, profile, err)
 			}
 
+			testProfileConditionalSave(t, store)
+
 			if err := db.Migrator().DropTable(&auditEventRecord{}); err != nil {
 				t.Fatal(err)
 			}
 			_, err = store.ApplyMutationWithAudit(AuditEvent{
 				Actor: "admin_api", Action: "profile.create", ResourceType: "runner_profile", ResourceID: "rolled-back-spec",
 			}, func(tx Store) error {
-				_, mutationErr := tx.UpsertProfile(RunnerProfile{
+				_, mutationErr := tx.UpsertProfileIfUnchanged(RunnerProfile{
 					Name: "rolled-back-spec", Labels: []string{"self-hosted", "rollback"},
 					RequiredLabels: []string{"rollback"}, TemplateID: "rollback-template", Enabled: true,
-				})
+				}, nil)
 				return mutationErr
 			})
 			if !errors.Is(err, ErrAuditEventPersistence) {

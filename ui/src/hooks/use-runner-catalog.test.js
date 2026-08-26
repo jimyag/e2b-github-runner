@@ -103,4 +103,32 @@ describe("useRunnerCatalog", () => {
     expect(activeToasts[0].title).toBe(validationMessage)
     expect(activeToasts.some((item) => item.type === "success")).toBe(false)
   })
+  test("blocks duplicate saves while validation is pending and allows retry after rejection", async () => {
+    let rejectRequest
+    let requests = 0
+    const getCatalog = mountRunnerCatalog(() => {
+      requests += 1
+      if (requests === 1) return new Promise((_, reject) => { rejectRequest = reject })
+      return Promise.resolve({})
+    }, async () => {})
+    act(() => getCatalog().setRunnerSpecOpen(true))
+    let pending
+    act(() => {
+      pending = getCatalog().saveRunnerSpec({ preventDefault() {} })
+      void getCatalog().saveRunnerSpec({ preventDefault() {} })
+    })
+    expect(getCatalog().savingRunnerSpec).toBe(true)
+    expect(requests).toBe(1)
+    await act(async () => {
+      rejectRequest(new Error("Template has no usable default build"))
+      await pending
+    })
+    expect(getCatalog().savingRunnerSpec).toBe(false)
+    expect(getCatalog().runnerSpecOpen).toBe(true)
+    await act(async () => { await getCatalog().saveRunnerSpec({ preventDefault() {} }) })
+    expect(requests).toBe(2)
+    expect(getCatalog().savingRunnerSpec).toBe(false)
+    expect(getCatalog().runnerSpecOpen).toBe(false)
+  })
+
 })

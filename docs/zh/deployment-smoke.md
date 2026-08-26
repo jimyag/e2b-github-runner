@@ -163,8 +163,20 @@ curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
 
 预期结果：只有第 1 个请求选择 `qiniu-ubuntu-24.04`。
 
-创建一个带显式 template ID 和 operator labels 的自定义回归 spec。确认保存时
-不会访问 Sandbox，运行时使用保存的 ID，并且仍可编辑和删除：
+先在 `/admin/sandbox_service` 配置后台 Sandbox endpoint 和凭据，再创建带显式
+模板 ID 和 operator labels 的自定义回归 spec。保存时应使用后台凭据查询模板
+访问权限及可用默认构建；实际运行仍使用仓库 owner 的有效 Sandbox 配置和已保存的
+模板 ID。在不影响现有任务的情况下确认：
+
+- 不存在的模板返回 `400 template_not_found`，不修改 spec 和审计记录。
+- 没有可用默认构建时返回 `400 template_not_ready`。
+- 缺少后台凭据时返回 `409 sandbox_service_not_configured`；managed 控制项和
+  现有自定义 spec 的非模板参数仍可修改。
+- 上游权限错误、服务故障和超时均拒绝保存并给出可操作提示；修正后重试可成功。
+- 新构建仍在进行时，已有可用默认构建的模板仍能保存。
+- 自定义 spec 仍可编辑和删除，并单独验证真实任务。
+
+成功创建示例：
 
 ```bash
 curl -fsS -X POST https://<runnerd-host>/runner_specs \

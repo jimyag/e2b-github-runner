@@ -69,9 +69,32 @@ labels, required labels, stable public template names, priority, and default
 availability while preserving operator-controlled `enabled`,
 `max_concurrency`, and `min_idle`. Custom specs remain admin API/UI data: give
 them an explicit `template_id`, advertised labels, and optional required
-labels. Custom template access is intentionally not validated at save time.
-It is checked when runnerd starts a sandbox with the account or organization
-Sandbox service config.
+labels. New custom specs and changed template IDs require an admin Sandbox
+endpoint and API key configured at `/admin/sandbox_service`. Validation uses
+that configuration only, not the signed-in user's or an organization's keys;
+the runtime fallback enabled/audience controls do not restrict admin validation.
+`GetTemplate` verifies existence/access, then the owned catalog or public default
+catalog supplies the effective uploaded default build ID. A failed/in-progress
+rebuild does not invalidate an older usable default. Detail build history is not
+a readiness signal: it is paginated, includes other tags, and is hidden from
+non-owners. Public templates outside the default catalog cannot have their build
+state confirmed by this API and are rejected with `template_state_unavailable`.
+
+The total provider check is limited to five seconds. Missing admin configuration
+returns `409 sandbox_service_not_configured`; a missing template or no usable
+default build returns `400 template_not_found` or `400 template_not_ready`.
+Provider 401/403 produces `502 sandbox_template_access_denied`, other upstream
+failures produce `502 template_validation_unavailable`, and cancellation/deadline
+returns `504 template_validation_timeout`. Fix the configuration/template or retry;
+a failed check never silently permits a save and never exposes the provider body.
+Rejected saves leave both profile and audit records unchanged. If another save or deletion changes the spec while validation is in flight, the conditional write returns `409 runner_spec_conflict`; refresh before retrying instead of overwriting the newer state.
+
+PATCH compares trimmed template IDs: changing only labels, capacity, or enabled
+state remains possible without Sandbox access. Managed spec controls also skip
+validation and retain runtime name resolution. No existing spec is automatically
+revalidated or disabled. Actual jobs still use their account/organization Sandbox
+configuration; admin validation does not grant access in those scopes or prove
+that the image contains the runner binaries. Verify the real workflow separately.
 
 `database.backend` supports `sqlite`, `postgres`, and `mysql`. Prefer sqlite for local development. Before documenting shared-database multi-instance deployment as supported, verify lease behavior with two runnerd processes sharing the same database.
 

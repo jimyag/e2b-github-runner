@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react"
+import { type FormEvent, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
@@ -58,6 +58,8 @@ export function useRunnerCatalog({
 }) {
   const { t } = useTranslation()
   const [runnerSpecOpen, setRunnerSpecOpen] = useState(false)
+  const [savingRunnerSpec, setSavingRunnerSpec] = useState(false)
+  const savingRunnerSpecRef = useRef(false)
   const [editingRunnerSpec, setEditingRunnerSpec] = useState<RunnerSpec | null>(null)
   const [runnerSpecForm, setRunnerSpecForm] = useState<RunnerSpecFormState>({
     name: "",
@@ -88,6 +90,9 @@ export function useRunnerCatalog({
 
   const saveRunnerSpec = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (savingRunnerSpecRef.current) return
+    savingRunnerSpecRef.current = true
+    setSavingRunnerSpec(true)
     try {
       const name = await submitRunnerSpecChanges({
         request,
@@ -100,6 +105,9 @@ export function useRunnerCatalog({
       await loadAll()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("admin.saveRunnerSpecFailed"))
+    } finally {
+      savingRunnerSpecRef.current = false
+      setSavingRunnerSpec(false)
     }
   }
 
@@ -133,6 +141,7 @@ export function useRunnerCatalog({
 
   return {
     runnerSpecOpen,
+    savingRunnerSpec,
     editingRunnerSpec,
     runnerSpecForm,
     setRunnerSpecOpen,
