@@ -105,13 +105,9 @@ func (s *DBStore) createRequest(req RunnerRequest, payload []byte, status, failu
 	if err != nil {
 		return false, RunnerState{}, err
 	}
-	// Extract context in memory. New requests leave the legacy
-	// github_payload_json column empty; existing payloads remain for backfill.
-	payloadLinks := githubLinksFromPayload(runnerRequestRecord{
-		WorkflowJobID:      &req.JobID,
-		RepositoryFullName: req.RepositoryFullName,
-		GitHubPayloadJSON:  string(payload),
-	})
+	// Extract context in memory to avoid retaining raw webhook data that may be
+	// sensitive. Existing github_payload_json values remain available for backfill.
+	payloadLinks := githubLinksFromPayloadBytes(payload, req.RepositoryFullName, req.JobID)
 	var failedAt *time.Time
 	if status == StatusFailed {
 		failedAt = &now
