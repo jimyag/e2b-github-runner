@@ -102,11 +102,7 @@ func githubLinksFromRecord(record runnerRequestRecord) githubPayloadLinks {
 		links = mergeGitHubPayloadLinks(links, githubLinksFromPayload(record))
 	}
 	if links.jobURL == "" {
-		jobID := record.AssignedJobID
-		if jobID == 0 {
-			jobID = pointerToInt64(record.WorkflowJobID)
-		}
-		links.jobURL = githubJobURL(record.RepositoryFullName, links.workflowRunID, jobID)
+		links.jobURL = githubJobURL(record.RepositoryFullName, links.workflowRunID, effectiveRunnerRequestJobID(record))
 	}
 	links.jobURL = appendPullRequestQuery(links.jobURL, links.pullRequestNumber)
 	return links
@@ -164,11 +160,14 @@ func githubInstallationIDFromPayload(payloadJSON string) int64 {
 }
 
 func githubLinksFromPayload(record runnerRequestRecord) githubPayloadLinks {
-	jobID := record.AssignedJobID
-	if jobID == 0 {
-		jobID = pointerToInt64(record.WorkflowJobID)
+	return githubLinksFromPayloadBytes([]byte(record.GitHubPayloadJSON), record.RepositoryFullName, effectiveRunnerRequestJobID(record))
+}
+
+func effectiveRunnerRequestJobID(record runnerRequestRecord) int64 {
+	if record.AssignedJobID != 0 {
+		return record.AssignedJobID
 	}
-	return githubLinksFromPayloadBytes([]byte(record.GitHubPayloadJSON), record.RepositoryFullName, jobID)
+	return pointerToInt64(record.WorkflowJobID)
 }
 
 func githubLinksFromPayloadBytes(payloadJSON []byte, repositoryFullName string, jobID int64) githubPayloadLinks {

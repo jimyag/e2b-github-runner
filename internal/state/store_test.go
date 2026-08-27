@@ -4060,6 +4060,26 @@ func TestGitHubLinksFromPayloadBytesFallbacks(t *testing.T) {
 	}
 }
 
+func TestEffectiveRunnerRequestJobID(t *testing.T) {
+	workflowJobID := int64(22)
+	tests := []struct {
+		name   string
+		record runnerRequestRecord
+		want   int64
+	}{
+		{name: "assigned job takes precedence", record: runnerRequestRecord{AssignedJobID: 11, WorkflowJobID: &workflowJobID}, want: 11},
+		{name: "workflow job fallback", record: runnerRequestRecord{WorkflowJobID: &workflowJobID}, want: 22},
+		{name: "missing job id", record: runnerRequestRecord{}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := effectiveRunnerRequestJobID(tt.record); got != tt.want {
+				t.Fatalf("effective runner request job ID = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunnerStateBuildsGitHubJobLinkFromWorkflowRunPayload(t *testing.T) {
 	store := New(t.TempDir()).(*DBStore)
 	payload := []byte(`{
