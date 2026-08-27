@@ -4028,6 +4028,38 @@ func TestRunnerStateDerivesGitHubJobLinkFromWorkflowJobPayload(t *testing.T) {
 	}
 }
 
+func TestGitHubLinksFromPayloadBytesFallbacks(t *testing.T) {
+	tests := []struct {
+		name       string
+		payload    string
+		wantRunID  int64
+		wantPR     int64
+		wantJobURL string
+	}{
+		{
+			name:       "workflow job nested run id",
+			payload:    `{"workflow_job":{"workflow_run":{"id":26392225417}}}`,
+			wantRunID:  26392225417,
+			wantJobURL: "https://github.com/qbox/las/actions/runs/26392225417/job/77684492230",
+		},
+		{
+			name:       "top level pull request number",
+			payload:    `{"workflow_job":{"run_id":26392225417},"pull_request":{"number":3335}}`,
+			wantRunID:  26392225417,
+			wantPR:     3335,
+			wantJobURL: "https://github.com/qbox/las/actions/runs/26392225417/job/77684492230?pr=3335",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			links := githubLinksFromPayloadBytes([]byte(tt.payload), "qbox/las", 77684492230)
+			if links.workflowRunID != tt.wantRunID || links.pullRequestNumber != tt.wantPR || links.jobURL != tt.wantJobURL {
+				t.Fatalf("github links = %#v, want run id %d, PR %d, URL %q", links, tt.wantRunID, tt.wantPR, tt.wantJobURL)
+			}
+		})
+	}
+}
+
 func TestRunnerStateBuildsGitHubJobLinkFromWorkflowRunPayload(t *testing.T) {
 	store := New(t.TempDir()).(*DBStore)
 	payload := []byte(`{

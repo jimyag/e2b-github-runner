@@ -101,14 +101,12 @@ func githubLinksFromRecord(record runnerRequestRecord) githubPayloadLinks {
 	if !record.GitHubContextBackfilled {
 		links = mergeGitHubPayloadLinks(links, githubLinksFromPayload(record))
 	}
-	if links.jobURL == "" && record.RepositoryFullName != "" && links.workflowRunID > 0 {
+	if links.jobURL == "" {
 		jobID := record.AssignedJobID
 		if jobID == 0 {
 			jobID = pointerToInt64(record.WorkflowJobID)
 		}
-		if jobID > 0 {
-			links.jobURL = fmt.Sprintf("https://github.com/%s/actions/runs/%d/job/%d", record.RepositoryFullName, links.workflowRunID, jobID)
-		}
+		links.jobURL = githubJobURL(record.RepositoryFullName, links.workflowRunID, jobID)
 	}
 	links.jobURL = appendPullRequestQuery(links.jobURL, links.pullRequestNumber)
 	return links
@@ -228,8 +226,8 @@ func githubLinksFromPayloadBytes(payloadJSON []byte, repositoryFullName string, 
 	}
 
 	jobURL := payload.WorkflowJob.HTMLURL
-	if jobURL == "" && repositoryFullName != "" && runID > 0 && jobID > 0 {
-		jobURL = fmt.Sprintf("https://github.com/%s/actions/runs/%d/job/%d", repositoryFullName, runID, jobID)
+	if jobURL == "" {
+		jobURL = githubJobURL(repositoryFullName, runID, jobID)
 	}
 	jobURL = appendPullRequestQuery(jobURL, prNumber)
 
@@ -242,6 +240,13 @@ func githubLinksFromPayloadBytes(payloadJSON []byte, repositoryFullName string, 
 		jobURL:             jobURL,
 		pullRequestNumber:  prNumber,
 	}
+}
+
+func githubJobURL(repositoryFullName string, runID, jobID int64) string {
+	if repositoryFullName == "" || runID <= 0 || jobID <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("https://github.com/%s/actions/runs/%d/job/%d", repositoryFullName, runID, jobID)
 }
 
 func firstNonEmpty(values ...string) string {
