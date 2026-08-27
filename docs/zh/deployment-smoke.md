@@ -98,8 +98,9 @@ https://<runnerd-host>/admin/accounts
 ```bash
 curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/pprof | jq
 curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/vars | jq
-curl -fsS -b "$COOKIE_JAR" \
-  'https://<runnerd-host>/diagnostics/catalog-migration-readiness?window_hours=72' | jq
+test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runnerd-host>/runner_groups)" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runnerd-host>/runner_policies)" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/catalog-migration-readiness)" = 404
 ```
 
 检查：
@@ -108,9 +109,10 @@ curl -fsS -b "$COOKIE_JAR" \
 - `state.database` 指向预期的 sqlite、Postgres 或 MySQL 数据库。
 - 当 local pprof service 可用时，可以看到 pprof discovery files 和 dump scripts。
 - Recent failure summaries 为空，或每一项都已理解。
-- Release A readiness 面板的观察窗口至少达到 72 小时，不存在 replay 截断或 malformed input，旧 matcher 与 enabled-Spec matcher 严格一致，并且每个启用 Spec 都有 registration、completion、cleanup 证据。
-- 每个预期的生产 label family 都应显示为一行启用 Spec。没有流量时保持阻塞；应使用现有 `runs-on` labels 触发正常 workflow job，而不是修改 catalog 数据来制造证据。
-- 所选窗口内保持 catalog/Sandbox 配置冻结。readiness 相关 mutation 必须在同一事务中提交数据变更与审计事件：被拒绝的 mutation 不留下审计证据，审计持久化失败时目标数据保持不变。备份恢复检查、服务连续运行观察、workflow labels 未修改仍需分别记录人工签字；仅有自动门禁全绿并不等于已授权 Release B。
+- 已退役的 Runner Group、Policy 及临时 catalog migration readiness API 返回 `404`；`/admin/runner_groups` 与 `/admin/runner_policies` 仍会安全重定向到 Runner Specs。
+- 持久化为 `failed` 且 `failure_stage=admission`、`failure_reason=profile_labels_not_matched` 的 Runner 请求显示为**未匹配**，不计入失败指标，可单独筛选，也不显示重试操作；真正的失败请求仍显示为**失败**，并在适用时允许重试。
+- 现有 workflow `runs-on` labels 和已启用 Runner Spec 的匹配行为保持不变。Release C 部署不得同时修改 Catalog 或 Sandbox 配置。
+- 遗留的 `runner_groups`、`runner_group_specs` 和 `repository_policies` 表保持原样用于回滚；删除它们必须安排后续独立授权的数据库维护窗口。
 
 ## 3. Runner Catalog
 
@@ -161,14 +163,26 @@ curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
 
 预期结果：只有第 1 个请求选择 `qiniu-ubuntu-24.04`。
 
-创建一个带显式 template ID 和 operator labels 的自定义回归 spec。确认保存时
-不会访问 Sandbox，运行时使用保存的 ID，并且仍可编辑和删除：
+先在 `/admin/sandbox_service` 配置后台 Sandbox endpoint 和凭据，再创建带显式
+模板 ID 和 operator labels 的自定义回归 spec。保存时应使用后台凭据查询模板
+访问权限及可用默认构建；实际运行仍使用仓库 owner 的有效 Sandbox 配置和已保存的
+模板 ID。在不影响现有任务的情况下确认：
+
+- 不存在的模板返回 `400 template_not_found`，不修改 spec 和审计记录。
+- 没有可用默认构建时返回 `400 template_not_ready`。
+- 缺少后台凭据时返回 `409 sandbox_service_not_configured`；managed 控制项和
+  现有自定义 spec 的非模板参数仍可修改。
+- 上游权限错误、服务故障和超时均拒绝保存并给出可操作提示；修正后重试可成功。
+- 新构建仍在进行时，已有可用默认构建的模板仍能保存。
+- 自定义 spec 仍可编辑和删除，并单独验证真实任务。
+
+成功创建示例：
 
 ```bash
 curl -fsS -X POST https://<runnerd-host>/runner_specs \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"name":"deployment-custom","labels":["self-hosted","deployment-custom"],"required_labels":["deployment-custom"],"template_id":"<private-template-id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
+  -d '{"name":"deployment-custom","labels":["self-hosted","deployment-custom"],"required_labels":["deployment-custom"],"template_id":"<private-template-id>","max_concurrency":1,"enabled":true}' | jq
 ```
 
 ## 4. Webhook Delivery

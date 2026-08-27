@@ -75,8 +75,27 @@ runnerd 启动时会协调 5 个 Qiniu Ubuntu managed specs。其 labels、requi
 labels、稳定公共模板名称、priority 和 default availability 由 runnerd 管理，
 operator 控制的 `enabled`、`max_concurrency` 和 `min_idle` 会被保留。自定义
 spec 仍通过 Admin API/UI 管理，需要显式 `template_id`、advertised labels 和
-可选 required labels。保存自定义 spec 时不会验证模板访问权限；runnerd 使用
-对应账户或组织的 Sandbox service 配置启动 sandbox 时才会检查。
+可选 required labels。新建自定义 spec 或更换模板 ID 前，需要在
+`/admin/sandbox_service` 配置后台 Sandbox endpoint 和 API Key。校验只使用这套
+后台配置，不读取当前登录用户或组织的凭据；运行时默认服务的启用开关和 audience
+不限制管理员校验。
+`GetTemplate` 确认模板存在且可访问，再从所属团队目录或公共默认目录读取实际已上传的
+默认构建 ID。最新重建失败或仍在进行时，旧的可用默认构建仍可通过检查。详情中的
+构建历史不能直接代表可用状态：它有分页、包含其他 tag，且对非所有者隐藏。
+不在公共默认目录中的第三方公共模板无法通过该 API 确认构建状态，会返回
+`template_state_unavailable`。
+
+整个远程检查限时 5 秒。未配置后台服务返回 `409 sandbox_service_not_configured`；
+模板不存在或没有可用默认构建分别返回 `400 template_not_found`、
+`400 template_not_ready`。上游 401/403 返回 `502 sandbox_template_access_denied`，
+其他上游故障返回 `502 template_validation_unavailable`，超时或取消返回
+`504 template_validation_timeout`。应修正配置、模板或重试；检查失败不会静默放行，
+也不会将上游响应正文暴露给客户端。拒绝保存时，spec 和审计记录均保持不变。若校验期间其他操作已修改或删除该 spec，条件写入返回 `409 runner_spec_conflict`；应刷新后重试，不会覆盖较新的状态。
+
+PATCH 按去除首尾空白后的模板 ID 判断是否变更。只修改标签、容量或启用状态时不访问
+Sandbox；managed spec 的控制项也不校验模板，继续保持运行时名称解析。已有 spec
+不会被自动重新验证或禁用。实际任务仍使用所属账户或组织的 Sandbox 配置；后台检查
+通过不代表其他作用域拥有访问权限，也不证明镜像包含 Runner 程序，仍需验证真实 workflow。
 
 `database.backend` 支持 `sqlite`、`postgres` 和 `mysql`。本地开发优先使用 sqlite；共享数据库的多实例部署需要先用两个 runnerd 进程验证 lease 行为，再作为正式运行方式记录。
 
@@ -116,17 +135,17 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
-State migration、shadow catalog matcher 和带审计的 catalog mutation 还提供
-opt-in 的真实方言兼容性门禁。两个 DSN 必须指向名称以 `_test` 结尾的专用、
+State migration 和带审计的 catalog mutation 还提供 opt-in 的真实方言兼容性
+门禁。两个 DSN 必须指向名称以 `_test` 结尾的专用、
 可丢弃数据库；测试会拒绝其他数据库名称，然后删除并重建 runnerd state tables。
-覆盖范围包括 fresh schema 创建、保留 catalog rows 的重复迁移、legacy catalog
-tables 存在、为空和不存在三种状态，以及 mutation 与 audit 的原子提交和回滚。
+覆盖范围包括 fresh schema 不创建已退役 catalog tables、重复迁移，以及 mutation
+与 audit 的原子提交和回滚。
 
 ```bash
 RUNNERD_CATALOG_BACKEND_TESTS=1 \
 RUNNERD_POSTGRES_TEST_DSN='host=127.0.0.1 user=runnerd password=runnerd dbname=runnerd_test port=5432 sslmode=disable' \
 RUNNERD_MYSQL_TEST_DSN='runnerd:runnerd@tcp(127.0.0.1:3306)/runnerd_test' \
-  go test ./internal/state -run 'Test(ApplyMutationWithAudit|CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+  go test ./internal/state -run 'Test(ApplyMutationWithAudit|FreshSchema)SQLBackends' -count=1 -v
 ```
 
 服务重启恢复有一组不依赖真实 Sandbox 的定向测试：
@@ -199,7 +218,7 @@ github:
     password: <token or password>
 ```
 
-不需要固定全局 repo/org 模式；webhook 会使用 payload 里的 `repository.full_name`。默认创建 repository runner；如果匹配到的 runner spec 设置了 GitHub `runner_group`，runnerd 会按该仓库 owner 创建 organization runner，并把 `runner_group` 作为 GitHub runner registration 的 `--runnergroup` 传入。`runner_specs.default_available: true` 的规格对所有仓库默认可用；`runner_policies` 只需要用于给某个仓库或仓库通配符追加特殊 spec，例如 `jimyag/*` 或 `jimyag/template-repository`。
+不需要固定全局 repo/org 模式；webhook 会使用 payload 里的 `repository.full_name`。默认创建 repository runner；如果匹配到的 runner spec 设置了 GitHub `runner_group`，runnerd 会按该仓库 owner 创建 organization runner，并把 `runner_group` 作为 GitHub runner registration 的 `--runnergroup` 传入。通过仓库 allowlist 检查后，admission 会从所有已启用 Runner Spec 中按标签选择；已移除的内部 Runner Group 和 Repository Policy 不影响匹配。
 
 ## 3. 启动服务
 
@@ -396,8 +415,14 @@ curl -fsS -b "$COOKIE_JAR" \
 curl -fsS -X POST http://127.0.0.1:25500/runner_specs \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"name":"custom-ubuntu","labels":["self-hosted","custom-ubuntu"],"required_labels":["custom-ubuntu"],"template_id":"<template id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
+  -d '{"name":"custom-ubuntu","labels":["self-hosted","custom-ubuntu"],"required_labels":["custom-ubuntu"],"template_id":"<template id>","max_concurrency":1,"enabled":true}' | jq
 ```
+
+Runner Spec 名称会先去除首尾空白，并作为单路径段标识使用。新名称不得包含
+`/`，也不得等于 `.` 或 `..`；被拒绝的创建会返回 `400 Bad Request`，且不会提交
+Runner Spec 或对应的 audit event。启动和匹配仍兼容旧库中的此类名称，但 runnerd
+不会自动重命名或删除这些记录，也不保证其单资源管理 URL 能通过反向代理的路径
+规范化。
 
 手动创建一个 runner：
 
@@ -619,8 +644,6 @@ curl -fsS -b "$COOKIE_JAR" \
 ```bash
 curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/pprof | jq
 curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
-curl -fsS -b "$COOKIE_JAR" \
-  'http://127.0.0.1:25500/diagnostics/catalog-migration-readiness?window_hours=72' | jq
 ```
 
 `/diagnostics/pprof` 会返回：
@@ -633,11 +656,7 @@ curl -fsS -b "$COOKIE_JAR" \
 
 `/diagnostics/vars` 会直接返回当前 runnerd 进程的 expvar registry，不再选择发现到的 pprof address file，因此旧进程留下的 stale artifact 不会遮蔽当前指标。当前指标覆盖 profile current/busy/idle/pending/desired、retry/lease、create/stop 次数与耗时、GitHub API 调用、runner 注册/清理，以及 workflow job queued/started/completed、conclusion、failure、queue duration 和 run duration。
 
-Admin Diagnostics 页面还会加载 catalog migration readiness 接口。它从已持久化的 runner requests 中提取不同的 repository/label 输入，分别使用 Release A 的旧 Group/Policy matcher 与 enabled-Spec matcher 回放，并按历史 request 数量加权统计结果。默认观察 72 小时，也可切换到 7 天或 30 天。整个报告在一次 read-only repeatable-read database transaction 中生成，最多回放 5,000 组不同输入；一旦截断或遇到无法解析的数据，门禁会阻塞，不会误报 parity。
-
-同一报告会为每个当前启用的 Runner Spec 展示持久化的 request、registration、completion、cleanup-finalized 数量，以及最近一条成功 GitHub Job 链接。completion 与 cleanup 证据要求此前已经持久化 runner registration；在创建 Sandbox 前被跳过的 request 不能满足完整生命周期证据。没有单独配置 `required_labels` 的自定义 Spec 会以其声明的 `labels` 作为 workflow label 证据展示。`cleanup finalized` 表示 runnerd 只有在 Sandbox 已停止、GitHub runner 已删除或确认不存在后，才把 request 持久化为 `completed`。未选择 runnerd 的 GitHub-hosted job（例如只带 `ubuntu-latest`）可能形成 `same` 的 no-match 回放结果，但不能计入任何启用 Spec 的生命周期证据。
-
-自动门禁仅在观察窗口至少 72 小时、窗口内没有 catalog/Sandbox 变更审计事件、历史 matcher 严格一致、并且每个启用 Spec 都有完整生命周期证据时通过。与 readiness 有关的 catalog 和 Sandbox mutation 会在同一数据库事务中提交数据变更与审计事件：被拒绝的 mutation 不会留下审计事件，审计持久化失败则会回滚数据变更。managed catalog reconciliation 写入 `profile.reconcile` 时也遵循同一规则。备份恢复验证、服务连续运行观察、workflow labels 未修改仍是明确的人工签字项；UI 不会推断或自动完成这些事项。
+Release C 在 matcher 切换完成后移除了临时 catalog migration readiness API 与界面。已退役的 Runner Group 和 Policy API 返回 `404`；其遗留数据库表保持原样用于回滚。
 
 ## 11. 官方参考
 

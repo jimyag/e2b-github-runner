@@ -43,6 +43,8 @@ describe("AppSidebar", () => {
 
     expect(html).toContain("Runner Specs")
     expect(html).toContain("Accounts")
+		expect(html).not.toContain("Runner Groups")
+		expect(html).not.toContain("Runner Policies")
     expect(html).toContain('data-size="lg"')
     expect(html).toContain("h-12 text-sm")
     expect(html).not.toContain("Connected")

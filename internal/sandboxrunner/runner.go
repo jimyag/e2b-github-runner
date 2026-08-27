@@ -116,11 +116,12 @@ type Service interface {
 }
 
 var (
-	ErrTemplateRequired = errors.New("template_id is required")
-	ErrTemplateNotFound = errors.New("template not found")
-	ErrTemplateNotReady = errors.New("template is not ready")
-	ErrSandboxNotFound  = errors.New("sandbox not found")
-	ErrRunnerNotFound   = errors.New("runner process not found")
+	ErrTemplateRequired         = errors.New("template_id is required")
+	ErrTemplateNotFound         = errors.New("template not found")
+	ErrTemplateNotReady         = errors.New("template is not ready")
+	ErrTemplateStateUnavailable = errors.New("template default build state cannot be confirmed")
+	ErrSandboxNotFound          = errors.New("sandbox not found")
+	ErrRunnerNotFound           = errors.New("runner process not found")
 )
 
 type E2BService struct {
@@ -154,15 +155,33 @@ func (s *E2BService) ValidateTemplate(ctx context.Context, templateID string) er
 		}
 		return err
 	}
-	if len(template.Builds) == 0 {
+	// Detail builds are paginated history (including other tags) and hidden
+	// from non-owners. The catalog's BuildID instead identifies the uploaded
+	// default build actually selected for creation. BuildStatus describes the
+	// latest attempt, which may be rebuilding while the old default is usable.
+	var templates []qnsandbox.Template
+	switch {
+	case template.IsOwner:
+		templates, err = s.client.ListTemplates(ctx, nil)
+	case template.Public:
+		templates, err = s.client.ListDefaultTemplates(ctx)
+	default:
+		return ErrTemplateStateUnavailable
+	}
+	if err != nil {
+		return err
+	}
+	for _, item := range templates {
+		if item.TemplateID != templateID {
+			continue
+		}
+		buildID := strings.TrimSpace(item.BuildID)
+		if buildID == "" || buildID == "00000000-0000-0000-0000-000000000000" {
+			return ErrTemplateNotReady
+		}
 		return nil
 	}
-	for _, build := range template.Builds {
-		if templateBuildUsable(build.Status) {
-			return nil
-		}
-	}
-	return ErrTemplateNotReady
+	return ErrTemplateStateUnavailable
 }
 
 func (s *E2BService) ListTemplates(ctx context.Context) ([]CatalogTemplate, error) {
@@ -235,10 +254,6 @@ func (s *E2BService) ListRunnerSandboxes(ctx context.Context) ([]CatalogSandbox,
 		})
 	}
 	return result, nil
-}
-
-func templateBuildUsable(status qnsandbox.TemplateBuildStatus) bool {
-	return status == qnsandbox.BuildStatusReady || status == qnsandbox.BuildStatusUploaded
 }
 
 func (s *E2BService) StartRunner(ctx context.Context, input StartInput) (StartResult, error) {

@@ -11,6 +11,7 @@ The public, bilingual end-user guides are served at [runner.qiniuinc.com/docs](h
 - [Public Runner Templates](default-runner-templates.md): qshell requirements, two-region build and publication order, Sandbox smoke evidence, ownership, and rollback.
 - [Runner Architecture Comparison](runner-architecture-comparison.md): current runnerd architecture baseline, Mermaid system/lifecycle/state diagrams, DB-backed state model, and comparison with Fireactions and Actions Runner Controller.
 - [Runnerd Implementation Review](runner-implementation-review.md): current implementation status, schema migration notes, and remaining product/operations decisions.
+- [Runner Spec Template Validation Implementation Plan](superpowers/plans/2026-08-26-template-validation.md): Issue #44.
 
 The root `README.md` is the operator quick start. `TODO.md` tracks pending decisions and should not duplicate completed behavior already documented here.
 

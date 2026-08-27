@@ -1,4 +1,4 @@
-import { Activity, ClipboardList, CloudCog, ListTree, Route, ScrollText, Server, Settings2, Stethoscope, UsersRound } from "lucide-react"
+import { Activity, ClipboardList, CloudCog, ListTree, ScrollText, Settings2, Stethoscope, UsersRound } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
 import { QiniuRunnerLogo } from "@/components/qiniu-runner-logo"
@@ -28,8 +28,6 @@ export function AppSidebar({
     { id: "accounts", label: t("sidebar.accounts"), icon: UsersRound },
     { id: "runner_requests", label: t("sidebar.runnerRequests"), icon: ListTree },
     { id: "runner_specs", label: t("sidebar.runnerSpecs"), icon: Settings2 },
-    { id: "runner_groups", label: t("sidebar.runnerGroups"), icon: Server },
-    { id: "runner_policies", label: t("sidebar.runnerPolicies"), icon: Route },
     { id: "sandbox_service", label: t("sidebar.sandboxService"), icon: CloudCog },
     { id: "match", label: t("sidebar.matchTest"), icon: ClipboardList },
     { id: "audit", label: t("sidebar.audit"), icon: ScrollText },

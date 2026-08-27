@@ -4,6 +4,22 @@ import * as AdminFormatModule from "../admin-format"
 import i18n from "../i18n"
 
 describe("translated admin metrics", () => {
+  test("treats profile label admission rejection as unmatched rather than failed", () => {
+    const unmatched = {
+      id: "unmatched",
+      status: "failed",
+      failure_stage: "admission",
+      failure_reason: "profile_labels_not_matched",
+    }
+    const failed = { id: "failed", status: "failed", failure_stage: "sandbox_create" }
+
+    expect(AdminFormatModule.runnerDisplayStatus(unmatched)).toBe("unmatched")
+    expect(AdminFormatModule.runnerDisplayStatus(failed)).toBe("failed")
+
+    const metrics = AdminFormatModule.runnerMetrics([unmatched, failed], 2, i18n.getFixedT("en"))
+    expect(metrics.find((metric) => metric.id === "failed")?.value).toBe(1)
+  })
+
   test("keep stable IDs while labels change with language", () => {
     expect(typeof AdminFormatModule.runnerMetrics).toBe("function")
     expect(typeof AdminFormatModule.accountMetrics).toBe("function")

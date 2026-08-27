@@ -80,7 +80,7 @@ func TestCacheScopesForWorkflowMatchesGitHubScopes(t *testing.T) {
 			defer api.Close()
 
 			srv := &Server{gh: github.NewClient(api.URL, api.Client())}
-			got := srv.cacheScopesForWorkflow(t.Context(), "owner/repo", state.RunnerState{WorkflowRunID: 101}, scopeForBranch("main"))
+			got := srv.cacheScopesForWorkflow(t.Context(), "owner/repo", state.RunnerState{WorkflowRunID: 101})
 			if got.WriteScope != test.wantWriteScope || got.Decision != test.wantDecision {
 				t.Fatalf("decision = %#v", got)
 			}
@@ -97,8 +97,16 @@ func TestCacheScopesForWorkflowMatchesGitHubScopes(t *testing.T) {
 }
 
 func TestCacheScopesForWorkflowFailsClosedWithoutWorkflowRun(t *testing.T) {
-	defaultScope := scopeForBranch("main")
-	got := (&Server{}).cacheScopesForWorkflow(t.Context(), "owner/repo", state.RunnerState{}, defaultScope)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/repo" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"full_name":"owner/repo","default_branch":"develop"}`))
+	}))
+	defer api.Close()
+
+	got := (&Server{gh: github.NewClient(api.URL, api.Client())}).cacheScopesForWorkflow(t.Context(), "owner/repo", state.RunnerState{})
+	defaultScope := scopeForBranch("develop")
 	if got.WriteScope != "" || got.Decision != "read_only_missing_workflow_run" || len(got.ReadScopes) != 1 || got.ReadScopes[0] != defaultScope {
 		t.Fatalf("scope decision = %#v", got)
 	}

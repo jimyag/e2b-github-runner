@@ -104,13 +104,17 @@ fi
 - 声明标签，例如 `self-hosted`、`linux`、`x64` 和 `acme-linux-x64`；
 - 包含 `acme-linux-x64` 的 required labels；
 - 目标 Sandbox 区域中准确的 template ID；
-- 组织仓库可选择 Runner Group，个人仓库应留空；
+- 组织仓库可选择 GitHub Runner Group，个人仓库应留空；
 - 合适的 `max_concurrency`、`min_idle` 和优先级；
 - 打开 `enabled`。
 
-首次发布时请关闭 `default_available`，并为目标仓库新增 Repository Policy。只有希望所有仓库都能使用该 spec 时才打开它。
+所有已启用 spec 都可由已放行仓库按 workflow 标签匹配。请使用唯一的 required labels，并只把这些标签加入目标 workflow；runnerd 不通过内部 Runner Group 或 Repository Policy 授权 spec。
 
-保存自定义 spec 时不会验证模板。ID 错误、区域不匹配、运行时文件缺失或镜像不可访问等问题，会在 runnerd 创建和注册 Runner 时暴露出来。
+创建 spec 前，请先在 `/admin/sandbox_service` 配置后台 Sandbox endpoint 和 API Key。新建或更换模板 ID 时，会使用后台凭据检查访问权限与可用默认构建。所属团队模板或公共默认模板必须在服务目录中有可用默认构建；新的重建不会使旧的可用默认构建失效。不在该目录中的第三方公共模板无法确认可用状态，会拒绝保存。
+
+缺少配置、模板不存在或未就绪、权限错误、查询失败或超时都会阻止保存；修正后可重试，表单会保留输入。仅修改非模板参数时不重复检查。没有后台 Sandbox 凭据时，仍可管理内置默认 spec。
+
+实际任务继续使用仓库 owner 的有效 Sandbox 配置。请确保该作用域可以访问同一模板；保存校验不检查 Runner 程序文件，也不能替代前面的沙箱冒烟测试。
 
 ## 使用自定义标签
 
@@ -136,8 +140,8 @@ jobs:
 
 ## 安全发布与故障排查
 
-先只向一个仓库开放，并使用一个手动触发的 smoke workflow。确认任务成功完成且 Sandbox 已清理后，再提高并发或增加 Repository Policy。
+先只在一个仓库的手动 smoke workflow 中加入唯一标签。确认任务成功完成且 Sandbox 已清理后，再提高并发或把这些标签加入更多 workflow。
 
-如果任务一直排队，请对比 Job 标签、required labels、声明标签、`enabled`、`default_available` 和 Repository Policy。如果 Runner 创建失败，请确认有效账号或组织的 Sandbox endpoint、template ID 和 `Status: ready`。如果运行时失败，请重新执行远端模板检查并查看 runnerd 日志。
+如果任务一直排队，请对比 Job 标签、required labels、声明标签和 `enabled`。如果 Runner 创建失败，请确认有效账号或组织的 Sandbox endpoint、template ID 和 `Status: ready`。如果运行时失败，请重新执行远端模板检查并查看 runnerd 日志。
 
 如果重新构建产生了新的 template ID，请在下一个任务运行前更新自定义 Runner Spec。继续按现象排查时，请参阅[故障排查](/docs/troubleshooting)。

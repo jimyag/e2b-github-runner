@@ -30,11 +30,12 @@
 - Ordinary-user Jobs authorization is repository-level, not installation-level. Resolve the user's repository intersection for every account-linked GitHub App installation with the stored GitHub user access token, preserve exact `(github_installation_id, repository_full_name)` pairs, filter before query limits, and reuse the same authorization for lists, details, groups, logs, and terminals. Missing or rejected user tokens must fail closed; an inaccessible installation contributes no authorized repositories.
 - Token and basic auth still exist as compatibility modes; their long-term product status is undecided.
 - GitHub Enterprise Server is not supported. Config validation rejects `github.api_base_url` values other than `https://api.github.com`.
-- Runner specs, runner groups, and repository policies are admin API/UI data, not `runnerd.yaml` fields.
+- Runner Specs are admin API/UI data, not `runnerd.yaml` fields. Internal Runner Groups and Repository Policies were removed in Release C: their APIs and state models no longer exist, while legacy tables remain untouched for rollback until a separately authorized cleanup; never use them for admission.
+- Admin custom Runner Spec create/template-change validation uses the saved admin Sandbox endpoint/key, independently of runtime fallback enabled/audience controls. It does not read user/organization credentials. GetTemplate proves access; the owned or public default catalog's nonzero effective BuildID proves a usable uploaded default. Latest BuildStatus and detail history are not equivalent to the selected default. Missing credentials, unknown build state, and provider errors reject before the audited transaction under a five-second provider deadline; responses exclude upstream bodies. Managed controls and unchanged-template edits make no provider calls. Runtime scoped resolution is unchanged. Admin saves use conditional writes against the original updated_at (insert-only for absent specs); concurrent changes/deletes produce 409 without audit or stale overwrites.
 - Sandbox credential precedence is request snapshot, installation custom/inherited config, eligible personal account config, enabled and audience-eligible admin default, then not configured. Corrupt scoped config must fail instead of falling through.
 - Admin default audience mode is `all` or `selected`. Selected entries match the repository owner's stable GitHub numeric account ID and account type, never the workflow actor or organization membership; an empty selected audience matches nobody.
 - Admin audience additions resolve a typed GitHub login to canonical stable ID/type through GitHub before persistence; login remains display metadata. Installation sync and runtime GitHub App lookup both populate the separate installation-owner cache used for selected-audience matching.
-- `github.allowed_repositories` limits admitted repositories before runner spec/policy matching.
+- `github.allowed_repositories` limits admitted repositories before enabled Runner Spec label matching.
 
 ## State And Migrations
 
@@ -42,6 +43,7 @@
 - Do not document multi-instance support until two runnerd processes have been verified against the same database.
 - State schema is defined mostly by GORM tags in `internal/state/records.go`.
 - Startup migration runs a narrow legacy compatibility pass in `internal/state/db.go`, then GORM `AutoMigrate`. Existing SQLite `runner_requests` and `runner_profiles` tables use additive missing-column/index migration instead of generic table recreation so ALTER-added runner-request fields and legacy runner-profile rows and indexes remain intact.
+- Validate Runner Spec names at both state write boundaries after trimming: reject `/`, `.`, and `..`. Keep migration, reads, listing, and matching tolerant of historical rows with those names; do not rename, delete, disable, or otherwise repair them automatically.
 - GORM foreign-key creation is intentionally disabled. Legacy compatibility may remove old constraints or reset incompatible legacy scope tables; keep every such action narrow and covered by old-schema tests. Pre-scope account preference/secret rows are intentionally erased, requiring Sandbox reconfiguration and GitHub reauthentication before installation sync.
 - Keep old-schema upgrade tests when changing state records, GORM tags, indexes, required columns, or relationship constraints.
 - Do not reintroduce legacy `users` migration behavior unless the user explicitly asks for that compatibility path.

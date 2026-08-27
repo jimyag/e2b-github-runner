@@ -68,6 +68,14 @@ type githubInstallationRepositoryAccessQueryBatch struct {
 }
 
 func (s *DBStore) CreateRequest(req RunnerRequest, payload []byte) (bool, RunnerState, error) {
+	return s.createRequest(req, payload, StatusQueued, "", "", "")
+}
+
+func (s *DBStore) CreateRejectedRequest(req RunnerRequest, payload []byte, reason string) (bool, RunnerState, error) {
+	return s.createRequest(req, payload, StatusFailed, "admission", strings.TrimSpace(reason), "runner admission rejected")
+}
+
+func (s *DBStore) createRequest(req RunnerRequest, payload []byte, status, failureStage, failureReason, errorMessage string) (bool, RunnerState, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {
 		return false, RunnerState{}, err
@@ -105,6 +113,10 @@ func (s *DBStore) CreateRequest(req RunnerRequest, payload []byte) (bool, Runner
 	if req.PullRequestNumber > 0 && payloadLinks.pullRequestNumber == 0 {
 		payloadLinks.pullRequestNumber = req.PullRequestNumber
 	}
+	var failedAt *time.Time
+	if status == StatusFailed {
+		failedAt = &now
+	}
 	record := runnerRequestRecord{
 		ID:                      req.ID,
 		Source:                  req.Source,
@@ -126,9 +138,13 @@ func (s *DBStore) CreateRequest(req RunnerRequest, payload []byte) (bool, Runner
 		SandboxAPIURL:           strings.TrimSpace(req.SandboxAPIURL),
 		SandboxAPIKeyEncrypted:  strings.TrimSpace(req.SandboxAPIKeyEncrypted),
 		SandboxConfigSource:     strings.TrimSpace(req.SandboxConfigSource),
-		Status:                  StatusQueued,
+		Status:                  status,
+		FailureStage:            failureStage,
+		FailureReason:           failureReason,
+		Error:                   errorMessage,
 		GitHubPayloadJSON:       string(payload),
 		QueuedAt:                req.CreatedAt,
+		FailedAt:                failedAt,
 		UpdatedAt:               now,
 		Version:                 0,
 	}

@@ -227,29 +227,33 @@ advertised labels 和 required labels。
 
 runnerd 处理 `queued`、`in_progress` 和 `completed` 动作。对于 `workflow_run` 事件，runnerd 会列出该 run 下所有排队 job，并将尚未入队的匹配 job 创建 runner request。
 
-## Runner Spec 与 Policy
+## Runner Spec 与匹配
 
-Runner spec、runner group 和 repository policy 通过管理 API 和控制台管理，**不在** `runnerd.yaml` 中配置。
+Runner spec 通过管理 API 和控制台管理，**不在** `runnerd.yaml` 中配置。所有已启用 spec 都可供 `github.allowed_repositories` 放行的仓库按标签匹配。
 
 - **Managed Runner Spec**：runnerd 会协调 `ubuntu-slim`、`ubuntu-22.04`、
   `ubuntu-24.04`、预览版 `ubuntu-26.04` 和 `ubuntu-latest` 这 5 个内置
-  specs。catalog labels、required labels、公共模板名称、priority 和
-  availability 由 runnerd 管理；operator 仍可控制 `enabled`、
+  specs。catalog labels、required labels、公共模板名称和 priority
+  由 runnerd 管理；operator 仍可控制 `enabled`、
   `max_concurrency` 和 `min_idle`。
 - **自定义 Runner Spec**：由 operator 管理，保存显式 `template_id`、
-  advertised labels、可选 required labels 和 `runner_group`。保存时不会调用
-  Sandbox 验证模板。
-- **Runner Group**：spec 设置了 `runner_group` 时，runnerd 创建组织级 runner；否则创建仓库级 runner。
+  advertised labels、可选 required labels 和 `runner_group`。新建或更换模板时，
+  使用 `/admin/sandbox_service` 配置的 endpoint 和凭据检查访问权限与可用默认构建，
+  即使运行时默认服务已禁用也可检查。未配置凭据时，只能管理内置默认 spec 或修改
+  现有 spec 的非模板参数。校验失败不会修改 spec 或审计记录；模板未变更时不访问 Sandbox。
+- **GitHub Runner Group**：spec 设置了 `runner_group` 时，runnerd 会在该 GitHub Group 中创建组织级 runner；否则创建仓库级 runner。它不是已退役的内部 Runner Group 模型。
 
 > **⚠️ 个人账号注意：** `runner_group` 需要调用组织级 GitHub API。如果仓库属于个人账号（而非组织），必须将 `runner_group` 留**空**，否则 runner 注册会返回 404 错误。
-
-- **Repository Policy**：为特定仓库授权访问默认之外的额外 spec。
 
 匹配始终遵守 `required_labels ⊆ job_labels ⊆ labels`。因此，managed Ubuntu
 spec 同时要求 `qiniu` 和准确的操作系统 label；`[ubuntu-24.04]` 或 `[qiniu]`
 都不能单独匹配。workflow 移除 `qiniu` 后不会选择 managed defaults；operator
 也可以在 Admin 中单独禁用某个 managed spec，而不改变 runnerd 协调的 catalog
 identity。
+
+内部 Runner Group 和 Repository Policy 已移除。旧管理 API 现在统一返回
+`404 Not Found`，旧 Admin 书签会重定向到 Runner Specs。遗留数据库表和记录保持
+原样，因此回滚到上一个应用镜像时不需要回滚 schema。
 
 Managed spec 保存稳定的公共模板名称。runnerd 会在创建 Runner 前，使用
 repository owner 对应的 scoped Sandbox endpoint 解析该名称，因此不同区域可以
@@ -273,7 +277,7 @@ label 组合，不包含 provider template ID、credential、endpoint，也不�
 
 | 路由                     | 说明                           |
 | ------------------------ | ------------------------------ |
-| `/admin/`                | 仪表盘：诊断、指标、最近失败与 Release A 持久化迁移证据 |
+| `/admin/`                | 仪表盘：诊断、指标与最近失败     |
 | `/admin/accounts`        | 账户管理：列表、搜索、角色变更 |
 | `/admin/sandbox_service` | Sandbox 服务配置               |
 

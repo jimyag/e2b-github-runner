@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -403,6 +402,7 @@ func TestListAuditEventsEndpointReturnsEvents(t *testing.T) {
 func TestDeleteProfileEndpointRemovesProfile(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	configureAdminProfileTemplateService(t, srv, nil, "base")
 
 	// Create the profile via the API
 	createReq := adminRequest(http.MethodPost, "/runner_specs",
@@ -430,88 +430,6 @@ func TestDeleteProfileEndpointRemovesProfile(t *testing.T) {
 	}
 }
 
-// ---------- handleDeleteRunnerGroup ----------
-
-func TestDeleteRunnerGroupEndpointRemovesGroup(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	// Create profile
-	req := adminRequest(http.MethodPost, "/runner_specs",
-		strings.NewReader(`{"name":"del-grp-spec-api","labels":["self-hosted"],"template_id":"base","max_concurrency":1,"enabled":true}`))
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create profile: %d %s", rec.Code, rec.Body.String())
-	}
-
-	// Create runner group
-	req = adminRequest(http.MethodPost, "/runner_groups",
-		strings.NewReader(`{"name":"del-group-api","spec_names":["del-grp-spec-api"],"enabled":true}`))
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create runner group: %d %s", rec.Code, rec.Body.String())
-	}
-
-	// Delete it
-	req = adminRequest(http.MethodDelete, "/runner_groups/del-group-api", nil)
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("DELETE /runner_groups/del-group-api: expected 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-
-	// Verify it's gone
-	req = adminRequest(http.MethodGet, "/runner_groups/del-group-api", nil)
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("GET after delete: expected 404, got %d body=%s", rec.Code, rec.Body.String())
-	}
-}
-
-// ---------- handleDeleteRepositoryPolicy ----------
-
-func TestDeleteRepositoryPolicyEndpointRemovesPolicy(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	// Create profile
-	req := adminRequest(http.MethodPost, "/runner_specs",
-		strings.NewReader(`{"name":"del-pol-spec-api","labels":["self-hosted"],"template_id":"base","max_concurrency":1,"enabled":true}`))
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create profile: %d %s", rec.Code, rec.Body.String())
-	}
-
-	// Create policy
-	req = adminRequest(http.MethodPost, "/runner_policies",
-		strings.NewReader(`{"repository_full_name":"org/del-pol-repo","runner_spec_name":"del-pol-spec-api","enabled":true}`))
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create policy: %d %s", rec.Code, rec.Body.String())
-	}
-
-	// Extract policy ID from response
-	var policyResp struct {
-		ID int64 `json:"id"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &policyResp); err != nil {
-		t.Fatalf("unmarshal policy response: %v", err)
-	}
-
-	// Delete policy
-	deleteReq := adminRequest(http.MethodDelete, fmt.Sprintf("/runner_policies/%d", policyResp.ID), nil)
-	deleteRec := httptest.NewRecorder()
-	srv.ServeHTTP(deleteRec, deleteReq)
-	if deleteRec.Code != http.StatusOK {
-		t.Fatalf("DELETE /runner_policies/{id}: expected 200, got %d body=%s", deleteRec.Code, deleteRec.Body.String())
-	}
-}
-
 // ---------- handleAdminRedirect ----------
 
 func TestAdminRedirectReturns301(t *testing.T) {
@@ -527,6 +445,60 @@ func TestAdminRedirectReturns301(t *testing.T) {
 	}
 	if loc := rec.Header().Get("Location"); loc != "/admin/" {
 		t.Errorf("GET /admin: Location = %q, want /admin/", loc)
+	}
+}
+
+func TestRetiredAdminCatalogRoutesRedirectToRunnerSpecs(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+
+	for _, path := range []string{
+		"/admin/runner_groups",
+		"/admin/runner_groups/",
+		"/admin/runner_policies",
+		"/admin/runner_policies/",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusTemporaryRedirect {
+			t.Fatalf("GET %s: status = %d, want %d", path, rec.Code, http.StatusTemporaryRedirect)
+		}
+		if location := rec.Header().Get("Location"); location != "/admin/runner_specs" {
+			t.Fatalf("GET %s: Location = %q, want /admin/runner_specs", path, location)
+		}
+	}
+}
+
+func TestReleaseCRemovesRetiredCatalogAPIs(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
+	tests := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/runner_groups", ""},
+		{http.MethodGet, "/runner_groups/group", ""},
+		{http.MethodGet, "/runner_policies", ""},
+		{http.MethodPost, "/runner_groups", `{}`},
+		{http.MethodPatch, "/runner_groups/group", `{}`},
+		{http.MethodDelete, "/runner_groups/group", ""},
+		{http.MethodPost, "/runner_policies", `{}`},
+		{http.MethodPatch, "/runner_policies/1", `{}`},
+		{http.MethodDelete, "/runner_policies/1", ""},
+		{http.MethodGet, "/diagnostics/catalog-migration-readiness", ""},
+		{http.MethodGet, "/diagnostics/catalog-migration-readiness/", ""},
+		{http.MethodOptions, "/runner_groups/group", ""},
+		{"PURGE", "/runner_policies/1", ""},
+	}
+	for _, tt := range tests {
+		req := adminRequest(tt.method, tt.path, strings.NewReader(tt.body))
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s: status = %d, want %d; body=%s", tt.method, tt.path, rec.Code, http.StatusNotFound, rec.Body.String())
+		}
 	}
 }
 
@@ -602,179 +574,10 @@ func TestListProfilesEndpointReturnsProfiles(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "default") {
 		t.Errorf("GET /runner_specs: expected default profile in response, got %s", rec.Body.String())
 	}
-}
-
-// ---------- handleListRunnerGroups ----------
-
-func TestListRunnerGroupsEndpointReturnsEmpty(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	req := adminRequest(http.MethodGet, "/runner_groups", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /runner_groups: expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	if strings.Contains(rec.Body.String(), "default_available") {
+		t.Errorf("GET /runner_specs exposed retired default_available: %s", rec.Body.String())
 	}
 }
-
-func TestListRunnerGroupsEndpointReturnsCreatedGroups(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	// Create a group
-	req := adminRequest(http.MethodPost, "/runner_groups",
-		strings.NewReader(`{"name":"list-test-group","spec_names":["default"],"enabled":true}`))
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create group: %d %s", rec.Code, rec.Body.String())
-	}
-
-	// List should include it
-	req = adminRequest(http.MethodGet, "/runner_groups", nil)
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /runner_groups: expected 200, got %d", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "list-test-group") {
-		t.Errorf("GET /runner_groups: expected group in response, got %s", rec.Body.String())
-	}
-}
-
-// ---------- handlePatchRunnerGroup ----------
-
-func TestPatchRunnerGroupUpdatesDescription(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	// Create group
-	req := adminRequest(http.MethodPost, "/runner_groups",
-		strings.NewReader(`{"name":"patch-test-group","spec_names":["default"],"enabled":true}`))
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create group: %d %s", rec.Code, rec.Body.String())
-	}
-
-	// Patch description
-	req = adminRequest(http.MethodPatch, "/runner_groups/patch-test-group",
-		strings.NewReader(`{"description":"updated desc"}`))
-	rec = httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("PATCH /runner_groups/patch-test-group: expected 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), "updated desc") {
-		t.Errorf("PATCH runner group: description not updated: %s", rec.Body.String())
-	}
-}
-
-func TestPatchRunnerGroupReturns404ForMissing(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	req := adminRequest(http.MethodPatch, "/runner_groups/no-such-group",
-		strings.NewReader(`{"description":"x"}`))
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("PATCH missing group: expected 404, got %d", rec.Code)
-	}
-}
-
-// ---------- handleListRepositoryPolicies ----------
-
-func TestListRepositoryPoliciesEndpointReturnsDefaultPolicy(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	req := adminRequest(http.MethodGet, "/runner_policies", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /runner_policies: expected 200, got %d body=%s", rec.Code, rec.Body.String())
-	}
-	// newTestServer creates a default policy for o/r
-	if !strings.Contains(rec.Body.String(), "o/r") {
-		t.Errorf("GET /runner_policies: expected o/r policy in response, got %s", rec.Body.String())
-	}
-}
-
-// ---------- handlePatchRepositoryPolicy ----------
-
-func TestPatchRepositoryPolicyDisablesPolicy(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	// Get current policies to find the default policy ID
-	listReq := adminRequest(http.MethodGet, "/runner_policies", nil)
-	listRec := httptest.NewRecorder()
-	srv.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("list policies: %d", listRec.Code)
-	}
-	var policies []struct {
-		ID      int64  `json:"id"`
-		Enabled bool   `json:"enabled"`
-		Repo    string `json:"repository_full_name"`
-	}
-	if err := json.Unmarshal(listRec.Body.Bytes(), &policies); err != nil {
-		t.Fatalf("unmarshal policies: %v", err)
-	}
-	if len(policies) == 0 {
-		t.Fatal("no policies found")
-	}
-
-	// Patch it to disable
-	patchReq := adminRequest(http.MethodPatch, fmt.Sprintf("/runner_policies/%d", policies[0].ID),
-		strings.NewReader(`{"enabled":false}`))
-	patchRec := httptest.NewRecorder()
-	srv.ServeHTTP(patchRec, patchReq)
-	if patchRec.Code != http.StatusOK {
-		t.Fatalf("PATCH /runner_policies/%d: expected 200, got %d body=%s", policies[0].ID, patchRec.Code, patchRec.Body.String())
-	}
-	var updated struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := json.Unmarshal(patchRec.Body.Bytes(), &updated); err != nil {
-		t.Fatalf("unmarshal updated policy: %v", err)
-	}
-	if updated.Enabled {
-		t.Error("PATCH policy: expected enabled=false after patch")
-	}
-}
-
-func TestPatchRepositoryPolicyReturns404ForMissing(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	req := adminRequest(http.MethodPatch, "/runner_policies/99999",
-		strings.NewReader(`{"enabled":false}`))
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("PATCH missing policy: expected 404, got %d", rec.Code)
-	}
-}
-
-func TestPatchRepositoryPolicyReturns400ForInvalidID(t *testing.T) {
-	store := state.New(t.TempDir())
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	req := adminRequest(http.MethodPatch, "/runner_policies/not-a-number",
-		strings.NewReader(`{"enabled":false}`))
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("PATCH invalid id: expected 400, got %d", rec.Code)
-	}
-}
-
-// ---------- handleDiagnosticsPprof ----------
 
 type diagnosticsBoundedStore struct {
 	state.Store
@@ -981,13 +784,6 @@ func TestDiagnosticsVariablesUseCurrentProcessWithoutPprofDiscovery(t *testing.T
 	}
 }
 
-type diagnosticsReadinessStore struct {
-	state.Store
-	report state.CatalogMigrationReadiness
-	start  time.Time
-	end    time.Time
-}
-
 type auditFailingStore struct {
 	state.Store
 }
@@ -1032,7 +828,7 @@ func TestCatalogMutationFailsClosedWhenAuditCannotBePersisted(t *testing.T) {
 	if _, err := baseStore.UpsertProfile(state.RunnerProfile{
 		Name: "audit-protected", Labels: []string{"self-hosted", "audit-protected"},
 		RequiredLabels: []string{"audit-protected"}, TemplateID: "audit-template",
-		MaxConcurrency: 1, Enabled: true, DefaultAvailable: true,
+		MaxConcurrency: 1, Enabled: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1069,95 +865,6 @@ func TestSandboxMutationFailsClosedWhenAuditCannotBePersisted(t *testing.T) {
 		t.Fatalf("Sandbox default mutation committed even though its audit event could not be persisted: %v", err)
 	}
 }
-
-func (s *diagnosticsReadinessStore) CatalogMigrationReadiness(start, end time.Time) (state.CatalogMigrationReadiness, error) {
-	s.start = start
-	s.end = end
-	s.report.WindowStart = start
-	s.report.WindowEnd = end
-	return s.report, nil
-}
-
-func TestDiagnosticsCatalogMigrationReadinessReturnsAutomatedAndManualGates(t *testing.T) {
-	baseStore := state.New(t.TempDir())
-	store := &diagnosticsReadinessStore{
-		Store: baseStore,
-		report: state.CatalogMigrationReadiness{
-			Replay: state.CatalogMatchReplaySummary{RequestCount: 12, DistinctInputCount: 3, SameRequests: 12},
-			Specs: []state.RunnerSpecLifecycleEvidence{
-				{Name: "qiniu-ubuntu-24.04", WorkflowLabels: []string{"qiniu", "ubuntu-24.04"}, CleanupFinalizedRequests: 1},
-			},
-		},
-	}
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-
-	req := adminRequest(http.MethodGet, "/diagnostics/catalog-migration-readiness?window_hours=72", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET readiness: status=%d body=%s", rec.Code, rec.Body.String())
-	}
-	if got := store.end.Sub(store.start); got != 72*time.Hour {
-		t.Fatalf("readiness window = %s, want 72h", got)
-	}
-	var response struct {
-		AutomatedGatesPassed bool `json:"automated_gates_passed"`
-		Gates                []struct {
-			Code   string `json:"code"`
-			Passed bool   `json:"passed"`
-		} `json:"gates"`
-		ManualRequirements []string `json:"manual_requirements"`
-		CurrentProcess     struct {
-			StartedAt          time.Time        `json:"started_at"`
-			CatalogMatchCounts map[string]int64 `json:"catalog_match_counts"`
-		} `json:"current_process"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if !response.AutomatedGatesPassed {
-		t.Fatalf("automated gates did not pass: %#v", response.Gates)
-	}
-	wantGateCodes := []string{"window_at_least_72_hours", "catalog_unchanged", "matcher_parity", "all_enabled_specs_full_lifecycle"}
-	if len(response.Gates) != len(wantGateCodes) {
-		t.Fatalf("gates = %#v", response.Gates)
-	}
-	for i, want := range wantGateCodes {
-		if response.Gates[i].Code != want || !response.Gates[i].Passed {
-			t.Fatalf("gate %d = %#v, want %q passed", i, response.Gates[i], want)
-		}
-	}
-	wantManual := []string{"backup_restore_verified", "continuous_service_observation", "workflow_labels_unchanged"}
-	if !reflect.DeepEqual(response.ManualRequirements, wantManual) {
-		t.Fatalf("manual requirements = %#v, want %#v", response.ManualRequirements, wantManual)
-	}
-	if response.CurrentProcess.StartedAt.IsZero() || response.CurrentProcess.CatalogMatchCounts == nil {
-		t.Fatalf("current process evidence = %#v", response.CurrentProcess)
-	}
-}
-
-func TestDiagnosticsCatalogMigrationReadinessRejectsInvalidWindowsAndRequiresAdmin(t *testing.T) {
-	store := &diagnosticsReadinessStore{Store: state.New(t.TempDir())}
-	srv := newTestServer(t, store, "http://example.test", &fakeSandbox{})
-	for _, value := range []string{"0", "721", "invalid"} {
-		t.Run(value, func(t *testing.T) {
-			req := adminRequest(http.MethodGet, "/diagnostics/catalog-migration-readiness?window_hours="+value, nil)
-			rec := httptest.NewRecorder()
-			srv.ServeHTTP(rec, req)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("window_hours=%s: status=%d body=%s", value, rec.Code, rec.Body.String())
-			}
-		})
-	}
-	req := httptest.NewRequest(http.MethodGet, "/diagnostics/catalog-migration-readiness", nil)
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthenticated readiness status=%d", rec.Code)
-	}
-}
-
-// ---------- scheduleStopRetry ----------
 
 func TestScheduleStopRetryReturnsTrueForRetryableError(t *testing.T) {
 	s := &Server{cfg: config.Config{

@@ -1,7 +1,6 @@
 package state
 
 import (
-	"database/sql"
 	"errors"
 	"time"
 )
@@ -104,7 +103,6 @@ type RunnerProfile struct {
 	MinIdle             int       `json:"min_idle"`
 	Priority            int       `json:"priority"`
 	Enabled             bool      `json:"enabled"`
-	DefaultAvailable    bool      `json:"default_available"`
 	ManagedBy           string    `json:"managed_by,omitempty"`
 	CatalogRevision     int       `json:"catalog_revision,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
@@ -117,113 +115,11 @@ type ManagedProfileConflict struct {
 	ExistingManagedBy string
 }
 
-type RunnerGroup struct {
-	Name        string    `json:"name"`
-	Description string    `json:"description,omitempty"`
-	SpecNames   []string  `json:"spec_names"`
-	Enabled     bool      `json:"enabled"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-type RepositoryPolicy struct {
-	ID                 int64     `json:"id"`
-	RepositoryFullName string    `json:"repository_full_name"`
-	ProfileName        string    `json:"runner_spec_name,omitempty"`
-	RunnerGroupName    string    `json:"runner_group_name,omitempty"`
-	Enabled            bool      `json:"enabled"`
-	CreatedAt          time.Time `json:"created_at"`
-}
-
 type ProfileMatch struct {
 	RepositoryFullName string         `json:"repository_full_name"`
 	Labels             []string       `json:"labels"`
 	Profile            *RunnerProfile `json:"runner_spec,omitempty"`
 	Reason             string         `json:"reason,omitempty"`
-}
-
-type ProfileMatchComparison struct {
-	Legacy  ProfileMatch
-	Enabled ProfileMatch
-}
-
-func (comparison ProfileMatchComparison) Result() string {
-	legacyName := ""
-	if comparison.Legacy.Profile != nil {
-		legacyName = comparison.Legacy.Profile.Name
-	}
-	enabledName := ""
-	if comparison.Enabled.Profile != nil {
-		enabledName = comparison.Enabled.Profile.Name
-	}
-	switch {
-	case comparison.Legacy.Profile != nil && comparison.Enabled.Profile == nil:
-		return "legacy_only"
-	case comparison.Legacy.Profile == nil && comparison.Enabled.Profile != nil:
-		return "enabled_only"
-	case comparison.Legacy.Profile != nil && comparison.Enabled.Profile != nil && legacyName != enabledName:
-		return "different_profile"
-	case legacyName == enabledName && comparison.Legacy.Reason != comparison.Enabled.Reason:
-		return "different_profile"
-	default:
-		return "same"
-	}
-}
-
-type CatalogMatchReplaySummary struct {
-	RequestCount             int64 `json:"request_count"`
-	DistinctInputCount       int   `json:"distinct_input_count"`
-	SameRequests             int64 `json:"same"`
-	LegacyOnlyRequests       int64 `json:"legacy_only"`
-	EnabledOnlyRequests      int64 `json:"enabled_only"`
-	DifferentProfileRequests int64 `json:"different_profile"`
-	ErrorRequests            int64 `json:"errors"`
-	Truncated                bool  `json:"truncated"`
-}
-
-type CatalogMatchReplaySample struct {
-	RepositoryFullName string    `json:"repository_full_name"`
-	Labels             []string  `json:"labels,omitempty"`
-	RequestCount       int64     `json:"request_count"`
-	FirstSeenAt        time.Time `json:"first_seen_at"`
-	LastSeenAt         time.Time `json:"last_seen_at"`
-	Result             string    `json:"result"`
-	LegacyProfile      string    `json:"legacy_profile,omitempty"`
-	LegacyReason       string    `json:"legacy_reason,omitempty"`
-	EnabledProfile     string    `json:"enabled_profile,omitempty"`
-	EnabledReason      string    `json:"enabled_reason,omitempty"`
-	Error              string    `json:"error,omitempty"`
-}
-
-type RunnerSpecLifecycleExample struct {
-	RequestID          string    `json:"request_id"`
-	RepositoryFullName string    `json:"repository_full_name"`
-	WorkflowJobID      int64     `json:"workflow_job_id"`
-	GitHubJobURL       string    `json:"github_job_url,omitempty"`
-	RequestedLabels    []string  `json:"requested_labels"`
-	RegisteredAt       time.Time `json:"registered_at"`
-	CompletedAt        time.Time `json:"completed_at"`
-	CleanupFinalizedAt time.Time `json:"cleanup_finalized_at"`
-}
-
-type RunnerSpecLifecycleEvidence struct {
-	Name                     string                      `json:"name"`
-	WorkflowLabels           []string                    `json:"workflow_labels"`
-	RequestCount             int64                       `json:"request_count"`
-	RegisteredRequests       int64                       `json:"registered_requests"`
-	CompletedRequests        int64                       `json:"completed_requests"`
-	CleanupFinalizedRequests int64                       `json:"cleanup_finalized_requests"`
-	Latest                   *RunnerSpecLifecycleExample `json:"latest,omitempty"`
-}
-
-type CatalogMigrationReadiness struct {
-	WindowStart             time.Time                     `json:"window_start"`
-	WindowEnd               time.Time                     `json:"window_end"`
-	Replay                  CatalogMatchReplaySummary     `json:"replay"`
-	ReplaySamples           []CatalogMatchReplaySample    `json:"replay_samples"`
-	Specs                   []RunnerSpecLifecycleEvidence `json:"specs"`
-	CatalogChanges          []AuditEvent                  `json:"catalog_changes"`
-	CatalogChangesTruncated bool                          `json:"catalog_changes_truncated"`
 }
 
 type AuditEvent struct {
@@ -378,6 +274,7 @@ type SandboxServiceDefaultAudience struct {
 type RunnerRequestStore interface {
 	Ensure() error
 	CreateRequest(req RunnerRequest, payload []byte) (bool, RunnerState, error)
+	CreateRejectedRequest(req RunnerRequest, payload []byte, reason string) (bool, RunnerState, error)
 	ReadRequest(id string) (RunnerRequest, error)
 	ReadState(id string) (RunnerState, error)
 	WriteState(st RunnerState) error
@@ -405,22 +302,11 @@ type RunnerCatalogStore interface {
 	ListProfiles() ([]RunnerProfile, error)
 	GetProfile(name string) (RunnerProfile, error)
 	UpsertProfile(profile RunnerProfile) (RunnerProfile, error)
+	UpsertProfileIfUnchanged(profile RunnerProfile, expectedUpdatedAt *time.Time) (RunnerProfile, error)
 	ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedProfileConflict, error)
 	DeleteProfile(name string) error
-	ListRunnerGroups() ([]RunnerGroup, error)
-	GetRunnerGroup(name string) (RunnerGroup, error)
-	UpsertRunnerGroup(group RunnerGroup) (RunnerGroup, error)
-	DeleteRunnerGroup(name string) error
-	ListRepositoryPolicies() ([]RepositoryPolicy, error)
-	GetRepositoryPolicy(id int64) (RepositoryPolicy, error)
-	UpsertRepositoryPolicy(policy RepositoryPolicy) (RepositoryPolicy, error)
-	DeleteRepositoryPolicy(id int64) error
 	MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error)
-	CompareProfileMatches(repositoryFullName string, labels []string) (ProfileMatchComparison, error)
-	CatalogMigrationReadiness(start, end time.Time) (CatalogMigrationReadiness, error)
 }
-
-var catalogSnapshotTxOptions = &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}
 
 type IdentityStore interface {
 	GetAccount(accountID int64) (Account, error)

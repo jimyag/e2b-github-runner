@@ -4309,27 +4309,6 @@ func TestRunnerTemplateBuildBootstrapsTLSCertificatesBeforeStrictHTTPS(t *testin
 	}
 }
 
-func TestTemplateBuildUsableAcceptsRunnableStatuses(t *testing.T) {
-	for _, status := range []qnsandbox.TemplateBuildStatus{
-		qnsandbox.BuildStatusReady,
-		qnsandbox.BuildStatusUploaded,
-	} {
-		if !templateBuildUsable(status) {
-			t.Fatalf("expected status %q to be usable", status)
-		}
-	}
-
-	for _, status := range []qnsandbox.TemplateBuildStatus{
-		qnsandbox.BuildStatusBuilding,
-		qnsandbox.BuildStatusWaiting,
-		qnsandbox.BuildStatusError,
-	} {
-		if templateBuildUsable(status) {
-			t.Fatalf("expected status %q to be unusable", status)
-		}
-	}
-}
-
 func TestRecoveredRunnerPIDRequiresRunnerTagAndExpectedPID(t *testing.T) {
 	runnerTag := "github-runner"
 	otherTag := "other"

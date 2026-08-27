@@ -74,49 +74,76 @@ type cacheScopeDecision struct {
 	Decision    string
 }
 
-func (s *Server) cacheScopesForWorkflow(ctx context.Context, repository string, st state.RunnerState, defaultScope string) cacheScopeDecision {
-	readOnly := func(reason string) cacheScopeDecision {
+func (s *Server) cacheScopesForWorkflow(ctx context.Context, repository string, st state.RunnerState) cacheScopeDecision {
+	readOnly := func(defaultScope, reason string) cacheScopeDecision {
 		return cacheScopeDecision{ReadScopes: []string{defaultScope}, Decision: reason}
 	}
+	noCache := func(reason string) cacheScopeDecision {
+		return cacheScopeDecision{Decision: reason}
+	}
+	resolveRepositoryDefaultScope := func(reason string) (string, cacheScopeDecision, bool) {
+		if s.gh == nil {
+			return "", noCache(reason), false
+		}
+		repositoryMetadata, err := s.gh.GetRepository(ctx, repository)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("failed to resolve repository default branch for cache scope", "workflow_run_id", st.WorkflowRunID, "repository", repository, "error", err)
+			}
+			return "", noCache(reason), false
+		}
+		if !strings.EqualFold(strings.TrimSpace(repositoryMetadata.FullName), repository) || strings.TrimSpace(repositoryMetadata.DefaultBranch) == "" {
+			return "", noCache("no_cache_untrusted_repository_metadata"), false
+		}
+		return scopeForBranch(repositoryMetadata.DefaultBranch), cacheScopeDecision{}, true
+	}
 	if st.WorkflowRunID <= 0 {
-		return readOnly("read_only_missing_workflow_run")
+		defaultScope, decision, ok := resolveRepositoryDefaultScope("no_cache_repository_lookup_failed")
+		if !ok {
+			return decision
+		}
+		return readOnly(defaultScope, "read_only_missing_workflow_run")
 	}
 	run, err := s.workflowRunForCache(ctx, repository, st.WorkflowRunID)
 	if err != nil {
-		s.logger.Warn("failed to resolve workflow run for cache scope", "workflow_run_id", st.WorkflowRunID, "repository", repository, "error", err)
-		return readOnly("read_only_workflow_run_lookup_failed")
+		if s.logger != nil {
+			s.logger.Warn("failed to resolve workflow run for cache scope", "workflow_run_id", st.WorkflowRunID, "repository", repository, "error", err)
+		}
+		defaultScope, decision, ok := resolveRepositoryDefaultScope("no_cache_repository_lookup_failed")
+		if !ok {
+			return decision
+		}
+		return readOnly(defaultScope, "read_only_workflow_run_lookup_failed")
 	}
+	defaultScope := ""
 	if branch := strings.TrimSpace(run.Repository.DefaultBranch); branch != "" {
 		defaultScope = scopeForBranch(branch)
 	} else {
-		repositoryMetadata, repositoryErr := s.gh.GetRepository(ctx, repository)
-		if repositoryErr != nil {
-			s.logger.Warn("failed to resolve repository default branch for cache scope", "workflow_run_id", st.WorkflowRunID, "repository", repository, "error", repositoryErr)
-			return readOnly("read_only_repository_lookup_failed")
+		var decision cacheScopeDecision
+		var ok bool
+		defaultScope, decision, ok = resolveRepositoryDefaultScope("no_cache_repository_lookup_failed")
+		if !ok {
+			return decision
 		}
-		if !strings.EqualFold(strings.TrimSpace(repositoryMetadata.FullName), repository) || strings.TrimSpace(repositoryMetadata.DefaultBranch) == "" {
-			return readOnly("read_only_untrusted_repository_metadata")
-		}
-		defaultScope = scopeForBranch(repositoryMetadata.DefaultBranch)
 	}
-	readOnly = func(reason string) cacheScopeDecision {
-		return cacheScopeDecision{ReadScopes: []string{defaultScope}, Decision: reason}
+	resolvedReadOnly := func(reason string) cacheScopeDecision {
+		return readOnly(defaultScope, reason)
 	}
 	event := strings.ToLower(strings.TrimSpace(run.Event))
 	if event == "pull_request" {
 		if len(run.PullRequests) == 0 || run.PullRequests[0].Number <= 0 {
-			return readOnly("read_only_missing_pull_request_metadata")
+			return resolvedReadOnly("read_only_missing_pull_request_metadata")
 		}
 		pull, pullErr := s.gh.GetPullRequest(ctx, repository, run.PullRequests[0].Number)
 		if pullErr != nil {
 			s.logger.Warn("failed to resolve pull request for cache scope", "workflow_run_id", st.WorkflowRunID, "repository", repository, "error", pullErr)
-			return readOnly("read_only_pull_request_lookup_failed")
+			return resolvedReadOnly("read_only_pull_request_lookup_failed")
 		}
 		baseRepo := strings.TrimSpace(pull.Base.Repository.FullName)
 		baseBranch := strings.TrimSpace(pull.Base.Ref)
 		headRepo := strings.TrimSpace(pull.Head.Repository.FullName)
 		if pull.Number != run.PullRequests[0].Number || baseRepo == "" || baseBranch == "" || headRepo == "" || !strings.EqualFold(baseRepo, repository) {
-			return readOnly("read_only_untrusted_pull_request_metadata")
+			return resolvedReadOnly("read_only_untrusted_pull_request_metadata")
 		}
 		prScope := scopeForPR(pull.Number)
 		readScopes := uniqueCacheScopes(prScope, scopeForBranch(baseBranch), defaultScope)
@@ -127,19 +154,19 @@ func (s *Server) cacheScopesForWorkflow(ctx context.Context, repository string, 
 		return cacheScopeDecision{WriteScope: prScope, ReadScopes: readScopes, PullRequest: pull.Number, Decision: decision}
 	}
 	if event == "pull_request_target" || event == "workflow_run" || event == "issue_comment" {
-		return readOnly("read_only_" + event)
+		return resolvedReadOnly("read_only_" + event)
 	}
 	headRepo := strings.TrimSpace(run.HeadRepository.FullName)
 	baseRepo := strings.TrimSpace(run.Repository.FullName)
 	branch := strings.TrimSpace(run.HeadBranch)
 	if headRepo == "" || baseRepo == "" || !strings.EqualFold(baseRepo, repository) || !strings.EqualFold(headRepo, baseRepo) {
-		return readOnly("read_only_untrusted_repository_metadata")
+		return resolvedReadOnly("read_only_untrusted_repository_metadata")
 	}
 	if branch == "" {
-		return readOnly("read_only_missing_branch")
+		return resolvedReadOnly("read_only_missing_branch")
 	}
 	if !cacheWriteTrustedEvent(event) {
-		return readOnly("read_only_untrusted_event")
+		return resolvedReadOnly("read_only_untrusted_event")
 	}
 	ownScope := scopeForBranch(branch)
 	return cacheScopeDecision{WriteScope: ownScope, ReadScopes: uniqueCacheScopes(ownScope, defaultScope), Decision: "branch"}
@@ -235,34 +262,7 @@ func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallatio
 }
 
 func (s *Server) matchProfileForAdmission(repository string, labels []string) (state.ProfileMatch, error) {
-	comparison, err := s.store.CompareProfileMatches(repository, labels)
-	if err != nil {
-		return state.ProfileMatch{}, err
-	}
-	legacyName := matchedProfileName(comparison.Legacy)
-	enabledName := matchedProfileName(comparison.Enabled)
-	result := comparison.Result()
-	metrics.RecordCatalogMatchComparison(legacyName, enabledName, result)
-	if result != "same" {
-		s.logger.Warn(
-			"catalog profile match mismatch",
-			"result", result,
-			"repository", repository,
-			"labels", append([]string(nil), labels...),
-			"legacy_profile", legacyName,
-			"legacy_reason", comparison.Legacy.Reason,
-			"enabled_profile", enabledName,
-			"enabled_reason", comparison.Enabled.Reason,
-		)
-	}
-	return comparison.Legacy, nil
-}
-
-func matchedProfileName(match state.ProfileMatch) string {
-	if match.Profile == nil {
-		return ""
-	}
-	return match.Profile.Name
+	return s.store.MatchProfile(repository, labels)
 }
 
 func (s *Server) enqueueRunnerRequest(req state.RunnerRequest, payload []byte) (state.RunnerState, bool, error) {
@@ -288,7 +288,9 @@ func (s *Server) enqueueRunnerRequest(req state.RunnerRequest, payload []byte) (
 }
 
 func (s *Server) rejectAdmission(req state.RunnerRequest, payload []byte, reason string) (state.RunnerState, error) {
-	created, st, err := s.store.CreateRequest(req, payload)
+	// CreateRejectedRequest relies on database uniqueness for duplicate deliveries
+	// and inserts the terminal state without exposing a queued row.
+	created, st, err := s.store.CreateRejectedRequest(req, payload, reason)
 	if err != nil {
 		return state.RunnerState{}, err
 	}
@@ -297,13 +299,6 @@ func (s *Server) rejectAdmission(req state.RunnerRequest, payload []byte, reason
 		return st, nil
 	}
 	metrics.RecordRunnerRequest(req.RepositoryFullName, req.ProfileName, req.Source, "rejected")
-	st.Status = state.StatusFailed
-	st.FailureStage = "admission"
-	st.FailureReason = reason
-	st.Error = "runner admission rejected"
-	if err := s.store.WriteState(st); err != nil {
-		return state.RunnerState{}, err
-	}
 	s.store.AppendLog(req.ID, "control.log", []byte("runner admission rejected: "+reason+"\n"))
 	s.logger.Info("runner admission rejected and recorded", "id", req.ID, "repository", req.RepositoryFullName, "reason", reason)
 	metrics.RecordWorkflowFailure(req.RepositoryFullName, "unknown", req.RunnerName, req.ProfileName, "admission", reason)
@@ -492,7 +487,7 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 				}
 			} else {
 				cacheBasePrefix := storage.prefix + "/" + req.RepositoryFullName
-				scopeDecision := s.cacheScopesForWorkflow(createCtx, req.RepositoryFullName, st, scopeForBranch("main"))
+				scopeDecision := s.cacheScopesForWorkflow(createCtx, req.RepositoryFullName, st)
 				s.logger.Debug("cache STS scope decision", "id", id, "decision", scopeDecision.Decision, "pull_request", scopeDecision.PullRequest, "write_scope", scopeDecision.WriteScope, "read_scopes", scopeDecision.ReadScopes)
 
 				stsCreds, stsErr := generateCacheSTS(createCtx, cacheSTSCredentialConfig{
@@ -1673,46 +1668,9 @@ func (s *Server) profileAtCapacityFor(profile state.RunnerProfile) (bool, error)
 	return inFlight >= profile.MaxConcurrency, nil
 }
 
-func (s *Server) ensureRepositoryAllowsProfile(repositoryFullName string, profile state.RunnerProfile, requestedLabels []string) error {
-	policies, err := s.store.ListRepositoryPolicies()
-	if err != nil {
-		return err
-	}
-	groups, err := s.store.ListRunnerGroups()
-	if err != nil {
-		return err
-	}
-	groupsByName := make(map[string]state.RunnerGroup, len(groups))
-	for _, group := range groups {
-		groupsByName[group.Name] = group
-	}
-	allowed := profile.DefaultAvailable
-	for _, policy := range policies {
-		if !policy.Enabled || !repositoryPatternMatches(policy.RepositoryFullName, repositoryFullName) {
-			continue
-		}
-		if policy.ProfileName == profile.Name {
-			allowed = true
-			break
-		}
-		if policy.RunnerGroupName != "" {
-			group, ok := groupsByName[policy.RunnerGroupName]
-			if !ok || !group.Enabled {
-				continue
-			}
-			for _, specName := range group.SpecNames {
-				if specName == profile.Name {
-					allowed = true
-					break
-				}
-			}
-			if allowed {
-				break
-			}
-		}
-	}
-	if !allowed {
-		return fmt.Errorf("profile %q is not allowed for repository %q", profile.Name, repositoryFullName)
+func validateRequestedProfile(profile state.RunnerProfile, requestedLabels []string) error {
+	if !profile.Enabled {
+		return fmt.Errorf("profile %q is disabled", profile.Name)
 	}
 	if len(requestedLabels) > 0 && !github.LabelsMatch(requestedLabels, profile.Labels) {
 		return fmt.Errorf("requested labels do not satisfy profile %q", profile.Name)
@@ -1770,21 +1728,6 @@ func writeMutationAuditError(w http.ResponseWriter, err error) bool {
 	}
 	writeError(w, http.StatusInternalServerError, "persist mutation audit: "+err.Error())
 	return true
-}
-
-func repositoryPatternMatches(pattern, repository string) bool {
-	pattern = strings.TrimSpace(pattern)
-	repository = strings.TrimSpace(repository)
-	if pattern == "" || repository == "" {
-		return false
-	}
-	if pattern == repository {
-		return true
-	}
-	if strings.HasSuffix(pattern, "/*") {
-		return strings.HasPrefix(repository, strings.TrimSuffix(pattern, "*"))
-	}
-	return false
 }
 
 func isActiveStatus(status string) bool {

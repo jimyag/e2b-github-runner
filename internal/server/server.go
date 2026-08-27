@@ -87,45 +87,29 @@ type manualCreateRequest struct {
 }
 
 type createProfileRequest struct {
-	Name             string   `json:"name"`
-	Labels           []string `json:"labels"`
-	RequiredLabels   []string `json:"required_labels"`
-	TemplateID       string   `json:"template_id"`
-	RunnerGroup      string   `json:"runner_group"`
-	MaxConcurrency   int      `json:"max_concurrency"`
-	MinIdle          *int     `json:"min_idle"`
-	Priority         *int     `json:"priority"`
-	Enabled          *bool    `json:"enabled"`
-	DefaultAvailable *bool    `json:"default_available"`
+	Name           string   `json:"name"`
+	Labels         []string `json:"labels"`
+	RequiredLabels []string `json:"required_labels"`
+	TemplateID     string   `json:"template_id"`
+	RunnerGroup    string   `json:"runner_group"`
+	MaxConcurrency int      `json:"max_concurrency"`
+	MinIdle        *int     `json:"min_idle"`
+	Priority       *int     `json:"priority"`
+	Enabled        *bool    `json:"enabled"`
 }
 
 type patchProfileRequest struct {
-	Labels           *[]string `json:"labels"`
-	RequiredLabels   *[]string `json:"required_labels"`
-	TemplateID       *string   `json:"template_id"`
-	RunnerGroup      *string   `json:"runner_group"`
-	MaxConcurrency   *int      `json:"max_concurrency"`
-	MinIdle          *int      `json:"min_idle"`
-	Priority         *int      `json:"priority"`
-	Enabled          *bool     `json:"enabled"`
-	DefaultAvailable *bool     `json:"default_available"`
+	Labels         *[]string `json:"labels"`
+	RequiredLabels *[]string `json:"required_labels"`
+	TemplateID     *string   `json:"template_id"`
+	RunnerGroup    *string   `json:"runner_group"`
+	MaxConcurrency *int      `json:"max_concurrency"`
+	MinIdle        *int      `json:"min_idle"`
+	Priority       *int      `json:"priority"`
+	Enabled        *bool     `json:"enabled"`
 }
 
 const managedRunnerSpecErrorCode = "managed_runner_spec"
-
-type upsertRepositoryPolicyRequest struct {
-	RepositoryFullName string `json:"repository_full_name"`
-	ProfileName        string `json:"runner_spec_name"`
-	RunnerGroupName    string `json:"runner_group_name"`
-	Enabled            *bool  `json:"enabled"`
-}
-
-type upsertRunnerGroupRequest struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	SpecNames   []string `json:"spec_names"`
-	Enabled     *bool    `json:"enabled"`
-}
 
 type profileMatchRequest struct {
 	RepositoryFullName string   `json:"repository_full_name"`
@@ -202,7 +186,12 @@ func newSandboxHTTPClient() *http.Client {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	startedAt := time.Now()
 	lw := &loggingResponseWriter{ResponseWriter: w, status: http.StatusOK}
-	s.mux.ServeHTTP(lw, r)
+	if isRetiredCatalogAPIPath(r.URL.Path) {
+		r.Pattern = "retired_catalog_api"
+		http.NotFound(lw, r)
+	} else {
+		s.mux.ServeHTTP(lw, r)
+	}
 	duration := time.Since(startedAt)
 	routePattern := r.Pattern
 	if routePattern == "" {
@@ -220,6 +209,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"github_event", r.Header.Get("X-GitHub-Event"),
 		"github_delivery", r.Header.Get("X-GitHub-Delivery"),
 	)
+}
+
+func isRetiredCatalogAPIPath(path string) bool {
+	return path == "/runner_groups" || strings.HasPrefix(path, "/runner_groups/") ||
+		path == "/runner_policies" || strings.HasPrefix(path, "/runner_policies/") ||
+		path == "/diagnostics/catalog-migration-readiness" || strings.HasPrefix(path, "/diagnostics/catalog-migration-readiness/")
 }
 
 type loggingResponseWriter struct {
@@ -435,18 +430,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /runner_specs/{name}", s.handleGetProfile)
 	s.mux.HandleFunc("PATCH /runner_specs/{name}", s.handlePatchProfile)
 	s.mux.HandleFunc("DELETE /runner_specs/{name}", s.handleDeleteProfile)
-	s.mux.HandleFunc("GET /runner_groups", s.handleListRunnerGroups)
-	s.mux.HandleFunc("POST /runner_groups", s.handleCreateRunnerGroup)
-	s.mux.HandleFunc("GET /runner_groups/{name}", s.handleGetRunnerGroup)
-	s.mux.HandleFunc("PATCH /runner_groups/{name}", s.handlePatchRunnerGroup)
-	s.mux.HandleFunc("DELETE /runner_groups/{name}", s.handleDeleteRunnerGroup)
-	s.mux.HandleFunc("GET /runner_policies", s.handleListRepositoryPolicies)
-	s.mux.HandleFunc("POST /runner_policies", s.handleCreateRepositoryPolicy)
-	s.mux.HandleFunc("PATCH /runner_policies/{id}", s.handlePatchRepositoryPolicy)
-	s.mux.HandleFunc("DELETE /runner_policies/{id}", s.handleDeleteRepositoryPolicy)
 	s.mux.HandleFunc("GET /diagnostics/pprof", s.handleDiagnosticsPprof)
 	s.mux.HandleFunc("GET /diagnostics/vars", s.handleDiagnosticsVars)
-	s.mux.HandleFunc("GET /diagnostics/catalog-migration-readiness", s.handleCatalogMigrationReadiness)
 }
 
 func (s *Server) handleAdminRedirect(w http.ResponseWriter, r *http.Request) {
@@ -455,6 +440,11 @@ func (s *Server) handleAdminRedirect(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/admin/")
+	retiredName := strings.TrimSuffix(name, "/")
+	if retiredName == "runner_groups" || retiredName == "runner_policies" {
+		http.Redirect(w, r, "/admin/runner_specs", http.StatusTemporaryRedirect)
+		return
+	}
 	s.handleUI(w, r, name)
 }
 

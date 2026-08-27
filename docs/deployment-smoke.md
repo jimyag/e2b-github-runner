@@ -100,8 +100,9 @@ Open the diagnostics page in the admin console, or call:
 ```bash
 curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/pprof | jq
 curl -fsS -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/vars | jq
-curl -fsS -b "$COOKIE_JAR" \
-  'https://<runnerd-host>/diagnostics/catalog-migration-readiness?window_hours=72' | jq
+test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runnerd-host>/runner_groups)" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runnerd-host>/runner_policies)" = 404
+test "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE_JAR" https://<runnerd-host>/diagnostics/catalog-migration-readiness)" = 404
 ```
 
 Check:
@@ -110,9 +111,10 @@ Check:
 - `state.database` points at the intended sqlite, Postgres, or MySQL database.
 - pprof discovery files and dump scripts are visible when the local pprof service is available.
 - Recent failure summaries are empty or understood.
-- The Release A readiness panel reports a window of at least 72 hours, no replay truncation or malformed inputs, strict legacy/enabled-Spec parity, and registration/completion/cleanup evidence for every enabled Spec.
-- Every expected production label family appears as an enabled Spec row. Missing traffic remains visibly blocked; generate a normal workflow job with the existing `runs-on` labels rather than editing catalog data to manufacture evidence.
-- Catalog/Sandbox changes remain frozen during the selected window. A readiness-relevant mutation must commit its data change and audit event atomically: rejected mutations leave no audit evidence, and audit persistence failures leave the target unchanged. Separately record the backup/restore check, continuous-service observation, and unchanged-workflow-label sign-offs; automated green status alone is not Release B authorization.
+- The retired Runner Group, Policy, and temporary catalog migration readiness APIs return `404`; `/admin/runner_groups` and `/admin/runner_policies` still redirect harmlessly to Runner Specs.
+- A Runner Request persisted as `failed` with `failure_stage=admission` and `failure_reason=profile_labels_not_matched` is shown as **Not matched**, is excluded from the failed metric, can be filtered independently, and has no retry action. Genuine failed requests remain **Failed** and retryable where applicable.
+- Existing workflow `runs-on` labels and enabled Runner Spec matching remain unchanged. Do not edit Catalog or Sandbox configuration as part of the Release C deployment.
+- Legacy `runner_groups`, `runner_group_specs`, and `repository_policies` tables remain untouched for rollback. Dropping them requires a later, separately authorized database-maintenance window.
 
 ## 3. Runner Catalog
 
@@ -164,15 +166,29 @@ curl -fsS -X POST https://<runnerd-host>/runner_specs/match \
 
 Expected result: only the first request selects `qiniu-ubuntu-24.04`.
 
-Create one custom regression spec with an explicit template ID and operator
-labels. Confirm saving it does not contact Sandbox, running it uses the stored
-ID, and it can still be edited and deleted:
+Configure the admin Sandbox endpoint/key at `/admin/sandbox_service`, then
+create one custom regression spec with an explicit template ID and operator
+labels. Saving must query template access and its usable default build with the
+admin credentials; running still uses the repository owner's effective Sandbox
+configuration and stored template ID. Confirm the following without disrupting
+existing jobs:
+
+- A missing template returns `400 template_not_found` with no spec/audit change.
+- A template without a usable default build returns `400 template_not_ready`.
+- Missing admin credentials return `409 sandbox_service_not_configured`;
+  managed control edits and unchanged-template custom edits remain available.
+- Provider auth/errors/timeouts reject the save with an actionable error, not a
+  false success. Retrying after correcting the template/configuration succeeds.
+- An existing usable default is accepted while a newer rebuild is in progress.
+- The custom spec can still be edited and deleted; test the real job separately.
+
+Example successful create:
 
 ```bash
 curl -fsS -X POST https://<runnerd-host>/runner_specs \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"name":"deployment-custom","labels":["self-hosted","deployment-custom"],"required_labels":["deployment-custom"],"template_id":"<private-template-id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
+  -d '{"name":"deployment-custom","labels":["self-hosted","deployment-custom"],"required_labels":["deployment-custom"],"template_id":"<private-template-id>","max_concurrency":1,"enabled":true}' | jq
 ```
 
 ## 4. Webhook Delivery

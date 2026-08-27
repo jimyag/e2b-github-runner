@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/qiniu/ci-runner/internal/labelutil"
-	"gorm.io/gorm"
 )
 
 func recordToRequest(record runnerRequestRecord) (RunnerRequest, error) {
@@ -298,43 +297,11 @@ func recordToProfile(record runnerProfileRecord) (RunnerProfile, error) {
 		MinIdle:             record.MinIdle,
 		Priority:            record.Priority,
 		Enabled:             record.Enabled,
-		DefaultAvailable:    record.DefaultAvailable,
 		ManagedBy:           record.ManagedBy,
 		CatalogRevision:     record.CatalogRevision,
 		CreatedAt:           record.CreatedAt,
 		UpdatedAt:           record.UpdatedAt,
 	}, nil
-}
-
-func (s *DBStore) recordToRunnerGroup(db *gorm.DB, record runnerGroupRecord) (RunnerGroup, error) {
-	var links []runnerGroupSpecRecord
-	if err := db.Where("group_name = ?", record.Name).Order("spec_name ASC").Find(&links).Error; err != nil {
-		return RunnerGroup{}, err
-	}
-	specNames := make([]string, 0, len(links))
-	for _, link := range links {
-		specNames = append(specNames, link.SpecName)
-	}
-	return RunnerGroup{
-		Name:        record.Name,
-		Description: record.Description,
-		SpecNames:   specNames,
-		Enabled:     record.Enabled,
-		CreatedAt:   record.CreatedAt,
-		UpdatedAt:   record.UpdatedAt,
-	}, nil
-}
-
-func recordToRepositoryPolicy(record repositoryPolicyRecord) RepositoryPolicy {
-	//lint:ignore S1016 keep record/API mapping explicit so field changes are reviewed intentionally
-	return RepositoryPolicy{
-		ID:                 record.ID,
-		RepositoryFullName: record.RepositoryFullName,
-		ProfileName:        record.ProfileName,
-		RunnerGroupName:    record.RunnerGroupName,
-		Enabled:            record.Enabled,
-		CreatedAt:          record.CreatedAt,
-	}
 }
 
 func uniqueTrimmed(values []string) []string {
@@ -409,21 +376,6 @@ func labelsFromJSON(data string) ([]string, error) {
 		return nil, err
 	}
 	return labels, nil
-}
-
-func repositoryMatches(pattern, repository string) bool {
-	pattern = strings.TrimSpace(pattern)
-	repository = strings.TrimSpace(repository)
-	if pattern == "" || repository == "" {
-		return false
-	}
-	if pattern == repository {
-		return true
-	}
-	if strings.HasSuffix(pattern, "/*") {
-		return strings.HasPrefix(repository, strings.TrimSuffix(pattern, "*"))
-	}
-	return false
 }
 
 func labelsMatch(jobLabels, required []string) bool {

@@ -14,11 +14,9 @@ import {
 
 describe("app load policy", () => {
   test.each([
-    ["overview", ["runner_requests", "runner_specs", "runner_policies"]],
+    ["overview", ["runner_requests", "runner_specs"]],
     ["runner_requests", ["runner_requests", "runner_specs"]],
-    ["runner_specs", ["runner_specs", "runner_groups"]],
-    ["runner_groups", ["runner_groups", "runner_specs"]],
-    ["runner_policies", ["runner_policies", "runner_specs", "runner_groups"]],
+    ["runner_specs", ["runner_specs"]],
     ["audit", ["audit_events"]],
     ["accounts", []],
     ["sandbox_service", []],

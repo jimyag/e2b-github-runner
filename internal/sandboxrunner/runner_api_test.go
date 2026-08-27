@@ -3,10 +3,14 @@ package sandboxrunner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	qnsandbox "github.com/qiniu/go-sdk/v7/sandbox"
 )
 
 // newTestService creates an E2BService wired to the given httptest.Server.
@@ -82,76 +86,105 @@ func TestValidateTemplate_NotFound(t *testing.T) {
 	}
 }
 
-func TestValidateTemplate_NoBuilds(t *testing.T) {
-	// Template exists but has no builds — considered valid.
-	ts := httptest.NewServer(serveTemplate(http.StatusOK, templateJSON("tpl-no-builds")))
-	defer ts.Close()
-
-	svc := newTestService(t, ts)
-	err := svc.ValidateTemplate(context.Background(), "tpl-no-builds")
-	if err != nil {
-		t.Fatalf("expected nil error for template with no builds, got %v", err)
+func TestValidateTemplateEffectiveDefaultBuild(t *testing.T) {
+	const usableID = "00000000-0000-0000-0000-000000000001"
+	for _, tt := range []struct {
+		name           string
+		owner          bool
+		public         bool
+		buildID        string
+		status         string
+		history        []string
+		missingCatalog bool
+		wantErr        error
+		wantUnknown    bool
+	}{
+		{name: "uploaded default", owner: true, buildID: usableID, status: "uploaded"},
+		{name: "ready default", owner: true, buildID: usableID, status: "ready"},
+		{name: "rebuilding keeps uploaded default", owner: true, buildID: usableID, status: "building", history: []string{"building"}},
+		{name: "failed rebuild keeps uploaded default", owner: true, buildID: usableID, status: "error"},
+		{name: "no builds", owner: true, buildID: "00000000-0000-0000-0000-000000000000", status: "waiting", wantErr: ErrTemplateNotReady},
+		{name: "other tag is ready but default is not", owner: true, status: "building", history: []string{"ready", "uploaded"}, wantErr: ErrTemplateNotReady},
+		{name: "non-owner public default hides builds", public: true, buildID: usableID, status: "uploaded"},
+		{name: "public default without a usable build", public: true, status: "waiting", wantErr: ErrTemplateNotReady},
+		{name: "public outside default catalog", public: true, missingCatalog: true, wantUnknown: true},
+		{name: "owner template removed from catalog", owner: true, missingCatalog: true, wantUnknown: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/templates/tpl":
+					body := templateJSON("tpl", tt.history...)
+					body = strings.Replace(body, `"public":false`, fmt.Sprintf(`"public":%t,"isOwner":%t`, tt.public, tt.owner), 1)
+					_, _ = w.Write([]byte(body))
+				case "/templates", "/default-templates":
+					wantPath := "/default-templates"
+					if tt.owner {
+						wantPath = "/templates"
+					}
+					if r.URL.Path != wantPath {
+						t.Errorf("catalog path = %s, want %s", r.URL.Path, wantPath)
+					}
+					if tt.missingCatalog {
+						_, _ = w.Write([]byte(`[]`))
+						return
+					}
+					_, _ = fmt.Fprintf(w, `[{"templateID":"tpl","buildID":%q,"buildStatus":%q}]`, tt.buildID, tt.status)
+				default:
+					t.Errorf("unexpected provider request: %s", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer ts.Close()
+			err := newTestService(t, ts).ValidateTemplate(context.Background(), " tpl ")
+			if tt.wantUnknown {
+				if err == nil || !strings.Contains(err.Error(), "cannot be confirmed") {
+					t.Fatalf("error = %v, want unknown build state", err)
+				}
+			} else if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if calls.Load() != 2 {
+				t.Fatalf("provider requests = %d, want detail and effective catalog", calls.Load())
+			}
+		})
 	}
 }
 
-func TestValidateTemplate_ReadyBuild(t *testing.T) {
-	ts := httptest.NewServer(serveTemplate(http.StatusOK, templateJSON("tpl-ready", "ready")))
-	defer ts.Close()
-
-	svc := newTestService(t, ts)
-	err := svc.ValidateTemplate(context.Background(), "tpl-ready")
-	if err != nil {
-		t.Fatalf("expected nil error for template with ready build, got %v", err)
+func TestValidateTemplateProviderFailures(t *testing.T) {
+	for _, stage := range []string{"detail", "catalog"} {
+		for _, code := range []int{401, 403, 429, 500} {
+			t.Run(fmt.Sprintf("%s/%d", stage, code), func(t *testing.T) {
+				ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					if stage == "catalog" && r.URL.Path == "/templates/tpl" {
+						_, _ = w.Write([]byte(`{"templateID":"tpl","isOwner":true,"builds":[]}`))
+						return
+					}
+					w.WriteHeader(code)
+					_, _ = w.Write([]byte(`{"message":"provider failed"}`))
+				}))
+				defer ts.Close()
+				err := newTestService(t, ts).ValidateTemplate(context.Background(), "tpl")
+				var apiErr *qnsandbox.APIError
+				if !errors.As(err, &apiErr) || apiErr.StatusCode != code {
+					t.Fatalf("error = %v, want provider status %d", err, code)
+				}
+			})
+		}
 	}
 }
 
-func TestValidateTemplate_UploadedBuild(t *testing.T) {
-	ts := httptest.NewServer(serveTemplate(http.StatusOK, templateJSON("tpl-uploaded", "uploaded")))
+func TestValidateTemplateCanceled(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("canceled validation reached provider") }))
 	defer ts.Close()
-
-	svc := newTestService(t, ts)
-	err := svc.ValidateTemplate(context.Background(), "tpl-uploaded")
-	if err != nil {
-		t.Fatalf("expected nil error for template with uploaded build, got %v", err)
-	}
-}
-
-func TestValidateTemplate_AllBuildsNotReady(t *testing.T) {
-	// All builds are in "building" or "error" state — none usable.
-	ts := httptest.NewServer(serveTemplate(http.StatusOK, templateJSON("tpl-building", "building", "error")))
-	defer ts.Close()
-
-	svc := newTestService(t, ts)
-	err := svc.ValidateTemplate(context.Background(), "tpl-building")
-	if !errors.Is(err, ErrTemplateNotReady) {
-		t.Fatalf("expected ErrTemplateNotReady, got %v", err)
-	}
-}
-
-func TestValidateTemplate_MixedBuilds_OneReady(t *testing.T) {
-	// Mix of non-ready and ready builds — should pass because at least one is usable.
-	ts := httptest.NewServer(serveTemplate(http.StatusOK, templateJSON("tpl-mixed", "building", "ready")))
-	defer ts.Close()
-
-	svc := newTestService(t, ts)
-	err := svc.ValidateTemplate(context.Background(), "tpl-mixed")
-	if err != nil {
-		t.Fatalf("expected nil error when at least one build is ready, got %v", err)
-	}
-}
-
-func TestValidateTemplate_ServerError(t *testing.T) {
-	// 500 response — should propagate as a non-sentinel API error.
-	ts := httptest.NewServer(serveTemplate(http.StatusInternalServerError, `{"code":"internal","message":"server error"}`))
-	defer ts.Close()
-
-	svc := newTestService(t, ts)
-	err := svc.ValidateTemplate(context.Background(), "tpl-error")
-	if err == nil {
-		t.Fatal("expected error for 500 response, got nil")
-	}
-	if errors.Is(err, ErrTemplateNotFound) || errors.Is(err, ErrTemplateNotReady) || errors.Is(err, ErrTemplateRequired) {
-		t.Fatalf("expected generic API error, got sentinel: %v", err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := newTestService(t, ts).ValidateTemplate(ctx, "tpl"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want canceled", err)
 	}
 }
 

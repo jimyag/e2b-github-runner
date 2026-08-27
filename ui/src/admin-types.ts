@@ -1,4 +1,5 @@
 export type RunnerStatus = "queued" | "creating" | "running" | "stopping" | "completed" | "failed"
+export type RunnerDisplayStatus = RunnerStatus | "unmatched"
 
 export type RunnerState = {
   id: string
@@ -67,25 +68,6 @@ export type RunnerSpec = {
   min_idle: number
   priority: number
   enabled: boolean
-  default_available: boolean
-  created_at: string
-  updated_at: string
-}
-
-export type RunnerPolicy = {
-  id: number
-  repository_full_name: string
-  runner_spec_name?: string
-  runner_group_name?: string
-  enabled: boolean
-  created_at: string
-}
-
-export type RunnerGroup = {
-  name: string
-  description?: string
-  spec_names: string[]
-  enabled: boolean
   created_at: string
   updated_at: string
 }
@@ -102,83 +84,6 @@ export type DiagnosticsSummary = {
   state: { backend: string; database: string }
   github: { auth_mode: string; installation_id?: number; api_base_url: string }
   recent_failures: RunnerState[]
-}
-
-export type CatalogMigrationGateCode =
-  | "window_at_least_72_hours"
-  | "catalog_unchanged"
-  | "matcher_parity"
-  | "all_enabled_specs_full_lifecycle"
-
-export type CatalogMigrationManualRequirement =
-  | "backup_restore_verified"
-  | "continuous_service_observation"
-  | "workflow_labels_unchanged"
-
-export type CatalogMatchReplaySample = {
-  repository_full_name: string
-  labels?: string[]
-  request_count: number
-  first_seen_at: string
-  last_seen_at: string
-  result: "legacy_only" | "enabled_only" | "different_profile" | "error"
-  legacy_profile?: string
-  legacy_reason?: string
-  enabled_profile?: string
-  enabled_reason?: string
-  error?: string
-}
-
-export type RunnerSpecLifecycleExample = {
-  request_id: string
-  repository_full_name: string
-  workflow_job_id: number
-  github_job_url?: string
-  requested_labels: string[]
-  registered_at: string
-  completed_at: string
-  cleanup_finalized_at: string
-}
-
-export type RunnerSpecLifecycleEvidence = {
-  name: string
-  workflow_labels: string[]
-  request_count: number
-  registered_requests: number
-  completed_requests: number
-  cleanup_finalized_requests: number
-  latest?: RunnerSpecLifecycleExample
-}
-
-export type CatalogMigrationReadiness = {
-  window_start: string
-  window_end: string
-  replay: {
-    request_count: number
-    distinct_input_count: number
-    same: number
-    legacy_only: number
-    enabled_only: number
-    different_profile: number
-    errors: number
-    truncated: boolean
-  }
-  replay_samples: CatalogMatchReplaySample[]
-  specs: RunnerSpecLifecycleEvidence[]
-  catalog_changes: AuditEvent[]
-  catalog_changes_truncated: boolean
-  automated_gates_passed: boolean
-  gates: Array<{ code: CatalogMigrationGateCode; passed: boolean }>
-  manual_requirements: CatalogMigrationManualRequirement[]
-  current_process: {
-    started_at: string
-    catalog_match_counts: {
-      same: number
-      legacy_only: number
-      enabled_only: number
-      different_profile: number
-    }
-  }
 }
 
 export type AuditEvent = {
@@ -369,8 +274,6 @@ export const adminSections = [
   "accounts",
   "runner_requests",
   "runner_specs",
-  "runner_groups",
-  "runner_policies",
   "sandbox_service",
   "match",
   "audit",

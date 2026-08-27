@@ -4,12 +4,12 @@ This file tracks active project work. Completed behavior should move into `READM
 
 ## Active Roadmap
 
+- If Runner Specs are exposed to ordinary users in the future, scope template validation to their own account/organization Sandbox credentials; do not reuse the admin save resolver. User-side Spec management is not implemented.
 - Decide whether GitHub token and basic auth remain supported compatibility modes or should be removed in favor of GitHub App-only operation.
-- Decide whether ordinary-user Activity repositories should include repository-policy configuration rows in addition to repositories observed from runner jobs.
 - Add an effective-config diagnostics view or config validation workflow if operators need to inspect runtime config from the UI.
 - Verify DB lease behavior with two runnerd processes sharing the same database before documenting multi-instance support.
 - Decide whether expvar diagnostics need a Prometheus/export adapter or histogram-style latency views for deployment observability.
-- Do not start the Release B matcher cutover until Admin Diagnostics shows at least 72 hours of untruncated historical parity and full lifecycle evidence for every enabled production Spec, and operators have separately recorded backup/restore, continuous-service, and unchanged-workflow-label sign-offs.
+- After Release C has completed its production rollback window, decide whether to run a separately authorized database-maintenance operation that drops only `runner_group_specs`, `runner_groups`, and `repository_policies`. Startup migration must not drop them. Keep `runner_profiles.default_available` until a separately tested SQLite-safe column-removal path exists.
 - After the `ui-production-smoke` check has reported on `main`, enable it as a required status check in branch protection; the repository currently has no required status checks.
 - Define a privacy-safe documentation activation funnel for `/docs` (guide entry, hosted/deploy path selection, and first successful job) before adding analytics; do not collect repository names, workflow names, credentials, or log content.
 - Decide production credential ownership, approval, and rotation before adding
@@ -22,5 +22,5 @@ This file tracks active project work. Completed behavior should move into `READM
 - Keep `docs/deployment-smoke.md` and `docs/zh/deployment-smoke.md` aligned with real GitHub App, webhook, Qiniu sandbox template, runner pickup, cleanup, and diagnostics behavior.
 - Keep generated production UI assets under `internal/server/ui/` out of hand edits; change source files in `ui/` and rebuild with `task build`.
 - Keep the paired public guide sources under `ui/src/content/site-docs/en/` and `ui/src/content/site-docs/zh/` aligned; add exact public routes through `ui/src/site-doc-routes.ts` instead of deriving arbitrary paths from filenames.
-- When changing `internal/state/records.go` tags or migration helpers in `internal/state/db.go`, run `go test ./internal/state -count=1` before the broader test suite, plus `TestMigrateSQLiteRunnerRequestSnapshot` when a production SQLite export is available and `Test(CompareProfileMatches|FreshSchema)SQLBackends` against dedicated PostgreSQL/MySQL test databases for cross-dialect changes.
+- When changing `internal/state/records.go` tags or migration helpers in `internal/state/db.go`, run `go test ./internal/state -count=1` before the broader test suite, plus `TestMigrateSQLiteRunnerRequestSnapshot` when a production SQLite export is available and `Test(ApplyMutationWithAudit|FreshSchema)SQLBackends` against dedicated PostgreSQL/MySQL test databases for cross-dialect changes.
 - Keep `.agents/` focused on agent-only rules and repeatable workflows; keep operator, architecture, and deployment content in `README.md` and `docs/`.

@@ -162,7 +162,6 @@ erDiagram
   RUNNER_PROFILES {
     string name PK
     string template_id
-    bool default_available
     int max_concurrency
   }
   ACCOUNTS {
@@ -230,7 +229,7 @@ flowchart LR
 | Compute | Qiniu sandbox | Firecracker microVM | Kubernetes pod |
 | State source | SQLite/Postgres/MySQL DB | Service-managed pool state | Kubernetes API / CRD status |
 | Scheduling input | GitHub webhooks + admin API | Pool desired/current state | Scale set/listener reconciliation |
-| Runner selection | Runner specs, groups, policies, label matching | Pool/profile selection | Runner groups and scale sets |
+| Runner selection | Enabled Runner Specs and label matching | Pool/profile selection | Runner groups and scale sets |
 | Auth | GitHub App, token, or basic auth | GitHub App | GitHub App / scale set auth |
 | Diagnostics | Admin diagnostics + pprof/expvar | Pool metrics | Controller/workflow metrics |
 | Operational scope | Lightweight service for Qiniu sandbox runners | Dedicated VM runner platform | Full Kubernetes-native controller |
@@ -243,10 +242,10 @@ Admission uses the GitHub webhook payload repository and labels. A runner reques
 
 - the webhook HMAC signature is valid;
 - `github.allowed_repositories` permits the repository, if configured;
-- a runner spec or runner group/policy can satisfy the job labels;
+- an enabled Runner Spec satisfies `required_labels ⊆ job_labels ⊆ labels`;
 - the matched spec is enabled.
 
-`runner_specs.default_available: true` makes a spec globally available to allowed installed repositories. Repository policies can grant additional specs or groups to specific repositories or repository patterns. When a spec includes a GitHub runner group, runnerd creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
+After the repository allowlist check, every enabled Runner Spec is eligible for label matching. Internal Runner Groups and Repository Policies no longer exist in the application model; their legacy database tables remain untouched only for rollback. When a spec includes a GitHub runner group, runnerd creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
 
 Capacity is checked later when the worker starts a queued request. Requests above global or per-spec concurrency limits remain `queued` and are retried later. Transient placement/rate-limit signals are treated as queue deferrals instead of hard failures.
 

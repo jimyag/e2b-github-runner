@@ -38,6 +38,8 @@ task test
 
 Old-schema upgrade coverage is required when adding required columns, changing uniqueness semantics, or altering relationship constraints. Fresh sqlite creation is not enough. Existing SQLite `runner_requests` and `runner_profiles` migrations are additive-only; non-additive changes require an explicit compatibility helper instead of generic table recreation. Assert preserved Installation ID, Sandbox snapshot fields, and `updated_at` values where migration promises preservation; preserve runner-profile rows and existing indexes while adding all missing model fields; and assert explicit data reset where the compatibility contract requires reconfiguration. For production snapshots, compare total rows plus populated `github_installation_id`, `sandbox_api_url`, `sandbox_api_key_encrypted`, and `sandbox_config_source` counts across two consecutive starts.
 
+For Runner Spec name validation, cover both `UpsertProfile` and managed reconciliation. Reject newly written names containing `/` or equal to `.` or `..` without committing profile or audit state, and prove historical rows with those names still survive startup migration, remain listable/readable/matchable, and are not automatically repaired.
+
 Use the state-only snapshot gate when a production export is available:
 
 ```bash
@@ -53,7 +55,7 @@ disposable databases whose names end in `_test`:
 RUNNERD_CATALOG_BACKEND_TESTS=1 \
 RUNNERD_POSTGRES_TEST_DSN='<dedicated postgres test DSN>' \
 RUNNERD_MYSQL_TEST_DSN='<dedicated mysql test DSN>' \
-  go test ./internal/state -run 'Test(ApplyMutationWithAudit|CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+  go test ./internal/state -run 'Test(ApplyMutationWithAudit|FreshSchema)SQLBackends' -count=1 -v
 ```
 
 ## Go Server Or API
@@ -62,7 +64,15 @@ RUNNERD_MYSQL_TEST_DSN='<dedicated mysql test DSN>' \
 - For broad server/API behavior, run `go test ./...`.
 - For pre-merge confidence, run `task test`; it rebuilds UI assets, runs Bun UI tests, and runs Go tests with race and coverage.
 - For ordinary-user Jobs authorization, cover shared installations with different repository access, exact installation/repository pair matching, filtering before the database limit, list/detail/group/log/terminal consistency, missing or rejected GitHub user tokens, inaccessible linked installations, and short-lived access-cache behavior.
-- For catalog-migration readiness changes, prove historical replay weighting, all matcher classifications, malformed/truncated fail-closed behavior, end-exclusive windows, catalog audit freeze detection, registration-backed lifecycle evidence for enabled Specs, and advertised-label fallback for custom Specs without required labels. Readiness-relevant catalog/Sandbox mutations and managed reconciliation must commit their data change and audit evidence atomically: rejected mutations leave no audit event, while audit failures roll back the mutation. Keep current-process expvar separate from persisted evidence and never turn automated gates into backup/restore, continuity, or workflow-label sign-offs.
+- For Release C state changes, prove fresh schemas omit retired catalog tables, legacy databases leave those tables and rows untouched, repeated migration is idempotent, and Runner Spec/Sandbox mutations plus managed reconciliation commit their data change and audit evidence atomically. Rejected mutations leave no audit event, while audit failures roll back the mutation.
+
+## Admin Template Validation
+
+- Extend existing provider/server/UI tests for custom create and changed-template PATCH; use httptest with real SDK decoding, never a production validation bypass.
+- Cover configured-but-disabled/selected admin defaults, missing credentials, 404, provider 401/403/429/5xx, cancellation/deadlines, no usable default build, public hidden history, and an older uploaded default during rebuild. Do not infer readiness from arbitrary tagged build history.
+- Assert rejected writes preserve profile and audit state, including concurrent changes/deletes during provider validation and conflicts on insert-only creation, and managed/unchanged-template control edits still work without provider access. Assert UI pending state suppresses duplicate saves and failed validation retains the form for retry.
+- For conditional profile persistence, run the audited mutation/fresh schema matrix on dedicated PostgreSQL/MySQL databases, including MySQL `clientFoundRows=true`. Cover duplicate inserts, unchanged values, and revision advancement at millisecond precision even when the clock moves backwards.
+- Run `go test ./internal/state -count=1` when changing shared local profile validation, then server/provider tests, Bun tests, i18n, and production smoke for the paired public guide changes. No schema migration is needed for this flow.
 
 ## UI
 

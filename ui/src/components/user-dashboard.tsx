@@ -718,7 +718,11 @@ function CacheS3Card({
             <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{t("user.cacheS3NoEndpoint")}</div>
           )}
           <div className="grid gap-4 md:grid-cols-2">
-            <div className="grid gap-2"><Label htmlFor="cache-bucket">{t("user.cacheS3Bucket")}</Label><Input id="cache-bucket" value={bucket} onChange={(event) => setBucket(event.target.value)} placeholder={t("user.cacheS3BucketPlaceholder")} disabled={saving || removing} /></div>
+            <div className="grid gap-2">
+              <Label htmlFor="cache-bucket">{t("user.cacheS3Bucket")}</Label>
+              <Input id="cache-bucket" value={bucket} onChange={(event) => setBucket(event.target.value)} placeholder={t("user.cacheS3BucketPlaceholder")} disabled={saving || removing} aria-describedby="cache-bucket-hint" />
+              <p id="cache-bucket-hint" className="text-xs text-muted-foreground">{t("user.cacheS3BucketHint")}</p>
+            </div>
             <div className="grid gap-2"><Label htmlFor="cache-prefix">{t("user.cacheS3Prefix")}</Label><Input id="cache-prefix" value={prefix} onChange={(event) => setPrefix(event.target.value)} placeholder={t("user.cacheS3PrefixPlaceholder")} disabled={saving || removing} /></div>
             <div className="grid gap-2"><Label htmlFor="cache-ak">{t("user.cacheS3AccessKeyID")}</Label><Input id="cache-ak" type="password" value={accessKeyID} onChange={(event) => setAccessKeyID(event.target.value)} placeholder={configured ? t("user.cacheS3AccessKeyIDPlaceholderNew") : t("user.cacheS3AccessKeyIDPlaceholder")} disabled={saving || removing} /></div>
             <div className="grid gap-2"><Label htmlFor="cache-sk">{t("user.cacheS3SecretAccessKey")}</Label><Input id="cache-sk" type="password" value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value)} placeholder={configured ? t("user.cacheS3SecretAccessKeyPlaceholderNew") : t("user.cacheS3SecretAccessKeyPlaceholder")} disabled={saving || removing} /></div>

@@ -47,17 +47,40 @@ func (s *DBStore) GetProfile(name string) (RunnerProfile, error) {
 	return recordToProfile(record)
 }
 
+// ValidateProfile checks local write constraints without accessing a database
+// or provider. Admin handlers reuse it before performing remote validation.
+func ValidateProfile(profile RunnerProfile) error {
+	name := strings.TrimSpace(profile.Name)
+	if name == "" {
+		return fmt.Errorf("profile name is required")
+	}
+	if err := validateProfileName(name); err != nil {
+		return err
+	}
+	if !labelsMatch(profile.RequiredLabels, profile.Labels) {
+		return fmt.Errorf("required labels must be a subset of labels")
+	}
+	return nil
+}
+
 func (s *DBStore) UpsertProfile(profile RunnerProfile) (RunnerProfile, error) {
+	return s.saveProfile(profile, false, nil)
+}
+
+// UpsertProfileIfUnchanged inserts only when absent (nil expectedUpdatedAt), or
+// updates only the version read before validation. Deleted/changed rows conflict.
+func (s *DBStore) UpsertProfileIfUnchanged(profile RunnerProfile, expectedUpdatedAt *time.Time) (RunnerProfile, error) {
+	return s.saveProfile(profile, true, expectedUpdatedAt)
+}
+
+func (s *DBStore) saveProfile(profile RunnerProfile, conditional bool, expectedUpdatedAt *time.Time) (RunnerProfile, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {
 		return RunnerProfile{}, err
 	}
 	profile.Name = strings.TrimSpace(profile.Name)
-	if profile.Name == "" {
-		return RunnerProfile{}, fmt.Errorf("profile name is required")
-	}
-	if !labelsMatch(profile.RequiredLabels, profile.Labels) {
-		return RunnerProfile{}, fmt.Errorf("required labels must be a subset of labels")
+	if err := ValidateProfile(profile); err != nil {
+		return RunnerProfile{}, err
 	}
 	labelsJSON, err := json.Marshal(profile.Labels)
 	if err != nil {
@@ -72,6 +95,13 @@ func (s *DBStore) UpsertProfile(profile RunnerProfile) (RunnerProfile, error) {
 	}
 	requiredLabelsJSONText := string(requiredLabelsJSON)
 	now := time.Now().UTC()
+	if conditional && expectedUpdatedAt != nil {
+		// MySQL persists datetime(3). Advance beyond the stored revision even
+		// for rapid saves or when the application clock moves backwards.
+		if next := expectedUpdatedAt.Add(time.Millisecond); now.Before(next) {
+			now = next
+		}
+	}
 	record := runnerProfileRecord{
 		Name:                profile.Name,
 		LabelsJSON:          string(labelsJSON),
@@ -83,7 +113,7 @@ func (s *DBStore) UpsertProfile(profile RunnerProfile) (RunnerProfile, error) {
 		MinIdle:             profile.MinIdle,
 		Priority:            profile.Priority,
 		Enabled:             profile.Enabled,
-		DefaultAvailable:    profile.DefaultAvailable,
+		DefaultAvailable:    true,
 		ManagedBy:           profile.ManagedBy,
 		CatalogRevision:     profile.CatalogRevision,
 		CreatedAt:           profile.CreatedAt,
@@ -92,26 +122,42 @@ func (s *DBStore) UpsertProfile(profile RunnerProfile) (RunnerProfile, error) {
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = now
 	}
-	if err := db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "name"}},
-		DoUpdates: clause.Assignments(map[string]any{
-			"labels_json":           record.LabelsJSON,
-			"required_labels_json":  record.RequiredLabelsJSON,
-			"template_id":           record.TemplateID,
-			"default_template_name": record.DefaultTemplateName,
-			"runner_group":          record.RunnerGroup,
-			"max_concurrency":       record.MaxConcurrency,
-			"min_idle":              record.MinIdle,
-			"priority":              record.Priority,
-			"enabled":               record.Enabled,
-			"default_available":     record.DefaultAvailable,
-			"managed_by":            record.ManagedBy,
-			"catalog_revision":      record.CatalogRevision,
-			"updated_at":            record.UpdatedAt,
-		}),
-	}).Create(&record).Error; err != nil {
-		return RunnerProfile{}, err
+	updates := map[string]any{
+		"labels_json":           record.LabelsJSON,
+		"required_labels_json":  record.RequiredLabelsJSON,
+		"template_id":           record.TemplateID,
+		"default_template_name": record.DefaultTemplateName,
+		"runner_group":          record.RunnerGroup,
+		"max_concurrency":       record.MaxConcurrency,
+		"min_idle":              record.MinIdle,
+		"priority":              record.Priority,
+		"enabled":               record.Enabled,
+		"managed_by":            record.ManagedBy,
+		"catalog_revision":      record.CatalogRevision,
+		"updated_at":            record.UpdatedAt,
 	}
+	var result *gorm.DB
+	switch {
+	case conditional && expectedUpdatedAt != nil:
+		result = db.Model(&runnerProfileRecord{}).
+			Where("name = ? AND updated_at = ?", record.Name, *expectedUpdatedAt).Updates(updates)
+	case conditional:
+		// A no-op ON CONFLICT reports success with MySQL clientFoundRows.
+		// Use a real insert and translate duplicate errors only at this boundary.
+		result = db.Create(&record)
+		if translator, ok := db.Dialector.(gorm.ErrorTranslator); ok && result.Error != nil && errors.Is(translator.Translate(result.Error), gorm.ErrDuplicatedKey) {
+			return RunnerProfile{}, ErrConflict
+		}
+	default:
+		result = db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "name"}}, DoUpdates: clause.Assignments(updates)}).Create(&record)
+	}
+	if result.Error != nil {
+		return RunnerProfile{}, result.Error
+	}
+	if conditional && result.RowsAffected == 0 {
+		return RunnerProfile{}, ErrConflict
+	}
+
 	return s.GetProfile(record.Name)
 }
 
@@ -128,6 +174,9 @@ func (s *DBStore) ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedP
 			profile.ManagedBy = strings.TrimSpace(profile.ManagedBy)
 			if profile.Name == "" {
 				return fmt.Errorf("profile name is required")
+			}
+			if err := validateProfileName(profile.Name); err != nil {
+				return err
 			}
 			if profile.ManagedBy == "" {
 				return fmt.Errorf("managed profile owner is required")
@@ -175,7 +224,7 @@ func (s *DBStore) ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedP
 					MinIdle:             profile.MinIdle,
 					Priority:            profile.Priority,
 					Enabled:             profile.Enabled,
-					DefaultAvailable:    profile.DefaultAvailable,
+					DefaultAvailable:    true,
 					ManagedBy:           profile.ManagedBy,
 					CatalogRevision:     profile.CatalogRevision,
 					CreatedAt:           createdAt,
@@ -197,7 +246,6 @@ func (s *DBStore) ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedP
 				"default_template_name": profile.DefaultTemplateName,
 				"runner_group":          profile.RunnerGroup,
 				"priority":              profile.Priority,
-				"default_available":     profile.DefaultAvailable,
 				"managed_by":            profile.ManagedBy,
 				"catalog_revision":      profile.CatalogRevision,
 				"updated_at":            now,
@@ -241,6 +289,13 @@ func (s *DBStore) ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedP
 	return conflicts, nil
 }
 
+func validateProfileName(name string) error {
+	if strings.Contains(name, "/") || name == "." || name == ".." {
+		return fmt.Errorf("profile name must not contain '/' or be '.' or '..'")
+	}
+	return nil
+}
+
 func appendManagedProfileReconciliationAudit(tx *gorm.DB, profile RunnerProfile, now time.Time) error {
 	payload, err := json.Marshal(map[string]any{
 		"managed_by":       profile.ManagedBy,
@@ -281,383 +336,35 @@ func (s *DBStore) DeleteProfile(name string) error {
 		return err
 	}
 	name = strings.TrimSpace(name)
-	return db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Delete(&runnerGroupSpecRecord{}, "spec_name = ?", name).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&runnerProfileRecord{}, "name = ?", name).Error
-	})
-}
-
-func (s *DBStore) ListRunnerGroups() ([]RunnerGroup, error) {
-	db, err := s.dbOrEnsure()
-	if err != nil {
-		return nil, err
-	}
-	var records []runnerGroupRecord
-	if err := db.Order("name ASC").Find(&records).Error; err != nil {
-		return nil, err
-	}
-	groups := make([]RunnerGroup, 0, len(records))
-	for _, record := range records {
-		group, err := s.recordToRunnerGroup(db, record)
-		if err != nil {
-			return nil, err
-		}
-		groups = append(groups, group)
-	}
-	return groups, nil
-}
-
-func (s *DBStore) GetRunnerGroup(name string) (RunnerGroup, error) {
-	db, err := s.dbOrEnsure()
-	if err != nil {
-		return RunnerGroup{}, err
-	}
-	var record runnerGroupRecord
-	if err := db.First(&record, "name = ?", strings.TrimSpace(name)).Error; err != nil {
-		return RunnerGroup{}, err
-	}
-	return s.recordToRunnerGroup(db, record)
-}
-
-func (s *DBStore) UpsertRunnerGroup(group RunnerGroup) (RunnerGroup, error) {
-	db, err := s.dbOrEnsure()
-	if err != nil {
-		return RunnerGroup{}, err
-	}
-	group.Name = strings.TrimSpace(group.Name)
-	if group.Name == "" {
-		return RunnerGroup{}, fmt.Errorf("runner group name is required")
-	}
-	specNames := uniqueTrimmed(group.SpecNames)
-	now := time.Now().UTC()
-	record := runnerGroupRecord{
-		Name:        group.Name,
-		Description: strings.TrimSpace(group.Description),
-		Enabled:     group.Enabled,
-		CreatedAt:   group.CreatedAt,
-		UpdatedAt:   now,
-	}
-	if record.CreatedAt.IsZero() {
-		record.CreatedAt = now
-	}
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		if len(specNames) > 0 {
-			var existingNames []string
-			if err := tx.Model(&runnerProfileRecord{}).Where("name IN ?", specNames).Pluck("name", &existingNames).Error; err != nil {
-				return err
-			}
-			existing := make(map[string]bool, len(existingNames))
-			for _, name := range existingNames {
-				existing[name] = true
-			}
-			for _, specName := range specNames {
-				if !existing[specName] {
-					return fmt.Errorf("runner spec %q does not exist", specName)
-				}
-			}
-		}
-		if err := tx.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "name"}},
-			DoUpdates: clause.Assignments(map[string]any{
-				"description": record.Description,
-				"enabled":     record.Enabled,
-				"updated_at":  record.UpdatedAt,
-			}),
-		}).Create(&record).Error; err != nil {
-			return err
-		}
-		if err := tx.Delete(&runnerGroupSpecRecord{}, "group_name = ?", record.Name).Error; err != nil {
-			return err
-		}
-		for _, specName := range specNames {
-			link := runnerGroupSpecRecord{GroupName: record.Name, SpecName: specName, CreatedAt: now}
-			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&link).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		return RunnerGroup{}, err
-	}
-	return s.GetRunnerGroup(record.Name)
-}
-
-func (s *DBStore) DeleteRunnerGroup(name string) error {
-	db, err := s.dbOrEnsure()
-	if err != nil {
-		return err
-	}
-	name = strings.TrimSpace(name)
-	return db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Delete(&runnerGroupSpecRecord{}, "group_name = ?", name).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&repositoryPolicyRecord{}).
-			Where("runner_group_name = ?", name).
-			Update("enabled", false).Error; err != nil {
-			return err
-		}
-		return tx.Delete(&runnerGroupRecord{}, "name = ?", name).Error
-	})
-}
-
-func (s *DBStore) ListRepositoryPolicies() ([]RepositoryPolicy, error) {
-	db, err := s.dbOrEnsure()
-	if err != nil {
-		return nil, err
-	}
-	var records []repositoryPolicyRecord
-	if err := db.Order("repository_full_name ASC, profile_name ASC, runner_group_name ASC").Find(&records).Error; err != nil {
-		return nil, err
-	}
-	policies := make([]RepositoryPolicy, 0, len(records))
-	for _, record := range records {
-		policies = append(policies, recordToRepositoryPolicy(record))
-	}
-	return policies, nil
-}
-
-func (s *DBStore) GetRepositoryPolicy(id int64) (RepositoryPolicy, error) {
-	db, err := s.dbOrEnsure()
-	if err != nil {
-		return RepositoryPolicy{}, err
-	}
-	var record repositoryPolicyRecord
-	if err := db.First(&record, "id = ?", id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return RepositoryPolicy{}, ErrNotFound
-		}
-		return RepositoryPolicy{}, err
-	}
-	return recordToRepositoryPolicy(record), nil
-}
-
-func (s *DBStore) UpsertRepositoryPolicy(policy RepositoryPolicy) (RepositoryPolicy, error) {
-	db, err := s.dbOrEnsure()
-	if err != nil {
-		return RepositoryPolicy{}, err
-	}
-	policy.RepositoryFullName = strings.TrimSpace(policy.RepositoryFullName)
-	policy.ProfileName = strings.TrimSpace(policy.ProfileName)
-	policy.RunnerGroupName = strings.TrimSpace(policy.RunnerGroupName)
-	if policy.RepositoryFullName == "" {
-		return RepositoryPolicy{}, fmt.Errorf("repository_full_name is required")
-	}
-	if (policy.ProfileName == "") == (policy.RunnerGroupName == "") {
-		return RepositoryPolicy{}, fmt.Errorf("exactly one of runner_spec_name or runner_group_name is required")
-	}
-	now := time.Now().UTC()
-	if policy.ID == 0 {
-		record := repositoryPolicyRecord{
-			RepositoryFullName: policy.RepositoryFullName,
-			ProfileName:        policy.ProfileName,
-			RunnerGroupName:    policy.RunnerGroupName,
-			Enabled:            policy.Enabled,
-			CreatedAt:          now,
-		}
-		if err := db.Clauses(clause.OnConflict{
-			Columns: []clause.Column{
-				{Name: "repository_full_name"},
-				{Name: "profile_name"},
-				{Name: "runner_group_name"},
-			},
-			DoUpdates: clause.Assignments(map[string]any{
-				"enabled": record.Enabled,
-			}),
-		}).Create(&record).Error; err != nil {
-			return RepositoryPolicy{}, err
-		}
-		var saved repositoryPolicyRecord
-		if err := db.First(&saved, "repository_full_name = ? AND profile_name = ? AND runner_group_name = ?", record.RepositoryFullName, record.ProfileName, record.RunnerGroupName).Error; err != nil {
-			return RepositoryPolicy{}, err
-		}
-		return recordToRepositoryPolicy(saved), nil
-	}
-	updates := map[string]any{
-		"repository_full_name": policy.RepositoryFullName,
-		"profile_name":         policy.ProfileName,
-		"runner_group_name":    policy.RunnerGroupName,
-		"enabled":              policy.Enabled,
-	}
-	if err := db.Model(&repositoryPolicyRecord{}).Where("id = ?", policy.ID).Updates(updates).Error; err != nil {
-		return RepositoryPolicy{}, err
-	}
-	var saved repositoryPolicyRecord
-	if err := db.First(&saved, "id = ?", policy.ID).Error; err != nil {
-		return RepositoryPolicy{}, err
-	}
-	return recordToRepositoryPolicy(saved), nil
-}
-
-func (s *DBStore) DeleteRepositoryPolicy(id int64) error {
-	db, err := s.dbOrEnsure()
-	if err != nil {
-		return err
-	}
-	return db.Delete(&repositoryPolicyRecord{}, "id = ?", id).Error
+	return db.Delete(&runnerProfileRecord{}, "name = ?", name).Error
 }
 
 func (s *DBStore) MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error) {
-	comparison, err := s.CompareProfileMatches(repositoryFullName, labels)
-	return comparison.Legacy, err
-}
-
-func (s *DBStore) CompareProfileMatches(repositoryFullName string, labels []string) (ProfileMatchComparison, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {
-		return ProfileMatchComparison{}, err
+		return ProfileMatch{}, err
 	}
-	var snapshot catalogMatchSnapshot
-	err = db.Transaction(func(tx *gorm.DB) error {
-		var loadErr error
-		snapshot, loadErr = loadCatalogMatchSnapshot(tx)
-		return loadErr
-	}, catalogSnapshotTxOptions)
+	profiles, err := loadRunnerProfilesForMatch(db)
 	if err != nil {
-		return ProfileMatchComparison{}, err
+		return ProfileMatch{}, err
 	}
-	return snapshot.compare(repositoryFullName, labels), nil
+	return profileMatchFromCandidates(repositoryFullName, labels, profiles), nil
 }
 
-type catalogMatchSnapshot struct {
-	profiles []RunnerProfile
-	policies []RepositoryPolicy
-	groups   []RunnerGroup
-}
-
-func loadCatalogMatchSnapshot(tx *gorm.DB) (catalogMatchSnapshot, error) {
-	var snapshot catalogMatchSnapshot
+func loadRunnerProfilesForMatch(tx *gorm.DB) ([]RunnerProfile, error) {
 	var profileRecords []runnerProfileRecord
 	if err := tx.Order("priority DESC, name ASC").Find(&profileRecords).Error; err != nil {
-		return catalogMatchSnapshot{}, err
+		return nil, err
 	}
-	snapshot.profiles = make([]RunnerProfile, 0, len(profileRecords))
+	profiles := make([]RunnerProfile, 0, len(profileRecords))
 	for _, record := range profileRecords {
 		profile, err := recordToProfile(record)
 		if err != nil {
-			return catalogMatchSnapshot{}, err
+			return nil, err
 		}
-		snapshot.profiles = append(snapshot.profiles, profile)
+		profiles = append(profiles, profile)
 	}
-
-	hasPolicies, err := catalogTableExists(tx, repositoryPolicyRecord{}.TableName())
-	if err != nil {
-		return catalogMatchSnapshot{}, err
-	}
-	if hasPolicies {
-		var policyRecords []repositoryPolicyRecord
-		if err := tx.Order("repository_full_name ASC, id ASC").Find(&policyRecords).Error; err != nil {
-			return catalogMatchSnapshot{}, err
-		}
-		snapshot.policies = make([]RepositoryPolicy, 0, len(policyRecords))
-		for _, record := range policyRecords {
-			snapshot.policies = append(snapshot.policies, recordToRepositoryPolicy(record))
-		}
-	}
-
-	hasGroups, err := catalogTableExists(tx, runnerGroupRecord{}.TableName())
-	if err != nil {
-		return catalogMatchSnapshot{}, err
-	}
-	if hasGroups {
-		var groupRecords []runnerGroupRecord
-		if err := tx.Order("name ASC").Find(&groupRecords).Error; err != nil {
-			return catalogMatchSnapshot{}, err
-		}
-		specsByGroup := make(map[string][]string, len(groupRecords))
-		hasGroupSpecs, err := catalogTableExists(tx, runnerGroupSpecRecord{}.TableName())
-		if err != nil {
-			return catalogMatchSnapshot{}, err
-		}
-		if hasGroupSpecs {
-			var specRecords []runnerGroupSpecRecord
-			if err := tx.Order("group_name ASC, spec_name ASC").Find(&specRecords).Error; err != nil {
-				return catalogMatchSnapshot{}, err
-			}
-			for _, record := range specRecords {
-				specsByGroup[record.GroupName] = append(specsByGroup[record.GroupName], record.SpecName)
-			}
-		}
-		snapshot.groups = make([]RunnerGroup, 0, len(groupRecords))
-		for _, record := range groupRecords {
-			snapshot.groups = append(snapshot.groups, RunnerGroup{
-				Name: record.Name, Description: record.Description,
-				SpecNames: specsByGroup[record.Name], Enabled: record.Enabled,
-				CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
-			})
-		}
-	}
-	return snapshot, nil
-}
-
-func (snapshot catalogMatchSnapshot) compare(repositoryFullName string, labels []string) ProfileMatchComparison {
-	legacyCandidates, legacyHasAllowedNames := legacyAllowedProfiles(snapshot.profiles, snapshot.policies, snapshot.groups, repositoryFullName)
-	legacy := profileMatchFromCandidates(repositoryFullName, labels, legacyCandidates)
-	if !legacyHasAllowedNames {
-		legacy.Reason = "profile_not_allowed"
-	}
-	enabled := profileMatchFromCandidates(repositoryFullName, labels, snapshot.profiles)
-	return ProfileMatchComparison{Legacy: legacy, Enabled: enabled}
-}
-
-func catalogTableExists(tx *gorm.DB, tableName string) (bool, error) {
-	var query string
-	switch tx.Dialector.Name() {
-	case BackendSQLite:
-		query = `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`
-	case BackendPostgres:
-		query = `SELECT count(*) FROM information_schema.tables WHERE table_schema = CURRENT_SCHEMA() AND table_name = ? AND table_type = 'BASE TABLE'`
-	case BackendMySQL:
-		query = `SELECT count(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ? AND table_type = 'BASE TABLE'`
-	default:
-		return false, fmt.Errorf("unsupported state backend for catalog table lookup: %s", tx.Dialector.Name())
-	}
-	var count int64
-	if err := tx.Raw(query, tableName).Scan(&count).Error; err != nil {
-		return false, fmt.Errorf("check catalog table %q: %w", tableName, err)
-	}
-	return count > 0, nil
-}
-
-func legacyAllowedProfiles(profiles []RunnerProfile, policies []RepositoryPolicy, groups []RunnerGroup, repositoryFullName string) ([]RunnerProfile, bool) {
-	groupsByName := make(map[string]RunnerGroup, len(groups))
-	for _, group := range groups {
-		groupsByName[group.Name] = group
-	}
-	allowed := map[string]bool{}
-	for _, profile := range profiles {
-		if profile.Enabled && profile.DefaultAvailable {
-			allowed[profile.Name] = true
-		}
-	}
-	for _, policy := range policies {
-		if !policy.Enabled {
-			continue
-		}
-		if repositoryMatches(policy.RepositoryFullName, repositoryFullName) {
-			if policy.ProfileName != "" {
-				allowed[policy.ProfileName] = true
-			}
-			if policy.RunnerGroupName != "" {
-				group := groupsByName[policy.RunnerGroupName]
-				if !group.Enabled {
-					continue
-				}
-				for _, specName := range group.SpecNames {
-					allowed[specName] = true
-				}
-			}
-		}
-	}
-	var candidates []RunnerProfile
-	for _, profile := range profiles {
-		if allowed[profile.Name] {
-			candidates = append(candidates, profile)
-		}
-	}
-	return candidates, len(allowed) > 0
+	return profiles, nil
 }
 
 func profileMatchFromCandidates(repositoryFullName string, labels []string, profiles []RunnerProfile) ProfileMatch {

@@ -26,7 +26,7 @@
 
 ## 托管与自定义的所有权
 
-runnerd 管理托管名称、标签、必需标签、公共模板名称、优先级和默认可用性。Operator 控制 `enabled`、`max_concurrency` 和 `min_idle`。
+runnerd 管理托管名称、标签、必需标签、公共模板名称和优先级。Operator 控制 `enabled`、`max_concurrency` 和 `min_idle`。
 
 自定义 spec 仍由 operator 管理，使用显式 template ID，并且可以定义其他声明标签和必需标签。保存自定义 spec 并不能证明模板在所选 Sandbox 区域中存在或可用。
 

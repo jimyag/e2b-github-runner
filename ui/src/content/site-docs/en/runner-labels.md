@@ -26,7 +26,7 @@ This means `[qiniu, ubuntu-24.04]` and the full advertised set both match. Parti
 
 ## Managed and custom ownership
 
-runnerd owns managed names, labels, required labels, public template names, priority, and default availability. Operators control `enabled`, `max_concurrency`, and `min_idle`.
+runnerd owns managed names, labels, required labels, public template names, and priority. Operators control `enabled`, `max_concurrency`, and `min_idle`.
 
 Custom specs remain operator-owned. They use an explicit template ID and may define different advertised and required labels. Saving a custom spec does not prove the template exists or is usable in the selected Sandbox region.
 

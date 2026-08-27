@@ -2,8 +2,8 @@ import { type FormEvent } from "react"
 import { Copy, ExternalLink, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 
-import { formatTime, runnerStatusLabel } from "@/admin-format"
-import { activeStatuses, logNames, type RunnerState, type RunnerStatus } from "@/admin-types"
+import { formatTime, runnerDisplayStatus, runnerStatusLabel } from "@/admin-format"
+import { activeStatuses, logNames, type RunnerDisplayStatus, type RunnerState } from "@/admin-types"
 import { Detail, StatusBadge } from "@/components/admin-shared"
 import type { AppTFunction } from "@/i18n"
 import { Button } from "@/components/ui/button"
@@ -93,7 +93,7 @@ export function RunnerRequestsSection({
   createRunnerSpec: string
   createLabels: string
   createRunnerOpen: boolean
-  runnerStatusFilter: RunnerStatus | "all"
+  runnerStatusFilter: RunnerDisplayStatus | "all"
   runnerRepositoryFilter: string
   runnerSpecFilter: string
   runnerRepositories: string[]
@@ -106,7 +106,7 @@ export function RunnerRequestsSection({
   onCreateRepositoryChange: (value: string) => void
   onCreateRunnerSpecChange: (value: string) => void
   onCreateLabelsChange: (value: string) => void
-  onStatusFilterChange: (value: RunnerStatus | "all") => void
+  onStatusFilterChange: (value: RunnerDisplayStatus | "all") => void
   onRepositoryFilterChange: (value: string) => void
   onRunnerSpecFilterChange: (value: string) => void
   onSelectRunner: (id: string) => void
@@ -195,13 +195,13 @@ export function RunnerRequestsSection({
               </DialogContent>
             </Dialog>
             <div className="grid gap-2 md:grid-cols-[minmax(160px,220px)_minmax(180px,1fr)_minmax(180px,1fr)]">
-              <Select value={runnerStatusFilter} onValueChange={(value) => onStatusFilterChange(value as RunnerStatus | "all")}>
+              <Select value={runnerStatusFilter} onValueChange={(value) => onStatusFilterChange(value as RunnerDisplayStatus | "all")}>
                 <SelectTrigger>
                   <SelectValue placeholder={t("common.status")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{t("admin.allStatuses")}</SelectItem>
-                  {(["queued", "creating", "running", "stopping", "completed", "failed"] as RunnerStatus[]).map((status) => (
+                  {(["queued", "creating", "running", "stopping", "completed", "unmatched", "failed"] as RunnerDisplayStatus[]).map((status) => (
                     <SelectItem key={status} value={status}>
                       {runnerStatusLabel(status)}
                     </SelectItem>
@@ -270,7 +270,7 @@ export function RunnerRequestsSection({
                     onClick={() => onSelectRunner(runner.id)}
                   >
                     <TableCell>
-                      <StatusBadge status={runner.status} />
+                      <StatusBadge status={runnerDisplayStatus(runner)} />
                     </TableCell>
                     <TableCell>
                       <div className="max-w-[220px] truncate">{runner.repository_full_name || "-"}</div>
@@ -304,7 +304,7 @@ export function RunnerRequestsSection({
                     <TableCell>{formatTime(runner.updated_at, i18n.resolvedLanguage)}</TableCell>
                     <TableCell>
                       <div className="flex gap-2">
-                        {runner.status === "failed" ? (
+                        {runnerDisplayStatus(runner) === "failed" ? (
                           <Button
                             type="button"
                             variant="outline"
@@ -365,7 +365,7 @@ export function RunnerRequestsSection({
           <CardContent className="grid gap-5 p-5">
             <div className="space-y-2">
               <Detail label="ID" value={selected.id} />
-              <Detail label={t("common.status")} value={runnerStatusLabel(selected.status)} />
+              <Detail label={t("common.status")} value={runnerStatusLabel(runnerDisplayStatus(selected))} />
               <Detail label={t("common.repository")} value={selected.repository_full_name || "-"} />
               <Detail label={t("common.runnerSpec")} value={selected.runner_spec_name || "-"} />
               <Detail label={t("common.sandbox")} value={selected.sandbox_id || "-"} />
@@ -409,7 +409,7 @@ export function RunnerRequestsSection({
               <Detail label={t("admin.lastErrorCode")} value={selected.last_error_code || "-"} />
               <Detail label={t("admin.error")} value={selected.error || "-"} />
             </div>
-            {selected.status === "failed" ? (
+            {runnerDisplayStatus(selected) === "failed" ? (
               <Button type="button" variant="outline" onClick={() => onRetryRunner(selected.id)}>
                 <RefreshCw />
                 {t("admin.retryRequest")}

@@ -78,9 +78,32 @@ labels, required labels, stable public template names, priority, and default
 availability while preserving operator-controlled `enabled`,
 `max_concurrency`, and `min_idle`. Custom specs remain admin API/UI data: give
 them an explicit `template_id`, advertised labels, and optional required
-labels. Custom template access is intentionally not validated at save time.
-It is checked when runnerd starts a sandbox with the account or organization
-Sandbox service config.
+labels. New custom specs and changed template IDs require an admin Sandbox
+endpoint and API key configured at `/admin/sandbox_service`. Validation uses
+that configuration only, not the signed-in user's or an organization's keys;
+the runtime fallback enabled/audience controls do not restrict admin validation.
+`GetTemplate` verifies existence/access, then the owned catalog or public default
+catalog supplies the effective uploaded default build ID. A failed/in-progress
+rebuild does not invalidate an older usable default. Detail build history is not
+a readiness signal: it is paginated, includes other tags, and is hidden from
+non-owners. Public templates outside the default catalog cannot have their build
+state confirmed by this API and are rejected with `template_state_unavailable`.
+
+The total provider check is limited to five seconds. Missing admin configuration
+returns `409 sandbox_service_not_configured`; a missing template or no usable
+default build returns `400 template_not_found` or `400 template_not_ready`.
+Provider 401/403 produces `502 sandbox_template_access_denied`, other upstream
+failures produce `502 template_validation_unavailable`, and cancellation/deadline
+returns `504 template_validation_timeout`. Fix the configuration/template or retry;
+a failed check never silently permits a save and never exposes the provider body.
+Rejected saves leave both profile and audit records unchanged. If another save or deletion changes the spec while validation is in flight, the conditional write returns `409 runner_spec_conflict`; refresh before retrying instead of overwriting the newer state.
+
+PATCH compares trimmed template IDs: changing only labels, capacity, or enabled
+state remains possible without Sandbox access. Managed spec controls also skip
+validation and retain runtime name resolution. No existing spec is automatically
+revalidated or disabled. Actual jobs still use their account/organization Sandbox
+configuration; admin validation does not grant access in those scopes or prove
+that the image contains the runner binaries. Verify the real workflow separately.
 
 `database.backend` supports `sqlite`, `postgres`, and `mysql`. Prefer sqlite for local development. Before documenting shared-database multi-instance deployment as supported, verify lease behavior with two runnerd processes sharing the same database.
 
@@ -120,19 +143,18 @@ RUNNERD_SQLITE_SNAPSHOT=/path/to/runnerd-export.db \
   go test ./internal/state -run TestMigrateSQLiteRunnerRequestSnapshot -count=1 -v
 ```
 
-State migration, the shadow catalog matcher, and audited catalog mutations also
-have an opt-in real-dialect compatibility gate. Both DSNs must point to
+State migration and audited catalog mutations also have an opt-in real-dialect
+compatibility gate. Both DSNs must point to
 dedicated disposable databases whose names end in `_test`: the tests refuse
 other database names, then drop and recreate runnerd state tables. They cover
-fresh schema creation, repeated migration with preserved catalog rows, legacy
-catalog tables present, empty, and absent, and atomic mutation/audit commit and
-rollback behavior.
+fresh schema creation without retired catalog tables, repeated migration, and
+atomic mutation/audit commit and rollback behavior.
 
 ```bash
 RUNNERD_CATALOG_BACKEND_TESTS=1 \
 RUNNERD_POSTGRES_TEST_DSN='host=127.0.0.1 user=runnerd password=runnerd dbname=runnerd_test port=5432 sslmode=disable' \
 RUNNERD_MYSQL_TEST_DSN='runnerd:runnerd@tcp(127.0.0.1:3306)/runnerd_test' \
-  go test ./internal/state -run 'Test(ApplyMutationWithAudit|CompareProfileMatches|FreshSchema)SQLBackends' -count=1 -v
+  go test ./internal/state -run 'Test(ApplyMutationWithAudit|FreshSchema)SQLBackends' -count=1 -v
 ```
 
 Restart recovery has focused tests that do not require a live sandbox:
@@ -205,7 +227,7 @@ github:
     password: <token or password>
 ```
 
-No global repo/org mode is required. Webhooks use `repository.full_name` from the payload. runnerd creates repository runners by default. If the matched runner spec sets GitHub `runner_group`, runnerd creates an organization runner for the repository owner and passes the group as `--runnergroup` during GitHub runner registration. Specs with `runner_specs.default_available: true` are available to all repositories by default; `runner_policies` are only needed to grant a repository or repository wildcard an additional special spec, for example `jimyag/*` or `jimyag/template-repository`.
+No global repo/org mode is required. Webhooks use `repository.full_name` from the payload. runnerd creates repository runners by default. If the matched runner spec sets GitHub `runner_group`, runnerd creates an organization runner for the repository owner and passes the group as `--runnergroup` during GitHub runner registration. Admission selects from all enabled Runner Specs after the repository allowlist check; the removed internal Runner Groups and Repository Policies do not affect matching.
 
 ## 3. Start The Service
 
@@ -410,8 +432,15 @@ backward-compatible explicit-template path:
 curl -fsS -X POST http://127.0.0.1:25500/runner_specs \
   -b "$COOKIE_JAR" \
   -H 'content-type: application/json' \
-  -d '{"name":"custom-ubuntu","labels":["self-hosted","custom-ubuntu"],"required_labels":["custom-ubuntu"],"template_id":"<template id>","max_concurrency":1,"enabled":true,"default_available":true}' | jq
+  -d '{"name":"custom-ubuntu","labels":["self-hosted","custom-ubuntu"],"required_labels":["custom-ubuntu"],"template_id":"<template id>","max_concurrency":1,"enabled":true}' | jq
 ```
+
+Runner Spec names are trimmed single-path-segment identifiers. New names must
+not contain `/` and must not equal `.` or `..`; rejected creates return
+`400 Bad Request` without committing the profile or its audit event. Startup
+and matching continue to tolerate historical rows with those names, but
+runnerd does not rename or delete them automatically and their single-resource
+management URLs are not guaranteed to survive reverse-proxy path normalization.
 
 Manually create a runner:
 
@@ -633,8 +662,6 @@ The service imports `github.com/jimmicro/pprof`. After startup it generates `.pp
 ```bash
 curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/pprof | jq
 curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
-curl -fsS -b "$COOKIE_JAR" \
-  'http://127.0.0.1:25500/diagnostics/catalog-migration-readiness?window_hours=72' | jq
 ```
 
 `/diagnostics/pprof` returns:
@@ -647,11 +674,7 @@ curl -fsS -b "$COOKIE_JAR" \
 
 `/diagnostics/vars` serves the current runnerd process's expvar registry directly. It never selects a discovered pprof address file, so a stale artifact from an older process cannot hide the current metrics. Current metrics cover profile current/busy/idle/pending/desired, retry/lease, create/stop counts and durations, GitHub API calls, runner registration/cleanup, and workflow job queued/started/completed, conclusion, failure, queue duration, and run duration.
 
-The Admin Diagnostics page also loads the catalog migration readiness endpoint. It replays distinct repository/label inputs from persisted runner requests against both the Release A legacy Group/Policy matcher and the enabled-Spec matcher, weighting the result by historical request count. The default 72-hour window can be changed to 7 or 30 days. The report is evaluated in one read-only repeatable-read database transaction, caps replay at 5,000 distinct inputs, and blocks rather than claims parity if the result is truncated or malformed.
-
-For every currently enabled Runner Spec, the same report displays durable request, registration, completion, and cleanup-finalized counts plus the latest successful GitHub Job link. Completion and cleanup evidence require that runner registration was persisted first; a request skipped before Sandbox creation cannot satisfy a full lifecycle row. Custom Specs with no separate `required_labels` display their advertised `labels` as the workflow-label evidence. `cleanup finalized` means runnerd reached persisted `completed` only after Sandbox stop and GitHub runner removal or confirmed absence. GitHub-hosted jobs whose labels do not select runnerd, such as a lone `ubuntu-latest`, may contribute a `same` no-match replay result but never satisfy an enabled Spec's lifecycle row.
-
-The automated gate passes only when the window is at least 72 hours, no catalog/Sandbox mutation audit event exists in the window, historical matching has strict parity, and every enabled Spec has full lifecycle evidence. Readiness-relevant catalog and Sandbox mutations commit their data change and audit event atomically: a rejected mutation leaves no audit event, while an audit persistence failure rolls back the data change. Managed catalog reconciliation records `profile.reconcile` under the same rule. Backup/restore verification, continuous-service observation, and confirmation that workflow labels were unchanged remain explicit operator sign-offs; the UI does not infer or complete them.
+Release C removed the temporary catalog migration readiness endpoint and UI after the matcher cutover completed. The retired Runner Group and Policy APIs return `404`; their legacy database tables remain untouched for rollback.
 
 ## 11. Official References
 
