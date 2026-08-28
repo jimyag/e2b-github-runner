@@ -16,6 +16,9 @@ This file tracks active project work. Completed behavior should move into `READM
 - Decide production credential ownership, approval, and rotation before adding
   a manual `workflow_dispatch` that publishes public Sandbox templates.
 - Keep old-schema upgrade coverage whenever state records or GORM tags change; the current migration path is a narrow legacy compatibility pass followed by `AutoMigrate`, with additive-only handling for existing SQLite `runner_requests` and `runner_profiles`, not a full handwritten migration history.
+- Run the scoped Runner Types release gates when dedicated environments are available: PostgreSQL/MySQL audited-mutation and fresh-schema tests, a production SQLite snapshot migration, and the SQLite down-version startup check against the documented baseline.
+- Run one real personal-account and one real Organization GitHub Actions workflow through the scoped Runner Types path, including Sandbox template validation, cleanup, and the repository-only outsider authorization boundary.
+- Execute the deployment canary for the scoped Runner Types routes and update `docs/user-scoped-runner-configuration.md` with origin, version, and cleanup evidence; local fixture-backed browser smoke is not a deployment substitute.
 
 ## Maintenance
 

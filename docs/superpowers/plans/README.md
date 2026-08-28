@@ -13,4 +13,4 @@ These files preserve design rationale and execution details for changes that hav
 | [Runner Spec Path-Safe Name](2026-08-25-runner-spec-path-safe-name.md) | Historical, completed | Landed in `0bab1e0` (`fix(runner): reject path-unsafe Runner Spec names (#86)`) |
 | [Runner Spec Template Validation](2026-08-26-template-validation.md) | Historical, completed | Landed in `5522d1a` (`fix(runner): validate templates before saving (#87)`) |
 
-The active proposal for ordinary-user Runner management is [User-scoped Runner Configuration](../../user-scoped-runner-configuration.md). Its implementation status is explicitly “not started”; `TODO.md` links to it as active roadmap work.
+The implementation record for ordinary-user Runner management is [User-scoped Runner Configuration](../../user-scoped-runner-configuration.md). State, API, UI, and documentation changes have landed in staged commits; the plan records the remaining real-database, provider, GitHub, and deployment gates, which are tracked in `TODO.md`.
