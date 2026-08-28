@@ -17,8 +17,10 @@ import (
 
 const maxRunnerRequestRepositoryAccessQueryParameters = 900
 
-// Startup migration backfills legacy payload context before list queries use
-// this projection; list reads intentionally never load raw webhook payloads.
+// runnerd enables MigrateOnStart, so startup migration backfills legacy payload
+// context before list queries use this projection. Embedders that disable
+// migration must migrate the database before serving list reads. List reads
+// intentionally never load raw webhook payloads.
 // Source and labels_json are omitted because recordToState does not read them.
 // Sandbox credential columns are omitted intentionally and remain empty in
 // list-derived RunnerState values; mutation paths re-read the full record.
