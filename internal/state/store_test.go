@@ -3438,6 +3438,157 @@ func TestFreshSchemaSQLBackends(t *testing.T) {
 	}
 }
 
+func TestFreshSchemaIncludesScopedRunnerCatalog(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"runner_profile_scope_controls", "scoped_runner_profiles"} {
+		if !db.Migrator().HasTable(table) {
+			t.Fatalf("expected fresh schema table %s", table)
+		}
+	}
+	for _, index := range []struct {
+		model any
+		name  string
+	}{
+		{model: "runner_profile_scope_controls", name: "idx_runner_profile_scope_controls_scope"},
+		{model: "scoped_runner_profiles", name: "idx_scoped_runner_profiles_scope_labels"},
+		{model: "scoped_runner_profiles", name: "idx_scoped_runner_profiles_scope"},
+	} {
+		if !db.Migrator().HasIndex(index.model, index.name) {
+			t.Fatalf("expected fresh schema index %s", index.name)
+		}
+	}
+	for _, column := range []string{"profile_source", "profile_scope_type", "profile_scope_id"} {
+		if !db.Migrator().HasColumn(&runnerRequestRecord{}, column) {
+			t.Fatalf("expected runner_requests.%s", column)
+		}
+	}
+}
+
+func TestMigrateSQLiteRunnerRequestAddsProfileScopeWithoutLosingRows(t *testing.T) {
+	databaseURL := filepath.Join(t.TempDir(), "runnerd.db")
+	setup := NewWithOptions(Options{Backend: BackendSQLite, DatabaseDSN: databaseURL, MigrateOnStart: false}).(*DBStore)
+	db, err := setup.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE runner_requests (
+		id TEXT PRIMARY KEY,
+		source TEXT NOT NULL,
+		labels_json TEXT NOT NULL,
+		profile_name TEXT,
+		runner_name TEXT NOT NULL,
+		status TEXT NOT NULL,
+		queued_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		version INTEGER NOT NULL DEFAULT 0
+	);`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE INDEX idx_runner_requests_profile_queued_id ON runner_requests(profile_name, queued_at DESC, id ASC)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := db.Exec(`INSERT INTO runner_requests (id, source, labels_json, runner_name, status, queued_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		"legacy-request", "github", `[]`, "runner", StatusCompleted, now, now).Error; err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+
+	migrated := NewWithOptions(Options{Backend: BackendSQLite, DatabaseDSN: databaseURL, MigrateOnStart: true}).(*DBStore)
+	if err := migrated.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = migrated.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row struct {
+		ID     string
+		Status string
+	}
+	if err := db.Table("runner_requests").Select("id, status").Where("id = ?", "legacy-request").Scan(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.ID != "legacy-request" || row.Status != StatusCompleted {
+		t.Fatalf("legacy row changed during migration: %#v", row)
+	}
+	for _, column := range []string{"profile_source", "profile_scope_type", "profile_scope_id"} {
+		if !db.Migrator().HasColumn(&runnerRequestRecord{}, column) {
+			t.Fatalf("expected migrated runner_requests.%s", column)
+		}
+	}
+	if !db.Migrator().HasIndex(&runnerRequestRecord{}, "idx_runner_requests_profile_scope_status") {
+		t.Fatal("expected profile scope status index")
+	}
+}
+
+func TestMigrateSQLiteScopedRunnerCatalogIsIdempotent(t *testing.T) {
+	databaseURL := filepath.Join(t.TempDir(), "runnerd.db")
+	store := NewWithOptions(Options{Backend: BackendSQLite, DatabaseDSN: databaseURL, MigrateOnStart: true}).(*DBStore)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before []string
+	if err := db.Raw(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('runner_profile_scope_controls', 'scoped_runner_profiles') ORDER BY name`).Scan(&before).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != 2 {
+		t.Fatalf("expected scoped catalog tables before repeat migration, got %v", before)
+	}
+	if err := store.migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var after []string
+	if err := db.Raw(`SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('runner_profile_scope_controls', 'scoped_runner_profiles') ORDER BY name`).Scan(&after).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("repeated migration changed scoped catalog tables: before=%v after=%v", before, after)
+	}
+}
+
+func TestScopedRunnerCatalogFreshSchemaSQLBackends(t *testing.T) {
+	if os.Getenv("RUNNERD_CATALOG_BACKEND_TESTS") != "1" {
+		t.Skip("set RUNNERD_CATALOG_BACKEND_TESTS=1 with dedicated Postgres and MySQL test databases")
+	}
+	for _, backend := range []struct {
+		name string
+		dsn  string
+	}{
+		{name: BackendPostgres, dsn: os.Getenv("RUNNERD_POSTGRES_TEST_DSN")},
+		{name: BackendMySQL, dsn: os.Getenv("RUNNERD_MYSQL_TEST_DSN")},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			if strings.TrimSpace(backend.dsn) == "" {
+				t.Skip("dedicated SQL backend test DSN not configured")
+			}
+			store := NewWithOptions(Options{Backend: backend.name, DatabaseDSN: backend.dsn, MigrateOnStart: true}).(*DBStore)
+			db, err := store.dbOrEnsure()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				_ = db.Exec("DROP TABLE scoped_runner_profiles").Error
+				_ = db.Exec("DROP TABLE runner_profile_scope_controls").Error
+				closeTestDB(t, db)
+			}()
+			for _, table := range []string{"runner_profile_scope_controls", "scoped_runner_profiles"} {
+				if !db.Migrator().HasTable(table) {
+					t.Fatalf("expected %s table", table)
+				}
+			}
+		})
+	}
+}
+
 func sqlBackendTestTables() []string {
 	return []string{
 		"runner_events",

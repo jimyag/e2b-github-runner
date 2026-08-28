@@ -37,6 +37,9 @@ type RunnerRequest struct {
 	RequestedLabels        []string  `json:"requested_labels,omitempty"`
 	Labels                 []string  `json:"labels"`
 	ProfileName            string    `json:"runner_spec_name,omitempty"`
+	ProfileSource          string    `json:"runner_spec_source,omitempty"`
+	ProfileScopeType       string    `json:"runner_spec_scope_type,omitempty"`
+	ProfileScopeID         int64     `json:"runner_spec_scope_id,omitempty"`
 	RunnerGroup            string    `json:"runner_group,omitempty"`
 	RunnerName             string    `json:"runner_name"`
 	SandboxAPIURL          string    `json:"-"`
@@ -52,6 +55,9 @@ type RunnerState struct {
 	RepositoryFullName     string    `json:"repository_full_name,omitempty"`
 	RequestedLabels        []string  `json:"requested_labels,omitempty"`
 	ProfileName            string    `json:"runner_spec_name,omitempty"`
+	ProfileSource          string    `json:"runner_spec_source,omitempty"`
+	ProfileScopeType       string    `json:"runner_spec_scope_type,omitempty"`
+	ProfileScopeID         int64     `json:"runner_spec_scope_id,omitempty"`
 	RunnerGroup            string    `json:"runner_group,omitempty"`
 	RunnerName             string    `json:"runner_name"`
 	SandboxID              string    `json:"sandbox_id,omitempty"`
@@ -117,7 +123,52 @@ type ProfileMatch struct {
 	RepositoryFullName string         `json:"repository_full_name"`
 	Labels             []string       `json:"labels"`
 	Profile            *RunnerProfile `json:"runner_spec,omitempty"`
+	Source             string         `json:"runner_spec_source,omitempty"`
+	ScopeType          string         `json:"runner_spec_scope_type,omitempty"`
+	ScopeID            int64          `json:"runner_spec_scope_id,omitempty"`
 	Reason             string         `json:"reason,omitempty"`
+}
+
+type RunnerProfileScope struct {
+	Type string `json:"scope_type"`
+	ID   int64  `json:"scope_id"`
+}
+
+type RunnerProfileControl struct {
+	ScopeType      string    `json:"scope_type"`
+	ScopeID        int64     `json:"scope_id"`
+	ProfileName    string    `json:"name"`
+	Enabled        bool      `json:"enabled"`
+	MaxConcurrency int       `json:"max_concurrency"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type ScopedRunnerProfile struct {
+	ScopeType      string    `json:"scope_type"`
+	ScopeID        int64     `json:"scope_id"`
+	Name           string    `json:"name"`
+	WorkflowLabels []string  `json:"workflow_labels"`
+	LabelKey       string    `json:"-"`
+	TemplateID     string    `json:"template_id,omitempty"`
+	RunnerGroup    string    `json:"runner_group,omitempty"`
+	MaxConcurrency int       `json:"max_concurrency"`
+	Enabled        bool      `json:"enabled"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type EffectiveRunnerProfile struct {
+	Source               string        `json:"source"`
+	ScopeType            string        `json:"scope_type,omitempty"`
+	ScopeID              int64         `json:"scope_id,omitempty"`
+	Profile              RunnerProfile `json:"-"`
+	WorkflowLabels       []string      `json:"workflow_labels"`
+	GlobalMaxConcurrency int           `json:"global_max_concurrency"`
+	ScopeMaxConcurrency  int           `json:"scope_max_concurrency"`
+	EffectiveEnabled     bool          `json:"enabled"`
+	OverridesGlobal      bool          `json:"overrides_global"`
+	Editable             bool          `json:"editable"`
 }
 
 type AuditEvent struct {

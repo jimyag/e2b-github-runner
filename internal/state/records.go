@@ -18,7 +18,10 @@ type runnerRequestRecord struct {
 	RepositoryFullName      string     `gorm:"column:repository_full_name;index:idx_runner_requests_repository_pr,priority:1;index:idx_runner_requests_repository_head,priority:1"`
 	RequestedLabelsJSON     string     `gorm:"column:requested_labels_json"`
 	LabelsJSON              string     `gorm:"column:labels_json;not null"`
-	ProfileName             string     `gorm:"column:profile_name;index:idx_runner_requests_profile_queued_id,priority:1"`
+	ProfileName             string     `gorm:"column:profile_name;index:idx_runner_requests_profile_queued_id,priority:1;index:idx_runner_requests_profile_scope_status,priority:4"`
+	ProfileSource           string     `gorm:"column:profile_source;index:idx_runner_requests_profile_scope_status,priority:1"`
+	ProfileScopeType        string     `gorm:"column:profile_scope_type;index:idx_runner_requests_profile_scope_status,priority:2"`
+	ProfileScopeID          int64      `gorm:"column:profile_scope_id;index:idx_runner_requests_profile_scope_status,priority:3"`
 	RunnerGroup             string     `gorm:"column:runner_group"`
 	RunnerName              string     `gorm:"column:runner_name;not null"`
 	Status                  string     `gorm:"column:status;not null;index:idx_runner_requests_status_updated;index:idx_runner_requests_status_retry_queue;index:idx_runner_requests_lease_expiry"`
@@ -84,6 +87,34 @@ type runnerProfileRecord struct {
 }
 
 func (runnerProfileRecord) TableName() string { return "runner_profiles" }
+
+type runnerProfileScopeControlRecord struct {
+	ScopeType      string    `gorm:"column:scope_type;primaryKey;index:idx_runner_profile_scope_controls_scope,priority:1"`
+	ScopeID        int64     `gorm:"column:scope_id;primaryKey;index:idx_runner_profile_scope_controls_scope,priority:2"`
+	ProfileName    string    `gorm:"column:profile_name;primaryKey"`
+	Enabled        bool      `gorm:"column:enabled;not null"`
+	MaxConcurrency int       `gorm:"column:max_concurrency;not null;default:0"`
+	CreatedAt      time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (runnerProfileScopeControlRecord) TableName() string { return "runner_profile_scope_controls" }
+
+type scopedRunnerProfileRecord struct {
+	ScopeType          string    `gorm:"column:scope_type;primaryKey;index:idx_scoped_runner_profiles_scope,priority:1;uniqueIndex:idx_scoped_runner_profiles_scope_labels,priority:1"`
+	ScopeID            int64     `gorm:"column:scope_id;primaryKey;index:idx_scoped_runner_profiles_scope,priority:2;uniqueIndex:idx_scoped_runner_profiles_scope_labels,priority:2"`
+	Name               string    `gorm:"column:name;primaryKey"`
+	WorkflowLabelsJSON string    `gorm:"column:workflow_labels_json;type:text;not null"`
+	LabelKey           string    `gorm:"column:label_key;not null;uniqueIndex:idx_scoped_runner_profiles_scope_labels,priority:3"`
+	TemplateID         string    `gorm:"column:template_id;not null"`
+	RunnerGroup        string    `gorm:"column:runner_group"`
+	MaxConcurrency     int       `gorm:"column:max_concurrency;not null"`
+	Enabled            bool      `gorm:"column:enabled;not null"`
+	CreatedAt          time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt          time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (scopedRunnerProfileRecord) TableName() string { return "scoped_runner_profiles" }
 
 type legacyRunnerProfileDefaultAvailableColumn struct {
 	DefaultAvailable bool `gorm:"column:default_available;not null;default:true"`
