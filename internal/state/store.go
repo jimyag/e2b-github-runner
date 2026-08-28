@@ -353,6 +353,16 @@ type RunnerCatalogStore interface {
 	ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedProfileConflict, error)
 	DeleteProfile(name string) error
 	MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error)
+	ListEffectiveProfiles(scope RunnerProfileScope) ([]EffectiveRunnerProfile, error)
+	GetEffectiveProfile(scope RunnerProfileScope, source, name string) (EffectiveRunnerProfile, error)
+	MatchProfileForScope(scope RunnerProfileScope, repositoryFullName string, labels []string) (ProfileMatch, error)
+	GetProfileControl(scope RunnerProfileScope, name string) (RunnerProfileControl, error)
+	UpsertProfileControlIfUnchanged(control RunnerProfileControl, expectedUpdatedAt *time.Time) (RunnerProfileControl, error)
+	DeleteProfileControlIfUnchanged(scope RunnerProfileScope, name string, expectedUpdatedAt *time.Time) error
+	ListScopedProfiles(scope RunnerProfileScope) ([]ScopedRunnerProfile, error)
+	GetScopedProfile(scope RunnerProfileScope, name string) (ScopedRunnerProfile, error)
+	UpsertScopedProfileIfUnchanged(profile ScopedRunnerProfile, expectedUpdatedAt *time.Time) (ScopedRunnerProfile, error)
+	DeleteScopedProfileIfUnchanged(scope RunnerProfileScope, name string, expectedUpdatedAt *time.Time) error
 }
 
 type IdentityStore interface {

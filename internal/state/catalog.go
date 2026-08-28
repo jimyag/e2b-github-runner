@@ -348,7 +348,9 @@ func (s *DBStore) MatchProfile(repositoryFullName string, labels []string) (Prof
 	if err != nil {
 		return ProfileMatch{}, err
 	}
-	return profileMatchFromCandidates(repositoryFullName, labels, profiles), nil
+	match := profileMatchFromCandidates(repositoryFullName, labels, profiles)
+	match.Source = "global"
+	return match, nil
 }
 
 func loadRunnerProfilesForMatch(tx *gorm.DB) ([]RunnerProfile, error) {

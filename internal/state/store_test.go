@@ -3589,6 +3589,130 @@ func TestScopedRunnerCatalogFreshSchemaSQLBackends(t *testing.T) {
 	}
 }
 
+func TestScopedRunnerProfilesAreIsolatedByScope(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	a := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	b := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 2}
+	profile := ScopedRunnerProfile{Name: "custom", WorkflowLabels: []string{"qiniu", "linux"}, TemplateID: "template-a", Enabled: true}
+	profile.ScopeType, profile.ScopeID = a.Type, a.ID
+	if _, err := store.UpsertScopedProfileIfUnchanged(profile, nil); err != nil {
+		t.Fatal(err)
+	}
+	profile.ScopeType, profile.ScopeID, profile.TemplateID = b.Type, b.ID, "template-b"
+	if _, err := store.UpsertScopedProfileIfUnchanged(profile, nil); err != nil {
+		t.Fatal(err)
+	}
+	gotA, err := store.GetScopedProfile(a, "custom")
+	if err != nil || gotA.TemplateID != "template-a" {
+		t.Fatalf("scope A read = %#v, err=%v", gotA, err)
+	}
+	gotB, err := store.GetScopedProfile(b, "custom")
+	if err != nil || gotB.TemplateID != "template-b" {
+		t.Fatalf("scope B read = %#v, err=%v", gotB, err)
+	}
+}
+
+func TestScopedRunnerProfileRejectsDuplicateNormalizedLabels(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	base := ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "one", WorkflowLabels: []string{"linux", "qiniu"}, TemplateID: "template", Enabled: true}
+	if _, err := store.UpsertScopedProfileIfUnchanged(base, nil); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := base
+	duplicate.Name = "two"
+	duplicate.WorkflowLabels = []string{" qiniu ", "linux", "qiniu"}
+	if _, err := store.UpsertScopedProfileIfUnchanged(duplicate, nil); err == nil {
+		t.Fatal("expected duplicate normalized labels to fail")
+	}
+}
+
+func TestScopedRunnerProfileConditionalWritesRejectStaleRevision(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	profile := ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "custom", WorkflowLabels: []string{"qiniu"}, TemplateID: "template", Enabled: true}
+	saved, err := store.UpsertScopedProfileIfUnchanged(profile, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.TemplateID = "template-new"
+	if _, err := store.UpsertScopedProfileIfUnchanged(saved, &profile.UpdatedAt); err == nil {
+		t.Fatal("expected stale scoped profile revision conflict")
+	}
+}
+
+func TestManagedProfileControlCannotEnableGloballyDisabledProfile(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	if _, err := store.UpsertProfile(RunnerProfile{Name: "managed", Labels: []string{"qiniu"}, RequiredLabels: []string{"qiniu"}, TemplateID: "template", ManagedBy: "runnerd", Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	if _, err := store.UpsertProfileControlIfUnchanged(RunnerProfileControl{ScopeType: scope.Type, ScopeID: scope.ID, ProfileName: "managed", Enabled: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	item, err := store.GetEffectiveProfile(scope, "managed", "managed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.EffectiveEnabled {
+		t.Fatal("scope control must not re-enable globally disabled profile")
+	}
+}
+
+func TestMatchProfileForScopePrefersExactScopedProfileAndShadowsWhenDisabled(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	if _, err := store.UpsertProfile(RunnerProfile{Name: "global", Labels: []string{"qiniu", "linux"}, RequiredLabels: []string{"qiniu"}, TemplateID: "global-template", Enabled: true, Priority: 100}); err != nil {
+		t.Fatal(err)
+	}
+	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	custom := ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "custom", WorkflowLabels: []string{"qiniu", "linux"}, TemplateID: "custom-template", Enabled: true}
+	if _, err := store.UpsertScopedProfileIfUnchanged(custom, nil); err != nil {
+		t.Fatal(err)
+	}
+	match, err := store.MatchProfileForScope(scope, "owner/repo", []string{"linux", "qiniu"})
+	if err != nil || match.Profile == nil || match.Profile.Name != "custom" || match.Source != "scoped_custom" {
+		t.Fatalf("custom match = %#v, err=%v", match, err)
+	}
+	custom.Enabled = false
+	saved, err := store.GetScopedProfile(scope, "custom")
+	if err != nil {
+		t.Fatal(err)
+	}
+	custom.UpdatedAt = saved.UpdatedAt
+	if _, err := store.UpsertScopedProfileIfUnchanged(custom, &saved.UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	match, err = store.MatchProfileForScope(scope, "owner/repo", []string{"qiniu", "linux"})
+	if err != nil || match.Profile != nil || match.Reason != "profile_scope_disabled" || match.Source != "scoped_custom" {
+		t.Fatalf("disabled custom match = %#v, err=%v", match, err)
+	}
+}
+
+func TestMatchProfileForScopeFallsBackToGlobalAndCountsStayScoped(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	if _, err := store.UpsertProfile(RunnerProfile{Name: "global", Labels: []string{"qiniu"}, RequiredLabels: []string{"qiniu"}, TemplateID: "template", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	scopeA := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	scopeB := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 2}
+	match, err := store.MatchProfileForScope(scopeA, "owner/repo", []string{"qiniu"})
+	if err != nil || match.Profile == nil || match.Source != "global" || match.ScopeID != scopeA.ID {
+		t.Fatalf("global fallback = %#v, err=%v", match, err)
+	}
+	for _, req := range []RunnerRequest{
+		{ID: "a", ProfileName: "global", ProfileSource: "global", ProfileScopeType: scopeA.Type, ProfileScopeID: scopeA.ID, Labels: []string{"qiniu"}, RunnerName: "a"},
+		{ID: "b", ProfileName: "global", ProfileSource: "global", ProfileScopeType: scopeB.Type, ProfileScopeID: scopeB.ID, Labels: []string{"qiniu"}, RunnerName: "b"},
+	} {
+		if _, _, err := store.CreateRequest(req, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	count, err := store.ActiveCountForProfileScope("global", scopeA, "global")
+	if err != nil || count != 1 {
+		t.Fatalf("scope A count = %d, err=%v", count, err)
+	}
+}
+
 func sqlBackendTestTables() []string {
 	return []string{
 		"runner_events",
