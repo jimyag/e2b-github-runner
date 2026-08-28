@@ -3,6 +3,7 @@ package state
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -266,7 +267,11 @@ func firstPullRequestNumber(pulls []githubPayloadPullRequest) int64 {
 }
 
 func appendPullRequestQuery(rawURL string, prNumber int64) string {
-	if rawURL == "" || prNumber == 0 || strings.Contains(rawURL, "pr=") {
+	if rawURL == "" || prNumber == 0 {
+		return rawURL
+	}
+	parsedURL, err := url.Parse(rawURL)
+	if err == nil && parsedURL.Query().Has("pr") {
 		return rawURL
 	}
 	separator := "?"

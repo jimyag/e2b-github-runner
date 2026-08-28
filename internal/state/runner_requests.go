@@ -245,7 +245,10 @@ func (s *DBStore) ListStates() ([]RunnerState, error) {
 		return nil, err
 	}
 	var records []runnerRequestRecord
-	if err := db.Order("queued_at DESC").Find(&records).Error; err != nil {
+	if err := db.
+		Select(runnerRequestListSelectColumns).
+		Order("queued_at DESC").
+		Find(&records).Error; err != nil {
 		return nil, err
 	}
 	states := make([]RunnerState, 0, len(records))
@@ -289,6 +292,7 @@ func (s *DBStore) ListActiveStates() ([]RunnerState, error) {
 	}
 	var records []runnerRequestRecord
 	if err := db.
+		Select(runnerRequestListSelectColumns).
 		Where("status IN ?", activeStatuses()).
 		Order("queued_at DESC").
 		Find(&records).Error; err != nil {
@@ -311,6 +315,7 @@ func (s *DBStore) ListMismatchedCompletedStates(limit int) ([]RunnerState, error
 	}
 	var records []runnerRequestRecord
 	if err := db.
+		Select(runnerRequestListSelectColumns).
 		Where("status = ?", StatusCompleted).
 		Where("workflow_job_id IS NOT NULL AND workflow_job_id != 0").
 		Where("assigned_job_id != 0 AND assigned_job_id != workflow_job_id").
@@ -336,6 +341,7 @@ func (s *DBStore) ListFailedWorkflowJobStates(limit int) ([]RunnerState, error) 
 	}
 	var records []runnerRequestRecord
 	if err := db.
+		Select(runnerRequestListSelectColumns).
 		Where("status = ?", StatusFailed).
 		Where("workflow_job_id IS NOT NULL AND workflow_job_id != 0").
 		Where("failure_stage IN ?", []string{"recovery", "cleanup"}).
@@ -396,6 +402,7 @@ func (s *DBStore) ListStatesForRepositories(repositories []string, limit int) ([
 	}
 	var records []runnerRequestRecord
 	if err := db.
+		Select(runnerRequestListSelectColumns).
 		Where("repository_full_name IN ?", repositories).
 		Order("queued_at DESC").
 		Limit(limit).
@@ -557,6 +564,7 @@ func (s *DBStore) ListStatesForGitHubInstallations(installationIDs []int64, limi
 	}
 	var records []runnerRequestRecord
 	if err := db.
+		Select(runnerRequestListSelectColumns).
 		Where("github_installation_id IN ?", installationIDs).
 		Order("queued_at DESC").
 		Limit(limit).

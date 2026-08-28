@@ -4060,6 +4060,42 @@ func TestGitHubLinksFromPayloadBytesFallbacks(t *testing.T) {
 	}
 }
 
+func TestAppendPullRequestQueryMatchesActualQueryParameter(t *testing.T) {
+	tests := []struct {
+		name   string
+		rawURL string
+		want   string
+	}{
+		{
+			name:   "existing pull request query",
+			rawURL: "https://github.com/qbox/las/actions/runs/1/job/2?pr=3335",
+			want:   "https://github.com/qbox/las/actions/runs/1/job/2?pr=3335",
+		},
+		{
+			name:   "path containing query-like text",
+			rawURL: "https://github.com/qbox/pr=/actions/runs/1/job/2",
+			want:   "https://github.com/qbox/pr=/actions/runs/1/job/2?pr=3335",
+		},
+		{
+			name:   "unrelated query value containing query-like text",
+			rawURL: "https://github.com/qbox/las/actions/runs/1/job/2?expr=pr=value",
+			want:   "https://github.com/qbox/las/actions/runs/1/job/2?expr=pr=value&pr=3335",
+		},
+		{
+			name:   "unrelated query",
+			rawURL: "https://github.com/qbox/las/actions/runs/1/job/2?attempt=2",
+			want:   "https://github.com/qbox/las/actions/runs/1/job/2?attempt=2&pr=3335",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := appendPullRequestQuery(tt.rawURL, 3335); got != tt.want {
+				t.Fatalf("appendPullRequestQuery(%q) = %q, want %q", tt.rawURL, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEffectiveRunnerRequestJobID(t *testing.T) {
 	workflowJobID := int64(22)
 	tests := []struct {
