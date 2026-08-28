@@ -1270,7 +1270,7 @@ go test ./internal/state -count=1
 
 - **Completed:** Tasks 1–7 的状态/API/UI/文档实现已按独立 commit 交付，本地自动化验证通过；新增 UI CRUD 和 API 回归修正也已独立提交。
 - **In progress:** Task 8 仅完成本地验证和结果回填；真实 Provider、GitHub/Sandbox E2E、跨方言 DB、降级门禁和部署 Canary 尚未执行。
-- **Not started:** 真实资源验收、外部测试仓库 PR（该仓库当前无 runnerd 测试入口）和部署。
+- **Pending external verification:** 真实资源验收和部署尚未执行；`qiniu-ci-runner-test` 是独立示例服务，当前没有 runnerd webhook/workflow 测试入口，因此不创建无意义的外部测试仓库 PR。
 - **Out of scope:** Repository Policy、Min Idle、跨作用域复制、审批流和历史表清理。
 - **Do not overwrite:** 接收者必须保留自己工作树中与本功能无关的修改，按明确路径分批提交。
 - **Closeout condition:** P0 全部通过、P1 无阻塞缺陷、第 9.2 节填入真实结果、文档同步、真实资源清理、Review 和 CI 收敛。

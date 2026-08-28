@@ -6,12 +6,12 @@ Originally reviewed: 2026-07-16. Baseline refreshed: 2026-08-28.
 
 Scope:
 
-- Review target: implementation status after file-based config, GORM-backed DB schema migration, retry/lease/audit handling, ordinary-user Sandbox catalogs, admin account-role controls, embedded UI assets, and local development workflow updates.
+- Review target: implementation status after file-based config, GORM-backed DB schema migration, retry/lease/audit handling, ordinary-user Sandbox catalogs and scoped Runner Types, admin account-role controls, embedded UI assets, and local development workflow updates.
 - Local references still useful for future comparison: actions-runner-controller style reconciliation and fireactions style pool/config modeling.
 
 ## Executive Summary
 
-Runnerd has moved past the original 2026-05-19 gap list. Runtime configuration is now file-first, runner state is DB-backed, schema creation is mostly driven by GORM model tags, retry/lease/audit fields exist, GitHub App auth can resolve installations dynamically, the ordinary-user UI covers job/repository/account setup flows, the admin console covers the core management workflow including audited account-role changes, diagnostics expose pprof/expvar state, and the documented local workflow includes `task dev`.
+Runnerd has moved past the original 2026-05-19 gap list. Runtime configuration is now file-first, runner state is DB-backed, schema creation is mostly driven by GORM model tags, retry/lease/audit fields exist, GitHub App auth can resolve installations dynamically, the ordinary-user UI covers job/repository/account setup and account/Organization Runner Types, the admin console covers the core management workflow including audited account-role changes, diagnostics expose pprof/expvar state, and the documented local workflow includes `task dev`.
 
 The remaining work is no longer a basic architecture catch-up. The next decisions are product and operations hardening: whether to keep token/basic auth as local compatibility modes, how much config management belongs in the admin console, and consistently executing and maintaining the canonical deployment smoke checklist before treating the service as production-ready.
 
@@ -28,6 +28,7 @@ The remaining work is no longer a basic architecture catch-up. The next decision
 - `/` is the public landing page and `/jobs` is the protected ordinary-user Jobs dashboard. Stable GitHub-context job-group routes include `/github/pulls/{owner}/{repo}/{number}/jobs`; unified repository/Sandbox readiness is at `/repositories`. `/account/repositories` and `/organizations/{login}/repositories` remain scoped compatibility links to that page. Sandbox Service, Templates, and Instances remain available under account or manageable-organization settings routes.
 - The admin console exposes `/admin/sandbox_service` and role-gated `/admin/api/sandbox-service-default` endpoints for the global fallback, including all/selected repository-owner audience controls; provider catalogs remain ordinary-user resources.
 - Authenticated catalog APIs expose region-filtered templates and region/template-filtered runner instances through `/user/sandbox/templates` and `/user/sandbox/instances`. They resolve encrypted credentials from the selected account or installation scope and do not expose provider secrets.
+- Ordinary users manage effective Runner Types at `/account/runner-types` or `/organizations/{login}/runner-types` through `/user/runner-specs`. Managed catalog identity remains runnerd-owned; scope controls can only change enabled state and additional concurrency. Scoped custom template validation uses the selected scope's Sandbox credentials, while repository-only collaborators retain only readiness visibility under `/repositories`. The admin global Runner Specs API remains a separate role-gated surface.
 - The React UI in `ui/` is embedded for production from `internal/server/ui/*`; development builds proxy UI assets to Vite through `internal/server/ui_assets_development.go`.
 - `task dev` starts Vite and the Go service together in development mode. `task build` builds the UI first, then compiles `bin/runnerd` with embedded production assets.
 - Diagnostics are available through the admin UI and `/diagnostics/pprof` / `/diagnostics/vars`, backed by `github.com/jimmicro/pprof` and expvar.
