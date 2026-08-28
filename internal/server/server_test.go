@@ -8073,6 +8073,31 @@ func testSessionCookie(subject, login, role string) *http.Cookie {
 	}
 }
 
+func TestUserRunnerSpecsListRequiresSessionAndReturnsScopedCatalog(t *testing.T) {
+	store := state.New(t.TempDir())
+	if _, err := store.UpsertProfile(state.RunnerProfile{Name: "managed", Labels: []string{"qiniu"}, RequiredLabels: []string{"qiniu"}, TemplateID: "template", ManagedBy: "runnerd", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	unauthenticated := httptest.NewRequest(http.MethodGet, "/user/runner-specs", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, unauthenticated)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/user/runner-specs", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec = httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"scope_type":"account"`) || !strings.Contains(rec.Body.String(), `"name":"managed"`) {
+		t.Fatalf("unexpected runner type list response: %s", rec.Body.String())
+	}
+}
+
 func saveTestGitHubOAuthToken(t *testing.T, store state.Store, accountID int64, encryptionKey, token string) {
 	t.Helper()
 	encryptedToken, err := encryptSecret(token, encryptionKey)
