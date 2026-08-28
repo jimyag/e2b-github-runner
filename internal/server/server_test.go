@@ -8098,6 +8098,67 @@ func TestUserRunnerSpecsListRequiresSessionAndReturnsScopedCatalog(t *testing.T)
 	}
 }
 
+func TestUserRunnerSpecsListUsesMostRestrictiveConcurrencyLimit(t *testing.T) {
+	store := state.New(t.TempDir())
+	if _, err := store.UpsertProfile(state.RunnerProfile{Name: "managed", Labels: []string{"qiniu"}, RequiredLabels: []string{"qiniu"}, TemplateID: "template", ManagedBy: "runnerd", Enabled: true, MaxConcurrency: 3}); err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := state.RunnerProfileControl{ScopeType: state.AccountScopeTypeAccount, ScopeID: account.ID, ProfileName: "managed", Enabled: true, MaxConcurrency: 7}
+	if _, err := store.UpsertProfileControlIfUnchanged(control, nil); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/user/runner-specs", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"effective_max_concurrency":3`) {
+		t.Fatalf("list response = %d %s, want effective limit 3", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUserPatchRunnerSpecRejectsLabelChangeWhileActive(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := state.RunnerProfileScope{Type: state.AccountScopeTypeAccount, ID: account.ID}
+	profile, err := store.UpsertScopedProfileIfUnchanged(state.ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "custom", WorkflowLabels: []string{"qiniu", "linux"}, TemplateID: "template", Enabled: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CreateRequest(state.RunnerRequest{ID: "active-custom", ProfileName: profile.Name, ProfileSource: "scoped_custom", ProfileScopeType: scope.Type, ProfileScopeID: scope.ID, Labels: profile.WorkflowLabels, RunnerName: "active-custom"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	auditBefore, err := store.ListAuditEvents(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"workflow_labels":["qiniu","linux","gpu"],"expected_updated_at":%q}`, profile.UpdatedAt.UTC().Format(time.RFC3339Nano))
+	req := httptest.NewRequest(http.MethodPatch, "/user/runner-specs/custom", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"code":"runner_spec_in_use"`) {
+		t.Fatalf("status=%d body=%s, want runner_spec_in_use", rec.Code, rec.Body.String())
+	}
+	got, err := store.GetScopedProfile(scope, "custom")
+	if err != nil || !reflect.DeepEqual(got.WorkflowLabels, profile.WorkflowLabels) {
+		t.Fatalf("profile changed after rejected patch: %#v err=%v", got, err)
+	}
+	auditAfter, err := store.ListAuditEvents(100)
+	if err != nil || !reflect.DeepEqual(auditBefore, auditAfter) {
+		t.Fatalf("rejected patch changed audit events: before=%d after=%d err=%v", len(auditBefore), len(auditAfter), err)
+	}
+}
+
 func saveTestGitHubOAuthToken(t *testing.T, store state.Store, accountID int64, encryptionKey, token string) {
 	t.Helper()
 	encryptedToken, err := encryptSecret(token, encryptionKey)

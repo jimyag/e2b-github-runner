@@ -99,10 +99,7 @@ func (s *Server) handleUserListRunnerSpecs(w http.ResponseWriter, r *http.Reques
 	}
 	response := userRunnerSpecListResponse{ScopeType: scope.Type, ScopeID: scope.ID, SandboxSource: sandboxSource, Items: make([]userRunnerSpecResponse, 0, len(items))}
 	for _, item := range items {
-		max := item.ScopeMaxConcurrency
-		if max <= 0 {
-			max = item.GlobalMaxConcurrency
-		}
+		max := effectiveRunnerConcurrencyLimit(item.GlobalMaxConcurrency, item.ScopeMaxConcurrency)
 		response.Items = append(response.Items, userRunnerSpecResponse{Name: item.Profile.Name, Source: item.Source, WorkflowLabels: append([]string(nil), item.WorkflowLabels...), TemplateID: item.Profile.TemplateID, DefaultTemplateName: item.Profile.DefaultTemplateName, Enabled: item.EffectiveEnabled, GlobalMaxConcurrency: item.GlobalMaxConcurrency, ScopeMaxConcurrency: item.ScopeMaxConcurrency, EffectiveMaxConcurrency: max, OverridesGlobal: item.OverridesGlobal, Editable: item.Editable, UpdatedAt: item.Profile.UpdatedAt.UTC().Format(time.RFC3339Nano)})
 	}
 	writeJSON(w, http.StatusOK, response)
@@ -208,6 +205,10 @@ func (s *Server) handleUserCreateRunnerSpec(w http.ResponseWriter, r *http.Reque
 		return err
 	})
 	if err != nil {
+		if errors.Is(err, state.ErrRunnerProfileNameConflict) {
+			writeErrorCode(w, http.StatusConflict, "runner_spec_name_conflict", "runner type name conflicts with an enabled platform type")
+			return
+		}
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			writeErrorCode(w, http.StatusConflict, "runner_spec_labels_conflict", "a runner type with these labels already exists")
 			return
@@ -242,15 +243,18 @@ func (s *Server) handleUserPatchRunnerSpec(w http.ResponseWriter, r *http.Reques
 		writeErrorCode(w, http.StatusNotFound, "runner_spec_not_found", "runner type not found")
 		return
 	}
+	templateChanged := input.TemplateID != nil && strings.TrimSpace(*input.TemplateID) != current.TemplateID
+	labelsChanged := false
 	if input.WorkflowLabels != nil {
 		labels, _, labelErr := state.NormalizeWorkflowLabels(*input.WorkflowLabels)
 		if labelErr != nil {
 			writeErrorCode(w, http.StatusBadRequest, "invalid_runner_spec", labelErr.Error())
 			return
 		}
+		labelsChanged = !sameStringSlice(labels, current.WorkflowLabels)
 		current.WorkflowLabels = labels
 	}
-	if input.TemplateID != nil && strings.TrimSpace(*input.TemplateID) != current.TemplateID {
+	if templateChanged {
 		if err := s.validateScopedProfileTemplate(r.Context(), prefScope, *input.TemplateID); err != nil {
 			s.writeScopedTemplateValidationError(w, err)
 			return
@@ -274,7 +278,18 @@ func (s *Server) handleUserPatchRunnerSpec(w http.ResponseWriter, r *http.Reques
 	if input.Enabled != nil {
 		current.Enabled = *input.Enabled
 	}
-	err = s.applyMutationWithAudit("github:"+session.Subject, "user_runner_spec.update", "scoped_runner_profile", fmt.Sprintf("%s:%d:%s", scope.Type, scope.ID, name), map[string]any{"template_id_changed": input.TemplateID != nil && strings.TrimSpace(*input.TemplateID) != current.TemplateID}, func(tx state.Store) error {
+	if labelsChanged || templateChanged {
+		count, countErr := s.store.ActiveCountForProfileScope("scoped_custom", scope, name)
+		if countErr != nil {
+			writeError(w, http.StatusInternalServerError, countErr.Error())
+			return
+		}
+		if count > 0 {
+			writeErrorCode(w, http.StatusConflict, "runner_spec_in_use", "runner type cannot change while active requests use it")
+			return
+		}
+	}
+	err = s.applyMutationWithAudit("github:"+session.Subject, "user_runner_spec.update", "scoped_runner_profile", fmt.Sprintf("%s:%d:%s", scope.Type, scope.ID, name), map[string]any{"template_id_changed": templateChanged, "workflow_labels_changed": labelsChanged}, func(tx state.Store) error {
 		_, err := tx.UpsertScopedProfileIfUnchanged(current, &expected)
 		return err
 	})
@@ -287,6 +302,31 @@ func (s *Server) handleUserPatchRunnerSpec(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.handleUserListRunnerSpecs(w, r)
+}
+
+func sameStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func effectiveRunnerConcurrencyLimit(global, scope int) int {
+	if global <= 0 {
+		if scope <= 0 {
+			return 0
+		}
+		return scope
+	}
+	if scope <= 0 || global < scope {
+		return global
+	}
+	return scope
 }
 
 func (s *Server) handleUserDeleteRunnerSpec(w http.ResponseWriter, r *http.Request) {
