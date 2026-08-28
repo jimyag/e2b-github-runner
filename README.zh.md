@@ -196,8 +196,8 @@ spec 同时要求 `qiniu` 和准确的操作系统 label；`[ubuntu-24.04]` 或 
 identity。
 
 内部 Runner Group 和 Repository Policy 已移除。旧管理 API 现在统一返回
-`404 Not Found`，旧 Admin 书签会重定向到 Runner Specs。遗留数据库表和记录保持
-原样，因此回滚到上一个应用镜像时不需要回滚 schema。
+`404 Not Found`，旧 Admin 书签会重定向到 Runner Specs。它们不再属于受支持的
+配置、匹配或恢复行为；当前代码会忽略任何遗留数据库对象。
 
 Managed spec 保存稳定的公共模板名称。runnerd 会在创建 Runner 前，使用
 repository owner 对应的 scoped Sandbox endpoint 解析该名称，因此不同区域可以
@@ -212,6 +212,18 @@ catalog 更新并取得新的区域 smoke 证据。
 label 组合，不包含 provider template ID、credential、endpoint，也不会暴露私有或
 自定义模板。依赖 credential 的
 `GET /user/sandbox/templates?region=<id>` 仍是独立的 scoped resource。
+
+普通用户在 `/account/runner-types` 或
+`/organizations/{login}/runner-types` 管理当前作用域的有效目录。需要登录的
+`/user/runner-specs` API 会组合 runnerd 管理的类型、只读的平台自定义类型，以及
+当前账户或可管理 Organization 自有的自定义类型。作用域控制只能停用 managed
+类型或增加并发上限，不能修改其 labels、priority 或稳定公共模板名。作用域自定义
+类型使用精确规范化后的 workflow labels，可以覆盖相同标签集合的全局类型；新建或
+更换 template ID 时，只使用当前作用域显式配置或合法继承的 Sandbox credential
+验证。`runner_group` 仅供 Organization 自定义类型使用。响应只会为调用者自己的
+作用域自定义类型返回 template ID，绝不会暴露平台自定义类型的 template ID。
+排队请求在启动前会重新加载并校验原先持久化的 source 与 scope，因此等待期间被
+停用的类型不会启动 Runner。
 
 对于自定义 spec，`template_id` 应指向包含 GitHub runner 镜像的 Qiniu Sandbox 模板。创建沙箱时会使用 **Repositories → Runner readiness** 中显示的仓库 owner 有效 Sandbox service 检查模板访问权限。
 

@@ -18,19 +18,22 @@ Use this guide for future Codex or agent work in this repository.
 - Runtime state can use sqlite, Postgres, or MySQL. Do not document multi-instance support until two runnerd processes have been verified against the same database.
 - New accepted and rejected runner requests must extract required GitHub context in memory without persisting the raw webhook body. Keep `github_payload_json`, existing values, and historical metadata/installation-ID backfill logic for compatibility. Do not clear historical payloads or remove the column during startup; cleanup requires a separately authorized maintenance plan.
 - State schema is defined mostly by GORM tags in `internal/state/records.go`; startup migration runs a narrow legacy compatibility pass and then `AutoMigrate` in `internal/state/db.go`. Existing SQLite `runner_requests` and `runner_profiles` tables are the exceptions: migrate their missing model columns and indexes additively because generic table recreation can erase ALTER-added runner-request values or legacy runner-profile rows and custom indexes. GORM foreign-key creation is disabled intentionally, so preserve the foreign-keyless schema convention unless a separately tested migration changes it. Legacy account preference/secret tables without scope columns are intentionally reset; operator docs must warn about Sandbox reconfiguration and GitHub reauthentication before installation sync.
-- Global Runner Specs remain admin API/UI data, while ordinary users use `/user/runner-specs` and account/Organization Runner Types pages for scoped controls and custom Specs. Internal Runner Groups and Repository Policies were removed in Release C: their management APIs return `404`, old Admin browser routes redirect to Runner Specs, and only untouched legacy tables remain for rollback until a separately authorized database cleanup.
+- Global Runner Specs remain admin API/UI data, while ordinary users use `/user/runner-specs` and account/Organization Runner Types pages for scoped controls and custom Specs. Internal Runner Groups and Repository Policies were removed completely in Release C: their management APIs return `404`, old Admin browser routes redirect to Runner Specs, and no current feature or recovery path may depend on legacy database artifacts.
+- Ordinary-user Runner Type responses may expose `template_id` and `runner_group` only for the selected scope's own `scoped_custom` entries. Managed entries expose their stable public template name; read-only `platform_custom` entries must omit their private template IDs. Organization custom forms may edit `runner_group`; account forms must omit it. Keep async list, template, and mutation follow-up responses bound to the scope that started them so an older account/Organization response cannot overwrite or submit against the current scope.
 - Runner Spec/Sandbox mutations must commit their data change and audit event in the same database transaction. Rejected mutations leave no audit event, and audit persistence failures roll back the mutation. Managed catalog reconciliation follows the same atomic rule.
 - Runner Spec names are trimmed, non-empty single-path-segment identifiers: new writes must reject names containing `/` and names equal to `.` or `..`. Apply the same validation to direct profile upserts and managed catalog reconciliation. Do not make startup, migration, list, state lookup, or matching reject historical path-unsafe rows, and never rename or delete those rows without a separately authorized data-repair plan.
 - Runner Spec matching must preserve
   `required_labels ⊆ job_labels ⊆ labels`. Managed Ubuntu defaults require
   both `qiniu` and the exact OS label; never broaden them to accept partial
   label sets or unsupported extra labels.
+- A claimed queued request must reload the persisted profile source and scope, apply the latest effective managed control or scoped-custom enabled state, and revalidate requested labels before registration or Sandbox creation. A disabled or changed type fails at profile validation; never launch from admission-time state alone.
 - runnerd owns the managed catalog's labels, required labels, stable public
   template name and priority. Operators own
   `enabled`, `max_concurrency`, and `min_idle`. The physical
-  `runner_profiles.default_available` column is an inert rollback-compatibility
-  detail and must not appear in APIs or influence matching. Custom specs remain
-  operator-owned and retain explicit `template_id` and edit/delete behavior.
+  `runner_profiles.default_available` column is an inert legacy-schema
+  compatibility detail and must not appear in APIs or influence matching.
+  Custom specs remain operator-owned and retain explicit `template_id` and
+  edit/delete behavior.
   Creating a custom spec or changing its trimmed template ID must validate using
   the configured admin Sandbox endpoint/key only, even when runtime fallback is
   disabled or audience-restricted. Never use user/organization credentials for
@@ -92,7 +95,6 @@ When changing state records, GORM tags, indexes, migration helpers, or audited m
 - `.agents/rules/frontend-internationalization.md`: i18n boundaries, language-switcher placement, stable identifier rules, and UI verification.
 - `.agents/skills/runnerd-state-schema/SKILL.md`: use for state records, GORM tags, indexes, and migration compatibility work.
 - `.agents/skills/runnerd-dev-smoke/SKILL.md`: use for `task dev`, Vite proxy, smee forwarding, and local startup verification.
-- `docs/superpowers/plans/README.md`: lifecycle index for retained historical implementation plans; their unchecked boxes are not active roadmap work.
 
 ## Editing Rules
 
@@ -102,5 +104,5 @@ When changing state records, GORM tags, indexes, migration helpers, or audited m
 - Keep `README.md` and `README.zh.md`, `docs/testing.md` and `docs/zh/testing.md`, and `TODO.md` aligned when changing config, build, development, public APIs, authentication/authorization, state semantics, or deployment workflows.
 - Keep `docs/README.md` and `docs/zh/README.md`, plus `docs/deployment-smoke.md` and `docs/zh/deployment-smoke.md`, aligned when adding or removing docs or deployment verification steps.
 - Keep `.agents/rules/` and `.agents/skills/` aligned when a change creates durable agent rules or repeatable project workflows.
-- Keep active future work in `TODO.md` and explicitly linked active plans. When a plan completes or is retired, update `docs/superpowers/plans/README.md` and mark the plan historical so its original checklist cannot be mistaken for current work.
+- Keep active future work in `TODO.md` and explicitly linked implementation records. When a plan completes or is retired, migrate durable rationale and compatibility boundaries into formal documentation, then remove obsolete execution checklists and their references.
 - When changing ordinary-user UI, keep account/organization Preferences and Sandbox catalog scope separate from admin-only management APIs instead of assuming everything under `ui/` is admin-only.

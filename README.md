@@ -199,8 +199,8 @@ managed spec in Admin without changing its reconciled catalog identity.
 
 Internal Runner Groups and Repository Policies have been removed. Their legacy
 management APIs now return `404 Not Found`, while old Admin bookmarks redirect
-to Runner Specs. Existing legacy database tables and rows are left untouched so
-the previous application image can still be restored without a schema rollback.
+to Runner Specs. They are not part of supported configuration, matching, or
+recovery behavior; any legacy database artifacts are ignored by current code.
 
 Managed specs store a stable public template name. Immediately before runner
 creation, runnerd resolves that name against the repository owner's scoped
@@ -220,6 +220,20 @@ sets; it never includes provider template IDs, credentials, endpoints, or
 private/custom templates. The credential-bound
 `GET /user/sandbox/templates?region=<id>` catalog remains a separate scoped
 resource.
+
+Ordinary users manage their effective catalog under `/account/runner-types` or
+`/organizations/{login}/runner-types`. The authenticated `/user/runner-specs`
+API combines runnerd-managed types, read-only platform custom types, and custom
+types owned by that account or manageable Organization. Scope controls can
+only disable a managed type or add a concurrency limit; they cannot change its
+labels, priority, or stable public template name. Scoped custom types use exact
+normalized workflow labels, may override a global type with the same label set,
+and validate new or changed template IDs only with that scope's explicit or
+legally inherited Sandbox credentials. `runner_group` is available only for
+Organization custom types. The response exposes a template ID only for the
+caller's own scoped custom type, never for a platform custom type. A queued
+request reloads and validates the same persisted source and scope immediately
+before startup, so a type disabled while waiting cannot launch a runner.
 
 For custom specs, `template_id` should point to a Qiniu Sandbox template containing the GitHub runner image. Template access is checked against the repository owner's effective Sandbox service shown under **Repositories → Runner readiness** at sandbox creation time.
 

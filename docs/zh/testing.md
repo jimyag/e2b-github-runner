@@ -348,6 +348,17 @@ curl -fsS -X DELETE -b "$COOKIE_JAR" \
 
 普通用户 Settings 还提供 `/account/runner-types` 和 `/organizations/{login}/runner-types`。`/user/runner-specs` API 只接受当前账户或可管理 Organization 作用域；作用域自定义模板使用该作用域 Sandbox 凭据验证，不使用 Admin 兜底凭据。
 
+Runner Type 回归必须区分三种目录来源：`managed` 条目返回稳定公共模板名和可编辑的
+作用域控制，`platform_custom` 条目只读且省略其私有 `template_id`，
+`scoped_custom` 条目只返回当前作用域自己的 `template_id`，并可包含仅供
+Organization 使用的 `runner_group`。精确规范化后的作用域标签会屏蔽同标签集合的
+全局类型，即使作用域类型已停用也不能回退。新建和更换模板的验证发生在带审计事务
+之前；不安全名称和其他无效本地字段必须在任何 provider 调用前拒绝。重复规范化
+标签、过期 revision 和使用中的修改返回稳定 `409`，且不留下部分审计状态。
+Lifecycle 测试还必须在准入后、启动前分别停用一个作用域自定义类型和 managed
+作用域控制，并证明两者都不会启动 Sandbox。UI 测试必须让旧的手动刷新或 mutation
+在切换 Organization 后才返回，并证明它不能覆盖新作用域数据或向新作用域提交。
+
 只运行 UI unit tests 时使用：
 
 ```bash
@@ -651,7 +662,7 @@ curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
 
 `/diagnostics/vars` 会直接返回当前 runnerd 进程的 expvar registry，不再选择发现到的 pprof address file，因此旧进程留下的 stale artifact 不会遮蔽当前指标。当前指标覆盖 profile current/busy/idle/pending/desired、retry/lease、create/stop 次数与耗时、GitHub API 调用、runner 注册/清理，以及 workflow job queued/started/completed、conclusion、failure、queue duration 和 run duration。
 
-Release C 在 matcher 切换完成后移除了临时 catalog migration readiness API 与界面。已退役的 Runner Group 和 Policy API 返回 `404`；其遗留数据库表保持原样用于回滚。
+Release C 在 matcher 切换完成后移除了临时 catalog migration readiness API 与界面。已退役的 Runner Group 和 Policy API 返回 `404`，当前 state、server 和 UI 行为都不依赖这些已移除模型。
 
 ## 11. 官方参考
 

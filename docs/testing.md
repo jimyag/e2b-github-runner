@@ -357,6 +357,22 @@ UI source lives in `ui/` and uses React, Vite, Tailwind CSS, shadcn-style compon
 
 Ordinary-user Settings also exposes `/account/runner-types` and `/organizations/{login}/runner-types`. The `/user/runner-specs` API requires the signed-in account or a manageable Organization scope; scoped custom templates are validated with that scope's Sandbox credentials and never the admin fallback.
 
+Runner Type regression coverage must keep the three catalog sources distinct:
+`managed` entries expose stable public template names and editable scope
+controls, `platform_custom` entries are read-only and omit their private
+`template_id`, and `scoped_custom` entries expose only the current scope's own
+`template_id` plus the optional Organization-only `runner_group`. Exact
+normalized scoped labels shadow the same global label set even when the scoped
+type is disabled. Create and changed-template validation happens before the
+audited transaction, while unsafe names and invalid local fields are rejected
+before any provider call. Duplicate normalized labels, stale revisions, and
+in-use edits return stable `409` errors without partial audit state. Lifecycle
+tests must also disable a scoped custom type and a managed scope control after
+admission but before startup, then prove that neither starts a Sandbox. UI
+tests must resolve an older manual refresh or mutation after switching
+Organization scope and prove it cannot overwrite or submit against the new
+scope.
+
 For focused UI unit tests, run:
 
 ```bash
@@ -669,7 +685,7 @@ curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:25500/diagnostics/vars | jq
 
 `/diagnostics/vars` serves the current runnerd process's expvar registry directly. It never selects a discovered pprof address file, so a stale artifact from an older process cannot hide the current metrics. Current metrics cover profile current/busy/idle/pending/desired, retry/lease, create/stop counts and durations, GitHub API calls, runner registration/cleanup, and workflow job queued/started/completed, conclusion, failure, queue duration, and run duration.
 
-Release C removed the temporary catalog migration readiness endpoint and UI after the matcher cutover completed. The retired Runner Group and Policy APIs return `404`; their legacy database tables remain untouched for rollback.
+Release C removed the temporary catalog migration readiness endpoint and UI after the matcher cutover completed. The retired Runner Group and Policy APIs return `404`, and no active state, server, or UI behavior depends on those removed models.
 
 ## 11. Official References
 

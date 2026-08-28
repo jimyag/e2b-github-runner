@@ -1,6 +1,6 @@
-# 用户作用域 Runner 配置 Implementation Plan
+# 用户作用域 Runner 配置实现记录与发布门禁
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans` 逐项执行本计划；实现功能或修复缺陷时使用 `superpowers:test-driven-development`，声称完成前使用 `superpowers:verification-before-completion`。所有任务使用复选框跟踪，未经用户明确授权不得推送、创建 PR、合并或部署。
+> **Lifecycle:** Tasks 1–7 是 `feat/user-scoped-runner-types` 的历史执行记录，不是当前待办；实现已提交至 upstream PR [#90](https://github.com/qiniu/ci-runner/pull/90)。当前发布缺口只以 `TODO.md` 和本文件 Task 8 的未完成门禁为准。未经用户明确授权不得推送、合并或部署。
 
 **Goal:** 在不开放现有 Admin Runner Spec API、不破坏全局托管目录和历史数据库的前提下，让普通用户在自己的个人账户或 GitHub Organization 作用域内查看有效 Runner 类型、控制托管类型，并使用该作用域的 Sandbox 凭据创建自定义 Runner 类型。
 
@@ -12,11 +12,11 @@
 
 **Repository:** `qiniu/ci-runner`；所有路径和命令均相对于仓库根目录。
 
-**Plan branch:** `docs/user-scoped-runner-configuration-plan`。
+**Implementation branch:** `feat/user-scoped-runner-types`。
 
 **Base branch and commit:** `main` at `b36f054064ba03ef6d51fe1d2a6ebbefed5ea94b`（`perf(state): stop storing webhook payloads (#88)`）。
 
-**Implementation status:** 本地实现已完成，按阶段提交了 State、匹配与生命周期、User API、Runner Types UI 和文档；真实 Provider/GitHub E2E、跨方言数据库、降级门禁和部署仍未执行。
+**Implementation status:** State、匹配与生命周期、User API、Runner Types UI 和文档已在 PR #90 实现并通过本地自动化验证。专用 PostgreSQL/MySQL、生产 SQLite snapshot 与降版本启动、Runner Types fixture-backed browser smoke、真实 Provider/GitHub E2E 和部署 canary 仍未执行，因此不能声明生产发布验收完成。
 
 ## Global Constraints
 
@@ -33,7 +33,7 @@
 - 所有新表和 `runner_requests` 新列只能通过向后兼容的增量迁移添加。不得重建现有 SQLite `runner_profiles` 或 `runner_requests` 表，不得删除、重命名或修复历史行。
 - 新增、更新、删除和重置作用域配置必须与审计事件原子提交。校验失败或审计写入失败时不能留下部分数据。
 - Sandbox Provider I/O 必须发生在数据库事务之外；写入时使用初始 `updated_at` 做条件更新，竞争修改或删除返回 `409 runner_spec_conflict`。
-- 不新增内部 Runner Group、Repository Policy 或仓库级授权模型；第一阶段不支持每个 Repository 单独覆盖 Runner 类型。
+- 不重新引入已完全移除的内部 Runner Group 或 Repository Policy，也不新增仓库级授权模型；第一阶段不支持每个 Repository 单独覆盖 Runner 类型。
 - 不清理历史 `github_payload_json`，不改变普通用户 Jobs 授权，不改变 Sandbox 凭据加密、遮罩和请求快照语义。
 - UI 只修改 `ui/` 源码，不手工修改 `internal/server/ui/`。英文和中文资源必须同步，固定文案必须通过 i18next。
 - 不提交真实 Sandbox API Key、OAuth Token、本地 SQLite、`runnerd.local.yaml`、`.smee-url`、Cookie 或生产导出。
@@ -50,7 +50,7 @@
 - Webhook 请求已经持久化 `github_installation_id`，Sandbox 生命周期会根据请求解析所属凭据。
 - 全局 Runner Spec 已有托管目录、自定义 Spec、标签匹配、并发限制、CAS 条件写入和原子审计。
 
-### 1.2 当前缺口
+### 1.2 实现前缺口（历史基线）
 
 - `/runner_specs` 的列表、创建、匹配、修改和删除全部要求 Admin 身份。
 - `runner_profiles.name` 是全局主键，没有账户或 Organization 作用域。
@@ -141,7 +141,7 @@
 
 ### 2.3 明确非目标
 
-- 不支持仓库级 Runner Policy、Spec 集合或内部 Runner Group。
+- 已移除的仓库级 Runner Policy 和内部 Runner Group 不再作为设计选项；第一阶段也不支持仓库级覆盖或 Spec 集合。
 - 不允许普通用户修改全局托管标签、优先级、稳定模板名和目录版本。
 - 不向普通用户开放 Admin Diagnostics、Audit 全量查询、Sandbox 默认受众或跨账户管理。
 - 不实现 `Min Idle` 或预热。
@@ -556,7 +556,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 - Produces: `RunnerProfileScope`、`RunnerProfileControl`、`ScopedRunnerProfile`、`ProfileMatch` 身份字段和请求的 `ProfileSource`／`ProfileScopeType`／`ProfileScopeID`。
 - Produces: 两个新表和请求作用域索引；后续任务依赖这些物理字段。
 
-- [ ] **Step 1：写新 Schema 与旧 SQLite 升级失败测试**
+- [x] **Step 1：写新 Schema 与旧 SQLite 升级失败测试**
 
   增加以下测试，先只表达目标，不改实现：
 
@@ -569,7 +569,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 
   断言新表、主键、唯一索引和请求索引存在；构造包含历史 `runner_profiles`、`runner_requests` 和自定义索引的 SQLite，连续启动两次后逐行比较原值和索引。
 
-- [ ] **Step 2：运行测试并确认预期失败**
+- [x] **Step 2：运行测试并确认预期失败**
 
   Run:
 
@@ -579,15 +579,15 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 
   Expected: FAIL，原因必须是新表、字段、索引或类型尚不存在；不能接受无关编译错误。
 
-- [ ] **Step 3：实现记录、领域类型和迁移**
+- [x] **Step 3：实现记录、领域类型和迁移**
 
   按第 4.2–4.4 节精确增加字段。新表加入 `AutoMigrate`；现有 SQLite `runner_requests` 通过窄迁移添加字段和 `idx_runner_requests_profile_scope_status`，不得让 GORM 重建表。
 
-- [ ] **Step 4：实现请求读写转换**
+- [x] **Step 4：实现请求读写转换**
 
   `CreateRequest`、`CreateRejectedRequest`、`ReadRequest`、`ReadState`、Retry 和列表查询必须保留三个新字段。旧行空值转换为 `ProfileSource == ""`，由服务层兼容解释为 global，不做 DB 回填。
 
-- [ ] **Step 5：运行 State 测试**
+- [x] **Step 5：运行 State 测试**
 
   Run:
 
@@ -597,7 +597,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 
   Expected: PASS，包括旧 SQLite 升级、重复迁移和现有 Payload 保留测试。
 
-- [ ] **Step 6：提交独立迁移变更**
+- [x] **Step 6：提交独立迁移变更**
 
   ```bash
   git add internal/state/records.go internal/state/store.go internal/state/conversions.go internal/state/db.go internal/state/runner_requests.go internal/state/store_test.go
@@ -620,7 +620,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 - Produces: 第 4.5 节全部 Store 方法。
 - Produces: `NormalizeWorkflowLabels(labels []string) ([]string, string, error)`，HTTP 和 UI 测试使用相同规范化结果。
 
-- [ ] **Step 1：写隔离、CAS 和匹配失败测试**
+- [x] **Step 1：写隔离、CAS 和匹配失败测试**
 
   ```go
   func TestScopedRunnerProfilesAreIsolatedByScope(t *testing.T)
@@ -637,7 +637,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 
   至少使用两个 Account scope、两个 Installation scope、相同名称、相同标签和相同请求状态证明隔离。
 
-- [ ] **Step 2：运行聚焦测试并确认失败**
+- [x] **Step 2：运行聚焦测试并确认失败**
 
   ```bash
   go test ./internal/state -run 'Test(ScopedRunner|ManagedProfileControl|MatchProfileForScope|ProfileScopeCounts)' -count=1 -v
@@ -645,19 +645,19 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 
   Expected: FAIL，缺少 Store 方法或行为未实现。
 
-- [ ] **Step 3：实现标签规范化和 CRUD**
+- [x] **Step 3：实现标签规范化和 CRUD**
 
   `NormalizeWorkflowLabels` 必须返回排序后的新切片，不能修改调用者输入。创建使用普通 INSERT；更新／删除按 `(scope_type, scope_id, name, updated_at)` 条件执行，并把 0 行影响映射为 `ErrConflict`。
 
-- [ ] **Step 4：实现有效目录和匹配**
+- [x] **Step 4：实现有效目录和匹配**
 
   先按 `label_key` 查询作用域自定义 Spec，不在查询条件中加入 `enabled`。命中且启用时构造 `RunnerProfile{Labels: labels, RequiredLabels: labels}`；命中但停用时返回空 Profile、保留 scoped custom 身份并设置 `Reason="profile_scope_disabled"`，不得继续匹配同标签全局 Spec。只有作用域内不存在精确标签时，才加载全局候选，对 managed 候选应用 scope control，再调用现有 `profileMatchFromCandidates`，不得复制一份不同的排序算法。
 
-- [ ] **Step 5：实现作用域计数**
+- [x] **Step 5：实现作用域计数**
 
   查询条件必须同时包含 `profile_source`、`profile_scope_type`、`profile_scope_id` 和 `profile_name`。旧 global 请求仍由现有 `InFlightCountForProfile` 计入全局上限。
 
-- [ ] **Step 6：运行 State 全量和跨方言测试**
+**Step 6（历史部分完成）：运行 State 全量测试并迁移跨方言门禁**
 
   ```bash
   go test ./internal/state -count=1
@@ -670,7 +670,10 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 
   Expected: 本地测试 PASS；跨方言测试只有在提供专用 DSN 时才能记为 PASS，未提供必须记为 skipped/not run。
 
-- [ ] **Step 7：提交目录状态变更**
+  当前状态：SQLite State 全量测试已通过；专用 PostgreSQL/MySQL DSN 未配置。
+  跨方言部分已迁入 Task 8 与 `TODO.md`，不再作为 Task 2 的独立待办。
+
+- [x] **Step 7：提交目录状态变更**
 
   ```bash
   git add internal/state/scoped_catalog.go internal/state/store.go internal/state/catalog.go internal/state/runner_requests.go internal/state/store_test.go
@@ -700,7 +703,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 
   `bool` 表示作用域是否可靠解析；false 必须走当前全局匹配。
 
-- [ ] **Step 1：写准入与生命周期失败测试**
+- [x] **Step 1：写准入与生命周期失败测试**
 
   ```go
   func TestWorkflowJobMatchesPersonalAccountScopedProfile(t *testing.T)
@@ -715,40 +718,40 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
   func TestLegacyQueuedRequestStillLoadsGlobalProfile(t *testing.T)
   ```
 
-- [ ] **Step 2：运行测试并确认失败**
+- [x] **Step 2：运行测试并确认失败**
 
   ```bash
   go test ./internal/server -run 'Test(WorkflowJob.*ScopedProfile|SameScopedProfileName|RetryKeepsOriginalProfile|ManagedProfileEnforces|ScopedCustomProfileEnforces|LegacyQueuedRequest)' -count=1 -v
   ```
 
-- [ ] **Step 3：实现作用域解析**
+- [x] **Step 3：实现作用域解析**
 
   Organization 根据 Installation Owner 元数据返回 Installation scope；个人 Installation 通过 `AccountScopeForPersonalGitHubInstallation` 返回 Account scope。元数据缺失或未同步时记录不含敏感信息的 Warn，并返回 `(zero, false, nil)` 兼容全局目录。
 
-- [ ] **Step 4：修改全部准入调用点**
+- [x] **Step 4：修改全部准入调用点**
 
   `enqueueWorkflowJob`、`handleGitHubWebhook` 的 queued 分支和 Admin Match Preview 必须使用新签名。Admin Preview 显式传 zero scope，保持全局预览。
 
-- [ ] **Step 5：持久化匹配身份**
+- [x] **Step 5：持久化匹配身份**
 
   命中作用域自定义时保存 `ProfileSource="scoped_custom"` 和 scope；命中全局时保存 `ProfileSource="global"`，如果已解析作用域仍保存 scope，以便计算作用域托管上限。停用的精确作用域自定义项按 rejected request 持久化 `profile_scope_disabled` 和 scoped custom 身份，不能再次调用全局 Matcher。
 
-- [ ] **Step 6：修改启动和 Retry 读取**
+- [x] **Step 6：修改启动和 Retry 读取**
 
   把 `GetProfile(req.ProfileName)` 改为基于 `ProfileSource` 和 scope 的 `GetEffectiveProfile`。历史空来源只允许读取全局。读取后调用 `validateRequestedProfile` 检查最新有效启用状态和请求标签；Scope 在排队期间被停用时不得启动。Retry 不调用 Matcher。
 
-- [ ] **Step 7：实现双层并发门控**
+- [x] **Step 7：实现双层并发门控**
 
   全局来源先保留 `InFlightCountForProfile(name)`，再根据作用域控制执行 `InFlightCountForProfileScope`。自定义来源只执行 scope count。日志分别输出达到的限制层：`global_profile_capacity` 或 `scope_profile_capacity`。
 
-- [ ] **Step 8：运行服务器和全量 Go 测试**
+- [x] **Step 8：运行服务器和全量 Go 测试**
 
   ```bash
   go test ./internal/server -count=1
   go test ./... -count=1
   ```
 
-- [ ] **Step 9：提交生命周期变更**
+- [x] **Step 9：提交生命周期变更**
 
   ```bash
   git add internal/server/server_runner_profile_scope.go internal/server/server_runner_lifecycle.go internal/server/server_webhooks.go internal/server/server_admin_handlers.go internal/server/server_test.go internal/server/server_default_templates_test.go
@@ -776,44 +779,44 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
   func (s *Server) validateScopedProfileTemplate(w http.ResponseWriter, r *http.Request, scope accountPreferenceScope, templateID string) bool
   ```
 
-- [ ] **Step 1：写 API 鉴权、校验和原子性失败测试**
+- [x] **Step 1：写 API 鉴权、校验和原子性失败测试**
 
   覆盖：未登录；其他账户；Organization active member；repository-only outsider 对 GET 和 Mutation 均为 403；已失效成员；无 Owner 元数据；个人 Runner Group；托管控制；自定义 CRUD；同名／同标签冲突；In Use；CAS；审计失败回滚。另用 `/repositories` 既有测试证明 outsider 仍能读取有限的仓库就绪状态。
 
-- [ ] **Step 2：写 Provider 作用域失败测试**
+- [x] **Step 2：写 Provider 作用域失败测试**
 
   覆盖：自定义个人凭据、Organization 凭据、合法继承账户凭据、只有 Admin 默认凭据、缺失配置、401/403、404、无 Ready Build、429、5xx、取消和 5 秒总截止时间。断言没有一个用户自定义请求调用 Admin 默认凭据。
 
-- [ ] **Step 3：运行聚焦测试并确认失败**
+- [x] **Step 3：运行聚焦测试并确认失败**
 
   ```bash
   go test ./internal/server -run 'TestUserRunnerSpec|TestScopedProfileTemplate' -count=1 -v
   ```
 
-- [ ] **Step 4：实现列表 DTO 与管理授权**
+- [x] **Step 4：实现列表 DTO 与管理授权**
 
   GET 需要有效 User Session，并对 Account／Installation 作用域执行与 Mutation 相同的 `accountPreferenceScopeManageable` 检查。不可管理、repository-only 或成员关系失效统一返回 `403 runner_spec_scope_forbidden`，且不得先查询或序列化完整 Runner Spec；有限只读就绪状态继续只由 `/repositories` 提供。
 
-- [ ] **Step 5：实现变更授权和本地校验**
+- [x] **Step 5：实现变更授权和本地校验**
 
   所有 Mutation 先要求 manageable；先校验名称、标签、并发、Spec 来源和个人 Runner Group，再执行 Provider I/O。不要让非法本地字段产生远程调用。
 
-- [ ] **Step 6：实现作用域模板验证**
+- [x] **Step 6：实现作用域模板验证**
 
   只调用 `sandboxServiceForScope(scope)`；不得调用 `sandboxServiceForScopeWithDefault` 或 `sandboxServiceForAdminDefault`。复用 Provider 错误分类和 5 秒 Deadline，但不复用 Admin 凭据解析。
 
-- [ ] **Step 7：实现 CAS 与原子审计**
+- [x] **Step 7：实现 CAS 与原子审计**
 
   Provider 成功后用初始 `updated_at` 执行 `applyMutationWithAudit`。Delete 和模板／标签变更先查 `ActiveCountForProfileScope`；审计 Payload 遵守第 4.7 节。
 
-- [ ] **Step 8：运行服务器测试**
+- [x] **Step 8：运行服务器测试**
 
   ```bash
   go test ./internal/server -run 'Test(UserRunnerSpec|ScopedProfileTemplate|OrganizationSandboxManagement)' -count=1 -v
   go test ./internal/server -count=1
   ```
 
-- [ ] **Step 9：提交 API 变更**
+- [x] **Step 9：提交 API 变更**
 
   ```bash
   git add internal/server/server_user_runner_specs.go internal/server/server.go internal/server/server_profile_validation.go internal/server/server_user_handlers.go internal/server/server_test.go internal/server/server_helpers_test.go
@@ -855,31 +858,31 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
   }
   ```
 
-- [ ] **Step 1：写路由和 Hook 失败测试**
+- [x] **Step 1：写路由和 Hook 失败测试**
 
   断言两个新路由属于普通用户 Settings；只在 Runner Types Tab 加载；切换 Account／Organization 会取消旧请求；保存 Pending 抑制重复提交；失败保留表单；成功刷新相同作用域。
 
-- [ ] **Step 2：运行测试并确认失败**
+- [x] **Step 2：运行测试并确认失败**
 
   ```bash
   cd ui && bun test src/app-load-policy.test.js src/hooks/use-user-runner-catalog.test.js
   ```
 
-- [ ] **Step 3：扩展 Settings 路由类型**
+- [x] **Step 3：扩展 Settings 路由类型**
 
   把 `AccountSettingsTab` 增加 `runner-types`，同步 `isAccountSettingsRoute`、`isSandboxSettingsRoute` 的职责边界、`parseAccountSettingsRoute` 和 `accountSettingsPath`。Runner Types 不是 Sandbox Catalog 页面，但需要同一 scope 选择。
 
-- [ ] **Step 4：实现 Hook**
+- [x] **Step 4：实现 Hook**
 
   Hook 接收 `request`、`installationID` 和 `active`；只在当前 Account 或 `manageable=true` 的 Organization Runner Types 路由激活，输出列表、sandbox source、loading、error、mutation pending 和 CRUD 方法。每次 scope 改变增加 generation，旧响应不得覆盖新作用域；无管理权限时不得发起 `/user/runner-specs` 请求。
 
-- [ ] **Step 5：运行 Hook 与路由测试**
+- [x] **Step 5：运行 Hook 与路由测试**
 
   ```bash
   cd ui && bun test src/app-load-policy.test.js src/hooks/use-user-runner-catalog.test.js
   ```
 
-- [ ] **Step 6：提交数据层变更**
+- [x] **Step 6：提交数据层变更**
 
   ```bash
   git add ui/src/admin-types.ts ui/src/app-load-policy.ts ui/src/app-load-policy.test.js ui/src/hooks/use-user-runner-catalog.ts ui/src/hooks/use-user-runner-catalog.test.js ui/src/App.tsx
@@ -905,33 +908,33 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 - Consumes: Task 5 Hook 输出。
 - Produces: Account／Organization Settings 中的“Runner 类型”Tab。
 
-- [ ] **Step 1：写组件失败测试**
+- [x] **Step 1：写组件失败测试**
 
   覆盖：托管／平台自定义／作用域自定义来源；Admin 全局停用不可被 UI 显示为启用；并发 0；复制 YAML；重置控制；创建／编辑／删除；覆盖警告；个人隐藏 Runner Group；Organization 显示高级字段；Sandbox 来源不允许创建；Pending；错误后保留表单；窄屏无横向页面溢出。另断言不可管理 Organization 不出现 Settings 入口、直接路由显示无权限且不请求 `/user/runner-specs`，同时 `/repositories` 仍显示有限就绪状态。
 
-- [ ] **Step 2：运行组件测试并确认失败**
+- [x] **Step 2：运行组件测试并确认失败**
 
   ```bash
   cd ui && bun test src/components/user-runner-types-section.test.js src/components/user-dashboard-sandbox.test.js
   ```
 
-- [ ] **Step 3：实现列表和状态文案**
+- [x] **Step 3：实现列表和状态文案**
 
   用 Table 或窄屏 Card 展示名称、来源、标签、模板和并发。来源和状态使用 Badge。`effective_max_concurrency == 0` 显示“仅受平台总容量限制”，不能显示成 0 个 Runner。
 
-- [ ] **Step 4：实现托管控制**
+- [x] **Step 4：实现托管控制**
 
   保存按钮只提交 `enabled` 和 `max_concurrency`；恢复默认调用 DELETE control。全局停用时 Switch 禁用并显示“平台已停用”。
 
-- [ ] **Step 5：实现自定义表单**
+- [x] **Step 5：实现自定义表单**
 
   模板用当前 scope Catalog 下拉项；标签以 Chip 或逗号输入解析，但提交前显示最终 `runs-on` 数组。检测与全局标签完全相同时显示覆盖确认，不增加第二个确认弹窗。
 
-- [ ] **Step 6：接入 Settings 和 i18n**
+- [x] **Step 6：接入 Settings 和 i18n**
 
   Account 和可管理 Organization 共用组件，仅通过 `installationID` 和 Owner Type 改变作用域；不可管理 Organization 在进入组件前被路由层拒绝。新增英文／中文 Key 后保持资源形状和插值变量完全一致。
 
-- [ ] **Step 7：扩展 fixture-backed Production Smoke**
+**Step 7（历史部分完成）：覆盖组件竞态并迁移 Runner Types Production Smoke 门禁**
 
   在 `ui/e2e/production-smoke.pw.ts` 增加仅本地 Fixture 模式运行的 Account／Organization Runner Types 用例（设置 `RUNNERD_UI_SMOKE_BASE_URL` 时跳过，不能对部署环境伪造 Session）。复用或扩展 `production-smoke-support.ts`，为 `/auth/session`、GitHub App Installation／Membership、Preferences、Sandbox Catalog 和 `/user/runner-specs` 提供按 `installation_id` 隔离的响应：
 
@@ -940,7 +943,11 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
   3. 使用 390 px 宽视口检查无文档级横向溢出，并对两个页面执行现有 Console、Page Error 和失败资源诊断。
   4. 增加不可管理 Organization Fixture，断言 Settings 中无 Runner Types 入口、直接路由不请求目录且显示无权限；单独访问 `/repositories` 确认有限就绪状态仍可见。
 
-- [ ] **Step 8：运行前端验证**
+  当前状态：组件测试已覆盖旧作用域手动刷新晚到的竞态，但现有四项
+  `task ui-production-smoke` 仍只覆盖公共页面和 Jobs 布局。Runner Types
+  fixture 扩展已迁入 Task 8 与 `TODO.md`，不能用现有 4/4 结果替代。
+
+- [x] **Step 8：运行前端验证**
 
   ```bash
   cd ui && bun run test
@@ -949,7 +956,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
   task ui-production-smoke
   ```
 
-- [ ] **Step 9：提交 UI 变更**
+- [x] **Step 9：提交 UI 变更**
 
   ```bash
   git add ui/src/components/user-runner-types-section.tsx ui/src/components/user-runner-types-section.test.js ui/src/components/user-dashboard.tsx ui/src/components/user-dashboard-sandbox.test.js ui/src/locales/en.ts ui/src/locales/zh.ts ui/e2e/production-smoke.pw.ts ui/e2e/production-smoke-support.ts ui/e2e/production-smoke-support.test.ts
@@ -978,19 +985,19 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 - Consumes: Tasks 1–6 的最终真实行为。
 - Produces: 操作员、用户和后续 Agent 可重复执行的说明。
 
-- [ ] **Step 1：更新当前能力和限制**
+- [x] **Step 1：更新当前能力和限制**
 
   明确 Admin 管全局目录，普通用户管理自己的 Account／Organization Runner 类型。记录自定义模板只使用作用域凭据、无 Repository 级覆盖、无 Min Idle。
 
-- [ ] **Step 2：更新测试与部署 Smoke**
+- [x] **Step 2：更新测试与部署 Smoke**
 
   增加个人、可管理 Organization、repository-only outsider 的 `/repositories` 有限就绪视图与 Settings 拒绝、自定义模板、并发、停用、删除、审计和清理步骤。中文／英文文件保持逐项对应。
 
-- [ ] **Step 3：更新 Roadmap 和 Agent 约束**
+- [x] **Step 3：更新 Roadmap 和 Agent 约束**
 
   已从 `TODO.md` 删除“用户侧 Spec 未实现”的旧项；跨组织审批或仓库级覆盖仍以具体未决问题保留，不把已实现行为继续写成计划。
 
-- [ ] **Step 4：运行文档和文案检查**
+- [x] **Step 4：运行文档和文案检查**
 
   ```bash
   test -f AGENTS.md
@@ -1000,7 +1007,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
   git diff --check
   ```
 
-- [ ] **Step 5：提交文档变更**
+- [x] **Step 5：提交文档变更**
 
   ```bash
   git add README.md README.zh.md docs/testing.md docs/zh/testing.md docs/deployment-smoke.md docs/zh/deployment-smoke.md docs/README.md docs/zh/README.md TODO.md AGENTS.md .agents/rules/project-architecture.md .agents/rules/testing-and-verification.md
@@ -1020,7 +1027,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 - Consumes: 全部实现和文档。
 - Produces: 可审核、可部署、可回滚的最终证据。
 
-- [ ] **Step 1：运行完整本地验证**
+- [x] **Step 1：运行完整本地验证**
 
   ```bash
   go test ./internal/state -count=1
@@ -1074,9 +1081,9 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 
   数据库名不以 `_test` 结尾时测试必须拒绝执行。覆盖 MySQL `clientFoundRows=true`。
 
-- [ ] **Step 5：运行本地真实浏览器验收**
+- [ ] **Step 5：扩展 fixture smoke 并运行本地真实浏览器验收**
 
-  使用 `task dev` 启动真实 runnerd 和 Vite，分别访问 Account 和可管理 Organization Runner Types 路由。验证桌面和窄屏、复制 YAML、表单失败保留、Scope 切换无旧响应覆盖；再用 repository-only outsider 验证 Settings 无入口、直接路由不加载目录而 `/repositories` 仍展示有限就绪状态。保存截图路径和浏览器 Console／Network 结果。
+  先扩展 `ui/e2e/production-smoke.pw.ts` 及 fixture support，覆盖 Account、一个可管理 Organization、旧作用域晚到响应和 repository-only outsider，并重新运行 `task ui-production-smoke`。再使用 `task dev` 启动真实 runnerd 和 Vite，分别访问 Account 和可管理 Organization Runner Types 路由。验证桌面和窄屏、复制 YAML、表单失败保留、Scope 切换无旧响应覆盖，以及键盘创建、编辑和删除；再用 repository-only outsider 验证 Settings 无入口、直接路由不加载目录而 `/repositories` 仍展示有限就绪状态。保存截图路径和浏览器 Console／Network 结果。
 
 - [ ] **Step 6：运行真实 GitHub＋Sandbox E2E**
 
@@ -1126,30 +1133,30 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 
 ### P0：发布阻塞标准
 
-- [ ] 无任何用户作用域配置时，现有托管工作流和 Admin Runner Specs 行为与基线一致。
-- [ ] Account 和 Organization 能各自创建同名自定义 Spec，匹配、模板和并发互不串扰。
-- [ ] 不可管理或 repository-only 用户在 Settings 无 Runner Types 入口，直接目录 GET 和 Mutation 均返回 403；`/repositories` 仍只返回不含私有配置的有限就绪状态。
-- [ ] 停用的作用域自定义 Spec 继续屏蔽同标签全局 Spec，准入返回 `profile_scope_disabled`，不得静默回退。
-- [ ] 用户自定义模板验证只使用作用域自有或合法继承凭据；只有 Admin 默认凭据时创建被拒绝。
-- [ ] 管理员全局停用的托管 Spec 不能被作用域重新启用。
-- [ ] 全局 Spec 上限、作用域附加上限和 runnerd 全局上限全部被独立执行。
-- [ ] Retry 使用原请求的 source、scope 和 name，不匹配其他作用域或新 Spec。
-- [ ] 所有 Mutation 与 Audit 原子；校验失败、CAS 冲突和审计失败均无部分写入。
+- [x] 无任何用户作用域配置时，现有托管工作流和 Admin Runner Specs 行为与基线一致（自动化回归）。
+- [x] Account 和 Organization 能各自创建同名自定义 Spec，匹配、模板和并发互不串扰（State/API 自动化回归）。
+- [x] 不可管理或 repository-only 用户在 Settings 无 Runner Types 入口，直接目录 GET 和 Mutation 均返回 403；`/repositories` 仍只返回不含私有配置的有限就绪状态（Server/UI 自动化回归）。
+- [x] 停用的作用域自定义 Spec 继续屏蔽同标签全局 Spec，准入返回 `profile_scope_disabled`，不得静默回退（State 自动化回归）。
+- [x] 用户自定义模板验证只使用作用域自有或合法继承凭据；只有 Admin 默认凭据时创建被拒绝（Server 自动化回归）。
+- [x] 管理员全局停用的托管 Spec 不能被作用域重新启用，且排队请求启动前会重新校验最新有效状态（State/Lifecycle 自动化回归）。
+- [x] 全局 Spec 上限、作用域附加上限和 runnerd 全局上限全部被独立执行（State/Lifecycle 自动化回归）。
+- [x] Retry 使用原请求的 source、scope 和 name，不匹配其他作用域或新 Spec（Lifecycle 自动化回归）。
+- [x] 所有 Mutation 与 Audit 原子；校验失败、CAS 冲突和审计失败均无部分写入（SQLite 自动化回归）。
 - [ ] 旧 SQLite 两次升级不丢失任何 profile/request 行或自定义索引；`scripts/verify-sqlite-downgrade.sh` 证明固定基线 SHA 的旧二进制能打开升级后的生产导出副本并返回 `/healthz` 200。
 - [ ] PostgreSQL、MySQL 真实方言 Schema 和事务测试通过。
-- [ ] Bun、i18n、TypeScript、ESLint、Go、Race、Coverage 和 Production Smoke 全部通过。
+- [x] Bun、i18n、TypeScript、ESLint、Go、Race、Coverage 和现有四项 Production Smoke 全部通过；Runner Types 专项浏览器 smoke 仍单独待办。
 - [ ] 真实个人与 Organization GitHub Actions 各完成一次，临时 Runner／Sandbox／请求清理完成。
-- [ ] 日志、JSON、审计和 UI 不泄露 Sandbox API Key、加密密文、OAuth Token 或 Provider Body。
+- [x] 自动化用例证明日志、JSON、审计和 UI 不泄露 Sandbox API Key、加密密文、OAuth Token 或 Provider Body；真实 E2E 仍需复核。
 
 ### P1：产品质量标准
 
-- [ ] 用户无需理解 `required_labels` 或 `priority` 即可得到可复制的 `runs-on`。
-- [ ] 托管控制、自定义类型和平台只读类型在视觉上可区分。
-- [ ] 覆盖全局标签、平台停用和并发 0 的语义都有明确文案。
-- [ ] Account／Organization 切换不会短暂显示或提交上一个 Scope 的数据。
-- [ ] 保存 Pending 禁止重复提交，失败保留输入，成功刷新当前 Scope。
+- [x] 用户无需理解 `required_labels` 或 `priority` 即可得到可复制的 `runs-on`。
+- [x] 托管控制、自定义类型和平台只读类型在视觉上可区分。
+- [x] 覆盖全局标签、平台停用和并发 0 的语义都有明确文案。
+- [x] Account／Organization 切换不会短暂显示或提交上一个 Scope 的数据（组件竞态回归）。
+- [x] 保存 Pending 禁止重复提交，失败保留输入，成功刷新当前 Scope。
 - [ ] 桌面与窄屏页面无文档级横向溢出；键盘可完成创建、编辑和删除。
-- [ ] README、Testing、Deployment Smoke、TODO、AGENTS 和 Agent Rules 与实际行为一致。
+- [x] README、Testing、Deployment Smoke、TODO、AGENTS 和 Agent Rules 与当前实现及未完成门禁一致。
 
 ## 9. 当前结果与最终结果记录
 
@@ -1162,14 +1169,14 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 | 文件级计划 | 完成 | Tasks 1–8 均给出文件、接口、测试、命令和提交边界 |
 | 测试矩阵 | 完成 | 覆盖 State、三种数据库、Server、UI、Browser 和真实 E2E |
 | 验收标准 | 完成 | 已列出 P0 发布阻塞标准和 P1 产品质量标准 |
-| 功能实现 | 本地完成 | Tasks 1–7 已实现并按阶段提交；真实 Provider、GitHub/Sandbox E2E 和部署仍待补齐 |
+| 功能实现 | PR 已创建 | Tasks 1–7 的 State/API/UI/文档实现位于 `feat/user-scoped-runner-types`，upstream PR #90；真实 Provider、GitHub/Sandbox E2E 和部署仍待补齐 |
 | 数据库迁移 | 本地通过 | Fresh SQLite、旧请求表增量迁移和重复迁移测试通过；未接触生产导出 |
 | 自动化测试 | 本地通过 | `go test ./... -count=1`、`task test`、`bun run test`、`task ui-i18n-check`、`task ui-lint` 均通过 |
 | 浏览器／线上验收 | 本地 Bundle 通过 | `task ui-production-smoke` 4/4 通过；未部署线上或运行真实 GitHub/Sandbox E2E |
 
-### 9.2 实现完成后必须回填的结果
+### 9.2 剩余发布门禁与结果记录
 
-执行者完成 Task 8 时，用真实命令结果替换下表的“未执行”；不得删除失败、警告或跳过项。
+执行者完成 Task 8 时，用真实命令结果替换下表的“未执行”；不得删除失败、警告或跳过项，也不得把现有四项 Production Smoke 解释为 Runner Types 专项浏览器验收。
 
 | 检查 | 当前结果 | 最终必须记录 |
 | --- | --- | --- |
@@ -1180,15 +1187,16 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 | MySQL SQLBackends | 未执行 | 版本、`clientFoundRows`、结果 |
 | Production SQLite Snapshot | 未执行 | 导出日期、升级前后计数、结果 |
 | SQLite Down-version Gate | 未执行 | 基线 SHA、当前／旧二进制版本、前后计数、`/healthz` 结果 |
-| `cd ui && bun run test` | 通过 | 180 pass, 0 fail |
+| `cd ui && bun run test` | 通过 | 184 pass, 0 fail |
 | `task ui-i18n-check` | 通过 | locale/source check 和 TypeScript 通过 |
 | `task ui-lint` | 通过 | ESLint、TypeScript、Vite build 通过；保留既有 chunk warning |
-| `task test` | 通过 | Bun 177 pass；Go race/coverage exit 0 |
-| `task ui-production-smoke` | 通过 | Chromium 4/4；无浏览器错误 |
+| `task lint` | 通过 | staticcheck、gofmt、gofumpt、goimports、go vet、ESLint、TypeScript 和 Vite build 通过 |
+| `task test` | 通过 | Bun 184 pass；Go race/coverage exit 0 |
+| `task ui-production-smoke` | 通过但范围有限 | Chromium 4/4；覆盖公共页面和 Jobs 布局，不包含 Runner Types 路由 |
 | Account 真实 E2E | 未执行 | Workflow Run、Spec、清理证据 |
 | Organization 真实 E2E | 未执行 | Workflow Run、隔离、清理证据 |
 | 部署 Canary | 未执行 | Origin、时间、版本、结果 |
-| 最终 Diff Review | 通过 | 最终工作树干净；分阶段 commit，无本地 Secret 或手改生成 UI |
+| 实现 Diff Review | 通过 | 实现提交 `da9fe6a` 后本地与 origin SHA 一致；无本地 Secret 或手改生成 UI |
 | `git diff --check` | 通过 | exit 0 |
 
 ## 10. 风险、回滚和未知项
@@ -1203,7 +1211,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 | SQLite AutoMigrate 重建表 | 历史数据或索引丢失 | 继续使用专用增量迁移和生产 Snapshot Gate |
 | Provider 校验后并发修改 | 旧验证结果覆盖新配置 | Provider I/O 后 CAS 条件写入 |
 | 用户误用 Admin 默认凭据 | 私有模板访问错位 | User Validator 禁止 Default Resolver |
-| UI Scope 请求竞态 | A 组织数据出现在 B 组织 | generation/cancel 测试和 Scope Key |
+| UI Scope 请求竞态 | A 组织数据出现在 B 组织 | generation、当前 query 校验和晚到响应组件测试 |
 | 回滚后自定义标签失效 | 用户工作流排队失败 | 回滚前停用入口、导出作用域配置、通知用户 |
 
 ### 10.2 回滚步骤
@@ -1224,7 +1232,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 - 仓库级覆盖需求不足以证明，应在真实用户反馈出现后另立方案。
 - `Min Idle` 没有运行时消费者，因此继续隐藏而不是在用户侧承诺预热。
 
-## 11. 执行交接
+## 11. 剩余发布门禁交接
 
 ### 11.1 接收者先读文件
 
@@ -1246,17 +1254,17 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 
 ### 11.2 第一动作
 
-接收者拿到本分支后，先创建独立实现分支或 Worktree，不直接在 `main` 工作：
+接收者继续处理发布证据前，先确认 PR、工作树和未完成门禁；不要重新执行 Tasks 1–7，也不要从旧计划分支开始：
 
 ```bash
 git status --short --branch
 git branch --show-current
 git rev-parse HEAD
-git switch -c feat/user-scoped-runner-configuration
-go test ./internal/state -count=1
+gh pr view 90 --repo qiniu/ci-runner
+rg -n '^- \[ \]' docs/user-scoped-runner-configuration.md TODO.md
 ```
 
-完成条件：确认工作树无他人未提交修改，记录实现分支起点，State 基线测试通过；如果基线失败，先保存完整错误并停止 Task 1，不把既有失败归因于本功能。
+完成条件：确认当前工作树没有被覆盖、实现仍对应 PR #90，并从 Task 8 或 `TODO.md` 选择一个有真实环境支撑的门禁。没有专用数据库、生产导出或真实 GitHub/Sandbox 环境时，保留为未执行，不用本地 SQLite 或 fixture 结果冒充。
 
 ### 11.3 环境与访问
 
@@ -1268,9 +1276,9 @@ go test ./internal/state -count=1
 
 ### 11.4 分支与交付状态
 
-- **Completed:** Tasks 1–7 的状态/API/UI/文档实现已按独立 commit 交付，本地自动化验证通过；新增 UI CRUD 和 API 回归修正也已独立提交。
-- **In progress:** Task 8 仅完成本地验证和结果回填；真实 Provider、GitHub/Sandbox E2E、跨方言 DB、降级门禁和部署 Canary 尚未执行。
+- **Completed:** Tasks 1–7 的状态/API/UI/文档实现已按独立 commit 交付至 `feat/user-scoped-runner-types`，PR #90 已创建，本地自动化验证通过；新增生命周期、API 隔离、UI 竞态和 Runner Group 回归也已提交。
+- **In progress:** Task 8 已完成本地验证和当前结果回填；Runner Types fixture-backed browser smoke、真实 Provider、GitHub/Sandbox E2E、跨方言 DB、生产 SQLite snapshot/降级门禁和部署 Canary 尚未执行。
 - **Pending external verification:** 真实资源验收和部署尚未执行；`qiniu-ci-runner-test` 是独立示例服务，当前没有 runnerd webhook/workflow 测试入口，因此不创建无意义的外部测试仓库 PR。
-- **Out of scope:** Repository Policy、Min Idle、跨作用域复制、审批流和历史表清理。
+- **Out of scope:** Min Idle、跨作用域复制和审批流。
 - **Do not overwrite:** 接收者必须保留自己工作树中与本功能无关的修改，按明确路径分批提交。
 - **Closeout condition:** P0 全部通过、P1 无阻塞缺陷、第 9.2 节填入真实结果、文档同步、真实资源清理、Review 和 CI 收敛。
