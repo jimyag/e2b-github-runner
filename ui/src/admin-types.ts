@@ -91,6 +91,7 @@ export type UserRunnerSpec = {
   effective_max_concurrency: number
   overrides_global: boolean
   editable: boolean
+  scope_control_configured?: boolean
   updated_at: string
 }
 

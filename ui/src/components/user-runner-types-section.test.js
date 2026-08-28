@@ -16,6 +16,7 @@ const managed = {
   effective_max_concurrency: 3,
   overrides_global: false,
   editable: true,
+  scope_control_configured: true,
   updated_at: "2026-08-28T00:00:00Z",
 }
 
