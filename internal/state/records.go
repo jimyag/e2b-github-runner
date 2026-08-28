@@ -105,7 +105,7 @@ type scopedRunnerProfileRecord struct {
 	ScopeID            int64     `gorm:"column:scope_id;primaryKey;index:idx_scoped_runner_profiles_scope,priority:2;uniqueIndex:idx_scoped_runner_profiles_scope_labels,priority:2"`
 	Name               string    `gorm:"column:name;primaryKey"`
 	WorkflowLabelsJSON string    `gorm:"column:workflow_labels_json;type:text;not null"`
-	LabelKey           string    `gorm:"column:label_key;not null;uniqueIndex:idx_scoped_runner_profiles_scope_labels,priority:3"`
+	LabelKey           string    `gorm:"column:label_key;size:64;not null;uniqueIndex:idx_scoped_runner_profiles_scope_labels,priority:3"`
 	TemplateID         string    `gorm:"column:template_id;not null"`
 	RunnerGroup        string    `gorm:"column:runner_group"`
 	MaxConcurrency     int       `gorm:"column:max_concurrency;not null"`
