@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 
-import { RunnerTypeForm, RunnerTypeItem } from "./user-runner-types-section"
+import { RunnerTypeForm, RunnerTypeItem, runnerTypeCatalogRegion, runnerTypeWorkflowYAML } from "./user-runner-types-section"
 
 const managed = {
   name: "ubuntu-24.04",
@@ -33,6 +33,15 @@ const custom = {
 }
 
 describe("UserRunnerTypesSection", () => {
+  test("uses the configured Sandbox region for the scoped catalog", () => {
+    expect(runnerTypeCatalogRegion("cn-yangzhou-1")).toBe("cn-yangzhou-1")
+    expect(runnerTypeCatalogRegion("unknown-region")).toBe("us-south-1")
+  })
+
+  test("quotes workflow labels in copied YAML", () => {
+    expect(runnerTypeWorkflowYAML(["foo: bar", "a,b", "#gpu"])).toBe('runs-on: ["foo: bar", "a,b", "#gpu"]')
+  })
+
   test("renders controls and effective details for managed and custom runner types", () => {
     const html = renderToStaticMarkup(createElement("div", null,
       createElement(RunnerTypeItem, { item: managed, copying: false, onCopy() {}, onEdit() {}, onDelete() {}, onControl() {}, onReset() {} }),

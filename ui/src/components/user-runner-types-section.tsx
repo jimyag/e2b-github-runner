@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import type { SandboxTemplate, UserRunnerSpec } from "@/admin-types"
+import { sandboxRegions } from "@/components/sandbox-catalog-utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,6 +19,14 @@ const emptyForm: FormState = { name: "", labels: "", templateID: "", maxConcurre
 
 function parseLabels(value: string) {
   return value.split(",").map((label) => label.trim()).filter(Boolean)
+}
+
+export function runnerTypeCatalogRegion(regionID: string) {
+  return sandboxRegions.some((region) => region.id === regionID) ? regionID : sandboxRegions[0].id
+}
+
+export function runnerTypeWorkflowYAML(labels: string[]) {
+  return `runs-on: [${labels.map((label) => JSON.stringify(label)).join(", ")}]`
 }
 
 export function RunnerTypeDetails({ item }: { item: UserRunnerSpec }) {
@@ -64,6 +73,7 @@ export function UserRunnerTypesSection({ request, installationID }: { request: R
   const { t } = useTranslation()
   const [items, setItems] = useState<UserRunnerSpec[]>([])
   const [sandboxSource, setSandboxSource] = useState("none")
+  const [sandboxRegion, setSandboxRegion] = useState("us-south-1")
   const [templates, setTemplates] = useState<SandboxTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [copying, setCopying] = useState<string | null>(null)
@@ -73,16 +83,16 @@ export function UserRunnerTypesSection({ request, installationID }: { request: R
   const [form, setForm] = useState<FormState>(emptyForm)
   const query = installationID ? `?installation_id=${installationID}` : ""
 
-  const load = async () => { setLoading(true); try { const response = await request(`/user/runner-specs${query}`) as { items?: UserRunnerSpec[]; sandbox_source?: string }; setItems(response.items || []); setSandboxSource(response.sandbox_source || "none") } catch (error) { toast.error(error instanceof Error ? error.message : t("user.runnerTypesLoadFailed")) } finally { setLoading(false) } }
-  useEffect(() => { let cancelled = false; setLoading(true); void request(`/user/runner-specs${query}`).then((response) => { if (cancelled) return; const data = response as { items?: UserRunnerSpec[]; sandbox_source?: string }; setItems(data.items || []); setSandboxSource(data.sandbox_source || "none") }).catch((error) => { if (!cancelled) toast.error(error instanceof Error ? error.message : t("user.runnerTypesLoadFailed")) }).finally(() => { if (!cancelled) setLoading(false) }); return () => { cancelled = true } }, [query, request, t])
-  const openCreate = async () => { setSelected(null); setForm(emptyForm); setDialog("create"); try { const suffix = installationID ? `&installation_id=${installationID}` : ""; const data = await request(`/user/sandbox/templates?region=us-south-1${suffix}`); setTemplates(Array.isArray(data) ? data as SandboxTemplate[] : []) } catch (error) { setTemplates([]); toast.error(error instanceof Error ? error.message : t("user.runnerTypesLoadFailed")) } }
+  const load = async () => { setLoading(true); try { const response = await request(`/user/runner-specs${query}`) as { items?: UserRunnerSpec[]; sandbox_source?: string; sandbox_region?: string }; setItems(response.items || []); setSandboxSource(response.sandbox_source || "none"); setSandboxRegion(runnerTypeCatalogRegion(response.sandbox_region || "")) } catch (error) { toast.error(error instanceof Error ? error.message : t("user.runnerTypesLoadFailed")) } finally { setLoading(false) } }
+  useEffect(() => { let cancelled = false; setLoading(true); void request(`/user/runner-specs${query}`).then((response) => { if (cancelled) return; const data = response as { items?: UserRunnerSpec[]; sandbox_source?: string; sandbox_region?: string }; setItems(data.items || []); setSandboxSource(data.sandbox_source || "none"); setSandboxRegion(runnerTypeCatalogRegion(data.sandbox_region || "")) }).catch((error) => { if (!cancelled) toast.error(error instanceof Error ? error.message : t("user.runnerTypesLoadFailed")) }).finally(() => { if (!cancelled) setLoading(false) }); return () => { cancelled = true } }, [query, request, t])
+  const openCreate = async () => { setSelected(null); setForm(emptyForm); setDialog("create"); try { const suffix = installationID ? `&installation_id=${installationID}` : ""; const data = await request(`/user/sandbox/templates?region=${encodeURIComponent(sandboxRegion)}${suffix}`); setTemplates(Array.isArray(data) ? data as SandboxTemplate[] : []) } catch (error) { setTemplates([]); toast.error(error instanceof Error ? error.message : t("user.runnerTypesLoadFailed")) } }
   const openEdit = (item: UserRunnerSpec) => { setSelected(item); setForm({ name: item.name, labels: item.workflow_labels.join(", "), templateID: item.template_id || "", maxConcurrency: String(item.scope_max_concurrency), enabled: item.enabled }); setDialog("edit") }
   const openControl = (item: UserRunnerSpec) => { setSelected(item); setForm({ ...emptyForm, name: item.name, maxConcurrency: String(item.scope_max_concurrency), enabled: item.enabled }); setDialog("control") }
   const closeDialog = () => { if (!saving) setDialog(null) }
   const submit = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); if (saving) return; setSaving(true); try { let url = `/user/runner-specs${query}`; let options: RequestInit = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: form.name, workflow_labels: parseLabels(form.labels), template_id: form.templateID, max_concurrency: Number(form.maxConcurrency) || 0, enabled: form.enabled }) }; if (dialog === "edit" && selected) { url = `/user/runner-specs/${encodeURIComponent(selected.name)}${query}`; options = { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workflow_labels: parseLabels(form.labels), template_id: form.templateID, max_concurrency: Number(form.maxConcurrency) || 0, enabled: form.enabled, expected_updated_at: selected.updated_at }) } } else if (dialog === "control" && selected) { url = `/user/runner-specs/${encodeURIComponent(selected.name)}/control${query}`; options = { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ max_concurrency: Number(form.maxConcurrency) || 0, enabled: form.enabled, expected_updated_at: selected.updated_at }) } } await request(url, options); toast.success(t("user.runnerTypeSaved")); setDialog(null); await load() } catch (error) { toast.error(error instanceof Error ? error.message : t("user.runnerTypeSaveFailed")) } finally { setSaving(false) } }
   const remove = async (item: UserRunnerSpec) => { if (saving || !window.confirm(t("user.confirmDeleteRunnerType", { name: item.name }))) return; setSaving(true); try { const separator = query ? "&" : "?"; await request(`/user/runner-specs/${encodeURIComponent(item.name)}${query}${separator}expected_updated_at=${encodeURIComponent(item.updated_at)}`, { method: "DELETE" }); toast.success(t("user.runnerTypeDeleted")); await load() } catch (error) { toast.error(error instanceof Error ? error.message : t("user.runnerTypeDeleteFailed")) } finally { setSaving(false) } }
   const reset = async (item: UserRunnerSpec) => { if (saving) return; setSaving(true); try { const separator = query ? "&" : "?"; await request(`/user/runner-specs/${encodeURIComponent(item.name)}/control${query}${separator}expected_updated_at=${encodeURIComponent(item.updated_at)}`, { method: "DELETE" }); toast.success(t("user.runnerTypeReset")); await load() } catch (error) { toast.error(error instanceof Error ? error.message : t("user.runnerTypeSaveFailed")) } finally { setSaving(false) } }
-  const copyYAML = async (item: UserRunnerSpec) => { setCopying(item.name); try { await navigator.clipboard?.writeText(`runs-on: [${item.workflow_labels.join(", ")}]`); toast.success(t("user.runnerTypeCopied")) } catch { toast.error(t("user.runnerTypeCopyFailed")) } finally { setCopying(null) } }
+  const copyYAML = async (item: UserRunnerSpec) => { setCopying(item.name); try { await navigator.clipboard?.writeText(runnerTypeWorkflowYAML(item.workflow_labels)); toast.success(t("user.runnerTypeCopied")) } catch { toast.error(t("user.runnerTypeCopyFailed")) } finally { setCopying(null) } }
   const canCreate = sandboxSource !== "none" && sandboxSource !== "admin_default"
   const sorted = useMemo(() => [...items].sort((a, b) => a.name.localeCompare(b.name)), [items])
   return <Card><CardHeader className="flex flex-row items-center justify-between gap-3"><CardTitle>{t("user.runnerTypes")}</CardTitle><Button type="button" size="sm" disabled={!canCreate || saving} title={!canCreate ? t("user.runnerTypesConfigureSandbox") : undefined} onClick={() => void openCreate()}><Plus className="h-4 w-4" />{t("user.createRunnerType")}</Button></CardHeader><CardContent>{loading ? <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />{t("common.loading")}</div> : null}{!loading && sorted.length === 0 ? <p className="text-sm text-muted-foreground">{t("user.noRunnerTypes")}</p> : null}<div className="grid gap-3">{sorted.map((item) => <RunnerTypeItem key={`${item.source}:${item.name}`} item={item} copying={copying === item.name} onCopy={(value) => void copyYAML(value)} onEdit={openEdit} onDelete={(value) => void remove(value)} onControl={openControl} onReset={(value) => void reset(value)} />)}</div><Button type="button" variant="link" className="mt-3 px-0" onClick={() => void load()} disabled={loading || saving}>{t("common.refresh")}</Button></CardContent><Dialog open={dialog !== null} onOpenChange={(open) => { if (!open) closeDialog() }}><DialogContent><DialogHeader><DialogTitle>{dialog === "create" ? t("user.createRunnerType") : dialog === "control" ? t("user.editRunnerTypeControl") : t("common.edit")}</DialogTitle></DialogHeader><RunnerTypeForm mode={dialog || "create"} form={form} templates={templates} saving={saving} onChange={(next) => setForm((current) => ({ ...current, ...next }))} onSubmit={submit} onClose={closeDialog} /></DialogContent></Dialog></Card>
