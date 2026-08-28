@@ -12,7 +12,7 @@ runnerd 是单个 Go 服务：接收 GitHub `workflow_job` webhooks，根据 rep
 
 - File-first runtime config，默认从 `runnerd.yaml` 加载，也可通过 `--config` 指定。
 - 通过 `database.backend` 和 `database.dsn` 支持 SQLite、Postgres 和 MySQL state backends。
-- DB-backed runner requests、runner events/logs、runner specs、runner groups、repository policies、本地 accounts、关联 OAuth identities、account preferences/secrets 和 audit events。
+- DB-backed runner requests、runner events/logs、Runner Specs、本地 accounts、关联 OAuth identities、GitHub installations、account preferences/secrets 和 audit events。升级数据库中可能只为回滚保留已退役的 Runner Group/Policy 表，它们不属于当前应用模型。
 - Account 和 GitHub installation scoped Preferences 用于 Sandbox service settings，API keys 作为 encrypted account secrets 保存。
 - 独立于 account preferences 的 admin-managed Sandbox service fallback，默认关闭。
 - Schema creation 由 state record structs 中的 GORM tags 驱动，启动时先执行窄范围 legacy compatibility pass，再运行 `AutoMigrate`；GORM foreign-key creation 有意保持关闭。
@@ -21,14 +21,14 @@ runnerd 是单个 Go 服务：接收 GitHub `workflow_job` webhooks，根据 rep
 - GitHub App auth 支持可选 dynamic installation resolution，同时保留 token 和 basic auth compatibility modes。
 - GitHub App OAuth 用于普通用户和管理员登录，本地 roles 决定管理权限，session 使用 signed HttpOnly cookie。
 - Ordinary-user UI 支持 PR/job views、统一的 repository access 与有效 Sandbox service readiness 页面、account 或 organization scoped Sandbox service settings，以及 scoped Sandbox template 和 runner-instance catalogs。
-- Admin API 和 UI 支持账户列表与带审计的角色控制、runner requests、specs、groups、policies、全局 Sandbox service fallback、retry/stop actions、match tests、audit history 和 diagnostics。
+- Admin API 和 UI 支持账户列表与带审计的角色控制、runner requests、Runner Specs、全局 Sandbox service fallback、retry/stop actions、match tests、audit history 和 diagnostics。
 - Production UI assets 从 `ui/` 构建到 `internal/server/ui/`；development assets 代理到 Vite。
 - 通过 `github.com/jimmicro/pprof`、`/diagnostics/pprof`、`/diagnostics/vars` 和 expvar metrics 提供 diagnostics。
 
 已知边界：
 
 - Config validation 拒绝 GitHub Enterprise Server；只支持 `https://api.github.com`。
-- Runner specs、runner groups 和 repository policies 通过 admin API/UI 管理，不是 `runnerd.yaml` 字段。
+- Runner Specs 通过 admin API/UI 管理，不是 `runnerd.yaml` 字段。内部 Runner Group 和 Repository Policy 已退役；可选 `runner_group` 字段只保留为 GitHub Organization Runner Group 注册目标。
 - Token 和 basic auth 仍作为 compatibility modes 存在。产品策略尚未决定是否为生产长期保留。
 - 在用两个 runnerd 进程连接同一个 database 验证前，不应宣传 multi-instance support。
 - Sandbox provider catalogs 是普通用户资源，不是 admin 配置。`GET /user/sandbox/templates` 和 `GET /user/sandbox/instances` 会先解析 scoped credentials，再尝试已启用的 admin fallback，只接受支持的 region id，并把 secrets 保留在服务端。
@@ -87,7 +87,7 @@ flowchart TB
 
 ### Runner Request 生命周期
 
-Admission 和 capacity 是两个独立步骤。Webhooks 只有在 repository 和 label/spec policy checks 通过后才准入 request。Capacity 由 worker claim queued request 后再检查，因此超过容量的工作会保持 queued，而不是被 admission 阶段拒绝。
+Admission 和 capacity 是两个独立步骤。Webhooks 只有在 repository allowlist 和已启用 Runner Spec 标签检查通过后才准入 request。Capacity 由 worker claim queued request 后再检查，因此超过容量的工作会保持 queued，而不是被 admission 阶段拒绝。
 
 ```mermaid
 sequenceDiagram
@@ -132,10 +132,7 @@ sequenceDiagram
 ```mermaid
 erDiagram
   RUNNER_REQUESTS ||--o{ RUNNER_EVENTS : records
-  RUNNER_PROFILES ||--o{ RUNNER_GROUP_SPECS : member
-  RUNNER_GROUPS ||--o{ RUNNER_GROUP_SPECS : contains
-  RUNNER_PROFILES ||--o{ REPOSITORY_POLICIES : grants
-  RUNNER_GROUPS ||--o{ REPOSITORY_POLICIES : grants
+  RUNNER_PROFILES o|--o{ RUNNER_REQUESTS : selected_by
   ACCOUNTS ||--o{ OAUTH_IDENTITIES : links
   ACCOUNTS ||--o{ GITHUB_INSTALLATIONS : owns
   ACCOUNTS ||--o{ AUDIT_EVENTS : acts
@@ -175,6 +172,8 @@ erDiagram
     string key_type
   }
 ```
+
+图中只展示当前应用模型。升级数据库中可能仍有遗留 `runner_groups`、`runner_group_specs` 和 `repository_policies` 表，但当前代码不会迁移或读取它们；物理清理仍需另行授权的维护决策。
 
 ### Request State Machine
 

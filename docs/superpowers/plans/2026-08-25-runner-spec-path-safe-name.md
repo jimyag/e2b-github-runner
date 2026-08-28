@@ -1,5 +1,7 @@
 # Runner Spec Path-Safe Name Implementation Plan
 
+> **Lifecycle:** Historical plan, completed in `0bab1e0` (`fix(runner): reject path-unsafe Runner Spec names (#86)`). The checklist below records the original execution sequence and is not active work; see [`README.md`](README.md) and the repository `TODO.md` for current status.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Reject newly written Runner Spec names that contain `/` or equal `.` or `..`, while preserving startup, read, match, and lifecycle compatibility for historical rows with those names.

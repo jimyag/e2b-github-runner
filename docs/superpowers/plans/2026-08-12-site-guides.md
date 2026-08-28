@@ -1,5 +1,7 @@
 # Public Site Guides Implementation Plan
 
+> **Lifecycle:** Historical plan, completed in `b8e777f` (`feat(ui): add bilingual site guides (#72)`). The checklist below is retained as execution history, not active work; see [`README.md`](README.md) and the repository `TODO.md` for current status.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Give Qiniu CI Runner users public, bilingual, same-origin paths from the landing page to their first successful managed GitHub Actions job, a self-hosted runnerd deployment, or a verified custom runner template and workflow.

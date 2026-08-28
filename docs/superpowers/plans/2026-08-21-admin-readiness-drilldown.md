@@ -1,5 +1,7 @@
 # Admin Readiness Drill-down Implementation Plan
 
+> **Lifecycle:** Historical plan, completed in `33e8da4`. The drill-down belonged to the temporary Release A readiness surface and was removed by Release C. The checklist below is not active work; see [`README.md`](README.md) and the repository `TODO.md` for current status.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make Admin Diagnostics explain missing Runner Spec lifecycle evidence with bounded recent request attempts, statuses, failure stages/reasons, timestamps, and safe GitHub Job links.

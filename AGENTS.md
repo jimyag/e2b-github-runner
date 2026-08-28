@@ -92,6 +92,7 @@ When changing state records, GORM tags, indexes, migration helpers, or audited m
 - `.agents/rules/frontend-internationalization.md`: i18n boundaries, language-switcher placement, stable identifier rules, and UI verification.
 - `.agents/skills/runnerd-state-schema/SKILL.md`: use for state records, GORM tags, indexes, and migration compatibility work.
 - `.agents/skills/runnerd-dev-smoke/SKILL.md`: use for `task dev`, Vite proxy, smee forwarding, and local startup verification.
+- `docs/superpowers/plans/README.md`: lifecycle index for retained historical implementation plans; their unchecked boxes are not active roadmap work.
 
 ## Editing Rules
 
@@ -101,4 +102,5 @@ When changing state records, GORM tags, indexes, migration helpers, or audited m
 - Keep `README.md` and `README.zh.md`, `docs/testing.md` and `docs/zh/testing.md`, and `TODO.md` aligned when changing config, build, development, public APIs, authentication/authorization, state semantics, or deployment workflows.
 - Keep `docs/README.md` and `docs/zh/README.md`, plus `docs/deployment-smoke.md` and `docs/zh/deployment-smoke.md`, aligned when adding or removing docs or deployment verification steps.
 - Keep `.agents/rules/` and `.agents/skills/` aligned when a change creates durable agent rules or repeatable project workflows.
+- Keep active future work in `TODO.md` and explicitly linked active plans. When a plan completes or is retired, update `docs/superpowers/plans/README.md` and mark the plan historical so its original checklist cannot be mistaken for current work.
 - When changing ordinary-user UI, keep account/organization Preferences and Sandbox catalog scope separate from admin-only management APIs instead of assuming everything under `ui/` is admin-only.

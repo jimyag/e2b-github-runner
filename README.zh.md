@@ -27,7 +27,7 @@ Qiniu CI Runner 控制面是开源方案；Workflow Job 实际运行所依赖的
 - **GitHub App 鉴权** — 推荐的生产鉴权方式，内置 Web 控制台支持 OAuth 登录
 - **多数据库支持** — SQLite（默认）、PostgreSQL 或 MySQL 存储运行时状态
 - **并发控制** — 全局 `max_concurrent_runners` 和 per-spec `max_concurrency`，基于队列的背压机制
-- **内置 Web UI** — 管理控制台（Runner Spec、分组、策略、账户、诊断）；普通用户控制台（Job 分组、日志、沙箱管理）
+- **内置 Web UI** — 管理控制台（Runner Request、Runner Spec、账户、平台 Sandbox 兜底、审计、匹配和诊断）；普通用户控制台（Job 分组、日志、仓库就绪状态和作用域 Sandbox 管理）
 - **配置混淆** — 敏感值可避免在配置文件中直接暴露明文
 - **重试与恢复** — 瞬时故障自动退避重试；服务重启后恢复排队任务和仍在运行的远端 runner
 
@@ -51,7 +51,7 @@ GitHub webhook (workflow_job)
 ```
 
 1. GitHub 向 runnerd 发送 `workflow_job`（queued）webhook。
-2. runnerd 将 job labels 与 runner spec 和 policy 进行匹配。
+2. runnerd 先应用仓库 allowlist，再将 job labels 与已启用的 Runner Spec 匹配。
 3. runnerd 创建 Qiniu Sandbox 实例，并在其中注册 self-hosted runner。
 4. GitHub Actions 将 job 分派到该 runner，job 在沙箱中执行。
 5. job 完成（或超时）后，runnerd 移除 runner 注册并停止沙箱。
@@ -223,7 +223,12 @@ label 组合，不包含 provider template ID、credential、endpoint，也不�
 | ------------------------ | ------------------------------ |
 | `/admin/`                | 仪表盘：诊断、指标与最近失败     |
 | `/admin/accounts`        | 账户管理：列表、搜索、角色变更 |
+| `/admin/runner_requests` | Runner Request 历史、重试／停止操作和持久化日志 |
+| `/admin/runner_specs`    | 托管和自定义全局 Runner Spec 管理 |
 | `/admin/sandbox_service` | Sandbox 服务配置               |
+| `/admin/match`           | 针对当前已启用 Runner Spec 的标签匹配预览 |
+| `/admin/audit`           | 审计事件历史 |
+| `/admin/diagnostics`     | 脱敏运行时摘要、近期失败、pprof discovery 和 expvar |
 
 `/` 始终是公开的 Qiniu CI Runner 产品首页。`/docs` 及其固定指南路由公开、同域，并提供英文和简体中文。普通用户 Jobs 首页位于 `/jobs`；其他受保护路由包括 `/repositories`、PR job 分组（`/github/pulls/{owner}/{repo}/{number}/jobs`）、账户设置（`/account/preferences`、`/account/sandbox-templates`、`/account/sandbox-instances`），以及对应的 `/organizations/{login}/...` 路由。未登录访问受保护路由时会显示独立的 GitHub 登录页，并在 OAuth 完成后返回原 URL。
 

@@ -1,5 +1,7 @@
 # Runner Spec template validation implementation plan
 
+> **Lifecycle:** Historical plan, completed in `5522d1a` (`fix(runner): validate templates before saving (#87)`). The checklist below records the original execution sequence and is not active work; see [`README.md`](README.md) and the repository `TODO.md` for current status.
+
 > **For agentic workers:** Execute task by task with superpowers:executing-plans, test-driven-development, and verification-before-completion. Do not commit or push without a user request.
 
 **Goal:** Reject invalid custom template changes in the admin save flow using only the configured admin Sandbox service, with actionable errors and atomic persistence.

@@ -2,7 +2,7 @@
 
 [English](../runner-implementation-review.md)
 
-日期：2026-07-16
+首次评审：2026-07-16。当前基线刷新：2026-08-28。
 
 范围：
 
@@ -20,12 +20,12 @@ Runnerd 已经越过最初 2026-05-19 的差距清单。Runtime configuration �
 - 配置默认从 `runnerd.yaml` 加载，也可通过 `--config` 指定。相对 sqlite database paths 和 GitHub App private-key paths 会按配置文件目录解析。
 - Config schema 覆盖 server、database、OAuth session auth、Sandbox lifecycle timeouts、GitHub webhook/auth/OAuth、allowed repositories，以及 worker retry/lease/concurrency behavior。Sandbox service API URL 和 API key 来自 database-backed scoped Preferences 或默认关闭的 admin fallback，不是 file config。
 - GitHub API auth mode 必须三选一：GitHub App、token 或 basic auth。GitHub App mode 支持可选静态 `installation_id`；省略时，runnerd 会按 job repository 解析 installation access 并缓存 transports。
-- Runner requests、events、specs、groups、policies、retry metadata、leases 和 audit events 存储在配置的 database backend 中。
+- Runner requests、events、Runner Specs、retry metadata、leases、accounts、GitHub installations、scoped preferences/secrets 和 audit events 存储在配置的 database backend 中。内部 Runner Group 和 Repository Policy 模型已在 Release C 移除；遗留表只为回滚保持原样。
 - State schema creation 会先对旧 columns、obsolete OAuth constraints 和不兼容的 legacy scope tables 执行窄范围 compatibility pass，再运行 GORM `AutoMigrate`。GORM foreign-key creation 有意保持关闭。缺少 scope columns 的 legacy account preference/secret tables 会被有意重置；升级后需要重新配置 Sandbox settings/API keys，相关用户还需重新通过 GitHub 认证后才能同步 installations。
 - Worker processing 使用 DB claim/lease semantics 和 retry scheduling，而不是只依赖 in-memory queue ownership。
 - Qiniu sandbox、GitHub、rate-limit、timeout 和 temporary network transient failures 会被分类为 retry 或 queue deferral。确定性的 auth/config/template failures 会立即失败。
-- Admin routes 通过 `/admin/accounts` 和 `/admin/api/accounts` 暴露账户列表与带审计的角色控制，同时提供 runner request management、retry/stop/log access、runner specs、runner groups、repository policies、match tests、audit events 和 diagnostics。Account 管理仅包含角色控制；系统拒绝修改自身角色，以及可能导致没有管理员的变更。
-- Ordinary-user routes 暴露 `/` 的 PR/job dashboard、`/github/pulls/{owner}/{repo}/{number}/jobs` 这类 stable GitHub-context job-group routes，以及 `/repositories` 的统一 repository/Sandbox readiness。`/account/repositories` 和 `/organizations/{login}/repositories` 保留为指向同一页面的 scoped compatibility links；Sandbox Service、Templates 和 Instances 继续位于账户或组织设置路由。
+- Admin routes 通过 `/admin/accounts` 和 `/admin/api/accounts` 暴露账户列表与带审计的角色控制，同时提供 runner request management、retry/stop/log access、Runner Specs、平台 Sandbox fallback、match tests、audit events 和 diagnostics。Account 管理仅包含角色控制；系统拒绝修改自身角色，以及可能导致没有管理员的变更。已退役的 Group/Policy 和 catalog-readiness API 返回 404。
+- `/` 是公开首页，`/jobs` 是受保护的 ordinary-user Jobs dashboard。Stable GitHub-context job-group routes 包括 `/github/pulls/{owner}/{repo}/{number}/jobs`；统一 repository/Sandbox readiness 位于 `/repositories`。`/account/repositories` 和 `/organizations/{login}/repositories` 保留为指向同一页面的 scoped compatibility links；Sandbox Service、Templates 和 Instances 继续位于账户或可管理组织的设置路由。
 - Admin console 通过 `/admin/sandbox_service` 和 role-gated `/admin/api/sandbox-service-default` endpoints 管理全局 fallback，包括 all/selected repository-owner audience controls；provider catalogs 仍属于 ordinary-user resources。
 - 登录用户目录 API 通过 `/user/sandbox/templates` 提供区域过滤模板，并通过 `/user/sandbox/instances` 提供区域和模板过滤的 runner instances。接口从选中的 account 或 installation scope 解析加密凭据，不会暴露 provider secrets。
 - `ui/` 中的 React UI 会从 `internal/server/ui/*` 嵌入生产构建；development builds 通过 `internal/server/ui_assets_development.go` 代理到 Vite。

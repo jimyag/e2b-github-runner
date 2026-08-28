@@ -27,7 +27,7 @@ The Qiniu CI Runner control plane is open source. Qiniu Sandbox, where workflow 
 - **GitHub App auth** — recommended production path with OAuth sign-in for the built-in web console
 - **Multi-database** — SQLite (default), PostgreSQL, or MySQL for runtime state
 - **Concurrency control** — global `max_concurrent_runners` and per-spec `max_concurrency` with queue-based backpressure
-- **Built-in web UI** — admin console for runner specs, groups, policies, accounts, and diagnostics; ordinary-user console for job groups, logs, and sandbox management
+- **Built-in web UI** — admin console for runner requests, runner specs, accounts, the platform Sandbox fallback, audit, matching, and diagnostics; ordinary-user console for job groups, logs, repository readiness, and scoped Sandbox management
 - **Config obfuscation** — sensitive values can be hidden from casual config inspection
 - **Retry & recovery** — transient failures are retried with backoff; queued work and active remote runners are recovered after a service restart
 
@@ -51,7 +51,7 @@ GitHub webhook (workflow_job)
 ```
 
 1. GitHub sends a `workflow_job` (queued) webhook to runnerd.
-2. runnerd matches the job labels against runner specs and policies.
+2. runnerd applies the repository allowlist, then matches the job labels against enabled Runner Specs.
 3. runnerd creates a Qiniu Sandbox instance and registers a self-hosted runner inside it.
 4. GitHub Actions dispatches the job to the runner; the job executes in the sandbox.
 5. When the job completes (or times out), runnerd removes the runner registration and stops the sandbox.
@@ -231,7 +231,12 @@ The built-in web UI provides:
 | --- | --- |
 | `/admin/` | Dashboard with diagnostics, metrics, and recent failures |
 | `/admin/accounts` | Account management — list, search, and change roles |
+| `/admin/runner_requests` | Runner request history, retry/stop controls, and persisted logs |
+| `/admin/runner_specs` | Managed and custom global Runner Spec administration |
 | `/admin/sandbox_service` | Sandbox service configuration |
+| `/admin/match` | Label-match preview against the current enabled Runner Specs |
+| `/admin/audit` | Audit event history |
+| `/admin/diagnostics` | Redacted runtime summary, recent failures, pprof discovery, and expvar |
 
 `/` is always the public Qiniu CI Runner product landing page. `/docs` and its fixed guide routes are public, same-origin, and available in English and Simplified Chinese. The ordinary-user Jobs homepage is `/jobs`; other protected routes include `/repositories`, PR job groups (`/github/pulls/{owner}/{repo}/{number}/jobs`), and account settings (`/account/preferences`, `/account/sandbox-templates`, `/account/sandbox-instances`), with matching `/organizations/{login}/...` routes. Opening a protected route without a session shows a focused GitHub sign-in page and returns to the original URL after OAuth.
 

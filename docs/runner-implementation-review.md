@@ -2,7 +2,7 @@
 
 [Chinese](zh/runner-implementation-review.md)
 
-Date: 2026-07-16
+Originally reviewed: 2026-07-16. Baseline refreshed: 2026-08-28.
 
 Scope:
 
@@ -20,12 +20,12 @@ The remaining work is no longer a basic architecture catch-up. The next decision
 - Configuration is loaded from `runnerd.yaml` by default, or from `--config`. Relative sqlite database paths and GitHub App private-key paths resolve from the config file directory.
 - The config schema covers server, database, OAuth session auth, Sandbox lifecycle timeouts, GitHub webhook/auth/OAuth, allowed repositories, and worker retry/lease/concurrency behavior. Sandbox service API URL and API key are database-backed scoped Preferences or the disabled-by-default admin fallback rather than file config.
 - Exactly one GitHub API auth mode is allowed: GitHub App, token, or basic auth. GitHub App mode supports optional static `installation_id`; when omitted, runnerd resolves installation access per job repository and caches transports.
-- Runner requests, events, specs, groups, policies, retry metadata, leases, and audit events are stored in the configured database backend.
+- Runner requests, events, Runner Specs, retry metadata, leases, accounts, GitHub installations, scoped preferences/secrets, and audit events are stored in the configured database backend. Internal Runner Group and Repository Policy models were removed in Release C; legacy tables remain untouched only for rollback.
 - State schema creation runs through GORM `AutoMigrate` after a narrow compatibility pass for older columns, obsolete OAuth constraints, and incompatible legacy scope tables. GORM foreign-key creation is intentionally disabled. Legacy account preference/secret tables without scope columns are intentionally reset, so Sandbox settings/API keys require reconfiguration and affected users require GitHub reauthentication before installation sync.
 - Worker processing uses DB claim/lease semantics and retry scheduling instead of only in-memory queue ownership.
 - Transient Qiniu sandbox, GitHub, rate-limit, timeout, and temporary network failures are classified for retry or queue deferral. Deterministic auth/config/template failures fail immediately.
-- Admin routes expose the account list and audited role controls at `/admin/accounts` and `/admin/api/accounts`, runner request management, retry/stop/log access, runner specs, runner groups, repository policies, match tests, audit events, and diagnostics. Account administration is role-only; self-role changes and changes that could leave no administrator are rejected.
-- Ordinary-user routes expose the PR/job dashboard at `/`, stable GitHub-context job-group routes such as `/github/pulls/{owner}/{repo}/{number}/jobs`, and unified repository/Sandbox readiness at `/repositories`. `/account/repositories` and `/organizations/{login}/repositories` remain scoped compatibility links to that page. Sandbox Service, Templates, and Instances remain available under account or organization settings routes.
+- Admin routes expose the account list and audited role controls at `/admin/accounts` and `/admin/api/accounts`, runner request management, retry/stop/log access, Runner Specs, the platform Sandbox fallback, match tests, audit events, and diagnostics. Account administration is role-only; self-role changes and changes that could leave no administrator are rejected. Retired Group/Policy and catalog-readiness APIs return 404.
+- `/` is the public landing page and `/jobs` is the protected ordinary-user Jobs dashboard. Stable GitHub-context job-group routes include `/github/pulls/{owner}/{repo}/{number}/jobs`; unified repository/Sandbox readiness is at `/repositories`. `/account/repositories` and `/organizations/{login}/repositories` remain scoped compatibility links to that page. Sandbox Service, Templates, and Instances remain available under account or manageable-organization settings routes.
 - The admin console exposes `/admin/sandbox_service` and role-gated `/admin/api/sandbox-service-default` endpoints for the global fallback, including all/selected repository-owner audience controls; provider catalogs remain ordinary-user resources.
 - Authenticated catalog APIs expose region-filtered templates and region/template-filtered runner instances through `/user/sandbox/templates` and `/user/sandbox/instances`. They resolve encrypted credentials from the selected account or installation scope and do not expose provider secrets.
 - The React UI in `ui/` is embedded for production from `internal/server/ui/*`; development builds proxy UI assets to Vite through `internal/server/ui_assets_development.go`.

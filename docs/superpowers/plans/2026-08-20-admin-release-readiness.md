@@ -1,5 +1,7 @@
 # Admin Release Readiness Implementation Plan
 
+> **Lifecycle:** Historical plan, completed in `984bbdd`. Its Release A readiness endpoint and UI were intentionally temporary and were removed by Release C. The checklist below is not active work; see [`README.md`](README.md) and the repository `TODO.md` for current status.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build an admin-only Release A observation surface that survives runnerd restarts, replays legacy versus enabled-Spec matching over persisted production requests, and proves per-Spec registration, completion, and cleanup evidence before Release B.

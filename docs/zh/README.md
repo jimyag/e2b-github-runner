@@ -11,7 +11,8 @@
 - [公共 Runner 模板](default-runner-templates.md)：qshell 环境要求、双区域构建与发布顺序、Sandbox smoke 证据、维护责任和回滚流程。
 - [Runner 架构对比](runner-architecture-comparison.md)：当前 runnerd 架构基线、Mermaid 系统/生命周期/状态图、DB-backed state model，以及和 Fireactions、Actions Runner Controller 的对比。
 - [Runnerd 实现评审](runner-implementation-review.md)：当前实现状态、schema migration notes，以及剩余产品/运维决策。
-- [Runner Spec 模板校验实施计划（英文）](../superpowers/plans/2026-08-26-template-validation.md)：Issue #44.
+- [用户作用域 Runner 配置](../user-scoped-runner-configuration.md)：尚未实现的活跃交接方案，覆盖个人账户与 Organization 作用域 Runner 管理的需求、架构、执行、测试、验收、回滚与结果记录约定。
+- [实施计划归档（英文）](../superpowers/plans/README.md)：保留已完成或已退役方案的设计依据；其中未勾选的历史 checklist 不代表当前待办。
 
 根目录 `README.zh.md` 是中文 operator quick start。`TODO.md` 记录仍待决策的事项，不应重复已经在这些文档中描述的已完成行为。
 

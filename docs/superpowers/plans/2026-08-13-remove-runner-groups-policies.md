@@ -1,5 +1,7 @@
 # Remove Runner Groups and Runner Policies Implementation Plan
 
+> **Lifecycle:** Historical rollout plan. Release A/B/C completed through `f877cde`; only the separately authorized physical cleanup of preserved legacy tables remains, and that decision is tracked in the repository `TODO.md`. The checklist below is not an active backlog; see [`README.md`](README.md) for the archive index.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Remove the internal Runner Group and Runner Policy product models without requiring any existing GitHub Actions workflow change and without interrupting queued, running, retrying, or future runner requests.

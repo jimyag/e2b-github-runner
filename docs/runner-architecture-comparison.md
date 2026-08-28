@@ -12,7 +12,7 @@ Implemented pieces:
 
 - File-first runtime config loaded from `runnerd.yaml` by default, or from `--config`.
 - SQLite, Postgres, and MySQL state backends through `database.backend` and `database.dsn`.
-- DB-backed runner requests, runner events/logs, runner specs, runner groups, repository policies, local accounts, linked OAuth identities, account preferences/secrets, and audit events.
+- DB-backed runner requests, runner events/logs, Runner Specs, local accounts, linked OAuth identities, GitHub installations, account preferences/secrets, and audit events. Retired Runner Group/Policy tables may remain only in upgraded databases for rollback and are not part of the active model.
 - Account and GitHub installation scoped Preferences for Sandbox service settings, with API keys stored as encrypted account secrets.
 - An admin-managed, disabled-by-default Sandbox service fallback stored independently from account preferences.
 - Schema creation is driven by GORM tags in the state record structs, with a narrow legacy compatibility pass followed by `AutoMigrate`; GORM foreign-key creation is intentionally disabled.
@@ -21,14 +21,14 @@ Implemented pieces:
 - GitHub App auth with optional dynamic installation resolution, plus token and basic auth compatibility modes.
 - GitHub App OAuth sign-in for ordinary users and administrators, with local roles and signed HttpOnly sessions.
 - Ordinary-user UI for PR/job views, a unified repository access and effective Sandbox service readiness page, account or organization scoped Sandbox service settings, and scoped Sandbox template and runner-instance catalogs.
-- Admin API and UI for the account list and audited role controls, runner requests, specs, groups, policies, the global Sandbox service fallback, retry/stop actions, match tests, audit history, and diagnostics.
+- Admin API and UI for the account list and audited role controls, runner requests, Runner Specs, the global Sandbox service fallback, retry/stop actions, match tests, audit history, and diagnostics.
 - Production UI assets built from `ui/` into `internal/server/ui/`; development assets are proxied to Vite.
 - Diagnostics through `github.com/jimmicro/pprof`, `/diagnostics/pprof`, `/diagnostics/vars`, and expvar metrics.
 
 Known boundaries:
 
 - GitHub Enterprise Server is rejected by config validation; only `https://api.github.com` is supported.
-- Runner specs, runner groups, and repository policies are managed through the admin API/UI, not through `runnerd.yaml`.
+- Runner Specs are managed through the admin API/UI, not through `runnerd.yaml`. Internal Runner Groups and Repository Policies are retired; the optional `runner_group` field remains only as the GitHub Organization Runner Group registration target.
 - Token and basic auth still exist as compatibility modes. Product policy has not decided whether to keep them for production.
 - Multi-instance behavior should not be advertised until two runnerd processes have been verified against the same database.
 - Sandbox provider catalogs are ordinary-user resources, not admin configuration. `GET /user/sandbox/templates` and `GET /user/sandbox/instances` resolve scoped credentials and then the enabled admin fallback, accept only supported region ids, and keep secrets server-side.
@@ -87,7 +87,7 @@ flowchart TB
 
 ### Runner Request Lifecycle
 
-Admission and capacity are separate steps. Webhooks admit a request only after repository and label/spec policy checks pass. Capacity is checked later by the worker when it claims a queued request, so over-capacity work remains queued instead of being rejected.
+Admission and capacity are separate steps. Webhooks admit a request only after the repository allowlist and enabled Runner Spec label checks pass. Capacity is checked later by the worker when it claims a queued request, so over-capacity work remains queued instead of being rejected.
 
 ```mermaid
 sequenceDiagram
@@ -132,10 +132,7 @@ The configured database is the durable source for runner requests and control-pl
 ```mermaid
 erDiagram
   RUNNER_REQUESTS ||--o{ RUNNER_EVENTS : records
-  RUNNER_PROFILES ||--o{ RUNNER_GROUP_SPECS : member
-  RUNNER_GROUPS ||--o{ RUNNER_GROUP_SPECS : contains
-  RUNNER_PROFILES ||--o{ REPOSITORY_POLICIES : grants
-  RUNNER_GROUPS ||--o{ REPOSITORY_POLICIES : grants
+  RUNNER_PROFILES o|--o{ RUNNER_REQUESTS : selected_by
   ACCOUNTS ||--o{ OAUTH_IDENTITIES : links
   ACCOUNTS ||--o{ GITHUB_INSTALLATIONS : owns
   ACCOUNTS ||--o{ AUDIT_EVENTS : acts
@@ -175,6 +172,8 @@ erDiagram
     string key_type
   }
 ```
+
+The diagram shows the active model. Upgraded databases may still contain the legacy `runner_groups`, `runner_group_specs`, and `repository_policies` tables, but current code neither migrates nor reads them; physical cleanup remains a separately authorized maintenance decision.
 
 ### Request State Machine
 

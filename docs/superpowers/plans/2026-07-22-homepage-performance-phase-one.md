@@ -1,5 +1,7 @@
 # Homepage Performance Phase One Implementation Plan
 
+> **Lifecycle:** Historical plan, completed in `fcb16e3` (`perf(homepage): reduce route loading contention (#39)`). The checklist below records the original execution sequence and is not active work; see [`README.md`](README.md) and the repository `TODO.md` for current status.
+
 > **For Codex:** Execute this plan in order with test-driven development and verify the local development stack before completion.
 
 **Goal:** Remove avoidable homepage request contention without changing the database schema or migrating business data.

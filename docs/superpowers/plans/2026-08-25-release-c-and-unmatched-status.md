@@ -1,5 +1,7 @@
 # Release C And Unmatched Request Status Implementation Plan
 
+> **Lifecycle:** Historical plan, completed in `f877cde` (`refactor(runner): complete Release C cleanup (#83)`). The checklist below records the original execution sequence and is not active work; see [`README.md`](README.md) and the repository `TODO.md` for current status.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Remove the retired internal Runner Group/Repository Policy code and Release A/B migration surfaces without changing Runner admission semantics or old-database rollback safety, and present admission rejections caused by `profile_labels_not_matched` as neutral unmatched requests in Admin Runner Requests.
