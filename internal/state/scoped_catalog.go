@@ -105,6 +105,30 @@ func (s *DBStore) UpsertProfileControlIfUnchanged(control RunnerProfileControl, 
 	var result *gorm.DB
 	if expectedUpdatedAt != nil {
 		result = db.Model(&runnerProfileScopeControlRecord{}).Where("scope_type = ? AND scope_id = ? AND profile_name = ? AND updated_at = ?", scope.Type, scope.ID, control.ProfileName, *expectedUpdatedAt).Updates(updates)
+		if result.Error == nil && result.RowsAffected == 0 {
+			var existing runnerProfileScopeControlRecord
+			existingErr := db.Where("scope_type = ? AND scope_id = ? AND profile_name = ?", scope.Type, scope.ID, control.ProfileName).First(&existing).Error
+			switch {
+			case existingErr == nil:
+				return RunnerProfileControl{}, ErrConflict
+			case !errors.Is(existingErr, gorm.ErrRecordNotFound):
+				return RunnerProfileControl{}, existingErr
+			}
+			var currentGlobal runnerProfileRecord
+			if err := db.Where("name = ? AND updated_at = ?", control.ProfileName, *expectedUpdatedAt).First(&currentGlobal).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return RunnerProfileControl{}, ErrConflict
+				}
+				return RunnerProfileControl{}, err
+			}
+			result = db.Create(&record)
+			if result.Error != nil {
+				if translator, ok := db.Dialector.(gorm.ErrorTranslator); ok && errors.Is(translator.Translate(result.Error), gorm.ErrDuplicatedKey) {
+					return RunnerProfileControl{}, ErrConflict
+				}
+				return RunnerProfileControl{}, result.Error
+			}
+		}
 	} else {
 		result = db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "scope_type"}, {Name: "scope_id"}, {Name: "profile_name"}}, DoUpdates: clause.Assignments(updates)}).Create(&record)
 	}
@@ -220,7 +244,20 @@ func (s *DBStore) UpsertScopedProfileIfUnchanged(profile ScopedRunnerProfile, ex
 	if expectedUpdatedAt != nil {
 		result = db.Model(&scopedRunnerProfileRecord{}).Where("scope_type = ? AND scope_id = ? AND name = ? AND updated_at = ?", scope.Type, scope.ID, profile.Name, *expectedUpdatedAt).Updates(updates)
 	} else {
-		result = db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "scope_type"}, {Name: "scope_id"}, {Name: "name"}}, DoUpdates: clause.Assignments(updates)}).Create(&record)
+		result = db.Create(&record)
+		if result.Error != nil {
+			if translator, ok := db.Dialector.(gorm.ErrorTranslator); ok && errors.Is(translator.Translate(result.Error), gorm.ErrDuplicatedKey) {
+				var existing scopedRunnerProfileRecord
+				existingErr := db.Where("scope_type = ? AND scope_id = ? AND name = ?", scope.Type, scope.ID, profile.Name).First(&existing).Error
+				if existingErr == nil {
+					return ScopedRunnerProfile{}, ErrConflict
+				}
+				if !errors.Is(existingErr, gorm.ErrRecordNotFound) {
+					return ScopedRunnerProfile{}, existingErr
+				}
+				return ScopedRunnerProfile{}, ErrRunnerProfileLabelsConflict
+			}
+		}
 	}
 	if result.Error != nil {
 		return ScopedRunnerProfile{}, result.Error

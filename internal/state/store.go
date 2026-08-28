@@ -27,6 +27,7 @@ var (
 	ErrSandboxServiceDefaultAPIKeyRequired = errors.New("sandbox service default api key is required")
 	ErrAuditEventPersistence               = errors.New("audit event persistence failed")
 	ErrRunnerProfileNameConflict           = errors.New("runner profile name conflicts with enabled global profile")
+	ErrRunnerProfileLabelsConflict         = errors.New("runner profile labels conflict")
 )
 
 type RunnerRequest struct {
@@ -160,17 +161,17 @@ type ScopedRunnerProfile struct {
 }
 
 type EffectiveRunnerProfile struct {
-	Source               string        `json:"source"`
-	ScopeType            string        `json:"scope_type,omitempty"`
-	ScopeID              int64         `json:"scope_id,omitempty"`
-	Profile              RunnerProfile `json:"-"`
-	WorkflowLabels       []string      `json:"workflow_labels"`
-	GlobalMaxConcurrency int           `json:"global_max_concurrency"`
-	ScopeMaxConcurrency  int           `json:"scope_max_concurrency"`
-	EffectiveEnabled     bool          `json:"enabled"`
-	OverridesGlobal      bool          `json:"overrides_global"`
-	Editable             bool          `json:"editable"`
-	ScopeControlConfigured bool        `json:"scope_control_configured"`
+	Source                 string        `json:"source"`
+	ScopeType              string        `json:"scope_type,omitempty"`
+	ScopeID                int64         `json:"scope_id,omitempty"`
+	Profile                RunnerProfile `json:"-"`
+	WorkflowLabels         []string      `json:"workflow_labels"`
+	GlobalMaxConcurrency   int           `json:"global_max_concurrency"`
+	ScopeMaxConcurrency    int           `json:"scope_max_concurrency"`
+	EffectiveEnabled       bool          `json:"enabled"`
+	OverridesGlobal        bool          `json:"overrides_global"`
+	Editable               bool          `json:"editable"`
+	ScopeControlConfigured bool          `json:"scope_control_configured"`
 }
 
 type AuditEvent struct {

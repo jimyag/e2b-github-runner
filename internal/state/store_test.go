@@ -3612,6 +3612,23 @@ func TestScopedRunnerProfilesAreIsolatedByScope(t *testing.T) {
 	}
 }
 
+func TestScopedRunnerProfileConditionalCreateRejectsExistingName(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	profile := ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "custom", WorkflowLabels: []string{"qiniu", "linux"}, TemplateID: "template-a", Enabled: true}
+	if _, err := store.UpsertScopedProfileIfUnchanged(profile, nil); err != nil {
+		t.Fatal(err)
+	}
+	profile.TemplateID = "template-b"
+	if _, err := store.UpsertScopedProfileIfUnchanged(profile, nil); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate scoped create = %v, want ErrConflict", err)
+	}
+	saved, err := store.GetScopedProfile(scope, profile.Name)
+	if err != nil || saved.TemplateID != "template-a" {
+		t.Fatalf("duplicate create overwrote scoped profile = %#v, err=%v", saved, err)
+	}
+}
+
 func TestScopedRunnerProfileRejectsDuplicateNormalizedLabels(t *testing.T) {
 	store := New(t.TempDir()).(*DBStore)
 	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
@@ -3622,8 +3639,8 @@ func TestScopedRunnerProfileRejectsDuplicateNormalizedLabels(t *testing.T) {
 	duplicate := base
 	duplicate.Name = "two"
 	duplicate.WorkflowLabels = []string{" qiniu ", "linux", "qiniu"}
-	if _, err := store.UpsertScopedProfileIfUnchanged(duplicate, nil); err == nil {
-		t.Fatal("expected duplicate normalized labels to fail")
+	if _, err := store.UpsertScopedProfileIfUnchanged(duplicate, nil); !errors.Is(err, ErrRunnerProfileLabelsConflict) {
+		t.Fatalf("duplicate normalized labels = %v, want ErrRunnerProfileLabelsConflict", err)
 	}
 }
 
@@ -3659,6 +3676,23 @@ func TestManagedProfileControlCannotEnableGloballyDisabledProfile(t *testing.T) 
 	}
 	if !item.ScopeControlConfigured {
 		t.Fatal("effective profile should report configured scope control")
+	}
+}
+
+func TestProfileControlConditionalCreateUsesGlobalRevisionWhenScopeRowIsMissing(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	global, err := store.UpsertProfile(RunnerProfile{Name: "managed", Labels: []string{"qiniu"}, RequiredLabels: []string{"qiniu"}, TemplateID: "template", ManagedBy: "runnerd", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	control := RunnerProfileControl{ScopeType: scope.Type, ScopeID: scope.ID, ProfileName: global.Name, Enabled: false, MaxConcurrency: 2}
+	if _, err := store.UpsertProfileControlIfUnchanged(control, &global.UpdatedAt); err != nil {
+		t.Fatalf("first conditional scope control save = %v", err)
+	}
+	saved, err := store.GetProfileControl(scope, global.Name)
+	if err != nil || saved.Enabled || saved.MaxConcurrency != 2 {
+		t.Fatalf("saved scope control = %#v, err=%v", saved, err)
 	}
 }
 

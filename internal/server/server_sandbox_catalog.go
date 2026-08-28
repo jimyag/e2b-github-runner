@@ -29,6 +29,17 @@ func supportedSandboxRegionEndpoint(rawURL string) (string, bool) {
 	return "", false
 }
 
+func sandboxRegionForAPIURL(rawURL string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	for _, region := range []string{"cn-yangzhou-1", "us-south-1"} {
+		endpoint, _ := sandboxRegionEndpoint(region)
+		if normalized == endpoint {
+			return region
+		}
+	}
+	return ""
+}
+
 func (s *Server) sandboxCatalogForUser(w http.ResponseWriter, r *http.Request) (sandboxrunner.Catalog, bool) {
 	_, account, ok := s.requireUserSession(w, r)
 	if !ok {

@@ -8159,6 +8159,38 @@ func TestUserPatchRunnerSpecRejectsLabelChangeWhileActive(t *testing.T) {
 	}
 }
 
+func TestProfileAtCapacityUsesGlobalCountAcrossScopes(t *testing.T) {
+	store := state.New(t.TempDir())
+	profile, err := store.UpsertProfile(state.RunnerProfile{Name: "managed-capacity", Labels: []string{"qiniu"}, RequiredLabels: []string{"qiniu"}, TemplateID: "template", ManagedBy: "runnerd", Enabled: true, MaxConcurrency: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []state.RunnerRequest{
+		{ID: "scope-a", ProfileName: profile.Name, ProfileSource: "global", ProfileScopeType: state.RunnerProfileScopeAccount, ProfileScopeID: 1, Labels: []string{"qiniu"}, RunnerName: "scope-a"},
+		{ID: "scope-b", ProfileName: profile.Name, ProfileSource: "global", ProfileScopeType: state.RunnerProfileScopeAccount, ProfileScopeID: 2, Labels: []string{"qiniu"}, RunnerName: "scope-b"},
+	} {
+		if _, _, err := store.CreateRequest(item, nil); err != nil {
+			t.Fatal(err)
+		}
+		current, err := store.ReadState(item.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current.Status = state.StatusRunning
+		if err := store.WriteState(current); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	limited, err := srv.profileAtCapacityFor(state.RunnerRequest{ProfileName: profile.Name, ProfileSource: "global", ProfileScopeType: state.RunnerProfileScopeAccount, ProfileScopeID: 3}, profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !limited {
+		t.Fatal("global profile capacity must include in-flight requests from other scopes")
+	}
+}
+
 func saveTestGitHubOAuthToken(t *testing.T, store state.Store, accountID int64, encryptionKey, token string) {
 	t.Helper()
 	encryptedToken, err := encryptSecret(token, encryptionKey)

@@ -1465,25 +1465,44 @@ func (s *Server) profileAtCapacityFor(req state.RunnerRequest, profile state.Run
 	if source == "" {
 		source = "global"
 	}
-	var inFlight int
-	var err error
-	if req.ProfileScopeType != "" && req.ProfileScopeID > 0 {
-		inFlight, err = s.store.InFlightCountForProfileScope(source, state.RunnerProfileScope{Type: req.ProfileScopeType, ID: req.ProfileScopeID}, req.ProfileName)
-	} else {
-		inFlight, err = s.store.InFlightCountForProfile(req.ProfileName)
-	}
-	if err != nil {
-		return false, err
-	}
-	if profile.MaxConcurrency > 0 && inFlight >= profile.MaxConcurrency {
-		return true, nil
-	}
-	if req.ProfileScopeType != "" && req.ProfileScopeID > 0 && source == "global" {
+	if source == "global" {
+		inFlight, err := s.store.InFlightCountForProfile(req.ProfileName)
+		if err != nil {
+			return false, err
+		}
+		if profile.MaxConcurrency > 0 && inFlight >= profile.MaxConcurrency {
+			return true, nil
+		}
+		if req.ProfileScopeType == "" || req.ProfileScopeID <= 0 {
+			return false, nil
+		}
 		item, err := s.store.GetEffectiveProfile(state.RunnerProfileScope{Type: req.ProfileScopeType, ID: req.ProfileScopeID}, "global", req.ProfileName)
 		if err != nil {
 			return false, err
 		}
-		if item.ScopeMaxConcurrency > 0 && inFlight >= item.ScopeMaxConcurrency {
+		scopeInFlight, err := s.store.InFlightCountForProfileScope(source, state.RunnerProfileScope{Type: req.ProfileScopeType, ID: req.ProfileScopeID}, req.ProfileName)
+		if err != nil {
+			return false, err
+		}
+		if item.ScopeMaxConcurrency > 0 && scopeInFlight >= item.ScopeMaxConcurrency {
+			return true, nil
+		}
+		return false, nil
+	}
+	if req.ProfileScopeType != "" && req.ProfileScopeID > 0 {
+		inFlight, err := s.store.InFlightCountForProfileScope(source, state.RunnerProfileScope{Type: req.ProfileScopeType, ID: req.ProfileScopeID}, req.ProfileName)
+		if err != nil {
+			return false, err
+		}
+		if profile.MaxConcurrency > 0 && inFlight >= profile.MaxConcurrency {
+			return true, nil
+		}
+	} else if profile.MaxConcurrency > 0 {
+		inFlight, err := s.store.InFlightCountForProfile(req.ProfileName)
+		if err != nil {
+			return false, err
+		}
+		if inFlight >= profile.MaxConcurrency {
 			return true, nil
 		}
 	}

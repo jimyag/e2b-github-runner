@@ -34,6 +34,7 @@ type userRunnerSpecListResponse struct {
 	ScopeType     string                   `json:"scope_type"`
 	ScopeID       int64                    `json:"scope_id"`
 	SandboxSource string                   `json:"sandbox_source"`
+	SandboxRegion string                   `json:"sandbox_region,omitempty"`
 	Items         []userRunnerSpecResponse `json:"items"`
 }
 
@@ -95,10 +96,12 @@ func (s *Server) handleUserListRunnerSpecs(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	sandboxSource := "none"
+	sandboxRegion := ""
 	if _, snapshot, err := s.sandboxServiceForScope(prefScope); err == nil {
 		sandboxSource = snapshot.Source
+		sandboxRegion = sandboxRegionForAPIURL(snapshot.APIURL)
 	}
-	response := userRunnerSpecListResponse{ScopeType: scope.Type, ScopeID: scope.ID, SandboxSource: sandboxSource, Items: make([]userRunnerSpecResponse, 0, len(items))}
+	response := userRunnerSpecListResponse{ScopeType: scope.Type, ScopeID: scope.ID, SandboxSource: sandboxSource, SandboxRegion: sandboxRegion, Items: make([]userRunnerSpecResponse, 0, len(items))}
 	for _, item := range items {
 		max := effectiveRunnerConcurrencyLimit(item.GlobalMaxConcurrency, item.ScopeMaxConcurrency)
 		response.Items = append(response.Items, userRunnerSpecResponse{Name: item.Profile.Name, Source: item.Source, WorkflowLabels: append([]string(nil), item.WorkflowLabels...), TemplateID: item.Profile.TemplateID, DefaultTemplateName: item.Profile.DefaultTemplateName, Enabled: item.EffectiveEnabled, GlobalMaxConcurrency: item.GlobalMaxConcurrency, ScopeMaxConcurrency: item.ScopeMaxConcurrency, EffectiveMaxConcurrency: max, OverridesGlobal: item.OverridesGlobal, Editable: item.Editable, ScopeControlConfigured: item.ScopeControlConfigured, UpdatedAt: item.Profile.UpdatedAt.UTC().Format(time.RFC3339Nano)})
@@ -210,8 +213,12 @@ func (s *Server) handleUserCreateRunnerSpec(w http.ResponseWriter, r *http.Reque
 			writeErrorCode(w, http.StatusConflict, "runner_spec_name_conflict", "runner type name conflicts with an enabled platform type")
 			return
 		}
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+		if errors.Is(err, state.ErrRunnerProfileLabelsConflict) {
 			writeErrorCode(w, http.StatusConflict, "runner_spec_labels_conflict", "a runner type with these labels already exists")
+			return
+		}
+		if errors.Is(err, state.ErrConflict) {
+			writeErrorCode(w, http.StatusConflict, "runner_spec_name_conflict", "a runner type with this name already exists")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, err.Error())
