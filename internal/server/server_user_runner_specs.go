@@ -254,6 +254,17 @@ func (s *Server) handleUserPatchRunnerSpec(w http.ResponseWriter, r *http.Reques
 		labelsChanged = !sameStringSlice(labels, current.WorkflowLabels)
 		current.WorkflowLabels = labels
 	}
+	if labelsChanged || templateChanged {
+		count, countErr := s.store.ActiveCountForProfileScope("scoped_custom", scope, name)
+		if countErr != nil {
+			writeError(w, http.StatusInternalServerError, countErr.Error())
+			return
+		}
+		if count > 0 {
+			writeErrorCode(w, http.StatusConflict, "runner_spec_in_use", "runner type cannot change while active requests use it")
+			return
+		}
+	}
 	if templateChanged {
 		if err := s.validateScopedProfileTemplate(r.Context(), prefScope, *input.TemplateID); err != nil {
 			s.writeScopedTemplateValidationError(w, err)
@@ -277,17 +288,6 @@ func (s *Server) handleUserPatchRunnerSpec(w http.ResponseWriter, r *http.Reques
 	}
 	if input.Enabled != nil {
 		current.Enabled = *input.Enabled
-	}
-	if labelsChanged || templateChanged {
-		count, countErr := s.store.ActiveCountForProfileScope("scoped_custom", scope, name)
-		if countErr != nil {
-			writeError(w, http.StatusInternalServerError, countErr.Error())
-			return
-		}
-		if count > 0 {
-			writeErrorCode(w, http.StatusConflict, "runner_spec_in_use", "runner type cannot change while active requests use it")
-			return
-		}
 	}
 	err = s.applyMutationWithAudit("github:"+session.Subject, "user_runner_spec.update", "scoped_runner_profile", fmt.Sprintf("%s:%d:%s", scope.Type, scope.ID, name), map[string]any{"template_id_changed": templateChanged, "workflow_labels_changed": labelsChanged}, func(tx state.Store) error {
 		_, err := tx.UpsertScopedProfileIfUnchanged(current, &expected)
