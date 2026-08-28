@@ -16,7 +16,7 @@
 
 **Base branch and commit:** `main` at `b36f054064ba03ef6d51fe1d2a6ebbefed5ea94b`（`perf(state): stop storing webhook payloads (#88)`）。
 
-**Implementation status:** 尚未开始。本分支只交付实施方案和交接上下文，不包含功能实现、运行时迁移、线上变更或部署结果。
+**Implementation status:** 本地实现已完成，按阶段提交了 State、匹配与生命周期、User API、Runner Types UI 和文档；真实 Provider/GitHub E2E、跨方言数据库、降级门禁和部署仍未执行。
 
 ## Global Constraints
 
@@ -1162,10 +1162,10 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 | 文件级计划 | 完成 | Tasks 1–8 均给出文件、接口、测试、命令和提交边界 |
 | 测试矩阵 | 完成 | 覆盖 State、三种数据库、Server、UI、Browser 和真实 E2E |
 | 验收标准 | 完成 | 已列出 P0 发布阻塞标准和 P1 产品质量标准 |
-| 功能实现 | 未执行 | 本分支是方案分支，没有修改运行时代码 |
-| 数据库迁移 | 未执行 | 没有启动迁移，也没有接触生产导出 |
-| 自动化测试 | 未执行 | 方案编写阶段未声称代码测试通过 |
-| 浏览器／线上验收 | 未执行 | 没有修改、部署或验证生产环境 |
+| 功能实现 | 本地完成 | Tasks 1–7 已实现并按阶段提交；真实 Provider、GitHub/Sandbox E2E 和部署仍待补齐 |
+| 数据库迁移 | 本地通过 | Fresh SQLite、旧请求表增量迁移和重复迁移测试通过；未接触生产导出 |
+| 自动化测试 | 本地通过 | `go test ./... -count=1`、`task test`、`bun run test`、`task ui-i18n-check`、`task ui-lint` 均通过 |
+| 浏览器／线上验收 | 本地 Bundle 通过 | `task ui-production-smoke` 4/4 通过；未部署线上或运行真实 GitHub/Sandbox E2E |
 
 ### 9.2 实现完成后必须回填的结果
 
@@ -1173,23 +1173,23 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 
 | 检查 | 当前结果 | 最终必须记录 |
 | --- | --- | --- |
-| Tests-first Red | 未执行 | 失败测试名称和预期失败原因 |
-| `go test ./internal/state -count=1` | 未执行 | 日期、退出码、关键测试 |
-| `go test ./... -count=1` | 未执行 | 日期、退出码、失败／跳过包 |
+| Tests-first Red | 已执行 | Schema 测试先因缺失新表/列失败，随后实现后通过 |
+| `go test ./internal/state -count=1` | 通过 | 2026-08-28，exit 0 |
+| `go test ./... -count=1` | 通过 | 2026-08-28，exit 0；SQL backend 用例按环境跳过 |
 | PostgreSQL SQLBackends | 未执行 | 版本、专用 DB、结果 |
 | MySQL SQLBackends | 未执行 | 版本、`clientFoundRows`、结果 |
 | Production SQLite Snapshot | 未执行 | 导出日期、升级前后计数、结果 |
 | SQLite Down-version Gate | 未执行 | 基线 SHA、当前／旧二进制版本、前后计数、`/healthz` 结果 |
-| `cd ui && bun run test` | 未执行 | 测试数量、结果 |
-| `task ui-i18n-check` | 未执行 | 结果 |
-| `task ui-lint` | 未执行 | ESLint、TypeScript、Build 结果 |
-| `task test` | 未执行 | Bun 数量、Go Race/Coverage 结果 |
-| `task ui-production-smoke` | 未执行 | 浏览器用例数量、Console/Network 结果 |
+| `cd ui && bun run test` | 通过 | 180 pass, 0 fail |
+| `task ui-i18n-check` | 通过 | locale/source check 和 TypeScript 通过 |
+| `task ui-lint` | 通过 | ESLint、TypeScript、Vite build 通过；保留既有 chunk warning |
+| `task test` | 通过 | Bun 177 pass；Go race/coverage exit 0 |
+| `task ui-production-smoke` | 通过 | Chromium 4/4；无浏览器错误 |
 | Account 真实 E2E | 未执行 | Workflow Run、Spec、清理证据 |
 | Organization 真实 E2E | 未执行 | Workflow Run、隔离、清理证据 |
 | 部署 Canary | 未执行 | Origin、时间、版本、结果 |
-| 最终 Diff Review | 未执行 | 无 Secret、无生成文件手改、无无关变更 |
-| `git diff --check` | 未执行 | 退出码 |
+| 最终 Diff Review | 待最终提交后确认 | 当前仅保留本阶段文档回填修改；分阶段 commit，无本地 Secret 或手改生成 UI |
+| `git diff --check` | 通过 | exit 0 |
 
 ## 10. 风险、回滚和未知项
 
@@ -1232,7 +1232,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 | --- | --- |
 | `AGENTS.md` | 当前产品、权限、迁移和验证硬边界 |
 | 本计划 | 需求、设计、任务顺序、验收和结果记录 |
-| `TODO.md` | 当前明确记录用户侧 Spec 尚未实现 |
+| `TODO.md` | 当前未决的仓库级覆盖与跨组织审批事项 |
 | `internal/state/records.go` | 当前全局 Profile 与请求物理 Schema |
 | `internal/state/catalog.go` | 当前全局 CRUD、托管协调和 Matcher |
 | `internal/state/db.go` | SQLite 窄迁移与 AutoMigrate 边界 |
@@ -1268,9 +1268,9 @@ go test ./internal/state -count=1
 
 ### 11.4 分支与交付状态
 
-- **Completed:** 需求、架构、执行步骤、测试矩阵、验收标准、风险和回滚方案已写入本文件。
-- **In progress:** 无运行时代码进行中。
-- **Not started:** Tasks 1–8 的实现、测试、真实 E2E、PR、合并和部署。
+- **Completed:** Tasks 1–7 的状态/API/UI/文档实现已按独立 commit 交付，本地自动化验证通过；新增 UI CRUD 和 API 回归修正也已独立提交。
+- **In progress:** Task 8 仅完成本地验证和结果回填；真实 Provider、GitHub/Sandbox E2E、跨方言 DB、降级门禁和部署 Canary 尚未执行。
+- **Not started:** 真实资源验收、外部测试仓库 PR（该仓库当前无 runnerd 测试入口）和部署。
 - **Out of scope:** Repository Policy、Min Idle、跨作用域复制、审批流和历史表清理。
 - **Do not overwrite:** 接收者必须保留自己工作树中与本功能无关的修改，按明确路径分批提交。
 - **Closeout condition:** P0 全部通过、P1 无阻塞缺陷、第 9.2 节填入真实结果、文档同步、真实资源清理、Review 和 CI 收敛。
