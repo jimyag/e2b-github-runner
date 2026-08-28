@@ -4,6 +4,7 @@ This file tracks active project work. Completed behavior should move into `READM
 
 ## Active Roadmap
 
+- Plan separately authorized cleanup of historical `runner_requests.github_payload_json` after verifying GitHub context and installation-ID backfills on a backup. New requests no longer store raw webhook bodies; existing payloads, the legacy column, and startup backfill remain. Historical request/log retention and repeated-log limits are still undecided.
 - If Runner Specs are exposed to ordinary users in the future, scope template validation to their own account/organization Sandbox credentials; do not reuse the admin save resolver. User-side Spec management is not implemented.
 - Decide whether GitHub token and basic auth remain supported compatibility modes or should be removed in favor of GitHub App-only operation.
 - Add an effective-config diagnostics view or config validation workflow if operators need to inspect runtime config from the UI.
