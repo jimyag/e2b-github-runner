@@ -4061,6 +4061,13 @@ func TestGitHubLinksFromPayloadBytesFallbacks(t *testing.T) {
 }
 
 func TestAppendPullRequestQueryMatchesActualQueryParameter(t *testing.T) {
+	baseURL := "https://github.com/qbox/las/actions/runs/1/job/2"
+	for _, prNumber := range []int64{0, -5} {
+		if got := appendPullRequestQuery(baseURL, prNumber); got != baseURL {
+			t.Fatalf("appendPullRequestQuery(%q, %d) = %q, want unchanged URL", baseURL, prNumber, got)
+		}
+	}
+
 	tests := []struct {
 		name   string
 		rawURL string

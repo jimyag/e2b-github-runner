@@ -266,7 +266,7 @@ func firstPullRequestNumber(pulls []githubPayloadPullRequest) int64 {
 }
 
 func appendPullRequestQuery(rawURL string, prNumber int64) string {
-	if rawURL == "" || prNumber == 0 {
+	if rawURL == "" || prNumber <= 0 {
 		return rawURL
 	}
 	if hasRawQueryParameter(rawURL, "pr") {
