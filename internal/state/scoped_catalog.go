@@ -294,7 +294,8 @@ func (s *DBStore) GetEffectiveProfile(scope RunnerProfileScope, source, name str
 		return EffectiveRunnerProfile{}, err
 	}
 	for _, item := range items {
-		if item.Source == source && item.Profile.Name == strings.TrimSpace(name) {
+		globalMatch := source == "global" && item.Source != "scoped_custom"
+		if (item.Source == source || globalMatch) && item.Profile.Name == strings.TrimSpace(name) {
 			return item, nil
 		}
 	}
