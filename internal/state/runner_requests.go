@@ -19,6 +19,7 @@ const maxRunnerRequestRepositoryAccessQueryParameters = 900
 
 // Startup migration backfills legacy payload context before list queries use
 // this projection; list reads intentionally never load raw webhook payloads.
+// Source and labels_json are omitted because recordToState does not read them.
 var runnerRequestListSelectColumns = []string{
 	"id",
 	"workflow_job_id",

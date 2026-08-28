@@ -4072,6 +4072,11 @@ func TestAppendPullRequestQueryMatchesActualQueryParameter(t *testing.T) {
 			want:   "https://github.com/qbox/las/actions/runs/1/job/2?pr=3335",
 		},
 		{
+			name:   "existing valueless pull request query",
+			rawURL: "https://github.com/qbox/las/actions/runs/1/job/2?pr",
+			want:   "https://github.com/qbox/las/actions/runs/1/job/2?pr",
+		},
+		{
 			name:   "path containing query-like text",
 			rawURL: "https://github.com/qbox/pr=/actions/runs/1/job/2",
 			want:   "https://github.com/qbox/pr=/actions/runs/1/job/2?pr=3335",

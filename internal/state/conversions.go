@@ -3,7 +3,6 @@ package state
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -270,8 +269,7 @@ func appendPullRequestQuery(rawURL string, prNumber int64) string {
 	if rawURL == "" || prNumber == 0 {
 		return rawURL
 	}
-	parsedURL, err := url.Parse(rawURL)
-	if err == nil && parsedURL.Query().Has("pr") {
+	if hasRawQueryParameter(rawURL, "pr") {
 		return rawURL
 	}
 	separator := "?"
@@ -279,6 +277,31 @@ func appendPullRequestQuery(rawURL string, prNumber int64) string {
 		separator = "&"
 	}
 	return fmt.Sprintf("%s%spr=%d", rawURL, separator, prNumber)
+}
+
+func hasRawQueryParameter(rawURL, name string) bool {
+	queryStart := strings.IndexByte(rawURL, '?')
+	fragmentStart := strings.IndexByte(rawURL, '#')
+	if queryStart < 0 || (fragmentStart >= 0 && fragmentStart < queryStart) {
+		return false
+	}
+	queryEnd := len(rawURL)
+	if fragmentStart >= 0 {
+		queryEnd = fragmentStart
+	}
+	rawQuery := rawURL[queryStart+1 : queryEnd]
+	for rawQuery != "" {
+		field, rest, found := strings.Cut(rawQuery, "&")
+		fieldName, _, _ := strings.Cut(field, "=")
+		if fieldName == name {
+			return true
+		}
+		if !found {
+			break
+		}
+		rawQuery = rest
+	}
+	return false
 }
 
 func recordToProfile(record runnerProfileRecord) (RunnerProfile, error) {
