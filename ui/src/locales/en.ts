@@ -480,6 +480,7 @@ export const en = {
     runnerTypesConfigureSandbox: "Configure Sandbox credentials for this scope first.",
     copyRunnerTypeYAML: "Copy runs-on YAML",
     resetRunnerTypeControl: "Restore platform default",
+    runsOn: "runs-on",
     accountPreferences: "Account preferences",
     accountPreferencesDescription: "Settings for the signed-in account.",
     templatesDescription: "Templates available to the signed-in account.",

@@ -72,7 +72,7 @@ export function UserRunnerTypesSection({ request, installationID }: { request: R
             <div key={`${item.source}:${item.name}`} className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-md border p-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2"><span className="font-medium">{item.name}</span><Badge variant={item.enabled ? "default" : "secondary"}>{item.enabled ? t("common.enabled") : t("common.disabled")}</Badge><Badge variant="outline">{item.source}</Badge></div>
-                <div className="mt-1 break-words font-mono text-xs text-muted-foreground">runs-on: [{item.workflow_labels.join(", ")}]</div>
+                <div className="mt-1 break-words font-mono text-xs text-muted-foreground">{t("user.runsOn")}: [{item.workflow_labels.join(", ")}]</div>
               </div>
               <div className="flex items-center gap-2">
                 <Button type="button" size="icon" variant="ghost" onClick={() => void copyYAML(item)} disabled={copying === item.name} title={t("user.copyRunnerTypeYAML")}><Copy className="h-4 w-4" /></Button>

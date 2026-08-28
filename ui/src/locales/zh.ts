@@ -480,6 +480,7 @@ export const zh = {
     runnerTypesConfigureSandbox: "请先为当前作用域配置 Sandbox 凭据。",
     copyRunnerTypeYAML: "复制 runs-on YAML",
     resetRunnerTypeControl: "恢复平台默认值",
+    runsOn: "runs-on",
     accountPreferences: "账号偏好",
     accountPreferencesDescription: "当前登录账号的设置。",
     templatesDescription: "当前登录账号可用的模板。",
