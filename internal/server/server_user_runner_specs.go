@@ -26,6 +26,7 @@ type userRunnerSpecResponse struct {
 	EffectiveMaxConcurrency int      `json:"effective_max_concurrency"`
 	OverridesGlobal         bool     `json:"overrides_global"`
 	Editable                bool     `json:"editable"`
+	ScopeControlConfigured  bool     `json:"scope_control_configured"`
 	UpdatedAt               string   `json:"updated_at"`
 }
 
@@ -100,7 +101,7 @@ func (s *Server) handleUserListRunnerSpecs(w http.ResponseWriter, r *http.Reques
 	response := userRunnerSpecListResponse{ScopeType: scope.Type, ScopeID: scope.ID, SandboxSource: sandboxSource, Items: make([]userRunnerSpecResponse, 0, len(items))}
 	for _, item := range items {
 		max := effectiveRunnerConcurrencyLimit(item.GlobalMaxConcurrency, item.ScopeMaxConcurrency)
-		response.Items = append(response.Items, userRunnerSpecResponse{Name: item.Profile.Name, Source: item.Source, WorkflowLabels: append([]string(nil), item.WorkflowLabels...), TemplateID: item.Profile.TemplateID, DefaultTemplateName: item.Profile.DefaultTemplateName, Enabled: item.EffectiveEnabled, GlobalMaxConcurrency: item.GlobalMaxConcurrency, ScopeMaxConcurrency: item.ScopeMaxConcurrency, EffectiveMaxConcurrency: max, OverridesGlobal: item.OverridesGlobal, Editable: item.Editable, UpdatedAt: item.Profile.UpdatedAt.UTC().Format(time.RFC3339Nano)})
+		response.Items = append(response.Items, userRunnerSpecResponse{Name: item.Profile.Name, Source: item.Source, WorkflowLabels: append([]string(nil), item.WorkflowLabels...), TemplateID: item.Profile.TemplateID, DefaultTemplateName: item.Profile.DefaultTemplateName, Enabled: item.EffectiveEnabled, GlobalMaxConcurrency: item.GlobalMaxConcurrency, ScopeMaxConcurrency: item.ScopeMaxConcurrency, EffectiveMaxConcurrency: max, OverridesGlobal: item.OverridesGlobal, Editable: item.Editable, ScopeControlConfigured: item.ScopeControlConfigured, UpdatedAt: item.Profile.UpdatedAt.UTC().Format(time.RFC3339Nano)})
 	}
 	writeJSON(w, http.StatusOK, response)
 }
