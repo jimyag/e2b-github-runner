@@ -51,6 +51,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { shouldShowSandboxSetupTask } from "@/user-onboarding"
 import { SandboxesSection, SandboxTemplatesSection } from "@/components/sandbox-catalog-sections"
+import { UserRunnerTypesSection } from "@/components/user-runner-types-section"
 import { sandboxRegions } from "@/components/sandbox-catalog-utils"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -76,7 +77,7 @@ type BuildGroup = {
 }
 
 type UserPage = "home" | "repositories" | "settings"
-type AccountSettingsTab = "repositories" | "preferences" | "sandbox-templates" | "sandbox-instances"
+type AccountSettingsTab = "repositories" | "preferences" | "sandbox-templates" | "sandbox-instances" | "runner-types"
 type AccountSettingsRoute = {
   accountLogin?: string
   tab: AccountSettingsTab
@@ -555,6 +556,12 @@ function AccountsPage({
                     {t("user.sandboxService")}
                   </TabsTrigger>
                   <TabsTrigger
+                    value="runner-types"
+                    className="ml-8 h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+                  >
+                    {t("user.runnerTypes")}
+                  </TabsTrigger>
+                  <TabsTrigger
                     value="sandbox-templates"
                     className="ml-8 h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
                   >
@@ -576,6 +583,9 @@ function AccountsPage({
                     onSave={(apiURL, apiKey, mode, replaceInheritedSource) => onSaveSandboxConfig(apiURL, apiKey, preferenceInstallationID, mode, replaceInheritedSource)}
                     onDelete={() => onDeleteSandboxAPIKey(preferenceInstallationID)}
                   />
+                </TabsContent>
+                <TabsContent value="runner-types">
+                  <UserRunnerTypesSection request={request} installationID={preferenceInstallationID} />
                 </TabsContent>
                 <TabsContent value="sandbox-templates">
                   <SandboxTemplatesSection
@@ -607,6 +617,8 @@ function AccountsPage({
                   onDelete={onDeleteSandboxAPIKey}
                 />
               </div>
+            ) : route.tab === "runner-types" ? (
+              <div className="space-y-4"><UserRunnerTypesSection request={request} /></div>
             ) : route.tab === "sandbox-templates" ? (
               <div className="space-y-4">
                 <div>
