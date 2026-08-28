@@ -189,6 +189,11 @@ func (s *DBStore) UpsertScopedProfileIfUnchanged(profile ScopedRunnerProfile, ex
 	if profile.Name == "" || strings.Contains(profile.Name, "/") || profile.Name == "." || profile.Name == ".." || profile.MaxConcurrency < 0 {
 		return ScopedRunnerProfile{}, fmt.Errorf("invalid scoped runner profile")
 	}
+	if global, globalErr := s.GetProfile(profile.Name); globalErr == nil && global.Enabled {
+		return ScopedRunnerProfile{}, ErrRunnerProfileNameConflict
+	} else if globalErr != nil && !errors.Is(globalErr, ErrNotFound) {
+		return ScopedRunnerProfile{}, globalErr
+	}
 	labels, labelKey, err := NormalizeWorkflowLabels(profile.WorkflowLabels)
 	if err != nil {
 		return ScopedRunnerProfile{}, err
@@ -269,13 +274,16 @@ func (s *DBStore) ListEffectiveProfiles(scope RunnerProfileScope) ([]EffectiveRu
 		control := controlMap[profile.Name]
 		scopeLimit := 0
 		enabled := profile.Enabled
+		updatedAt := profile.UpdatedAt
 		if control.ProfileName != "" {
 			scopeLimit, enabled = control.MaxConcurrency, enabled && control.Enabled
+			updatedAt = control.UpdatedAt
 		}
 		source := "platform_custom"
 		if profile.ManagedBy != "" {
 			source = "managed"
 		}
+		profile.UpdatedAt = updatedAt
 		items = append(items, EffectiveRunnerProfile{Source: source, ScopeType: scope.Type, ScopeID: scope.ID, Profile: profile, WorkflowLabels: append([]string(nil), profile.Labels...), GlobalMaxConcurrency: profile.MaxConcurrency, ScopeMaxConcurrency: scopeLimit, EffectiveEnabled: enabled, Editable: profile.ManagedBy != ""})
 	}
 	scoped, err := s.ListScopedProfiles(scope)

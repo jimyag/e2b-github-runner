@@ -3713,6 +3713,28 @@ func TestMatchProfileForScopeFallsBackToGlobalAndCountsStayScoped(t *testing.T) 
 	}
 }
 
+func TestScopedRunnerProfileNameConflictsWithEnabledGlobalProfile(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	if _, err := store.UpsertProfile(RunnerProfile{Name: "ubuntu", Labels: []string{"qiniu"}, RequiredLabels: []string{"qiniu"}, TemplateID: "global", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	if _, err := store.UpsertScopedProfileIfUnchanged(ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "ubuntu", WorkflowLabels: []string{"custom"}, TemplateID: "scoped", Enabled: true}, nil); err == nil {
+		t.Fatal("expected scoped profile name conflict with enabled global profile")
+	}
+}
+
+func TestScopedRunnerProfileNameCanMatchDisabledGlobalProfile(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	if _, err := store.UpsertProfile(RunnerProfile{Name: "ubuntu", Labels: []string{"qiniu"}, RequiredLabels: []string{"qiniu"}, TemplateID: "global", Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	if _, err := store.UpsertScopedProfileIfUnchanged(ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "ubuntu", WorkflowLabels: []string{"custom"}, TemplateID: "scoped", Enabled: true}, nil); err != nil {
+		t.Fatalf("disabled global profile should not block scoped name: %v", err)
+	}
+}
+
 func sqlBackendTestTables() []string {
 	return []string{
 		"runner_events",

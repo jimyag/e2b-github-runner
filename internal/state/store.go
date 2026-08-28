@@ -26,6 +26,7 @@ var (
 	ErrRetryNotAllowed                     = errors.New("retry not allowed for current state")
 	ErrSandboxServiceDefaultAPIKeyRequired = errors.New("sandbox service default api key is required")
 	ErrAuditEventPersistence               = errors.New("audit event persistence failed")
+	ErrRunnerProfileNameConflict           = errors.New("runner profile name conflicts with enabled global profile")
 )
 
 type RunnerRequest struct {
