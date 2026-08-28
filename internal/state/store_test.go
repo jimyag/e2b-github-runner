@@ -3657,6 +3657,9 @@ func TestManagedProfileControlCannotEnableGloballyDisabledProfile(t *testing.T) 
 	if item.EffectiveEnabled {
 		t.Fatal("scope control must not re-enable globally disabled profile")
 	}
+	if !item.ScopeControlConfigured {
+		t.Fatal("effective profile should report configured scope control")
+	}
 }
 
 func TestMatchProfileForScopePrefersExactScopedProfileAndShadowsWhenDisabled(t *testing.T) {

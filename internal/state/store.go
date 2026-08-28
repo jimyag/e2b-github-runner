@@ -170,6 +170,7 @@ type EffectiveRunnerProfile struct {
 	EffectiveEnabled     bool          `json:"enabled"`
 	OverridesGlobal      bool          `json:"overrides_global"`
 	Editable             bool          `json:"editable"`
+	ScopeControlConfigured bool        `json:"scope_control_configured"`
 }
 
 type AuditEvent struct {

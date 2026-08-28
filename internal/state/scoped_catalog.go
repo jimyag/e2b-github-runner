@@ -284,7 +284,7 @@ func (s *DBStore) ListEffectiveProfiles(scope RunnerProfileScope) ([]EffectiveRu
 			source = "managed"
 		}
 		profile.UpdatedAt = updatedAt
-		items = append(items, EffectiveRunnerProfile{Source: source, ScopeType: scope.Type, ScopeID: scope.ID, Profile: profile, WorkflowLabels: append([]string(nil), profile.Labels...), GlobalMaxConcurrency: profile.MaxConcurrency, ScopeMaxConcurrency: scopeLimit, EffectiveEnabled: enabled, Editable: profile.ManagedBy != ""})
+		items = append(items, EffectiveRunnerProfile{Source: source, ScopeType: scope.Type, ScopeID: scope.ID, Profile: profile, WorkflowLabels: append([]string(nil), profile.Labels...), GlobalMaxConcurrency: profile.MaxConcurrency, ScopeMaxConcurrency: scopeLimit, EffectiveEnabled: enabled, Editable: profile.ManagedBy != "", ScopeControlConfigured: control.ProfileName != ""})
 	}
 	scoped, err := s.ListScopedProfiles(scope)
 	if err != nil {
