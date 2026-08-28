@@ -114,6 +114,7 @@ Check:
 - The retired Runner Group, Policy, and temporary catalog migration readiness APIs return `404`; `/admin/runner_groups` and `/admin/runner_policies` still redirect harmlessly to Runner Specs.
 - A Runner Request persisted as `failed` with `failure_stage=admission` and `failure_reason=profile_labels_not_matched` is shown as **Not matched**, is excluded from the failed metric, can be filtered independently, and has no retry action. Genuine failed requests remain **Failed** and retryable where applicable.
 - Existing workflow `runs-on` labels and enabled Runner Spec matching remain unchanged. Do not edit Catalog or Sandbox configuration as part of the Release C deployment.
+- Verify `/account/runner-types` and one manageable `/organizations/{login}/runner-types` route; confirm `/user/runner-specs` rejects repository-only scopes and never exposes private template IDs outside manageable Settings.
 - Legacy `runner_groups`, `runner_group_specs`, and `repository_policies` tables remain untouched for rollback. Dropping them requires a later, separately authorized database-maintenance window.
 
 ## 3. Runner Catalog

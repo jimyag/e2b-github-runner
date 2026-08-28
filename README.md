@@ -27,7 +27,7 @@ The Qiniu CI Runner control plane is open source. Qiniu Sandbox, where workflow 
 - **GitHub App auth** — recommended production path with OAuth sign-in for the built-in web console
 - **Multi-database** — SQLite (default), PostgreSQL, or MySQL for runtime state
 - **Concurrency control** — global `max_concurrent_runners` and per-spec `max_concurrency` with queue-based backpressure
-- **Built-in web UI** — admin console for runner requests, runner specs, accounts, the platform Sandbox fallback, audit, matching, and diagnostics; ordinary-user console for job groups, logs, repository readiness, and scoped Sandbox management
+- **Built-in web UI** — admin console for runner requests, global runner specs, accounts, the platform Sandbox fallback, audit, matching, and diagnostics; ordinary-user console for job groups, logs, repository readiness, scoped Sandbox management, and account/Organization Runner Types
 - **Config obfuscation** — sensitive values can be hidden from casual config inspection
 - **Retry & recovery** — transient failures are retried with backoff; queued work and active remote runners are recovered after a service restart
 
@@ -233,6 +233,7 @@ The built-in web UI provides:
 | `/admin/accounts` | Account management — list, search, and change roles |
 | `/admin/runner_requests` | Runner request history, retry/stop controls, and persisted logs |
 | `/admin/runner_specs` | Managed and custom global Runner Spec administration |
+| `/account/runner-types` and `/organizations/{login}/runner-types` | Account or manageable Organization Runner Type management |
 | `/admin/sandbox_service` | Sandbox service configuration |
 | `/admin/match` | Label-match preview against the current enabled Runner Specs |
 | `/admin/audit` | Audit event history |

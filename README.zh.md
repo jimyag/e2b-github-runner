@@ -27,7 +27,7 @@ Qiniu CI Runner 控制面是开源方案；Workflow Job 实际运行所依赖的
 - **GitHub App 鉴权** — 推荐的生产鉴权方式，内置 Web 控制台支持 OAuth 登录
 - **多数据库支持** — SQLite（默认）、PostgreSQL 或 MySQL 存储运行时状态
 - **并发控制** — 全局 `max_concurrent_runners` 和 per-spec `max_concurrency`，基于队列的背压机制
-- **内置 Web UI** — 管理控制台（Runner Request、Runner Spec、账户、平台 Sandbox 兜底、审计、匹配和诊断）；普通用户控制台（Job 分组、日志、仓库就绪状态和作用域 Sandbox 管理）
+- **内置 Web UI** — 管理控制台（Runner Request、全局 Runner Spec、账户、平台 Sandbox 兜底、审计、匹配和诊断）；普通用户控制台（Job 分组、日志、仓库就绪状态、作用域 Sandbox 管理和账户／Organization Runner 类型）
 - **配置混淆** — 敏感值可避免在配置文件中直接暴露明文
 - **重试与恢复** — 瞬时故障自动退避重试；服务重启后恢复排队任务和仍在运行的远端 runner
 
@@ -225,6 +225,7 @@ label 组合，不包含 provider template ID、credential、endpoint，也不�
 | `/admin/accounts`        | 账户管理：列表、搜索、角色变更 |
 | `/admin/runner_requests` | Runner Request 历史、重试／停止操作和持久化日志 |
 | `/admin/runner_specs`    | 托管和自定义全局 Runner Spec 管理 |
+| `/account/runner-types`、`/organizations/{login}/runner-types` | 管理个人或可管理 Organization 作用域内的 Runner 类型 |
 | `/admin/sandbox_service` | Sandbox 服务配置               |
 | `/admin/match`           | 针对当前已启用 Runner Spec 的标签匹配预览 |
 | `/admin/audit`           | 审计事件历史 |
