@@ -48,6 +48,7 @@ describe("app load policy", () => {
     ["/organizations/octo/repositories", ["github_app", "preferences", "onboarding"]],
     ["/account/preferences", ["github_app", "preferences", "onboarding"]],
     ["/organizations/octo/sandbox-templates", ["github_app", "preferences", "onboarding"]],
+    ["/account/runner-types", ["github_app", "preferences", "onboarding", "runner_specs"]],
     ["/jobs/job-1", []],
     ["/admin/", []],
   ])("loads only data used by user route %s", (path, expected) => {

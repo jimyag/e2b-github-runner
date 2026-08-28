@@ -79,6 +79,28 @@ export type RunnerSpecMatch = {
   reason?: string
 }
 
+export type UserRunnerSpec = {
+  name: string
+  source: "managed" | "platform_custom" | "scoped_custom" | string
+  workflow_labels: string[]
+  template_id?: string
+  default_template_name?: string
+  enabled: boolean
+  global_max_concurrency: number
+  scope_max_concurrency: number
+  effective_max_concurrency: number
+  overrides_global: boolean
+  editable: boolean
+  updated_at: string
+}
+
+export type UserRunnerSpecList = {
+  scope_type: string
+  scope_id: number
+  sandbox_source: string
+  items: UserRunnerSpec[]
+}
+
 export type DiagnosticsSummary = {
   pprof: Array<{ address: string; address_file: string; dump_script: string }>
   state: { backend: string; database: string }

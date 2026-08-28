@@ -81,7 +81,7 @@ const DocsPage = lazy(() =>
   import("@/components/docs-page").then(({ DocsPage: Component }) => ({ default: Component }))
 )
 
-type AccountSettingsTab = "repositories" | "preferences" | "sandbox-templates" | "sandbox-instances"
+type AccountSettingsTab = "repositories" | "preferences" | "sandbox-templates" | "sandbox-instances" | "runner-types"
 type AccountSettingsRoute = {
   accountLogin?: string
   tab: AccountSettingsTab
@@ -1208,7 +1208,8 @@ function isAccountSettingsPath(path: string): boolean {
     path === "/account/sandbox" ||
     path === "/account/sandbox-templates" ||
     path === "/account/sandbox-instances" ||
-    /^\/organizations\/[^/]+\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances)$/.test(path)
+    path === "/account/runner-types" ||
+    /^\/organizations\/[^/]+\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances|runner-types)$/.test(path)
   )
 }
 
@@ -1218,8 +1219,9 @@ function parseAccountSettingsRoute(path: string, currentLogin?: string): Account
   if (path === "/account/preferences") return { accountLogin: currentLogin, tab: "preferences" }
   if (path === "/account/sandbox" || path === "/account/sandbox-templates") return { accountLogin: currentLogin, tab: "sandbox-templates" }
   if (path === "/account/sandbox-instances") return { accountLogin: currentLogin, tab: "sandbox-instances" }
+  if (path === "/account/runner-types") return { accountLogin: currentLogin, tab: "runner-types" }
 
-  const organizationMatch = path.match(/^\/organizations\/([^/]+)\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances)$/)
+  const organizationMatch = path.match(/^\/organizations\/([^/]+)\/(repositories|preferences|sandbox|sandbox-templates|sandbox-instances|runner-types)$/)
   if (!organizationMatch) return null
   const accountLogin = safeDecodePathSegment(organizationMatch[1])
   if (!accountLogin) return null
@@ -1396,7 +1398,7 @@ function accountSettingsPath(
   currentLogin: string | undefined,
   tab: AccountSettingsTab
 ): string {
-  const segment = tab === "preferences" ? "preferences" : tab === "sandbox-templates" ? "sandbox-templates" : tab === "sandbox-instances" ? "sandbox-instances" : "repositories"
+  const segment = tab === "preferences" ? "preferences" : tab === "sandbox-templates" ? "sandbox-templates" : tab === "sandbox-instances" ? "sandbox-instances" : tab === "runner-types" ? "runner-types" : "repositories"
   const login = accountLogin?.trim()
   if (!login || login === currentLogin) return `/account/${segment}`
   return `/organizations/${encodeURIComponent(login)}/${segment}`
