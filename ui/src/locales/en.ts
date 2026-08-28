@@ -497,6 +497,7 @@ export const en = {
     runnerTypeCopied: "runs-on YAML copied",
     runnerTypeCopyFailed: "Unable to copy runs-on YAML",
     confirmDeleteRunnerType: "Delete runner type {{name}}?",
+    confirmRunnerTypeOverride: "These labels exactly match a platform Runner Type. Save and override it for this scope?",
     accountPreferences: "Account preferences",
     accountPreferencesDescription: "Settings for the signed-in account.",
     templatesDescription: "Templates available to the signed-in account.",

@@ -85,6 +85,7 @@ export type UserRunnerSpec = {
   workflow_labels: string[]
   template_id?: string
   default_template_name?: string
+  runner_group?: string
   enabled: boolean
   global_max_concurrency: number
   scope_max_concurrency: number

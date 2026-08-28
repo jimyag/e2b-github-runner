@@ -20,6 +20,7 @@ type userRunnerSpecResponse struct {
 	WorkflowLabels          []string `json:"workflow_labels"`
 	TemplateID              string   `json:"template_id,omitempty"`
 	DefaultTemplateName     string   `json:"default_template_name,omitempty"`
+	RunnerGroup             string   `json:"runner_group,omitempty"`
 	Enabled                 bool     `json:"enabled"`
 	GlobalMaxConcurrency    int      `json:"global_max_concurrency"`
 	ScopeMaxConcurrency     int      `json:"scope_max_concurrency"`
@@ -104,7 +105,12 @@ func (s *Server) handleUserListRunnerSpecs(w http.ResponseWriter, r *http.Reques
 	response := userRunnerSpecListResponse{ScopeType: scope.Type, ScopeID: scope.ID, SandboxSource: sandboxSource, SandboxRegion: sandboxRegion, Items: make([]userRunnerSpecResponse, 0, len(items))}
 	for _, item := range items {
 		max := effectiveRunnerConcurrencyLimit(item.GlobalMaxConcurrency, item.ScopeMaxConcurrency)
-		response.Items = append(response.Items, userRunnerSpecResponse{Name: item.Profile.Name, Source: item.Source, WorkflowLabels: append([]string(nil), item.WorkflowLabels...), TemplateID: item.Profile.TemplateID, DefaultTemplateName: item.Profile.DefaultTemplateName, Enabled: item.EffectiveEnabled, GlobalMaxConcurrency: item.GlobalMaxConcurrency, ScopeMaxConcurrency: item.ScopeMaxConcurrency, EffectiveMaxConcurrency: max, OverridesGlobal: item.OverridesGlobal, Editable: item.Editable, ScopeControlConfigured: item.ScopeControlConfigured, UpdatedAt: item.Profile.UpdatedAt.UTC().Format(time.RFC3339Nano)})
+		responseItem := userRunnerSpecResponse{Name: item.Profile.Name, Source: item.Source, WorkflowLabels: append([]string(nil), item.WorkflowLabels...), DefaultTemplateName: item.Profile.DefaultTemplateName, Enabled: item.EffectiveEnabled, GlobalMaxConcurrency: item.GlobalMaxConcurrency, ScopeMaxConcurrency: item.ScopeMaxConcurrency, EffectiveMaxConcurrency: max, OverridesGlobal: item.OverridesGlobal, Editable: item.Editable, ScopeControlConfigured: item.ScopeControlConfigured, UpdatedAt: item.Profile.UpdatedAt.UTC().Format(time.RFC3339Nano)}
+		if item.Source == "scoped_custom" {
+			responseItem.TemplateID = item.Profile.TemplateID
+			responseItem.RunnerGroup = item.Profile.RunnerGroup
+		}
+		response.Items = append(response.Items, responseItem)
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -195,7 +201,8 @@ func (s *Server) handleUserCreateRunnerSpec(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	labels, _, err := state.NormalizeWorkflowLabels(input.WorkflowLabels)
-	if err != nil || strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.TemplateID) == "" || input.MaxConcurrency < 0 {
+	name := strings.TrimSpace(input.Name)
+	if err != nil || !validUserRunnerSpecName(name) || strings.TrimSpace(input.TemplateID) == "" || input.MaxConcurrency < 0 {
 		writeErrorCode(w, http.StatusBadRequest, "invalid_runner_spec", "invalid runner type payload")
 		return
 	}
@@ -203,7 +210,7 @@ func (s *Server) handleUserCreateRunnerSpec(w http.ResponseWriter, r *http.Reque
 		s.writeScopedTemplateValidationError(w, err)
 		return
 	}
-	profile := state.ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: strings.TrimSpace(input.Name), WorkflowLabels: labels, TemplateID: strings.TrimSpace(input.TemplateID), RunnerGroup: strings.TrimSpace(input.RunnerGroup), MaxConcurrency: input.MaxConcurrency, Enabled: input.Enabled}
+	profile := state.ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: name, WorkflowLabels: labels, TemplateID: strings.TrimSpace(input.TemplateID), RunnerGroup: strings.TrimSpace(input.RunnerGroup), MaxConcurrency: input.MaxConcurrency, Enabled: input.Enabled}
 	err = s.applyMutationWithAudit("github:"+session.Subject, "user_runner_spec.create", "scoped_runner_profile", fmt.Sprintf("%s:%d:%s", scope.Type, scope.ID, profile.Name), map[string]any{"template_id": profile.TemplateID, "workflow_labels": labels}, func(tx state.Store) error {
 		_, err := tx.UpsertScopedProfileIfUnchanged(profile, nil)
 		return err
@@ -302,6 +309,10 @@ func (s *Server) handleUserPatchRunnerSpec(w http.ResponseWriter, r *http.Reques
 		return err
 	})
 	if err != nil {
+		if errors.Is(err, state.ErrRunnerProfileLabelsConflict) {
+			writeErrorCode(w, http.StatusConflict, "runner_spec_labels_conflict", "a runner type with these labels already exists")
+			return
+		}
 		if errors.Is(err, state.ErrConflict) {
 			writeErrorCode(w, http.StatusConflict, "runner_spec_conflict", "Runner type changed while saving; refresh and try again")
 			return
@@ -310,6 +321,10 @@ func (s *Server) handleUserPatchRunnerSpec(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	s.handleUserListRunnerSpecs(w, r)
+}
+
+func validUserRunnerSpecName(name string) bool {
+	return name != "" && !strings.Contains(name, "/") && name != "." && name != ".."
 }
 
 func sameStringSlice(a, b []string) bool {

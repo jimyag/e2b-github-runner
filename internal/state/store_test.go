@@ -3644,6 +3644,52 @@ func TestScopedRunnerProfileRejectsDuplicateNormalizedLabels(t *testing.T) {
 	}
 }
 
+func TestScopedRunnerProfileUpdateRejectsDuplicateNormalizedLabels(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	first := ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "one", WorkflowLabels: []string{"linux", "qiniu"}, TemplateID: "template-one", Enabled: true}
+	if _, err := store.UpsertScopedProfileIfUnchanged(first, nil); err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.UpsertScopedProfileIfUnchanged(ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "two", WorkflowLabels: []string{"qiniu", "gpu"}, TemplateID: "template-two", Enabled: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second.WorkflowLabels = []string{" qiniu ", "linux", "qiniu"}
+	if _, err := store.UpsertScopedProfileIfUnchanged(second, &second.UpdatedAt); !errors.Is(err, ErrRunnerProfileLabelsConflict) {
+		t.Fatalf("duplicate normalized labels on update = %v, want ErrRunnerProfileLabelsConflict", err)
+	}
+}
+
+func TestListEffectiveProfilesReportsOnlyExactGlobalLabelOverrides(t *testing.T) {
+	store := New(t.TempDir()).(*DBStore)
+	if _, err := store.UpsertProfile(RunnerProfile{Name: "global", Labels: []string{"qiniu", "linux"}, RequiredLabels: []string{"qiniu"}, TemplateID: "global-template", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}
+	for _, profile := range []ScopedRunnerProfile{
+		{ScopeType: scope.Type, ScopeID: scope.ID, Name: "override", WorkflowLabels: []string{"linux", "qiniu"}, TemplateID: "override-template", Enabled: true},
+		{ScopeType: scope.Type, ScopeID: scope.ID, Name: "distinct", WorkflowLabels: []string{"qiniu", "gpu"}, TemplateID: "distinct-template", Enabled: true},
+	} {
+		if _, err := store.UpsertScopedProfileIfUnchanged(profile, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	items, err := store.ListEffectiveProfiles(scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, item := range items {
+		if item.Source == "scoped_custom" {
+			got[item.Profile.Name] = item.OverridesGlobal
+		}
+	}
+	if !got["override"] || got["distinct"] {
+		t.Fatalf("override flags = %#v, want override=true and distinct=false", got)
+	}
+}
+
 func TestScopedRunnerProfileConditionalWritesRejectStaleRevision(t *testing.T) {
 	store := New(t.TempDir()).(*DBStore)
 	scope := RunnerProfileScope{Type: RunnerProfileScopeAccount, ID: 1}

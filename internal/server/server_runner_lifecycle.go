@@ -151,6 +151,11 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		s.failStart(id, st, "profile_lookup", fmt.Errorf("load profile %q: %w", req.ProfileName, err))
 		return
 	}
+	if err := validateRequestedProfile(profile, req.RequestedLabels); err != nil {
+		unlock()
+		s.failStart(id, st, "profile_validation", err)
+		return
+	}
 	s.admissionMu.Lock()
 	inFlight, err := s.store.InFlightCount()
 	if err != nil {
@@ -1441,9 +1446,12 @@ func (s *Server) profileForRunnerRequest(req state.RunnerRequest) (state.RunnerP
 	if source == "" || source == "global" {
 		if req.ProfileScopeType != "" && req.ProfileScopeID > 0 {
 			item, err := s.store.GetEffectiveProfile(state.RunnerProfileScope{Type: req.ProfileScopeType, ID: req.ProfileScopeID}, "global", req.ProfileName)
-			if err == nil {
-				return item.Profile, nil
+			if err != nil {
+				return state.RunnerProfile{}, err
 			}
+			profile := item.Profile
+			profile.Enabled = item.EffectiveEnabled
+			return profile, nil
 		}
 		return s.store.GetProfile(req.ProfileName)
 	}
@@ -1452,7 +1460,9 @@ func (s *Server) profileForRunnerRequest(req state.RunnerRequest) (state.RunnerP
 		if err != nil {
 			return state.RunnerProfile{}, err
 		}
-		return item.Profile, nil
+		profile := item.Profile
+		profile.Enabled = item.EffectiveEnabled
+		return profile, nil
 	}
 	return state.RunnerProfile{}, state.ErrNotFound
 }

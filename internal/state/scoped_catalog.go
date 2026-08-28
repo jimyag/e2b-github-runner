@@ -243,10 +243,13 @@ func (s *DBStore) UpsertScopedProfileIfUnchanged(profile ScopedRunnerProfile, ex
 	var result *gorm.DB
 	if expectedUpdatedAt != nil {
 		result = db.Model(&scopedRunnerProfileRecord{}).Where("scope_type = ? AND scope_id = ? AND name = ? AND updated_at = ?", scope.Type, scope.ID, profile.Name, *expectedUpdatedAt).Updates(updates)
+		if isDuplicatedKeyError(db, result.Error) {
+			return ScopedRunnerProfile{}, ErrRunnerProfileLabelsConflict
+		}
 	} else {
 		result = db.Create(&record)
 		if result.Error != nil {
-			if translator, ok := db.Dialector.(gorm.ErrorTranslator); ok && errors.Is(translator.Translate(result.Error), gorm.ErrDuplicatedKey) {
+			if isDuplicatedKeyError(db, result.Error) {
 				var existing scopedRunnerProfileRecord
 				existingErr := db.Where("scope_type = ? AND scope_id = ? AND name = ?", scope.Type, scope.ID, profile.Name).First(&existing).Error
 				if existingErr == nil {
@@ -307,7 +310,11 @@ func (s *DBStore) ListEffectiveProfiles(scope RunnerProfileScope) ([]EffectiveRu
 		controlMap[control.ProfileName] = control
 	}
 	items := make([]EffectiveRunnerProfile, 0, len(globals))
+	globalLabelKeys := make(map[string]struct{}, len(globals))
 	for _, profile := range globals {
+		if _, labelKey, normalizeErr := NormalizeWorkflowLabels(profile.Labels); normalizeErr == nil {
+			globalLabelKeys[labelKey] = struct{}{}
+		}
 		control := controlMap[profile.Name]
 		scopeLimit := 0
 		enabled := profile.Enabled
@@ -328,9 +335,20 @@ func (s *DBStore) ListEffectiveProfiles(scope RunnerProfileScope) ([]EffectiveRu
 		return nil, err
 	}
 	for _, profile := range scoped {
-		items = append(items, EffectiveRunnerProfile{Source: "scoped_custom", ScopeType: scope.Type, ScopeID: scope.ID, Profile: RunnerProfile{Name: profile.Name, Labels: append([]string(nil), profile.WorkflowLabels...), RequiredLabels: append([]string(nil), profile.WorkflowLabels...), TemplateID: profile.TemplateID, RunnerGroup: profile.RunnerGroup, MaxConcurrency: profile.MaxConcurrency, Enabled: profile.Enabled, CreatedAt: profile.CreatedAt, UpdatedAt: profile.UpdatedAt}, WorkflowLabels: append([]string(nil), profile.WorkflowLabels...), ScopeMaxConcurrency: profile.MaxConcurrency, EffectiveEnabled: profile.Enabled, OverridesGlobal: true, Editable: true})
+		_, overridesGlobal := globalLabelKeys[profile.LabelKey]
+		items = append(items, EffectiveRunnerProfile{Source: "scoped_custom", ScopeType: scope.Type, ScopeID: scope.ID, Profile: RunnerProfile{Name: profile.Name, Labels: append([]string(nil), profile.WorkflowLabels...), RequiredLabels: append([]string(nil), profile.WorkflowLabels...), TemplateID: profile.TemplateID, RunnerGroup: profile.RunnerGroup, MaxConcurrency: profile.MaxConcurrency, Enabled: profile.Enabled, CreatedAt: profile.CreatedAt, UpdatedAt: profile.UpdatedAt}, WorkflowLabels: append([]string(nil), profile.WorkflowLabels...), ScopeMaxConcurrency: profile.MaxConcurrency, EffectiveEnabled: profile.Enabled, OverridesGlobal: overridesGlobal, Editable: true})
 	}
 	return items, nil
+}
+
+func isDuplicatedKeyError(db *gorm.DB, err error) bool {
+	if err == nil {
+		return false
+	}
+	if translator, ok := db.Dialector.(gorm.ErrorTranslator); ok {
+		return errors.Is(translator.Translate(err), gorm.ErrDuplicatedKey)
+	}
+	return errors.Is(err, gorm.ErrDuplicatedKey)
 }
 
 func (s *DBStore) GetEffectiveProfile(scope RunnerProfileScope, source, name string) (EffectiveRunnerProfile, error) {
@@ -417,7 +435,7 @@ func (s *DBStore) GetProfileControls(scope RunnerProfileScope) ([]RunnerProfileC
 }
 
 func controlFromRecord(record runnerProfileScopeControlRecord) RunnerProfileControl {
-	return RunnerProfileControl{ScopeType: record.ScopeType, ScopeID: record.ScopeID, ProfileName: record.ProfileName, Enabled: record.Enabled, MaxConcurrency: record.MaxConcurrency, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt}
+	return RunnerProfileControl(record)
 }
 
 func scopedProfileFromRecord(record scopedRunnerProfileRecord) (ScopedRunnerProfile, error) {

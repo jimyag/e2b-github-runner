@@ -8098,6 +8098,74 @@ func TestUserRunnerSpecsListRequiresSessionAndReturnsScopedCatalog(t *testing.T)
 	}
 }
 
+func TestUserRunnerSpecsListHidesPlatformTemplateIDsAndReturnsScopedFields(t *testing.T) {
+	store := state.New(t.TempDir())
+	if _, err := store.UpsertProfile(state.RunnerProfile{Name: "platform-custom", Labels: []string{"qiniu", "platform"}, RequiredLabels: []string{"qiniu"}, TemplateID: "platform-secret-template-id", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := state.RunnerProfileScope{Type: state.AccountScopeTypeAccount, ID: account.ID}
+	if _, err := store.UpsertScopedProfileIfUnchanged(state.ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "scoped", WorkflowLabels: []string{"qiniu", "scoped"}, TemplateID: "scoped-template-id", RunnerGroup: "org-runners", Enabled: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/user/runner-specs", nil)
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "platform-secret-template-id") {
+		t.Fatalf("platform template ID leaked in user response: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"template_id":"scoped-template-id"`) || !strings.Contains(rec.Body.String(), `"runner_group":"org-runners"`) {
+		t.Fatalf("scoped fields missing from user response: %s", rec.Body.String())
+	}
+}
+
+func TestUserCreateRunnerSpecRejectsUnsafeNameBeforeSandboxValidation(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	req := httptest.NewRequest(http.MethodPost, "/user/runner-specs", strings.NewReader(`{"name":"..","workflow_labels":["qiniu"],"template_id":"template","enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"invalid_runner_spec"`) {
+		t.Fatalf("status=%d body=%s, want local invalid_runner_spec rejection", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUserPatchRunnerSpecMapsDuplicateLabelsToConflict(t *testing.T) {
+	store := state.New(t.TempDir())
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	account, _, err := store.GetAccountByOAuthIdentity("github", "hubot-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := state.RunnerProfileScope{Type: state.AccountScopeTypeAccount, ID: account.ID}
+	if _, err := store.UpsertScopedProfileIfUnchanged(state.ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "one", WorkflowLabels: []string{"qiniu", "linux"}, TemplateID: "one", Enabled: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	two, err := store.UpsertScopedProfileIfUnchanged(state.ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "two", WorkflowLabels: []string{"qiniu", "gpu"}, TemplateID: "two", Enabled: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf(`{"workflow_labels":["linux","qiniu"],"expected_updated_at":%q}`, two.UpdatedAt.UTC().Format(time.RFC3339Nano))
+	req := httptest.NewRequest(http.MethodPatch, "/user/runner-specs/two", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"code":"runner_spec_labels_conflict"`) {
+		t.Fatalf("status=%d body=%s, want runner_spec_labels_conflict", rec.Code, rec.Body.String())
+	}
+}
+
 func TestUserRunnerSpecsListUsesMostRestrictiveConcurrencyLimit(t *testing.T) {
 	store := state.New(t.TempDir())
 	if _, err := store.UpsertProfile(state.RunnerProfile{Name: "managed", Labels: []string{"qiniu"}, RequiredLabels: []string{"qiniu"}, TemplateID: "template", ManagedBy: "runnerd", Enabled: true, MaxConcurrency: 3}); err != nil {

@@ -497,6 +497,7 @@ export const zh = {
     runnerTypeCopied: "已复制 runs-on YAML",
     runnerTypeCopyFailed: "无法复制 runs-on YAML",
     confirmDeleteRunnerType: "确定删除 Runner 类型 {{name}}？",
+    confirmRunnerTypeOverride: "这些标签与平台 Runner 类型完全一致。仍要保存并在当前作用域覆盖它吗？",
     accountPreferences: "账号偏好",
     accountPreferencesDescription: "当前登录账号的设置。",
     templatesDescription: "当前登录账号可用的模板。",
