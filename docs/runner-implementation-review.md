@@ -43,19 +43,23 @@ Token and basic auth are still supported alongside GitHub App auth. That is usef
 
 The ordinary-user UI is now routed outside `/admin/*`. `/repositories` lists every repository in the user/GitHub App authorization intersection, annotates local job activity without hiding repositories that have not run, and shows the effective Sandbox service source for the selected account or organization. When no effective source exists, a manageable scope links to its account or organization Preferences page; credentials are edited only in Settings.
 
-### 3. Config Management
+### 3. Scoped Runner Types Verification
+
+Account and manageable-Organization Runner Types are implemented through `/account/runner-types`, `/organizations/{login}/runner-types`, and `/user/runner-specs`. Local State, API, UI, i18n, full Go, and fixture-backed production smoke checks pass. Dedicated PostgreSQL/MySQL transactions, production SQLite snapshot and downgrade gates, real Sandbox template validation, personal/Organization GitHub workflow execution, and a deployed canary remain release gates; they are tracked in `TODO.md` and are not represented as completed evidence.
+
+### 4. Config Management
 
 Runtime config is file-first, but the admin console does not yet provide an effective-config view, config validation preview, reload workflow, or import/export flow. Keep the current file-only operations model unless live config operations become a clear requirement.
 
-### 4. Deployment Smoke
+### 5. Deployment Smoke
 
 Local build/lint/test coverage validates the code path, but production readiness still depends on a real GitHub App installation, real Qiniu sandbox templates, webhook delivery, and sandbox runner execution. Run and maintain the [deployment smoke checklist](deployment-smoke.md) covering webhook signature handling, installation resolution, runner spec matching, sandbox creation, GitHub job pickup, cleanup, and diagnostics.
 
-### 5. Multi-Instance And Operations
+### 6. Multi-Instance And Operations
 
 The DB lease model is in place, but multi-process behavior should be verified with two runnerd instances against the same database before documenting multi-instance support. Expvar diagnostics cover useful counters and gauges; add histogram/export adapters only if deployment observability needs them.
 
-### 6. Schema Compatibility
+### 7. Schema Compatibility
 
 The current migration path intentionally avoids a full handwritten migration history. GORM tags in `internal/state/records.go` define the normal schema, while `internal/state/db.go` keeps only narrow compatibility actions for older state databases, including the explicit reset of pre-scope account preference/secret tables. Future schema changes should include old-schema upgrade tests that assert preservation or intentional data loss as appropriate when they add required columns, indexes with uniqueness semantics, or relationship constraints.
 

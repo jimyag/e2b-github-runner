@@ -43,19 +43,23 @@ Token 和 basic auth 仍与 GitHub App auth 并存。它们对本地验证或 le
 
 Ordinary-user UI 现在已经路由到 `/admin/*` 之外。`/repositories` 会列出用户与 GitHub App 授权交集内的全部 repositories，用本地 job activity 标注运行记录但不会隐藏尚未运行的 repositories，并显示所选账户或组织的有效 Sandbox service 来源。不存在有效来源时，可管理的 scope 会链接到对应账户或组织 Preferences 页面；credentials 只在 Settings 中编辑。
 
-### 3. Config Management
+### 3. 作用域 Runner Types 验证
+
+个人账户和可管理 Organization 的 Runner Types 已通过 `/account/runner-types`、`/organizations/{login}/runner-types` 和 `/user/runner-specs` 实现。本地 State、API、UI、i18n、Go 全量测试和 fixture-backed production smoke 检查已通过。专用 PostgreSQL/MySQL 事务测试、生产 SQLite snapshot 与降级门禁、真实 Sandbox 模板校验、个人／Organization GitHub workflow 执行和部署 canary 仍是发布门禁；这些事项已记录在 `TODO.md`，不能当作已完成证据。
+
+### 4. Config Management
 
 Runtime config 仍是 file-first，但 admin console 尚未提供 effective-config view、config validation preview、reload workflow 或 import/export flow。除非 live config operations 成为明确需求，否则继续保持当前 file-only operations model。
 
-### 4. Deployment Smoke
+### 5. Deployment Smoke
 
 Local build/lint/test coverage 只能验证代码路径；production readiness 仍依赖真实 GitHub App installation、真实 Qiniu sandbox templates、webhook delivery 和 sandbox runner execution。运行并维护[部署 smoke checklist](deployment-smoke.md)，覆盖 webhook signature handling、installation resolution、runner spec matching、sandbox creation、GitHub job pickup、cleanup 和 diagnostics。
 
-### 5. Multi-Instance And Operations
+### 6. Multi-Instance And Operations
 
 DB lease model 已经存在，但在记录 multi-instance support 前，仍需用两个 runnerd instances 连接同一个 database 验证 multi-process behavior。Expvar diagnostics 覆盖有用 counters 和 gauges；只有在 deployment observability 需要时才添加 histogram/export adapters。
 
-### 6. Schema Compatibility
+### 7. Schema Compatibility
 
 当前 migration path 有意避免完整 handwritten migration history。`internal/state/records.go` 中的 GORM tags 定义正常 schema，`internal/state/db.go` 只保留针对旧 state databases 的窄范围 compatibility actions，包括显式重置 pre-scope account preference/secret tables。后续 schema changes 如果新增 required columns、带 uniqueness semantics 的 indexes 或 relationship constraints，应包含 old-schema upgrade tests，并按实际语义断言数据被保留或有意丢弃。
 
