@@ -1188,7 +1188,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
 | Account 真实 E2E | 未执行 | Workflow Run、Spec、清理证据 |
 | Organization 真实 E2E | 未执行 | Workflow Run、隔离、清理证据 |
 | 部署 Canary | 未执行 | Origin、时间、版本、结果 |
-| 最终 Diff Review | 待最终提交后确认 | 当前仅保留本阶段文档回填修改；分阶段 commit，无本地 Secret 或手改生成 UI |
+| 最终 Diff Review | 通过 | 最终工作树干净；分阶段 commit，无本地 Secret 或手改生成 UI |
 | `git diff --check` | 通过 | exit 0 |
 
 ## 10. 风险、回滚和未知项
