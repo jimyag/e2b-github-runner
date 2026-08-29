@@ -134,12 +134,21 @@ func (s *Server) handleUserPutRunnerSpecControl(w http.ResponseWriter, r *http.R
 		return
 	}
 	name := strings.TrimSpace(r.PathValue("name"))
-	if _, err := s.store.GetProfile(name); err != nil {
-		writeErrorCode(w, http.StatusNotFound, "runner_spec_not_found", "runner type not found")
+	profile, err := s.store.GetProfile(name)
+	if err != nil {
+		if errors.Is(err, state.ErrNotFound) {
+			writeErrorCode(w, http.StatusNotFound, "runner_spec_not_found", "runner type not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if strings.TrimSpace(profile.ManagedBy) == "" {
+		writeErrorCode(w, http.StatusForbidden, "runner_spec_read_only", "runner type is read-only")
 		return
 	}
 	control := state.RunnerProfileControl{ScopeType: scope.Type, ScopeID: scope.ID, ProfileName: name, Enabled: input.Enabled, MaxConcurrency: input.MaxConcurrency}
-	err := s.applyMutationWithAudit("github:"+session.Subject, "user_runner_spec_control.upsert", "runner_profile_scope_control", fmt.Sprintf("%s:%d:%s", scope.Type, scope.ID, name), map[string]any{"enabled": input.Enabled, "max_concurrency": input.MaxConcurrency}, func(tx state.Store) error {
+	err = s.applyMutationWithAudit("github:"+session.Subject, "user_runner_spec_control.upsert", "runner_profile_scope_control", fmt.Sprintf("%s:%d:%s", scope.Type, scope.ID, name), map[string]any{"enabled": input.Enabled, "max_concurrency": input.MaxConcurrency}, func(tx state.Store) error {
 		_, err := tx.UpsertProfileControlIfUnchanged(control, &expected)
 		return err
 	})

@@ -8127,6 +8127,24 @@ func TestUserRunnerSpecsListHidesPlatformTemplateIDsAndReturnsScopedFields(t *te
 	}
 }
 
+func TestUserPutRunnerSpecControlRejectsPlatformCustomProfile(t *testing.T) {
+	store := state.New(t.TempDir())
+	profile, err := store.UpsertProfile(state.RunnerProfile{Name: "platform-custom", Labels: []string{"qiniu", "platform"}, RequiredLabels: []string{"qiniu"}, TemplateID: "platform-template", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	body := fmt.Sprintf(`{"enabled":false,"max_concurrency":1,"expected_updated_at":%q}`, profile.UpdatedAt.UTC().Format(time.RFC3339Nano))
+	req := httptest.NewRequest(http.MethodPut, "/user/runner-specs/platform-custom/control", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"code":"runner_spec_read_only"`) {
+		t.Fatalf("status=%d body=%s, want runner_spec_read_only", rec.Code, rec.Body.String())
+	}
+}
+
 func TestUserCreateRunnerSpecRejectsUnsafeNameBeforeSandboxValidation(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "", &fakeSandbox{})
