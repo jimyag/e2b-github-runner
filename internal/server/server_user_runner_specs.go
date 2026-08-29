@@ -255,7 +255,11 @@ func (s *Server) handleUserPatchRunnerSpec(w http.ResponseWriter, r *http.Reques
 	name := strings.TrimSpace(r.PathValue("name"))
 	current, err := s.store.GetScopedProfile(scope, name)
 	if err != nil {
-		writeErrorCode(w, http.StatusNotFound, "runner_spec_not_found", "runner type not found")
+		if errors.Is(err, state.ErrNotFound) {
+			writeErrorCode(w, http.StatusNotFound, "runner_spec_not_found", "runner type not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	templateChanged := input.TemplateID != nil && strings.TrimSpace(*input.TemplateID) != current.TemplateID

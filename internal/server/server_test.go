@@ -8140,6 +8140,31 @@ func TestUserCreateRunnerSpecRejectsUnsafeNameBeforeSandboxValidation(t *testing
 	}
 }
 
+type scopedProfileLookupErrorStore struct {
+	state.Store
+	lookupErr error
+}
+
+func (s *scopedProfileLookupErrorStore) GetScopedProfile(state.RunnerProfileScope, string) (state.ScopedRunnerProfile, error) {
+	return state.ScopedRunnerProfile{}, s.lookupErr
+}
+
+func TestUserPatchRunnerSpecReturnsInternalErrorWhenProfileLookupFails(t *testing.T) {
+	store := &scopedProfileLookupErrorStore{
+		Store:     state.New(t.TempDir()),
+		lookupErr: errors.New("fixture scoped profile lookup failure"),
+	}
+	srv := newTestServer(t, store, "", &fakeSandbox{})
+	req := httptest.NewRequest(http.MethodPatch, "/user/runner-specs/custom", strings.NewReader(`{"expected_updated_at":"2026-08-28T00:00:00Z"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(testSessionCookie("hubot-id", "hubot", "user"))
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s, want 500 for scoped profile lookup failure", rec.Code, rec.Body.String())
+	}
+}
+
 func TestUserPatchRunnerSpecMapsDuplicateLabelsToConflict(t *testing.T) {
 	store := state.New(t.TempDir())
 	srv := newTestServer(t, store, "", &fakeSandbox{})
