@@ -30,6 +30,19 @@ sandbox:
   timeout_seconds: 3600
   create_timeout_seconds: 120
   stop_timeout_seconds: 30
+  # Region catalog — label and api_url are exposed to the frontend via
+  # GET /sandbox/regions so they are never hardcoded in the UI.
+  regions:
+    - id: us-south-1
+      label: "United States · Dallas 1"
+      sandbox_api_url: https://us-south-1-sandbox.qiniuapi.com
+      s3_region: us-north-1
+      s3_endpoint: https://internal-s3-las-us-north-1-dal.qiniucs.com
+    - id: cn-yangzhou-1
+      label: "China · Yangzhou 1"
+      sandbox_api_url: https://cn-yangzhou-1-sandbox.qiniuapi.com
+      s3_region: cn-east-1
+      s3_endpoint: https://internal-s3-las-cn-east-1-yz.qiniucs.com
 
 github:
   webhook_secret: change-me
@@ -63,6 +76,16 @@ github:
   # basic_auth:
   #   username: your-username
   #   password: your-token-or-password
+
+# S3-compatible Cache credentials (bucket, AK, SK) are configured by each user
+# in account or GitHub installation Preferences; they are not stored in runnerd.yaml.
+# On each sandbox start, runnerd mints a short-lived Qiniu IAM STS credential
+# scoped to the user's cache prefix and injects it as AWS_* / RUNS_ON_S3_* env
+# vars so runs-on/cache can upload and restore caches directly to the bucket.
+
+cache:
+  # STS federation token endpoint. The request path /sts/federation/token is appended.
+  sts_endpoint: https://sts-ov.qiniuapi.com
 
 worker:
   max_concurrent_runners: 100

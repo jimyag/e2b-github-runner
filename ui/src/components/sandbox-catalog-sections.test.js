@@ -5,6 +5,9 @@ import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 
 import * as catalogUtils from "./sandbox-catalog-utils"
+import { SandboxRegionsContext } from "./sandbox-catalog-utils"
+
+const { formatOptionalTime, findSandboxRegionByAPIURL } = catalogUtils
 
 const window = new Window({ url: "http://localhost/" })
 const domGlobals = {
@@ -32,7 +35,6 @@ for (const [key, value] of Object.entries(domGlobals)) {
 
 const { SandboxTemplateCatalog, SandboxTemplatesSection } = await import("./sandbox-catalog-sections")
 
-const { formatOptionalTime } = catalogUtils
 const mountedRoots = []
 
 afterEach(async () => {
@@ -55,14 +57,25 @@ async function mountSandboxTemplates(request) {
   document.body.append(container)
   const root = createRoot(container)
   mountedRoots.push({ root, container })
+  const regions = [
+    { id: "us-south-1", label: "United States \u00b7 Dallas 1", apiURL: "https://us-south-1-sandbox.qiniuapi.com" },
+  ]
   await act(async () => {
-    root.render(createElement(SandboxTemplatesSection, { request, installationID: 42 }))
+    root.render(
+      createElement(SandboxRegionsContext.Provider, { value: regions },
+        createElement(SandboxTemplatesSection, { request, installationID: 42 }),
+      ),
+    )
   })
   return {
     container,
     async rerender(nextRequest) {
       await act(async () => {
-        root.render(createElement(SandboxTemplatesSection, { request: nextRequest, installationID: 42 }))
+        root.render(
+          createElement(SandboxRegionsContext.Provider, { value: regions },
+            createElement(SandboxTemplatesSection, { request: nextRequest, installationID: 42 }),
+          ),
+        )
       })
     },
   }
@@ -117,8 +130,8 @@ const scopedTemplate = (id) => ({
 })
 
 describe("sandbox regions", () => {
-  test("shares overseas-first region metadata", () => {
-    expect(catalogUtils.sandboxRegions).toEqual([
+  test("matches a known region by exact API URL", () => {
+    const regions = [
       {
         id: "us-south-1",
         label: "United States · Dallas 1",
@@ -129,7 +142,10 @@ describe("sandbox regions", () => {
         label: "China · Yangzhou 1",
         apiURL: "https://cn-yangzhou-1-sandbox.qiniuapi.com",
       },
-    ])
+    ]
+    expect(findSandboxRegionByAPIURL(regions, "https://us-south-1-sandbox.qiniuapi.com")?.id).toBe("us-south-1")
+    expect(findSandboxRegionByAPIURL(regions, "https://cn-yangzhou-1-sandbox.qiniuapi.com/")?.id).toBe("cn-yangzhou-1")
+    expect(findSandboxRegionByAPIURL(regions, "https://unknown.example.com")).toBeUndefined()
   })
 })
 

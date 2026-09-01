@@ -5,8 +5,8 @@ import { useTranslation } from "react-i18next"
 
 import { formatTime } from "@/admin-format"
 import type { SandboxServiceDefault } from "@/admin-types"
+import { findSandboxRegionByAPIURL, useSandboxRegions } from "@/components/sandbox-catalog-utils"
 import appI18n from "@/i18n"
-import { sandboxRegions } from "@/components/sandbox-catalog-utils"
 import {
   availableSandboxAudienceAccounts,
   normalizeSandboxAudienceLogin,
@@ -56,16 +56,9 @@ const emptyConfig: SandboxServiceDefault = {
   api_key: { configured: false },
 }
 
-function normalizeAPIURL(value: string) {
-  return value.trim().replace(/\/+$/, "").toLowerCase()
-}
-
-function regionForAPIURL(value: string) {
-  const normalized = normalizeAPIURL(value)
-  return sandboxRegions.find((region) => normalizeAPIURL(region.apiURL) === normalized)
-}
 
 export function SandboxServiceDefaultSection({ request }: { request: Request }) {
+  const sandboxRegions = useSandboxRegions()
   const { t, i18n } = useTranslation()
   const [config, setConfig] = useState<SandboxServiceDefault>(emptyConfig)
   const [enabled, setEnabled] = useState(false)
@@ -93,7 +86,7 @@ export function SandboxServiceDefaultSection({ request }: { request: Request }) 
     setCandidateLogin("")
     setAPIURL(sandboxServiceDefaultAPIURL(normalized.api_url || "", sandboxRegions))
     setAPIKey("")
-  }, [])
+  }, [sandboxRegions])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -111,7 +104,7 @@ export function SandboxServiceDefaultSection({ request }: { request: Request }) 
     void load()
   }, [load])
 
-  const selectedRegion = useMemo(() => regionForAPIURL(apiURL), [apiURL])
+  const selectedRegion = useMemo(() => findSandboxRegionByAPIURL(sandboxRegions, apiURL), [sandboxRegions, apiURL])
   const availableAccounts = useMemo(
     () => availableSandboxAudienceAccounts(config.available_accounts, config.audiences),
     [config.available_accounts, config.audiences],

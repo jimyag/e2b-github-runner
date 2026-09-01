@@ -118,6 +118,64 @@ Supported fields: `database.dsn`, `auth.session_secret`, `auth.encryption_key`, 
 
 > **Note:** This hides plaintext from casual inspection only — the decoding key is embedded in the binary. It is not encryption against a host-level attacker.
 
+### Cache and S3
+
+Each user configures a Cache S3 Bucket, optional Prefix, AK, and SK in account or GitHub installation Preferences. The default prefix is `gh-actions-cache`. The S3 region and endpoint are derived from the selected Sandbox service region and are configured by the operator in `runnerd.yaml` under `sandbox.regions`. Because the configured endpoint may be private to the Sandbox network, runnerd only validates the configuration shape when saving it; bucket reachability and permissions are verified by the actual workflow in the Sandbox. AK/SK are encrypted in scoped state and are never returned to the browser or runner.
+
+On every sandbox start, runnerd resolves the GitHub repository to its installation/account scope, verifies the Workflow Run trust context, and mints a Qiniu IAM federation token through the configured `cache.sts_endpoint` (default `https://sts-ov.qiniuapi.com`). Its requested lifetime is the configured Sandbox lifecycle plus five minutes for the post-job cache save step; no refresh mechanism is provided yet. It injects the token plus bucket/endpoint/prefix as `AWS_*` / `RUNS_ON_S3_*` environment variables in the Sandbox start script, so the scoped cache action can upload and restore caches directly to the user bucket without proxying bytes through runnerd.
+
+Cache object keys are isolated by repository and workflow context:
+
+```text
+<configured-prefix>/<owner>/<repo>/scopes/branch-<first-16-bytes-of-sha256(branch)-hex>/...
+<configured-prefix>/<owner>/<repo>/scopes/pr-<number>/...
+```
+
+With the scoped `qiniu/actions-cache@v5` action, runnerd injects ordered read prefixes plus one write prefix. A trusted branch searches its own scope and then the default-branch scope, and writes only its own scope. A pull request, including a Fork PR, searches its PR scope, base-branch scope, and default-branch scope in that order, and writes only its own PR scope; this matches GitHub's merge-ref cache isolation so a Fork cannot poison a base-branch cache. `pull_request_target`, `workflow_run`, `issue_comment`, and unverified metadata are default-branch read-only. Kodo list operations are scoped to authorized prefixes via `kodo:prefix` Condition, so cache key names outside the granted scopes are not enumerable across credentials.
+
+#### Operator configuration
+
+```yaml
+sandbox:
+  regions:
+    - id: us-south-1
+      label: "United States · Dallas 1"
+      sandbox_api_url: https://us-south-1-sandbox.qiniuapi.com
+      s3_region: us-north-1
+      s3_endpoint: https://internal-s3-las-us-north-1-dal.qiniucs.com
+
+cache:
+  sts_endpoint: https://sts-ov.qiniuapi.com
+```
+
+`sandbox.regions` defines the public Sandbox region catalog exposed through `GET /sandbox/regions`; S3 mappings remain server-side because endpoints can be private. Each entry must include `id`, `label`, and `sandbox_api_url`. `s3_region` and `s3_endpoint` are optional and must be configured together; only regions with both fields support Cache S3. At least one region is required. For stronger cache isolation, use a dedicated bucket per GitHub installation. `cache.sts_endpoint` is the Qiniu IAM federation token endpoint used to mint short-lived credentials.
+
+#### Using cache in GitHub Actions workflows
+
+Use [`qiniu/actions-cache@v5`](https://github.com/qiniu/actions-cache) instead of `actions/cache`. No additional configuration is needed in the workflow — runnerd injects S3 credentials plus ordered read prefixes and a single write prefix as environment variables:
+
+```yaml
+steps:
+  - uses: qiniu/actions-cache@v5
+    with:
+      path: |
+        ~/.cache/go-build
+        ~/go/pkg/mod
+      key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+      restore-keys: |
+        ${{ runner.os }}-go-
+```
+
+The upload/download concurrency can be tuned via environment variables (defaults shown):
+
+```yaml
+env:
+  UPLOAD_QUEUE_SIZE: "16"    # concurrent multipart upload parts
+  UPLOAD_PART_SIZE: "16"     # part size in MiB
+  DOWNLOAD_QUEUE_SIZE: "16"  # concurrent range-request downloads
+  DOWNLOAD_PART_SIZE: "16"   # part size in MiB
+```
+
 ## GitHub App Setup
 
 ### Required Permissions

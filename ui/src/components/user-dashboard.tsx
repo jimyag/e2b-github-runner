@@ -51,7 +51,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { shouldShowSandboxSetupTask } from "@/user-onboarding"
 import { SandboxesSection, SandboxTemplatesSection } from "@/components/sandbox-catalog-sections"
-import { sandboxRegions } from "@/components/sandbox-catalog-utils"
+import { findSandboxRegionByAPIURL, useSandboxRegions } from "@/components/sandbox-catalog-utils"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useSandboxTerminal } from "@/hooks/use-sandbox-terminal"
@@ -89,14 +89,7 @@ type GitHubLogState =
 const jobLogTabsListClassName = "h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0 text-muted-foreground"
 const jobLogTabsTriggerClassName = "h-10 flex-none rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0 py-2 text-sm font-medium shadow-none hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
 
-function normalizeSandboxAPIURL(value: string) {
-  return value.trim().replace(/\/+$/, "")
-}
 
-function findSandboxRegionByAPIURL(value: string) {
-  const normalized = normalizeSandboxAPIURL(value)
-  return sandboxRegions.find((region) => normalizeSandboxAPIURL(region.apiURL) === normalized)
-}
 
 export function UserDashboard({
   authSession,
@@ -123,6 +116,8 @@ export function UserDashboard({
   onSaveProductTourOnboarding,
   onSaveSandboxConfig,
   onDeleteSandboxAPIKey,
+  onSaveCacheConfig,
+  onDeleteCacheConfig,
   onNavigate,
   onNavigateRepositoryAccount,
   onNavigateAccountSettings,
@@ -157,6 +152,8 @@ export function UserDashboard({
   onSaveProductTourOnboarding: (state: ProductTourOnboarding) => Promise<void>
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
+  onSaveCacheConfig: (input: { bucket: string; prefix: string; access_key_id: string; secret_access_key: string }, installationID?: number) => Promise<void>
+  onDeleteCacheConfig: (installationID?: number) => Promise<void>
   onNavigate: (page: UserPage) => void
   onNavigateRepositoryAccount: (accountLogin: string | undefined) => void
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
@@ -333,6 +330,8 @@ export function UserDashboard({
           showProductTourSetup={shouldShowSandboxSetupTask(productTourOnboarding)}
           onSaveSandboxConfig={onSaveSandboxConfig}
           onDeleteSandboxAPIKey={onDeleteSandboxAPIKey}
+          onSaveCacheConfig={onSaveCacheConfig}
+          onDeleteCacheConfig={onDeleteCacheConfig}
           currentLogin={authSession.login}
           onNavigateAccountSettings={onNavigateAccountSettings}
           request={request}
@@ -399,6 +398,8 @@ function AccountsPage({
   showProductTourSetup,
   onSaveSandboxConfig,
   onDeleteSandboxAPIKey,
+  onSaveCacheConfig,
+  onDeleteCacheConfig,
   currentLogin,
   onNavigateAccountSettings,
   request,
@@ -410,6 +411,8 @@ function AccountsPage({
   showProductTourSetup: boolean
   onSaveSandboxConfig: (apiURL: string, apiKey: string, installationID?: number, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDeleteSandboxAPIKey: (installationID?: number) => Promise<void>
+  onSaveCacheConfig: (input: { bucket: string; prefix: string; access_key_id: string; secret_access_key: string }, installationID?: number) => Promise<void>
+  onDeleteCacheConfig: (installationID?: number) => Promise<void>
   currentLogin?: string
   onNavigateAccountSettings: (accountLogin: string | undefined, tab: AccountSettingsTab) => void
   request: (url: string, options?: RequestInit) => Promise<unknown>
@@ -576,6 +579,7 @@ function AccountsPage({
                     onSave={(apiURL, apiKey, mode, replaceInheritedSource) => onSaveSandboxConfig(apiURL, apiKey, preferenceInstallationID, mode, replaceInheritedSource)}
                     onDelete={() => onDeleteSandboxAPIKey(preferenceInstallationID)}
                   />
+                  <CacheS3Card preferences={userPreferences} installationID={preferenceInstallationID} onSave={onSaveCacheConfig} onDelete={onDeleteCacheConfig} />
                 </TabsContent>
                 <TabsContent value="sandbox-templates">
                   <SandboxTemplatesSection
@@ -606,6 +610,7 @@ function AccountsPage({
                   onSave={(apiURL, apiKey, mode) => onSaveSandboxConfig(apiURL, apiKey, undefined, mode)}
                   onDelete={onDeleteSandboxAPIKey}
                 />
+                <CacheS3Card preferences={userPreferences} onSave={onSaveCacheConfig} onDelete={onDeleteCacheConfig} />
               </div>
             ) : route.tab === "sandbox-templates" ? (
               <div className="space-y-4">
@@ -645,6 +650,92 @@ function AccountsPage({
   )
 }
 
+function CacheS3Card({
+  preferences,
+  installationID,
+  onSave,
+  onDelete,
+}: {
+  preferences: UserPreferences | null
+  installationID?: number
+  onSave: (input: { bucket: string; prefix: string; access_key_id: string; secret_access_key: string }, installationID?: number) => Promise<void>
+  onDelete: (installationID?: number) => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const s3Region = preferences?.cache?.region ?? ""
+  const s3Endpoint = preferences?.cache?.endpoint ?? ""
+
+  const [bucket, setBucket] = useState(preferences?.cache?.bucket ?? "")
+  const [prefix, setPrefix] = useState(preferences?.cache?.prefix ?? "")
+  const [accessKeyID, setAccessKeyID] = useState("")
+  const [secretAccessKey, setSecretAccessKey] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const [error, setError] = useState("")
+  const configured = Boolean(preferences?.cache?.configured)
+
+  useEffect(() => {
+    setBucket(preferences?.cache?.bucket ?? "")
+    setPrefix(preferences?.cache?.prefix ?? "")
+    setAccessKeyID("")
+    setSecretAccessKey("")
+  }, [preferences?.cache?.bucket, preferences?.cache?.prefix, installationID])
+
+  const hasRegion = Boolean(s3Region)
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!hasRegion) {
+      setError(t("user.cacheS3RegionRequired"))
+      return
+    }
+    if (!bucket.trim() || (!configured && (!accessKeyID.trim() || !secretAccessKey.trim()))) {
+      setError(t("user.cacheS3BucketRequired"))
+      return
+    }
+    setSaving(true)
+    setError("")
+    try {
+      await onSave({ bucket, prefix, access_key_id: accessKeyID, secret_access_key: secretAccessKey }, installationID)
+      setAccessKeyID("")
+      setSecretAccessKey("")
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("user.cacheS3SaveFailed"))
+    } finally {
+      setSaving(false)
+    }
+  }
+  return (
+    <Card className="rounded-lg">
+      <form onSubmit={submit}>
+        <CardHeader className="gap-2 pb-3"><CardTitle className="text-base">{t("user.cacheS3")}</CardTitle><CardDescription>{t("user.cacheS3Description")}</CardDescription></CardHeader>
+        <CardContent className="space-y-4">
+          {hasRegion ? (
+            <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">{t("user.cacheS3Region")}</span> {s3Region}{" "}
+              <span className="font-medium text-foreground">{t("user.cacheS3Endpoint")}</span> {s3Endpoint}
+            </div>
+          ) : (
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{t("user.cacheS3NoEndpoint")}</div>
+          )}
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="cache-bucket">{t("user.cacheS3Bucket")}</Label>
+              <Input id="cache-bucket" value={bucket} onChange={(event) => setBucket(event.target.value)} placeholder={t("user.cacheS3BucketPlaceholder")} disabled={saving || removing} aria-describedby="cache-bucket-hint" />
+              <p id="cache-bucket-hint" className="text-xs text-muted-foreground">{t("user.cacheS3BucketHint")}</p>
+            </div>
+            <div className="grid gap-2"><Label htmlFor="cache-prefix">{t("user.cacheS3Prefix")}</Label><Input id="cache-prefix" value={prefix} onChange={(event) => setPrefix(event.target.value)} placeholder={t("user.cacheS3PrefixPlaceholder")} disabled={saving || removing} /></div>
+            <div className="grid gap-2"><Label htmlFor="cache-ak">{t("user.cacheS3AccessKeyID")}</Label><Input id="cache-ak" type="password" value={accessKeyID} onChange={(event) => setAccessKeyID(event.target.value)} placeholder={configured ? t("user.cacheS3AccessKeyIDPlaceholderNew") : t("user.cacheS3AccessKeyIDPlaceholder")} disabled={saving || removing} /></div>
+            <div className="grid gap-2"><Label htmlFor="cache-sk">{t("user.cacheS3SecretAccessKey")}</Label><Input id="cache-sk" type="password" value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value)} placeholder={configured ? t("user.cacheS3SecretAccessKeyPlaceholderNew") : t("user.cacheS3SecretAccessKeyPlaceholder")} disabled={saving || removing} /></div>
+          </div>
+          <div className="flex items-center gap-2"><Button type="submit" disabled={saving || removing || !hasRegion}>{saving ? t("user.cacheS3Validating") : configured ? t("user.cacheS3SaveChanges") : t("user.cacheS3Save")}</Button>{configured ? <Button type="button" variant="outline" disabled={saving || removing} onClick={async () => { setRemoving(true); setError(""); try { await onDelete(installationID) } catch (cause) { setError(cause instanceof Error ? cause.message : t("user.cacheS3RemoveFailed")) } finally { setRemoving(false) } }}>{t("user.cacheS3Remove")}</Button> : null}</div>
+          <div className="text-sm text-muted-foreground">{configured ? `${t("user.cacheS3Configured")}${preferences?.cache?.updated_at ? ` · ${formatTime(preferences.cache.updated_at)}` : ""}` : t("user.cacheS3NotConfigured")}</div>
+          {error ? <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</div> : null}
+        </CardContent>
+      </form>
+    </Card>
+  )
+}
+
 function SandboxAPIKeyCard({
   preferences,
   allowInheritance = false,
@@ -658,6 +749,7 @@ function SandboxAPIKeyCard({
   onSave: (apiURL: string, apiKey: string, mode?: "custom" | "inherit", replaceInheritedSource?: boolean) => Promise<void>
   onDelete: () => Promise<void>
 }) {
+  const sandboxRegions = useSandboxRegions()
   const { t, i18n } = useTranslation()
   const [apiURL, setAPIURL] = useState("")
   const [apiKey, setAPIKey] = useState("")
@@ -680,12 +772,12 @@ function SandboxAPIKeyCard({
   const updatedAt = preferences?.sandbox?.api_key?.updated_at
   const savedAPIURL = preferences?.sandbox?.api_url ?? ""
   const effectiveAPIURL = apiURL
-  const selectedRegion = findSandboxRegionByAPIURL(effectiveAPIURL)
+  const selectedRegion = findSandboxRegionByAPIURL(sandboxRegions, effectiveAPIURL)
   const organizationManaged = preferences?.sandbox?.manageable === false
 
   useEffect(() => {
-    setAPIURL(findSandboxRegionByAPIURL(savedAPIURL)?.apiURL ?? "")
-  }, [savedAPIURL])
+    setAPIURL(findSandboxRegionByAPIURL(sandboxRegions, savedAPIURL)?.apiURL ?? "")
+  }, [sandboxRegions, savedAPIURL])
 
   useEffect(() => {
     setCredentialMode(allowInheritance && preferences?.sandbox?.mode === "inherit" ? "inherit" : "custom")

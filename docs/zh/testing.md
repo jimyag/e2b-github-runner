@@ -30,6 +30,15 @@ auth:
   encryption_key: <separate random encryption key>
   session_ttl_hours: 12
 
+sandbox:
+  regions:
+    - id: us-south-1
+      label: "United States · Dallas 1"
+      sandbox_api_url: https://us-south-1-sandbox.qiniuapi.com
+      # 可选：同时配置以下两个字段后，该区域支持 Cache S3。
+      s3_region: us-north-1
+      s3_endpoint: https://internal-s3-las-us-north-1-dal.qiniucs.com
+
 github:
   webhook_secret: <random webhook secret>
   app:

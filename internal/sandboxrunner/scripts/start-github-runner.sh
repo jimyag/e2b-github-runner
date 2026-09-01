@@ -85,7 +85,56 @@ runner_labels="$(printf '%%s' "%[4]s" | base64 -d)"
 runner_group="$(printf '%%s' "%[5]s" | base64 -d)"
 runner_request_id="$(printf '%%s' "%[6]s" | base64 -d)"
 sandbox_id="$(printf '%%s' "%[7]s" | base64 -d)"
+cache_s3_region="$(printf '%%s' "%[9]s" | base64 -d)"
+cache_s3_bucket="$(printf '%%s' "%[10]s" | base64 -d)"
+cache_s3_endpoint="$(printf '%%s' "%[11]s" | base64 -d)"
+cache_s3_read_prefixes="$(printf '%%s' "%[12]s" | base64 -d)"
+cache_s3_write_prefix="$(printf '%%s' "%[13]s" | base64 -d)"
+cache_s3_access_key="$(printf '%%s' "%[14]s" | base64 -d)"
+cache_s3_secret_key="$(printf '%%s' "%[15]s" | base64 -d)"
+cache_s3_session_token="$(printf '%%s' "%[16]s" | base64 -d)"
 
+# Inject Cache S3 STS credentials for qiniu/actions-cache
+if [ -n "$cache_s3_bucket" ] && [ -n "$cache_s3_access_key" ] && [ -n "$cache_s3_secret_key" ]; then
+  export RUNS_ON_S3_BUCKET_CACHE="$cache_s3_bucket"
+  if [ -n "$cache_s3_endpoint" ]; then
+    export RUNS_ON_S3_BUCKET_ENDPOINT="$cache_s3_endpoint"
+  fi
+  export RUNS_ON_AWS_REGION="$cache_s3_region"
+  export RUNS_ON_S3_FORCE_PATH_STYLE="true"
+  # qiniu/actions-cache reads these dedicated variables into an explicit S3
+  # client provider, so workflow AWS credential changes cannot replace them.
+  export RUNS_ON_S3_ACCESS_KEY_ID="$cache_s3_access_key"
+  export RUNS_ON_S3_SECRET_ACCESS_KEY="$cache_s3_secret_key"
+  if [ -n "$cache_s3_session_token" ]; then
+    export RUNS_ON_S3_SESSION_TOKEN="$cache_s3_session_token"
+  fi
+  # Keep AWS-compatible names for SDKs used by workflow steps. The cache action
+  # snapshots the runnerd-specific names into an explicit S3 client provider.
+  export AWS_ACCESS_KEY_ID="$cache_s3_access_key"
+  export AWS_SECRET_ACCESS_KEY="$cache_s3_secret_key"
+  if [ -n "$cache_s3_session_token" ]; then
+    export AWS_SESSION_TOKEN="$cache_s3_session_token"
+  fi
+  if [ -n "$cache_s3_read_prefixes" ]; then
+    export RUNS_ON_S3_CACHE_READ_PREFIXES="$cache_s3_read_prefixes"
+  else
+    echo "cache S3 read scopes are missing; restore is disabled" >&2
+  fi
+  if [ -n "$cache_s3_write_prefix" ]; then
+    export RUNS_ON_S3_CACHE_WRITE_PREFIX="$cache_s3_write_prefix"
+  else
+    echo "cache S3 write scope is missing; save is disabled" >&2
+  fi
+  # Tune qiniu/actions-cache upload/download concurrency for better throughput.
+  export UPLOAD_QUEUE_SIZE="${UPLOAD_QUEUE_SIZE:-16}"
+  export UPLOAD_PART_SIZE="${UPLOAD_PART_SIZE:-16}"
+  export DOWNLOAD_QUEUE_SIZE="${DOWNLOAD_QUEUE_SIZE:-16}"
+  export DOWNLOAD_PART_SIZE="${DOWNLOAD_PART_SIZE:-16}"
+  echo "injected cache S3 STS credentials for qiniu/actions-cache (upload_queue=${UPLOAD_QUEUE_SIZE} upload_part=${UPLOAD_PART_SIZE}MiB download_queue=${DOWNLOAD_QUEUE_SIZE} download_part=${DOWNLOAD_PART_SIZE}MiB)"
+elif [ -n "$cache_s3_bucket" ]; then
+  echo "cache S3 configuration is incomplete; skipping credential injection" >&2
+fi
 export RUNNERD_SANDBOX_ID="$sandbox_id"
 export RUNNERD_REQUEST_ID="$runner_request_id"
 export RUNNERD_RUNNER_NAME="$runner_name"

@@ -118,6 +118,64 @@ unset secret_value
 
 > **注意：** 此功能仅防止直接查看配置时的明文泄漏，解码 key 内置在二进制中，不能抵御主机级别的攻击者。
 
+### Cache 与 S3
+
+用户需要在账户或 GitHub installation 的 Preferences 中配置 Cache S3 Bucket、可选 Prefix、AK 和 SK。默认 Prefix 是 `gh-actions-cache`。S3 region 和 endpoint 由用户选择的 Sandbox service region 决定，并由运维人员在 `runnerd.yaml` 的 `sandbox.regions` 中配置。由于 endpoint 可能只在 Sandbox 内网可访问，runnerd 保存时只校验配置格式；Bucket 的可达性和权限由实际工作流在 Sandbox 中验证。AK/SK 会加密保存在 scoped state，不会返回给浏览器或 Runner。
+
+每次启动沙箱时，runnerd 将 GitHub 仓库解析到对应 installation/account scope，校验 Workflow Run 的可信上下文，并通过 `cache.sts_endpoint`（默认 `https://sts-ov.qiniuapi.com`）签发七牛 IAM 联邦凭证。凭证请求时长为配置的 Sandbox 生命周期加五分钟，用于覆盖任务结束后的缓存保存步骤；目前暂不提供刷新机制。随后在沙箱启动脚本中注入 `AWS_*` / `RUNS_ON_S3_*` 环境变量，使 scoped cache action 可以直接把缓存上传/恢复到用户 bucket，而无需经过 runnerd 转发字节。
+
+缓存对象 Key 按仓库和工作流上下文隔离：
+
+```text
+<配置前缀>/<owner>/<repo>/scopes/branch-<sha256(branch)前16字节的十六进制>/...
+<配置前缀>/<owner>/<repo>/scopes/pr-<number>/...
+```
+
+配合 scoped `qiniu/actions-cache@v5` action，runnerd 会注入有序读取前缀和唯一写入前缀。可信分支依次搜索自身和默认分支 scope，且只能写入自身 scope；PR（包括 Fork PR）按 PR、自身 base branch、默认分支的顺序搜索，并且只能写入自己的 PR scope。这与 GitHub merge-ref cache 隔离语义一致，Fork 无法污染 base branch Cache。`pull_request_target`、`workflow_run`、`issue_comment` 及无法验证的元数据只能只读默认分支 scope。Kodo list 操作通过 `kodo:prefix` Condition 限定到已授权的前缀范围，授权范围外的缓存 Key 名称不可枚举。
+
+#### 运维配置
+
+```yaml
+sandbox:
+  regions:
+    - id: us-south-1
+      label: "United States · Dallas 1"
+      sandbox_api_url: https://us-south-1-sandbox.qiniuapi.com
+      s3_region: us-north-1
+      s3_endpoint: https://internal-s3-las-us-north-1-dal.qiniucs.com
+
+cache:
+  sts_endpoint: https://sts-ov.qiniuapi.com
+```
+
+`sandbox.regions` 定义通过 `GET /sandbox/regions` 暴露给前端的公开 Sandbox 区域目录；S3 映射只保留在服务端，因为 endpoint 可能是内网地址。每个条目必须包含 `id`、`label` 和 `sandbox_api_url`。`s3_region` 与 `s3_endpoint` 是可选字段，但必须同时配置；只有同时配置的区域支持 Cache S3。必须至少配置一个 region。为了更好地隔离缓存，建议每个 GitHub installation 使用独立 Bucket。`cache.sts_endpoint` 是七牛 IAM 联邦凭证端点，用于签发短期凭证。
+
+#### 在 GitHub Actions 工作流中使用缓存
+
+使用 [`qiniu/actions-cache@v5`](https://github.com/qiniu/actions-cache) 替代 `actions/cache`。工作流中无需额外配置，runnerd 会自动注入 S3 凭证、有序读取前缀和唯一写入前缀作为环境变量：
+
+```yaml
+steps:
+  - uses: qiniu/actions-cache@v5
+    with:
+      path: |
+        ~/.cache/go-build
+        ~/go/pkg/mod
+      key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+      restore-keys: |
+        ${{ runner.os }}-go-
+```
+
+上传/下载并发可通过环境变量调优（以下为默认值）：
+
+```yaml
+env:
+  UPLOAD_QUEUE_SIZE: "16"    # 并发上传分片数
+  UPLOAD_PART_SIZE: "16"     # 分片大小，单位 MiB
+  DOWNLOAD_QUEUE_SIZE: "16"  # 并发下载请求数
+  DOWNLOAD_PART_SIZE: "16"   # 分片大小，单位 MiB
+```
+
 ## GitHub App 设置
 
 ### 所需权限

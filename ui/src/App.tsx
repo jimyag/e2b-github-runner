@@ -11,6 +11,7 @@ import { RunnerJobDetail } from "@/components/runner-job-detail"
 import { RunnerRequestsSection } from "@/components/runner-requests-section"
 import { RunnerSpecsSection } from "@/components/runner-specs-section"
 import { SandboxServiceDefaultSection } from "@/components/sandbox-service-default-section"
+import { SandboxRegionsContext, fetchSandboxRegions, type SandboxRegion } from "@/components/sandbox-catalog-utils"
 import { SiteHeader } from "@/components/site-header"
 import { UserDashboard } from "@/components/user-dashboard"
 import {
@@ -166,6 +167,13 @@ function App() {
   const [userSelectedKey, setUserSelectedKey] = useState(() => userJobsGroupKeyFromLocation(window.location.pathname, window.location.search))
   const [beginGitHubReauthentication] = useState(createGitHubReauthenticationGate)
   const userLoadGate = useRef(createLatestUserLoadGate()).current
+  const [sandboxRegions, setSandboxRegions] = useState<SandboxRegion[]>([])
+
+  useEffect(() => {
+    void fetchSandboxRegions().then((regions) => {
+      if (regions && regions.length > 0) setSandboxRegions(regions)
+    })
+  }, [])
 
   const setSection = useCallback((next: string) => {
     const section = adminSections.includes(next as AdminSection) ? (next as AdminSection) : "overview"
@@ -616,6 +624,24 @@ function App() {
     toast.success(appI18n.t("app.sandboxSaved"))
   }, [request])
 
+  const saveCacheConfig = useCallback(async (input: { bucket: string; prefix: string; access_key_id: string; secret_access_key: string }, installationID?: number) => {
+    const preferences = (await request(userPreferencesPath(installationID, "/user/preferences/cache"), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    })) as UserPreferences
+    setUserPreferences(preferences)
+    setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
+    toast.success(t("user.cacheS3SettingsSaved"))
+  }, [request])
+
+  const deleteCacheConfig = useCallback(async (installationID?: number) => {
+    const preferences = (await request(userPreferencesPath(installationID, "/user/preferences/cache"), { method: "DELETE" })) as UserPreferences
+    setUserPreferences(preferences)
+    setUserPreferencesScope(installationID ? `github_installation:${installationID}` : "account")
+    toast.success(t("user.cacheS3SettingsRemoved"))
+  }, [request])
+
   const deleteSandboxAPIKey = useCallback(async (installationID?: number) => {
     const preferences = (await request(userPreferencesPath(installationID, "/user/preferences/sandbox-api-key"), {
       method: "DELETE",
@@ -987,6 +1013,7 @@ function App() {
       )
     }
     return (
+      <SandboxRegionsContext.Provider value={sandboxRegions}>
       <>
         <UserDashboard
           authSession={authSession}
@@ -1013,6 +1040,8 @@ function App() {
           onSaveProductTourOnboarding={saveProductTourOnboarding}
           onSaveSandboxConfig={saveSandboxConfig}
           onDeleteSandboxAPIKey={deleteSandboxAPIKey}
+          onSaveCacheConfig={saveCacheConfig}
+          onDeleteCacheConfig={deleteCacheConfig}
           onNavigate={setUserPage}
           onNavigateRepositoryAccount={setRepositoryAccount}
           onNavigateAccountSettings={setAccountSettingsRoute}
@@ -1025,10 +1054,12 @@ function App() {
         />
         <Toaster richColors />
       </>
+      </SandboxRegionsContext.Provider>
     )
   }
 
   return (
+    <SandboxRegionsContext.Provider value={sandboxRegions}>
     <SidebarProvider>
       <AppSidebar
         section={section}
@@ -1145,6 +1176,7 @@ function App() {
       </SidebarInset>
       <Toaster richColors />
     </SidebarProvider>
+    </SandboxRegionsContext.Provider>
   )
 }
 

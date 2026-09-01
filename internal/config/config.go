@@ -45,6 +45,16 @@ type Config struct {
 	MaxConcurrentRunners      int
 	GitHubAPIBaseURL          string
 	ConfigPath                string
+	SandboxRegions            []SandboxRegionConfig
+	CacheSTSEndpoint          string
+}
+
+type SandboxRegionConfig struct {
+	ID            string `yaml:"id"`
+	Label         string `yaml:"label"`
+	SandboxAPIURL string `yaml:"sandbox_api_url"`
+	S3Region      string `yaml:"s3_region"`
+	S3Endpoint    string `yaml:"s3_endpoint"`
 }
 
 type fileConfig struct {
@@ -65,9 +75,10 @@ type fileConfig struct {
 		SessionTTLHours int    `yaml:"session_ttl_hours"`
 	} `yaml:"auth"`
 	Sandbox struct {
-		TimeoutSec       int `yaml:"timeout_seconds"`
-		CreateTimeoutSec int `yaml:"create_timeout_seconds"`
-		StopTimeoutSec   int `yaml:"stop_timeout_seconds"`
+		TimeoutSec       int                   `yaml:"timeout_seconds"`
+		CreateTimeoutSec int                   `yaml:"create_timeout_seconds"`
+		StopTimeoutSec   int                   `yaml:"stop_timeout_seconds"`
+		Regions          []SandboxRegionConfig `yaml:"regions"`
 	} `yaml:"sandbox"`
 	GitHub struct {
 		WebhookSecret       Secret   `yaml:"webhook_secret"`
@@ -101,9 +112,40 @@ type fileConfig struct {
 		RetryMaxDelaySec     int `yaml:"retry_max_delay_seconds"`
 		RetryMaxAttempts     int `yaml:"retry_max_attempts"`
 	} `yaml:"worker"`
+	Cache struct {
+		STSEndpoint string `yaml:"sts_endpoint"`
+	} `yaml:"cache"`
 }
 
-const defaultGitHubAPIBaseURL = "https://api.github.com"
+const (
+	defaultGitHubAPIBaseURL = "https://api.github.com"
+	defaultCacheSTSEndpoint = "https://sts-ov.qiniuapi.com"
+)
+
+func validateSandboxRegions(regions []SandboxRegionConfig) error {
+	if len(regions) == 0 {
+		return fmt.Errorf("sandbox.regions requires at least one region")
+	}
+	seen := make(map[string]struct{}, len(regions))
+	for i, region := range regions {
+		id := strings.TrimSpace(region.ID)
+		label := strings.TrimSpace(region.Label)
+		apiURL := strings.TrimSpace(region.SandboxAPIURL)
+		s3Region := strings.TrimSpace(region.S3Region)
+		s3Endpoint := strings.TrimSpace(region.S3Endpoint)
+		if id == "" || label == "" || apiURL == "" {
+			return fmt.Errorf("sandbox.regions[%d] requires id, label, and sandbox_api_url", i)
+		}
+		if s3Region == "" && s3Endpoint != "" || s3Region != "" && s3Endpoint == "" {
+			return fmt.Errorf("sandbox.regions[%d] must set both s3_region and s3_endpoint", i)
+		}
+		if _, ok := seen[id]; ok {
+			return fmt.Errorf("sandbox.regions[%d] duplicates id %q", i, id)
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
+}
 
 func Load(path string) (Config, error) {
 	path = strings.TrimSpace(path)
@@ -160,6 +202,8 @@ func LoadFile(path string) (Config, error) {
 		MaxConcurrentRunners:      defaultInt(raw.Worker.MaxConcurrentRunners, 100),
 		GitHubAPIBaseURL:          defaultString(raw.GitHub.APIBaseURL, defaultGitHubAPIBaseURL),
 		ConfigPath:                path,
+		SandboxRegions:            raw.Sandbox.Regions,
+		CacheSTSEndpoint:          defaultString(raw.Cache.STSEndpoint, defaultCacheSTSEndpoint),
 	}
 	if cfg.StateBackend == "sqlite" {
 		if strings.TrimSpace(cfg.StateDatabaseDSN.Value()) == "" {
@@ -170,6 +214,9 @@ func LoadFile(path string) (Config, error) {
 		cfg.StateDir = filepath.Dir(cfg.StateDatabaseDSN.Value())
 	}
 	if err := cfg.validate(); err != nil {
+		return Config{}, err
+	}
+	if err := validateSandboxRegions(cfg.SandboxRegions); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
