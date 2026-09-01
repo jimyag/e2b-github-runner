@@ -102,14 +102,8 @@ func githubLinksFromRecord(record runnerRequestRecord) githubPayloadLinks {
 	if !record.GitHubContextBackfilled {
 		links = mergeGitHubPayloadLinks(links, githubLinksFromPayload(record))
 	}
-	if links.jobURL == "" && record.RepositoryFullName != "" && links.workflowRunID > 0 {
-		jobID := record.AssignedJobID
-		if jobID == 0 {
-			jobID = pointerToInt64(record.WorkflowJobID)
-		}
-		if jobID > 0 {
-			links.jobURL = fmt.Sprintf("https://github.com/%s/actions/runs/%d/job/%d", record.RepositoryFullName, links.workflowRunID, jobID)
-		}
+	if links.jobURL == "" {
+		links.jobURL = githubJobURL(record.RepositoryFullName, links.workflowRunID, effectiveRunnerRequestJobID(record))
 	}
 	links.jobURL = appendPullRequestQuery(links.jobURL, links.pullRequestNumber)
 	return links
@@ -167,6 +161,17 @@ func githubInstallationIDFromPayload(payloadJSON string) int64 {
 }
 
 func githubLinksFromPayload(record runnerRequestRecord) githubPayloadLinks {
+	return githubLinksFromPayloadBytes([]byte(record.GitHubPayloadJSON), record.RepositoryFullName, effectiveRunnerRequestJobID(record))
+}
+
+func effectiveRunnerRequestJobID(record runnerRequestRecord) int64 {
+	if record.AssignedJobID != 0 {
+		return record.AssignedJobID
+	}
+	return pointerToInt64(record.WorkflowJobID)
+}
+
+func githubLinksFromPayloadBytes(payloadJSON []byte, repositoryFullName string, jobID int64) githubPayloadLinks {
 	var payload struct {
 		WorkflowJob struct {
 			RunID        int64                      `json:"run_id"`
@@ -193,8 +198,8 @@ func githubLinksFromPayload(record runnerRequestRecord) githubPayloadLinks {
 			Number int64 `json:"number"`
 		} `json:"pull_request"`
 	}
-	if record.GitHubPayloadJSON != "" {
-		_ = json.Unmarshal([]byte(record.GitHubPayloadJSON), &payload)
+	if len(payloadJSON) > 0 {
+		_ = json.Unmarshal(payloadJSON, &payload)
 	}
 
 	runID := payload.WorkflowJob.RunID
@@ -221,12 +226,8 @@ func githubLinksFromPayload(record runnerRequestRecord) githubPayloadLinks {
 	}
 
 	jobURL := payload.WorkflowJob.HTMLURL
-	jobID := record.AssignedJobID
-	if jobID == 0 {
-		jobID = pointerToInt64(record.WorkflowJobID)
-	}
-	if jobURL == "" && record.RepositoryFullName != "" && runID > 0 && jobID > 0 {
-		jobURL = fmt.Sprintf("https://github.com/%s/actions/runs/%d/job/%d", record.RepositoryFullName, runID, jobID)
+	if jobURL == "" {
+		jobURL = githubJobURL(repositoryFullName, runID, jobID)
 	}
 	jobURL = appendPullRequestQuery(jobURL, prNumber)
 
@@ -239,6 +240,13 @@ func githubLinksFromPayload(record runnerRequestRecord) githubPayloadLinks {
 		jobURL:             jobURL,
 		pullRequestNumber:  prNumber,
 	}
+}
+
+func githubJobURL(repositoryFullName string, runID, jobID int64) string {
+	if repositoryFullName == "" || runID <= 0 || jobID <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("https://github.com/%s/actions/runs/%d/job/%d", repositoryFullName, runID, jobID)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -259,7 +267,10 @@ func firstPullRequestNumber(pulls []githubPayloadPullRequest) int64 {
 }
 
 func appendPullRequestQuery(rawURL string, prNumber int64) string {
-	if rawURL == "" || prNumber == 0 || strings.Contains(rawURL, "pr=") {
+	if rawURL == "" || prNumber <= 0 {
+		return rawURL
+	}
+	if hasRawQueryParameter(rawURL, "pr") {
 		return rawURL
 	}
 	separator := "?"
@@ -267,6 +278,31 @@ func appendPullRequestQuery(rawURL string, prNumber int64) string {
 		separator = "&"
 	}
 	return fmt.Sprintf("%s%spr=%d", rawURL, separator, prNumber)
+}
+
+func hasRawQueryParameter(rawURL, name string) bool {
+	queryStart := strings.IndexByte(rawURL, '?')
+	fragmentStart := strings.IndexByte(rawURL, '#')
+	if queryStart < 0 || (fragmentStart >= 0 && fragmentStart < queryStart) {
+		return false
+	}
+	queryEnd := len(rawURL)
+	if fragmentStart >= 0 {
+		queryEnd = fragmentStart
+	}
+	rawQuery := rawURL[queryStart+1 : queryEnd]
+	for rawQuery != "" {
+		field, rest, found := strings.Cut(rawQuery, "&")
+		fieldName, _, _ := strings.Cut(field, "=")
+		if fieldName == name {
+			return true
+		}
+		if !found {
+			break
+		}
+		rawQuery = rest
+	}
+	return false
 }
 
 func recordToProfile(record runnerProfileRecord) (RunnerProfile, error) {

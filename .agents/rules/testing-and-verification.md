@@ -23,6 +23,8 @@ Also inspect the diff and keep `docs/README.md` aligned when adding, removing, o
 
 ## State Schema
 
+For runner-request payload persistence changes, extend the existing state tests: assert accepted and rejected requests leave `github_payload_json` empty, `workflow_job` and `workflow_run` context survives reopening the database, and legacy metadata/installation-ID backfills preserve historical payloads. Keep repeated-migration coverage; do not use tests that create new requests as a substitute for legacy raw-payload fixtures.
+
 When touching `internal/state/records.go`, GORM tags, indexes, or migration helpers in `internal/state/db.go`, run:
 
 ```bash

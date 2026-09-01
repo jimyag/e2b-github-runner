@@ -17,6 +17,13 @@ import (
 
 const maxRunnerRequestRepositoryAccessQueryParameters = 900
 
+// runnerd enables MigrateOnStart, so startup migration backfills legacy payload
+// context before list queries use this projection. Embedders that disable
+// migration must migrate the database before serving list reads. List reads
+// intentionally never load raw webhook payloads.
+// Source and labels_json are omitted because recordToState does not read them.
+// Sandbox credential columns are omitted intentionally and remain empty in
+// list-derived RunnerState values; mutation paths re-read the full record.
 var runnerRequestListSelectColumns = []string{
 	"id",
 	"workflow_job_id",
@@ -105,11 +112,9 @@ func (s *DBStore) createRequest(req RunnerRequest, payload []byte, status, failu
 	if err != nil {
 		return false, RunnerState{}, err
 	}
-	payloadLinks := githubLinksFromPayload(runnerRequestRecord{
-		WorkflowJobID:      &req.JobID,
-		RepositoryFullName: req.RepositoryFullName,
-		GitHubPayloadJSON:  string(payload),
-	})
+	// Extract context in memory to avoid retaining raw webhook data that may be
+	// sensitive. Existing github_payload_json values remain available for backfill.
+	payloadLinks := githubLinksFromPayloadBytes(payload, req.RepositoryFullName, req.JobID)
 	if req.PullRequestNumber > 0 && payloadLinks.pullRequestNumber == 0 {
 		payloadLinks.pullRequestNumber = req.PullRequestNumber
 	}
@@ -142,7 +147,6 @@ func (s *DBStore) createRequest(req RunnerRequest, payload []byte, status, failu
 		FailureStage:            failureStage,
 		FailureReason:           failureReason,
 		Error:                   errorMessage,
-		GitHubPayloadJSON:       string(payload),
 		QueuedAt:                req.CreatedAt,
 		FailedAt:                failedAt,
 		UpdatedAt:               now,
@@ -251,7 +255,10 @@ func (s *DBStore) ListStates() ([]RunnerState, error) {
 		return nil, err
 	}
 	var records []runnerRequestRecord
-	if err := db.Order("queued_at DESC").Find(&records).Error; err != nil {
+	if err := db.
+		Select(runnerRequestListSelectColumns).
+		Order("queued_at DESC").
+		Find(&records).Error; err != nil {
 		return nil, err
 	}
 	states := make([]RunnerState, 0, len(records))
@@ -295,6 +302,7 @@ func (s *DBStore) ListActiveStates() ([]RunnerState, error) {
 	}
 	var records []runnerRequestRecord
 	if err := db.
+		Select(runnerRequestListSelectColumns).
 		Where("status IN ?", activeStatuses()).
 		Order("queued_at DESC").
 		Find(&records).Error; err != nil {
@@ -317,6 +325,7 @@ func (s *DBStore) ListMismatchedCompletedStates(limit int) ([]RunnerState, error
 	}
 	var records []runnerRequestRecord
 	if err := db.
+		Select(runnerRequestListSelectColumns).
 		Where("status = ?", StatusCompleted).
 		Where("workflow_job_id IS NOT NULL AND workflow_job_id != 0").
 		Where("assigned_job_id != 0 AND assigned_job_id != workflow_job_id").
@@ -342,6 +351,7 @@ func (s *DBStore) ListFailedWorkflowJobStates(limit int) ([]RunnerState, error) 
 	}
 	var records []runnerRequestRecord
 	if err := db.
+		Select(runnerRequestListSelectColumns).
 		Where("status = ?", StatusFailed).
 		Where("workflow_job_id IS NOT NULL AND workflow_job_id != 0").
 		Where("failure_stage IN ?", []string{"recovery", "cleanup"}).
@@ -402,6 +412,7 @@ func (s *DBStore) ListStatesForRepositories(repositories []string, limit int) ([
 	}
 	var records []runnerRequestRecord
 	if err := db.
+		Select(runnerRequestListSelectColumns).
 		Where("repository_full_name IN ?", repositories).
 		Order("queued_at DESC").
 		Limit(limit).
@@ -563,6 +574,7 @@ func (s *DBStore) ListStatesForGitHubInstallations(installationIDs []int64, limi
 	}
 	var records []runnerRequestRecord
 	if err := db.
+		Select(runnerRequestListSelectColumns).
 		Where("github_installation_id IN ?", installationIDs).
 		Order("queued_at DESC").
 		Limit(limit).

@@ -227,6 +227,8 @@ advertised labels 和 required labels。
 
 runnerd 处理 `queued`、`in_progress` 和 `completed` 动作。对于 `workflow_run` 事件，runnerd 会列出该 run 下所有排队 job，并将尚未入队的匹配 job 创建 runner request。
 
+新建 runner request（包括准入拒绝记录）只保存解析后的 GitHub 上下文，不保存 webhook 原文。历史兼容列 `github_payload_json` 及已有值继续保留，用于回填旧记录的元信息；此变更不会清理已有原文、请求历史或日志。
+
 ## Runner Spec 与匹配
 
 Runner spec 通过管理 API 和控制台管理，**不在** `runnerd.yaml` 中配置。所有已启用 spec 都可供 `github.allowed_repositories` 放行的仓库按标签匹配。

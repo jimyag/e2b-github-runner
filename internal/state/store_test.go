@@ -943,7 +943,7 @@ func TestCreateRequestIsIdempotent(t *testing.T) {
 }
 
 func TestCreateRejectedRequestIsNeverRunnable(t *testing.T) {
-	store := New(t.TempDir())
+	store := New(t.TempDir()).(*DBStore)
 	req := RunnerRequest{
 		ID:                 "rejected",
 		Source:             "github_webhook",
@@ -953,7 +953,7 @@ func TestCreateRejectedRequestIsNeverRunnable(t *testing.T) {
 		Labels:             []string{"ubuntu-latest"},
 		RunnerName:         "e2b-rejected",
 	}
-	created, st, err := store.CreateRejectedRequest(req, []byte(`{"workflow_job":{"id":12345}}`), "profile_labels_not_matched")
+	created, st, err := store.CreateRejectedRequest(req, []byte(`{"workflow_job":{"id":12345,"run_id":67890,"workflow_name":"CI"}}`), "profile_labels_not_matched")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -965,6 +965,16 @@ func TestCreateRejectedRequestIsNeverRunnable(t *testing.T) {
 	}
 	if st.Error != "runner admission rejected" || st.FailedAt.IsZero() {
 		t.Fatalf("rejected state is missing terminal failure details: %#v", st)
+	}
+	record, err := store.readRecord(req.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.GitHubPayloadJSON != "" {
+		t.Fatal("rejected request must not persist the webhook payload")
+	}
+	if record.WorkflowRunID != 67890 || record.WorkflowName != "CI" || !record.GitHubContextBackfilled {
+		t.Fatalf("rejected request must retain parsed github context: %#v", record)
 	}
 
 	_, _, claimed, err := store.ClaimNextRunnable("worker", time.Now().UTC().Add(time.Minute), time.Minute)
@@ -3953,13 +3963,14 @@ func TestRunnerStateDerivesGitHubJobLinkFromWorkflowJobPayload(t *testing.T) {
 		}
 	}`)
 	_, st, err := store.CreateRequest(RunnerRequest{
-		ID:                 "77684492230",
-		Source:             "github",
-		JobID:              77684492230,
-		RepositoryFullName: "qbox/las",
-		RequestedLabels:    []string{"github-runner-ubuntu-24-04"},
-		Labels:             []string{"github-runner-ubuntu-24-04"},
-		RunnerName:         "e2b-77684492230",
+		ID:                   "77684492230",
+		Source:               "github",
+		JobID:                77684492230,
+		GitHubInstallationID: 42,
+		RepositoryFullName:   "qbox/las",
+		RequestedLabels:      []string{"github-runner-ubuntu-24-04"},
+		Labels:               []string{"github-runner-ubuntu-24-04"},
+		RunnerName:           "e2b-77684492230",
 	}, payload)
 	if err != nil {
 		t.Fatal(err)
@@ -3995,13 +4006,137 @@ func TestRunnerStateDerivesGitHubJobLinkFromWorkflowJobPayload(t *testing.T) {
 	if !record.GitHubContextBackfilled {
 		t.Fatalf("expected github context backfill marker to be persisted")
 	}
+	if record.GitHubPayloadJSON != "" {
+		t.Fatal("accepted request must not persist the webhook payload")
+	}
+	closeTestDB(t, db)
+	restarted := NewWithOptions(store.opts).(*DBStore)
+	restartedState, err := restarted.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(restartedState, st) {
+		t.Fatalf("state changed after restart without a payload: got %#v want %#v", restartedState, st)
+	}
+	req, err := restarted.ReadRequest(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.GitHubInstallationID != 42 || req.JobID != 77684492230 || req.RepositoryFullName != "qbox/las" ||
+		!reflect.DeepEqual(req.Labels, []string{"github-runner-ubuntu-24-04"}) {
+		t.Fatalf("request lost runner recovery fields: %#v", req)
+	}
+}
+
+func TestGitHubLinksFromPayloadBytesFallbacks(t *testing.T) {
+	tests := []struct {
+		name       string
+		payload    string
+		wantRunID  int64
+		wantPR     int64
+		wantJobURL string
+	}{
+		{
+			name:       "workflow job nested run id",
+			payload:    `{"workflow_job":{"workflow_run":{"id":26392225417}}}`,
+			wantRunID:  26392225417,
+			wantJobURL: "https://github.com/qbox/las/actions/runs/26392225417/job/77684492230",
+		},
+		{
+			name:       "top level pull request number",
+			payload:    `{"workflow_job":{"run_id":26392225417},"pull_request":{"number":3335}}`,
+			wantRunID:  26392225417,
+			wantPR:     3335,
+			wantJobURL: "https://github.com/qbox/las/actions/runs/26392225417/job/77684492230?pr=3335",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			links := githubLinksFromPayloadBytes([]byte(tt.payload), "qbox/las", 77684492230)
+			if links.workflowRunID != tt.wantRunID || links.pullRequestNumber != tt.wantPR || links.jobURL != tt.wantJobURL {
+				t.Fatalf("github links = %#v, want run id %d, PR %d, URL %q", links, tt.wantRunID, tt.wantPR, tt.wantJobURL)
+			}
+		})
+	}
+}
+
+func TestAppendPullRequestQueryMatchesActualQueryParameter(t *testing.T) {
+	baseURL := "https://github.com/qbox/las/actions/runs/1/job/2"
+	for _, prNumber := range []int64{0, -5} {
+		if got := appendPullRequestQuery(baseURL, prNumber); got != baseURL {
+			t.Fatalf("appendPullRequestQuery(%q, %d) = %q, want unchanged URL", baseURL, prNumber, got)
+		}
+	}
+
+	tests := []struct {
+		name   string
+		rawURL string
+		want   string
+	}{
+		{
+			name:   "existing pull request query",
+			rawURL: "https://github.com/qbox/las/actions/runs/1/job/2?pr=3335",
+			want:   "https://github.com/qbox/las/actions/runs/1/job/2?pr=3335",
+		},
+		{
+			name:   "existing valueless pull request query",
+			rawURL: "https://github.com/qbox/las/actions/runs/1/job/2?pr",
+			want:   "https://github.com/qbox/las/actions/runs/1/job/2?pr",
+		},
+		{
+			name:   "path containing query-like text",
+			rawURL: "https://github.com/qbox/pr=/actions/runs/1/job/2",
+			want:   "https://github.com/qbox/pr=/actions/runs/1/job/2?pr=3335",
+		},
+		{
+			name:   "unrelated query value containing query-like text",
+			rawURL: "https://github.com/qbox/las/actions/runs/1/job/2?expr=pr=value",
+			want:   "https://github.com/qbox/las/actions/runs/1/job/2?expr=pr=value&pr=3335",
+		},
+		{
+			name:   "unrelated query",
+			rawURL: "https://github.com/qbox/las/actions/runs/1/job/2?attempt=2",
+			want:   "https://github.com/qbox/las/actions/runs/1/job/2?attempt=2&pr=3335",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := appendPullRequestQuery(tt.rawURL, 3335); got != tt.want {
+				t.Fatalf("appendPullRequestQuery(%q) = %q, want %q", tt.rawURL, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEffectiveRunnerRequestJobID(t *testing.T) {
+	workflowJobID := int64(22)
+	tests := []struct {
+		name   string
+		record runnerRequestRecord
+		want   int64
+	}{
+		{name: "assigned job takes precedence", record: runnerRequestRecord{AssignedJobID: 11, WorkflowJobID: &workflowJobID}, want: 11},
+		{name: "workflow job fallback", record: runnerRequestRecord{WorkflowJobID: &workflowJobID}, want: 22},
+		{name: "missing job id", record: runnerRequestRecord{}, want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := effectiveRunnerRequestJobID(tt.record); got != tt.want {
+				t.Fatalf("effective runner request job ID = %d, want %d", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestRunnerStateBuildsGitHubJobLinkFromWorkflowRunPayload(t *testing.T) {
-	store := New(t.TempDir())
+	store := New(t.TempDir()).(*DBStore)
 	payload := []byte(`{
 		"workflow_run": {
 			"id": 26392225417,
+			"name": "CI",
+			"run_attempt": 2,
+			"head_branch": "feature/group-jobs",
+			"head_sha": "abc123def456",
 			"pull_requests": [{"number": 3335}]
 		}
 	}`)
@@ -4020,6 +4155,29 @@ func TestRunnerStateBuildsGitHubJobLinkFromWorkflowRunPayload(t *testing.T) {
 	wantURL := "https://github.com/qbox/las/actions/runs/26392225417/job/77684492230?pr=3335"
 	if st.WorkflowRunID != 26392225417 || st.GitHubJobURL != wantURL {
 		t.Fatalf("unexpected github metadata: %#v", st)
+	}
+	if st.WorkflowName != "CI" || st.WorkflowRunAttempt != 2 || st.HeadBranch != "feature/group-jobs" || st.HeadSHA != "abc123def456" || st.PullRequestNumber != 3335 {
+		t.Fatalf("unexpected workflow_run context: %#v", st)
+	}
+	record, err := store.readRecord(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.GitHubPayloadJSON != "" || !record.GitHubContextBackfilled {
+		t.Fatal("workflow_run request must persist parsed context without the webhook payload")
+	}
+	db, err := store.dbOrEnsure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+	restarted := NewWithOptions(store.opts)
+	restartedState, err := restarted.ReadState(st.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(restartedState, st) {
+		t.Fatalf("workflow_run context changed after restart: got %#v want %#v", restartedState, st)
 	}
 }
 
@@ -4186,6 +4344,19 @@ func TestMigrateBackfillsLegacyRunnerRequestGitHubContext(t *testing.T) {
 	}
 	if pendingBackfills != 0 {
 		t.Fatalf("expected no pending github context backfills, got %d", pendingBackfills)
+	}
+	if record.GitHubPayloadJSON != payload {
+		t.Fatal("migration must preserve the historical webhook payload")
+	}
+	if err := migrated.migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	var afterSecondMigration runnerRequestRecord
+	if err := db.First(&afterSecondMigration, "id = ?", record.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(afterSecondMigration, record) {
+		t.Fatal("repeated migration must preserve the historical payload and backfilled record")
 	}
 }
 
@@ -4371,6 +4542,9 @@ func TestMigrateRepairsMissingRunnerRequestInstallationID(t *testing.T) {
 	}
 	if repaired.GitHubInstallationID != 135340026 {
 		t.Fatalf("github installation id was not repaired: %d", repaired.GitHubInstallationID)
+	}
+	if repaired.GitHubPayloadJSON != record.GitHubPayloadJSON {
+		t.Fatal("installation id repair must preserve the historical webhook payload")
 	}
 	if !repaired.UpdatedAt.Equal(originalUpdatedAt) {
 		t.Fatalf("updated_at changed during repair: got %s want %s", repaired.UpdatedAt, originalUpdatedAt)
