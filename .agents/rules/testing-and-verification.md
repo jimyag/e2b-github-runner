@@ -66,7 +66,15 @@ RUNNERD_MYSQL_TEST_DSN='<dedicated mysql test DSN>' \
 - For broad server/API behavior, run `go test ./...`.
 - For pre-merge confidence, run `task test`; it rebuilds UI assets, runs Bun UI tests, and runs Go tests with race and coverage.
 - For ordinary-user Jobs authorization, cover shared installations with different repository access, exact installation/repository pair matching, filtering before the database limit, list/detail/group/log/terminal consistency, missing or rejected GitHub user tokens, inaccessible linked installations, and short-lived access-cache behavior.
-- For Release C state changes, prove fresh schemas omit retired catalog tables, legacy databases leave those tables and rows untouched, repeated migration is idempotent, and Runner Spec/Sandbox mutations plus managed reconciliation commit their data change and audit evidence atomically. Rejected mutations leave no audit event, while audit failures roll back the mutation.
+- Keep regression coverage proving retired Runner Group/Policy models and APIs stay absent, fresh schemas omit their tables, and Runner Spec JSON omits `default_available`. No current behavior or recovery test may depend on legacy physical tables. Runner Spec/Sandbox mutations plus managed reconciliation must commit their data change and audit evidence atomically; rejected mutations leave no audit event, while audit failures roll back the mutation.
+
+## Scoped Runner Types
+
+- Run `go test ./internal/state -count=1` after changing scoped catalog uniqueness, effective controls, matching, or concurrency. Preserve old SQLite upgrade tests and run the dedicated PostgreSQL/MySQL matrix when schema or transaction behavior changes.
+- API tests must cover manageable account/Organization scope, repository-only rejection, local validation before provider I/O, duplicate-label and stale-revision `409` mapping, atomic audit behavior, and response-field isolation. Only `scoped_custom` entries may expose the selected scope's `template_id` and Organization `runner_group`; `platform_custom` template IDs stay private.
+- Lifecycle tests must mutate both a scoped custom type and a managed scope control after admission but before startup, then prove current disabled state or incompatible labels fail at `profile_validation` before GitHub registration or Sandbox creation.
+- UI tests must cover Organization-only Runner Group input, exact global-label override confirmation, pending-save suppression, and stale manual-refresh or mutation completion after switching scope. An old response must not replace current items, close the current dialog, or trigger a refresh for the new scope.
+- Local `task ui-production-smoke` currently covers the public pages and fixture-backed Jobs layout, not the Runner Types routes. Do not treat its four passing checks as Account/Organization Runner Types browser acceptance; keep that fixture extension and real-browser scope acceptance explicit until they are implemented.
 
 ## Admin Template Validation
 

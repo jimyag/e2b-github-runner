@@ -39,6 +39,9 @@ var runnerRequestListSelectColumns = []string{
 	"repository_full_name",
 	"requested_labels_json",
 	"profile_name",
+	"profile_source",
+	"profile_scope_type",
+	"profile_scope_id",
 	"runner_group",
 	"runner_name",
 	"status",
@@ -138,6 +141,9 @@ func (s *DBStore) createRequest(req RunnerRequest, payload []byte, status, failu
 		RequestedLabelsJSON:     string(requestedLabelsJSON),
 		LabelsJSON:              string(labelsJSON),
 		ProfileName:             req.ProfileName,
+		ProfileSource:           req.ProfileSource,
+		ProfileScopeType:        req.ProfileScopeType,
+		ProfileScopeID:          req.ProfileScopeID,
 		RunnerGroup:             req.RunnerGroup,
 		RunnerName:              req.RunnerName,
 		SandboxAPIURL:           strings.TrimSpace(req.SandboxAPIURL),
@@ -209,6 +215,9 @@ func (s *DBStore) WriteState(st RunnerState) error {
 		"status":                    st.Status,
 		"repository_full_name":      st.RepositoryFullName,
 		"profile_name":              st.ProfileName,
+		"profile_source":            st.ProfileSource,
+		"profile_scope_type":        st.ProfileScopeType,
+		"profile_scope_id":          st.ProfileScopeID,
 		"runner_group":              st.RunnerGroup,
 		"runner_name":               sanitizeRunnerName(st.RunnerName),
 		"sandbox_id":                st.SandboxID,
@@ -625,7 +634,7 @@ func (s *DBStore) ActiveCountForProfile(name string) (int, error) {
 }
 
 func (s *DBStore) InFlightCountForProfile(name string) (int, error) {
-	return s.countStatesForProfile(name, []string{StatusCreating, StatusRunning, StatusStopping})
+	return s.countStatesForProfileSource(name, []string{"", "global"}, []string{StatusCreating, StatusRunning, StatusStopping})
 }
 
 func (s *DBStore) ClaimNextRunnable(workerID string, now time.Time, leaseTTL time.Duration) (RunnerRequest, RunnerState, bool, error) {
@@ -858,6 +867,22 @@ func (s *DBStore) countStatesForProfile(name string, statuses []string) (int, er
 	var count int64
 	if err := db.Model(&runnerRequestRecord{}).
 		Where("profile_name = ?", strings.TrimSpace(name)).
+		Where("status IN ?", statuses).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func (s *DBStore) countStatesForProfileSource(name string, sources, statuses []string) (int, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	if err := db.Model(&runnerRequestRecord{}).
+		Where("profile_name = ?", strings.TrimSpace(name)).
+		Where("profile_source IN ?", sources).
 		Where("status IN ?", statuses).
 		Count(&count).Error; err != nil {
 		return 0, err

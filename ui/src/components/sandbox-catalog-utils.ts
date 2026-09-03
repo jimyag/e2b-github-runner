@@ -9,6 +9,21 @@ export type SandboxRegion = {
   apiURL: string
 }
 
+// Retained for compatibility with pure helpers that predate the runtime region catalog.
+// Components should use useSandboxRegions() so configured regions remain authoritative.
+export const sandboxRegions: SandboxRegion[] = [
+  {
+    id: "us-south-1",
+    label: "United States · Dallas 1",
+    apiURL: "https://us-south-1-sandbox.qiniuapi.com",
+  },
+  {
+    id: "cn-yangzhou-1",
+    label: "China · Yangzhou 1",
+    apiURL: "https://cn-yangzhou-1-sandbox.qiniuapi.com",
+  },
+]
+
 /** Region catalog provided by runnerd.yaml through GET /sandbox/regions. */
 export const SandboxRegionsContext = createContext<SandboxRegion[]>([])
 

@@ -28,6 +28,17 @@ func (s *Server) supportedSandboxRegionEndpoint(rawURL string) (string, bool) {
 	return "", false
 }
 
+func (s *Server) sandboxRegionForAPIURL(rawURL string) string {
+	normalized := strings.TrimRight(strings.TrimSpace(rawURL), "/")
+	for _, region := range s.cfg.SandboxRegions {
+		endpoint := strings.TrimRight(strings.TrimSpace(region.SandboxAPIURL), "/")
+		if strings.EqualFold(normalized, endpoint) {
+			return strings.TrimSpace(region.ID)
+		}
+	}
+	return ""
+}
+
 func (s *Server) sandboxCatalogForUser(w http.ResponseWriter, r *http.Request) (sandboxrunner.Catalog, bool) {
 	_, account, ok := s.requireUserSession(w, r)
 	if !ok {

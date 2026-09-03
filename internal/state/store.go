@@ -27,6 +27,8 @@ var (
 	ErrSandboxServiceDefaultAPIKeyRequired = errors.New("sandbox service default api key is required")
 	ErrCacheServiceNotConfigured           = errors.New("cache service not configured")
 	ErrAuditEventPersistence               = errors.New("audit event persistence failed")
+	ErrRunnerProfileNameConflict           = errors.New("runner profile name conflicts with enabled global profile")
+	ErrRunnerProfileLabelsConflict         = errors.New("runner profile labels conflict")
 )
 
 type RunnerRequest struct {
@@ -39,6 +41,9 @@ type RunnerRequest struct {
 	RequestedLabels        []string  `json:"requested_labels,omitempty"`
 	Labels                 []string  `json:"labels"`
 	ProfileName            string    `json:"runner_spec_name,omitempty"`
+	ProfileSource          string    `json:"runner_spec_source,omitempty"`
+	ProfileScopeType       string    `json:"runner_spec_scope_type,omitempty"`
+	ProfileScopeID         int64     `json:"runner_spec_scope_id,omitempty"`
 	RunnerGroup            string    `json:"runner_group,omitempty"`
 	RunnerName             string    `json:"runner_name"`
 	SandboxAPIURL          string    `json:"-"`
@@ -54,6 +59,9 @@ type RunnerState struct {
 	RepositoryFullName     string    `json:"repository_full_name,omitempty"`
 	RequestedLabels        []string  `json:"requested_labels,omitempty"`
 	ProfileName            string    `json:"runner_spec_name,omitempty"`
+	ProfileSource          string    `json:"runner_spec_source,omitempty"`
+	ProfileScopeType       string    `json:"runner_spec_scope_type,omitempty"`
+	ProfileScopeID         int64     `json:"runner_spec_scope_id,omitempty"`
 	RunnerGroup            string    `json:"runner_group,omitempty"`
 	RunnerName             string    `json:"runner_name"`
 	SandboxID              string    `json:"sandbox_id,omitempty"`
@@ -119,7 +127,54 @@ type ProfileMatch struct {
 	RepositoryFullName string         `json:"repository_full_name"`
 	Labels             []string       `json:"labels"`
 	Profile            *RunnerProfile `json:"runner_spec,omitempty"`
+	Source             string         `json:"runner_spec_source,omitempty"`
+	ScopeType          string         `json:"runner_spec_scope_type,omitempty"`
+	ScopeID            int64          `json:"runner_spec_scope_id,omitempty"`
 	Reason             string         `json:"reason,omitempty"`
+}
+
+type RunnerProfileScope struct {
+	Type string `json:"scope_type"`
+	ID   int64  `json:"scope_id"`
+}
+
+type RunnerProfileControl struct {
+	ScopeType      string    `json:"scope_type"`
+	ScopeID        int64     `json:"scope_id"`
+	ProfileName    string    `json:"name"`
+	Enabled        bool      `json:"enabled"`
+	MaxConcurrency int       `json:"max_concurrency"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type ScopedRunnerProfile struct {
+	ScopeType      string    `json:"scope_type"`
+	ScopeID        int64     `json:"scope_id"`
+	Name           string    `json:"name"`
+	WorkflowLabels []string  `json:"workflow_labels"`
+	LabelKey       string    `json:"-"`
+	TemplateID     string    `json:"template_id,omitempty"`
+	RunnerGroup    string    `json:"runner_group,omitempty"`
+	MaxConcurrency int       `json:"max_concurrency"`
+	Enabled        bool      `json:"enabled"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type EffectiveRunnerProfile struct {
+	Source                 string        `json:"source"`
+	ScopeType              string        `json:"scope_type,omitempty"`
+	ScopeID                int64         `json:"scope_id,omitempty"`
+	Profile                RunnerProfile `json:"-"`
+	WorkflowLabels         []string      `json:"workflow_labels"`
+	GlobalMaxConcurrency   int           `json:"global_max_concurrency"`
+	ScopeMaxConcurrency    int           `json:"scope_max_concurrency"`
+	EffectiveEnabled       bool          `json:"enabled"`
+	ScopeEnabled           bool          `json:"scope_enabled"`
+	OverridesGlobal        bool          `json:"overrides_global"`
+	Editable               bool          `json:"editable"`
+	ScopeControlConfigured bool          `json:"scope_control_configured"`
 }
 
 type AuditEvent struct {
@@ -291,6 +346,8 @@ type RunnerRequestStore interface {
 	InFlightCount() (int, error)
 	ActiveCountForProfile(name string) (int, error)
 	InFlightCountForProfile(name string) (int, error)
+	ActiveCountForProfileScope(source string, scope RunnerProfileScope, name string) (int, error)
+	InFlightCountForProfileScope(source string, scope RunnerProfileScope, name string) (int, error)
 	ClaimNextRunnable(workerID string, now time.Time, leaseTTL time.Duration) (RunnerRequest, RunnerState, bool, error)
 	ReleaseLease(id, workerID string) error
 	RetryRequest(id string, now time.Time) (RunnerState, error)
@@ -306,6 +363,16 @@ type RunnerCatalogStore interface {
 	ReconcileManagedProfiles(profiles []RunnerProfile) ([]ManagedProfileConflict, error)
 	DeleteProfile(name string) error
 	MatchProfile(repositoryFullName string, labels []string) (ProfileMatch, error)
+	ListEffectiveProfiles(scope RunnerProfileScope) ([]EffectiveRunnerProfile, error)
+	GetEffectiveProfile(scope RunnerProfileScope, source, name string) (EffectiveRunnerProfile, error)
+	MatchProfileForScope(scope RunnerProfileScope, repositoryFullName string, labels []string) (ProfileMatch, error)
+	GetProfileControl(scope RunnerProfileScope, name string) (RunnerProfileControl, error)
+	UpsertProfileControlIfUnchanged(control RunnerProfileControl, expectedUpdatedAt *time.Time) (RunnerProfileControl, error)
+	DeleteProfileControlIfUnchanged(scope RunnerProfileScope, name string, expectedUpdatedAt *time.Time) error
+	ListScopedProfiles(scope RunnerProfileScope) ([]ScopedRunnerProfile, error)
+	GetScopedProfile(scope RunnerProfileScope, name string) (ScopedRunnerProfile, error)
+	UpsertScopedProfileIfUnchanged(profile ScopedRunnerProfile, expectedUpdatedAt *time.Time) (ScopedRunnerProfile, error)
+	DeleteScopedProfileIfUnchanged(scope RunnerProfileScope, name string, expectedUpdatedAt *time.Time) error
 }
 
 type IdentityStore interface {

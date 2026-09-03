@@ -244,10 +244,15 @@ func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallatio
 		st, err := s.rejectAdmission(req, payload, "repository_not_allowed")
 		return st, false, err
 	}
-	match, err := s.matchProfileForAdmission(repositoryFullName, job.Labels)
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
+	match, err := s.matchProfileForAdmission(repositoryFullName, githubInstallationID, job.Labels)
 	if err != nil {
 		return state.RunnerState{}, false, err
 	}
+	req.ProfileSource = match.Source
+	req.ProfileScopeType = match.ScopeType
+	req.ProfileScopeID = match.ScopeID
 	if match.Profile == nil {
 		s.logger.Info("runner admission rejected", "id", req.ID, "repository", repositoryFullName, "labels", []string(job.Labels), "reason", match.Reason)
 		st, err := s.rejectAdmission(req, payload, match.Reason)
@@ -258,22 +263,32 @@ func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallatio
 	req.Labels = append([]string(nil), match.Profile.Labels...)
 	s.logger.Info("workflow run job matched profile", "job_id", job.ID, "repository", repositoryFullName, "profile", match.Profile.Name, "runner_group", match.Profile.RunnerGroup, "labels", req.Labels)
 	metrics.RecordWorkflowQueued(repositoryFullName, workflowRunName, job.Name, match.Profile.Name)
-	return s.enqueueRunnerRequest(req, payload)
+	return s.enqueueRunnerRequestLocked(req, payload)
 }
 
-func (s *Server) matchProfileForAdmission(repository string, labels []string) (state.ProfileMatch, error) {
+func (s *Server) matchProfileForAdmission(repository string, installationID int64, labels []string) (state.ProfileMatch, error) {
+	scope, ok, err := s.runnerProfileScopeForInstallation(installationID)
+	if err != nil {
+		return state.ProfileMatch{}, err
+	}
+	if ok {
+		return s.store.MatchProfileForScope(scope, repository, labels)
+	}
 	return s.store.MatchProfile(repository, labels)
 }
 
 func (s *Server) enqueueRunnerRequest(req state.RunnerRequest, payload []byte) (state.RunnerState, bool, error) {
 	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
+	return s.enqueueRunnerRequestLocked(req, payload)
+}
+
+func (s *Server) enqueueRunnerRequestLocked(req state.RunnerRequest, payload []byte) (state.RunnerState, bool, error) {
 	if st, err := s.store.ReadState(req.ID); err == nil {
-		s.admissionMu.Unlock()
 		s.logger.Info("runner request already exists", "id", req.ID, "status", st.Status)
 		return st, false, nil
 	}
 	created, st, err := s.store.CreateRequest(req, payload)
-	s.admissionMu.Unlock()
 	if err != nil {
 		return state.RunnerState{}, false, err
 	}
@@ -327,10 +342,15 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		s.store.AppendLog(id, "control.log", []byte("runner start skipped because request is stopped\n"))
 		return
 	}
-	profile, err := s.store.GetProfile(req.ProfileName)
+	profile, err := s.profileForRunnerRequest(req)
 	if err != nil {
 		unlock()
 		s.failStart(id, st, "profile_lookup", fmt.Errorf("load profile %q: %w", req.ProfileName, err))
+		return
+	}
+	if err := validateRequestedProfile(profile, req.RequestedLabels); err != nil {
+		unlock()
+		s.failStart(id, st, "profile_validation", err)
 		return
 	}
 	s.admissionMu.Lock()
@@ -351,7 +371,7 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 		return
 	}
 	if req.ProfileName != "" {
-		rejected, err := s.profileAtCapacityFor(profile)
+		rejected, err := s.profileAtCapacityFor(req, profile)
 		if err != nil {
 			s.admissionMu.Unlock()
 			unlock()
@@ -1657,15 +1677,82 @@ func appendError(current, extra string) string {
 	return current + "; " + extra
 }
 
-func (s *Server) profileAtCapacityFor(profile state.RunnerProfile) (bool, error) {
-	if profile.MaxConcurrency <= 0 {
+func (s *Server) profileForRunnerRequest(req state.RunnerRequest) (state.RunnerProfile, error) {
+	source := req.ProfileSource
+	if source == "" || source == "global" {
+		if req.ProfileScopeType != "" && req.ProfileScopeID > 0 {
+			item, err := s.store.GetEffectiveProfile(state.RunnerProfileScope{Type: req.ProfileScopeType, ID: req.ProfileScopeID}, "global", req.ProfileName)
+			if err != nil {
+				return state.RunnerProfile{}, err
+			}
+			profile := item.Profile
+			profile.Enabled = item.EffectiveEnabled
+			return profile, nil
+		}
+		return s.store.GetProfile(req.ProfileName)
+	}
+	if source == "scoped_custom" && req.ProfileScopeType != "" && req.ProfileScopeID > 0 {
+		item, err := s.store.GetEffectiveProfile(state.RunnerProfileScope{Type: req.ProfileScopeType, ID: req.ProfileScopeID}, source, req.ProfileName)
+		if err != nil {
+			return state.RunnerProfile{}, err
+		}
+		profile := item.Profile
+		profile.Enabled = item.EffectiveEnabled
+		return profile, nil
+	}
+	return state.RunnerProfile{}, state.ErrNotFound
+}
+
+func (s *Server) profileAtCapacityFor(req state.RunnerRequest, profile state.RunnerProfile) (bool, error) {
+	if profile.MaxConcurrency <= 0 && (req.ProfileSource != "global" || req.ProfileScopeType == "") {
 		return false, nil
 	}
-	inFlight, err := s.store.InFlightCountForProfile(profile.Name)
-	if err != nil {
-		return false, err
+	source := req.ProfileSource
+	if source == "" {
+		source = "global"
 	}
-	return inFlight >= profile.MaxConcurrency, nil
+	if source == "global" {
+		inFlight, err := s.store.InFlightCountForProfile(req.ProfileName)
+		if err != nil {
+			return false, err
+		}
+		if profile.MaxConcurrency > 0 && inFlight >= profile.MaxConcurrency {
+			return true, nil
+		}
+		if req.ProfileScopeType == "" || req.ProfileScopeID <= 0 {
+			return false, nil
+		}
+		item, err := s.store.GetEffectiveProfile(state.RunnerProfileScope{Type: req.ProfileScopeType, ID: req.ProfileScopeID}, "global", req.ProfileName)
+		if err != nil {
+			return false, err
+		}
+		scopeInFlight, err := s.store.InFlightCountForProfileScope(source, state.RunnerProfileScope{Type: req.ProfileScopeType, ID: req.ProfileScopeID}, req.ProfileName)
+		if err != nil {
+			return false, err
+		}
+		if item.ScopeMaxConcurrency > 0 && scopeInFlight >= item.ScopeMaxConcurrency {
+			return true, nil
+		}
+		return false, nil
+	}
+	if req.ProfileScopeType != "" && req.ProfileScopeID > 0 {
+		inFlight, err := s.store.InFlightCountForProfileScope(source, state.RunnerProfileScope{Type: req.ProfileScopeType, ID: req.ProfileScopeID}, req.ProfileName)
+		if err != nil {
+			return false, err
+		}
+		if profile.MaxConcurrency > 0 && inFlight >= profile.MaxConcurrency {
+			return true, nil
+		}
+	} else if profile.MaxConcurrency > 0 {
+		inFlight, err := s.store.InFlightCountForProfile(req.ProfileName)
+		if err != nil {
+			return false, err
+		}
+		if inFlight >= profile.MaxConcurrency {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func validateRequestedProfile(profile state.RunnerProfile, requestedLabels []string) error {

@@ -254,6 +254,67 @@ func TestRunnerLifecycleCustomTemplateUsesStoredIDWithoutCatalog(t *testing.T) {
 	}
 }
 
+func TestRunnerLifecycleRevalidatesScopedProfileBeforeStarting(t *testing.T) {
+	store := state.New(t.TempDir())
+	scope := state.RunnerProfileScope{Type: state.RunnerProfileScopeAccount, ID: 1}
+	profile, err := store.UpsertScopedProfileIfUnchanged(state.ScopedRunnerProfile{ScopeType: scope.Type, ScopeID: scope.ID, Name: "custom", WorkflowLabels: []string{"self-hosted", "custom"}, TemplateID: "custom-template-id", Enabled: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _, err := store.CreateRequest(state.RunnerRequest{ID: "disabled-scoped-request", Source: "test", RepositoryFullName: "o/r", RequestedLabels: []string{"self-hosted", "custom"}, Labels: []string{"self-hosted", "custom"}, ProfileName: profile.Name, ProfileSource: "scoped_custom", ProfileScopeType: scope.Type, ProfileScopeID: scope.ID, RunnerName: "e2b-disabled-scoped-request"}, nil)
+	if err != nil || !created {
+		t.Fatalf("CreateRequest created=%v err=%v", created, err)
+	}
+	profile.Enabled = false
+	if _, err := store.UpsertScopedProfileIfUnchanged(profile, &profile.UpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	sandbox := &lifecycleSandboxService{}
+	srv := newRunnerLifecycleTestServer(t, store, "http://127.0.0.1:1", sandbox)
+
+	srv.startRunner(context.Background(), "disabled-scoped-request", "worker-test")
+
+	got, err := store.ReadState("disabled-scoped-request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FailureStage != "profile_validation" || got.Status == state.StatusRunning {
+		t.Fatalf("state = %#v, want profile_validation failure", got)
+	}
+	if inputs := sandbox.startInputs(); len(inputs) != 0 {
+		t.Fatalf("disabled scoped profile started sandbox with inputs %#v", inputs)
+	}
+}
+
+func TestRunnerLifecycleRevalidatesManagedScopeControlBeforeStarting(t *testing.T) {
+	store := state.New(t.TempDir())
+	profile := lifecycleManagedProfile("managed-template-id")
+	upsertLifecycleProfile(t, store, profile)
+	scope := state.RunnerProfileScope{Type: state.RunnerProfileScopeAccount, ID: 1}
+	if _, err := store.UpsertProfileControlIfUnchanged(state.RunnerProfileControl{ScopeType: scope.Type, ScopeID: scope.ID, ProfileName: profile.Name, Enabled: false}, nil); err != nil {
+		t.Fatal(err)
+	}
+	created, _, err := store.CreateRequest(state.RunnerRequest{ID: "disabled-managed-request", Source: "test", RepositoryFullName: "o/r", RequestedLabels: []string{"self-hosted", "managed"}, Labels: []string{"self-hosted", "managed"}, ProfileName: profile.Name, ProfileSource: "global", ProfileScopeType: scope.Type, ProfileScopeID: scope.ID, RunnerName: "e2b-disabled-managed-request"}, nil)
+	if err != nil || !created {
+		t.Fatalf("CreateRequest created=%v err=%v", created, err)
+	}
+	sandbox := &lifecycleSandboxService{}
+	srv := newRunnerLifecycleTestServer(t, store, "http://127.0.0.1:1", sandbox)
+
+	srv.startRunner(context.Background(), "disabled-managed-request", "worker-test")
+
+	got, err := store.ReadState("disabled-managed-request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FailureStage != "profile_validation" || got.Status == state.StatusRunning {
+		t.Fatalf("state = %#v, want profile_validation failure", got)
+	}
+	if inputs := sandbox.startInputs(); len(inputs) != 0 {
+		t.Fatalf("disabled managed scope started sandbox with inputs %#v", inputs)
+	}
+}
+
 func TestRunnerLifecycleRetryUsesPersistedSpecWithoutPolicyOrGroupReads(t *testing.T) {
 	// Characterization test: a retry starts from its admitted Runner Spec. It
 	// catches a migration that rematches a stored request through retired policy

@@ -12,7 +12,7 @@ Implemented pieces:
 
 - File-first runtime config loaded from `runnerd.yaml` by default, or from `--config`.
 - SQLite, Postgres, and MySQL state backends through `database.backend` and `database.dsn`.
-- DB-backed runner requests, runner events/logs, runner specs, runner groups, repository policies, local accounts, linked OAuth identities, account preferences/secrets, and audit events.
+- DB-backed runner requests, runner events/logs, Runner Specs, local accounts, linked OAuth identities, GitHub installations, account preferences/secrets, and audit events. Internal Runner Group/Policy models have been removed and are not part of the active model.
 - Account and GitHub installation scoped Preferences for Sandbox service settings, with API keys stored as encrypted account secrets.
 - An admin-managed, disabled-by-default Sandbox service fallback stored independently from account preferences.
 - Schema creation is driven by GORM tags in the state record structs, with a narrow legacy compatibility pass followed by `AutoMigrate`; GORM foreign-key creation is intentionally disabled.
@@ -21,14 +21,14 @@ Implemented pieces:
 - GitHub App auth with optional dynamic installation resolution, plus token and basic auth compatibility modes.
 - GitHub App OAuth sign-in for ordinary users and administrators, with local roles and signed HttpOnly sessions.
 - Ordinary-user UI for PR/job views, a unified repository access and effective Sandbox service readiness page, account or organization scoped Sandbox service settings, and scoped Sandbox template and runner-instance catalogs.
-- Admin API and UI for the account list and audited role controls, runner requests, specs, groups, policies, the global Sandbox service fallback, retry/stop actions, match tests, audit history, and diagnostics.
+- Admin API and UI for the account list and audited role controls, runner requests, Runner Specs, the global Sandbox service fallback, retry/stop actions, match tests, audit history, and diagnostics.
 - Production UI assets built from `ui/` into `internal/server/ui/`; development assets are proxied to Vite.
 - Diagnostics through `github.com/jimmicro/pprof`, `/diagnostics/pprof`, `/diagnostics/vars`, and expvar metrics.
 
 Known boundaries:
 
 - GitHub Enterprise Server is rejected by config validation; only `https://api.github.com` is supported.
-- Runner specs, runner groups, and repository policies are managed through the admin API/UI, not through `runnerd.yaml`.
+- Runner Specs are managed through the admin API/UI, not through `runnerd.yaml`. Internal Runner Groups and Repository Policies are retired; the optional `runner_group` field remains only as the GitHub Organization Runner Group registration target.
 - Token and basic auth still exist as compatibility modes. Product policy has not decided whether to keep them for production.
 - Multi-instance behavior should not be advertised until two runnerd processes have been verified against the same database.
 - Sandbox provider catalogs are ordinary-user resources, not admin configuration. `GET /user/sandbox/templates` and `GET /user/sandbox/instances` resolve scoped credentials and then the enabled admin fallback, accept only supported region ids, and keep secrets server-side.
@@ -87,7 +87,7 @@ flowchart TB
 
 ### Runner Request Lifecycle
 
-Admission and capacity are separate steps. Webhooks admit a request only after repository and label/spec policy checks pass. Capacity is checked later by the worker when it claims a queued request, so over-capacity work remains queued instead of being rejected.
+Admission and capacity are separate steps. Webhooks admit a request only after the repository allowlist and the effective account/Organization Runner Type label checks pass. Exact scoped custom labels are evaluated before the scope-controlled global catalog, and the selected source, scope, and name are persisted with the request. Capacity is checked later by the worker when it claims a queued request, so over-capacity work remains queued instead of being rejected. Before registration or Sandbox creation, the worker reloads that persisted identity and revalidates the latest enabled state and requested labels.
 
 ```mermaid
 sequenceDiagram
@@ -100,7 +100,7 @@ sequenceDiagram
 
   GH->>HTTP: workflow_job queued
   HTTP->>HTTP: verify HMAC and parse labels
-  HTTP->>Store: MatchProfile(repository, labels)
+  HTTP->>Store: MatchProfileForScope(scope, repository, labels)
   alt no matching spec or repository rejected
     HTTP->>Store: record failed admission
     HTTP-->>GH: 202 with failed runner request
@@ -132,10 +132,7 @@ The configured database is the durable source for runner requests and control-pl
 ```mermaid
 erDiagram
   RUNNER_REQUESTS ||--o{ RUNNER_EVENTS : records
-  RUNNER_PROFILES ||--o{ RUNNER_GROUP_SPECS : member
-  RUNNER_GROUPS ||--o{ RUNNER_GROUP_SPECS : contains
-  RUNNER_PROFILES ||--o{ REPOSITORY_POLICIES : grants
-  RUNNER_GROUPS ||--o{ REPOSITORY_POLICIES : grants
+  RUNNER_PROFILES o|--o{ RUNNER_REQUESTS : selected_by
   ACCOUNTS ||--o{ OAUTH_IDENTITIES : links
   ACCOUNTS ||--o{ GITHUB_INSTALLATIONS : owns
   ACCOUNTS ||--o{ AUDIT_EVENTS : acts
@@ -245,9 +242,9 @@ Admission uses the GitHub webhook payload repository and labels. A runner reques
 - an enabled Runner Spec satisfies `required_labels ⊆ job_labels ⊆ labels`;
 - the matched spec is enabled.
 
-After the repository allowlist check, every enabled Runner Spec is eligible for label matching. Internal Runner Groups and Repository Policies no longer exist in the application model; their legacy database tables remain untouched only for rollback. When a spec includes a GitHub runner group, runnerd creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
+After the repository allowlist check, a resolved account or Organization scope first checks an exact scoped custom label set. A disabled exact custom match explicitly shadows the global catalog with `profile_scope_disabled`; otherwise the matcher applies the scope's managed controls before global matching. If no scope can be resolved, the existing global catalog remains the compatibility path. Internal Runner Groups and Repository Policies no longer exist or participate in matching. When a spec includes a GitHub runner group, runnerd creates an organization runner for the job repository owner and passes that group as `--runnergroup`.
 
-Capacity is checked later when the worker starts a queued request. Requests above global or per-spec concurrency limits remain `queued` and are retried later. Transient placement/rate-limit signals are treated as queue deferrals instead of hard failures.
+Capacity is checked later when the worker starts a queued request. Managed global specs enforce both their global limit and any additional scope limit; scoped custom specs enforce their scope limit, and all requests remain subject to `worker.max_concurrent_runners`. Requests above a limit remain `queued` and are retried later. A queued request whose persisted type is now disabled or no longer satisfies its requested labels fails at `profile_validation` instead of launching from stale admission state. Transient placement/rate-limit signals are treated as queue deferrals instead of hard failures.
 
 ## State And Recovery
 
@@ -261,6 +258,14 @@ Runner state is database-backed. The worker claims runnable requests with lease 
 The design deliberately uses portable DB semantics rather than relying on Postgres-only locking features for the core path. SQLite remains valid for local and small single-node deployments; Postgres and MySQL are available for more durable deployments, pending multi-process validation.
 
 The schema source of truth lives in `internal/state/records.go`. Startup migration runs a narrow legacy compatibility pass in `internal/state/db.go` before GORM `AutoMigrate`. This keeps fresh database creation model-driven while preserving known older sqlite upgrade paths for missing columns and obsolete OAuth constraints. Incompatible legacy account preference/secret tables without scope columns are intentionally dropped and recreated; their rows are not migrated. Operators must reconfigure affected Sandbox settings/API keys, and affected users must reauthenticate with GitHub before installation sync.
+
+## Request Loading And Observability
+
+The React application uses the pure policies in `ui/src/app-load-policy.ts` to load only the resources required by the active route. Jobs and dynamic Admin request surfaces may poll; static or unrelated account and catalog surfaces do not inherit a global polling loop. Mutation refreshes stay scoped to the active surface.
+
+Runner-request lists use bounded pagination and list-only database projections instead of loading raw webhook, label, or encrypted Sandbox fields. Ordinary-user lists apply the exact `(github_installation_id, repository_full_name)` authorization intersection before database limits and merge bounded installation results into one globally ordered page.
+
+Successful repository authorization is cached for at most 30 seconds. A request after 20 seconds may return the still-valid entry while one background refresh runs; expired, missing, or rejected credentials fail closed, and transient errors never extend the original expiry. HTTP timing counters use mux route patterns rather than concrete IDs so expvar metric cardinality remains bounded.
 
 ## Diagnostics
 

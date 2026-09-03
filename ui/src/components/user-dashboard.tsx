@@ -51,6 +51,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { shouldShowSandboxSetupTask } from "@/user-onboarding"
 import { SandboxesSection, SandboxTemplatesSection } from "@/components/sandbox-catalog-sections"
+import { UserRunnerTypesSection } from "@/components/user-runner-types-section"
 import { findSandboxRegionByAPIURL, useSandboxRegions } from "@/components/sandbox-catalog-utils"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -76,7 +77,7 @@ type BuildGroup = {
 }
 
 type UserPage = "home" | "repositories" | "settings"
-type AccountSettingsTab = "repositories" | "preferences" | "sandbox-templates" | "sandbox-instances"
+type AccountSettingsTab = "repositories" | "preferences" | "sandbox-templates" | "sandbox-instances" | "runner-types"
 type AccountSettingsRoute = {
   accountLogin?: string
   tab: AccountSettingsTab
@@ -88,8 +89,6 @@ type GitHubLogState =
 
 const jobLogTabsListClassName = "h-auto w-full justify-start gap-6 rounded-none border-b bg-transparent p-0 text-muted-foreground"
 const jobLogTabsTriggerClassName = "h-10 flex-none rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-0 py-2 text-sm font-medium shadow-none hover:text-foreground data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none dark:data-[state=active]:bg-transparent"
-
-
 
 export function UserDashboard({
   authSession,
@@ -558,6 +557,12 @@ function AccountsPage({
                     {t("user.sandboxService")}
                   </TabsTrigger>
                   <TabsTrigger
+                    value="runner-types"
+                    className="ml-8 h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+                  >
+                    {t("user.runnerTypes")}
+                  </TabsTrigger>
+                  <TabsTrigger
                     value="sandbox-templates"
                     className="ml-8 h-10 flex-none rounded-none border-0 border-b-2 border-transparent bg-transparent px-0 py-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
                   >
@@ -580,6 +585,9 @@ function AccountsPage({
                     onDelete={() => onDeleteSandboxAPIKey(preferenceInstallationID)}
                   />
                   <CacheS3Card preferences={userPreferences} installationID={preferenceInstallationID} onSave={onSaveCacheConfig} onDelete={onDeleteCacheConfig} />
+                </TabsContent>
+                <TabsContent value="runner-types">
+                  <UserRunnerTypesSection request={request} installationID={preferenceInstallationID} />
                 </TabsContent>
                 <TabsContent value="sandbox-templates">
                   <SandboxTemplatesSection
@@ -612,6 +620,8 @@ function AccountsPage({
                 />
                 <CacheS3Card preferences={userPreferences} onSave={onSaveCacheConfig} onDelete={onDeleteCacheConfig} />
               </div>
+            ) : route.tab === "runner-types" ? (
+              <div className="space-y-4"><UserRunnerTypesSection request={request} /></div>
             ) : route.tab === "sandbox-templates" ? (
               <div className="space-y-4">
                 <div>

@@ -12,7 +12,7 @@ runnerd 是单个 Go 服务：接收 GitHub `workflow_job` webhooks，根据 rep
 
 - File-first runtime config，默认从 `runnerd.yaml` 加载，也可通过 `--config` 指定。
 - 通过 `database.backend` 和 `database.dsn` 支持 SQLite、Postgres 和 MySQL state backends。
-- DB-backed runner requests、runner events/logs、runner specs、runner groups、repository policies、本地 accounts、关联 OAuth identities、account preferences/secrets 和 audit events。
+- DB-backed runner requests、runner events/logs、Runner Specs、本地 accounts、关联 OAuth identities、GitHub installations、account preferences/secrets 和 audit events。内部 Runner Group/Policy 模型已经移除，不属于当前应用模型。
 - Account 和 GitHub installation scoped Preferences 用于 Sandbox service settings，API keys 作为 encrypted account secrets 保存。
 - 独立于 account preferences 的 admin-managed Sandbox service fallback，默认关闭。
 - Schema creation 由 state record structs 中的 GORM tags 驱动，启动时先执行窄范围 legacy compatibility pass，再运行 `AutoMigrate`；GORM foreign-key creation 有意保持关闭。
@@ -21,14 +21,14 @@ runnerd 是单个 Go 服务：接收 GitHub `workflow_job` webhooks，根据 rep
 - GitHub App auth 支持可选 dynamic installation resolution，同时保留 token 和 basic auth compatibility modes。
 - GitHub App OAuth 用于普通用户和管理员登录，本地 roles 决定管理权限，session 使用 signed HttpOnly cookie。
 - Ordinary-user UI 支持 PR/job views、统一的 repository access 与有效 Sandbox service readiness 页面、account 或 organization scoped Sandbox service settings，以及 scoped Sandbox template 和 runner-instance catalogs。
-- Admin API 和 UI 支持账户列表与带审计的角色控制、runner requests、specs、groups、policies、全局 Sandbox service fallback、retry/stop actions、match tests、audit history 和 diagnostics。
+- Admin API 和 UI 支持账户列表与带审计的角色控制、runner requests、Runner Specs、全局 Sandbox service fallback、retry/stop actions、match tests、audit history 和 diagnostics。
 - Production UI assets 从 `ui/` 构建到 `internal/server/ui/`；development assets 代理到 Vite。
 - 通过 `github.com/jimmicro/pprof`、`/diagnostics/pprof`、`/diagnostics/vars` 和 expvar metrics 提供 diagnostics。
 
 已知边界：
 
 - Config validation 拒绝 GitHub Enterprise Server；只支持 `https://api.github.com`。
-- Runner specs、runner groups 和 repository policies 通过 admin API/UI 管理，不是 `runnerd.yaml` 字段。
+- Runner Specs 通过 admin API/UI 管理，不是 `runnerd.yaml` 字段。内部 Runner Group 和 Repository Policy 已退役；可选 `runner_group` 字段只保留为 GitHub Organization Runner Group 注册目标。
 - Token 和 basic auth 仍作为 compatibility modes 存在。产品策略尚未决定是否为生产长期保留。
 - 在用两个 runnerd 进程连接同一个 database 验证前，不应宣传 multi-instance support。
 - Sandbox provider catalogs 是普通用户资源，不是 admin 配置。`GET /user/sandbox/templates` 和 `GET /user/sandbox/instances` 会先解析 scoped credentials，再尝试已启用的 admin fallback，只接受支持的 region id，并把 secrets 保留在服务端。
@@ -87,7 +87,7 @@ flowchart TB
 
 ### Runner Request 生命周期
 
-Admission 和 capacity 是两个独立步骤。Webhooks 只有在 repository 和 label/spec policy checks 通过后才准入 request。Capacity 由 worker claim queued request 后再检查，因此超过容量的工作会保持 queued，而不是被 admission 阶段拒绝。
+Admission 和 capacity 是两个独立步骤。Webhooks 只有在 repository allowlist 和当前账户／Organization 有效 Runner Type 标签检查通过后才准入 request。精确的作用域自定义标签先于应用作用域控制后的全局目录匹配，选中的 source、scope 和 name 会随 request 持久化。Capacity 由 worker claim queued request 后再检查，因此超过容量的工作会保持 queued，而不是被 admission 阶段拒绝。GitHub 注册或创建 Sandbox 前，worker 会按持久化身份重新加载类型，并校验最新启用状态和 requested labels。
 
 ```mermaid
 sequenceDiagram
@@ -100,7 +100,7 @@ sequenceDiagram
 
   GH->>HTTP: workflow_job queued
   HTTP->>HTTP: verify HMAC and parse labels
-  HTTP->>Store: MatchProfile(repository, labels)
+  HTTP->>Store: MatchProfileForScope(scope, repository, labels)
   alt no matching spec or repository rejected
     HTTP->>Store: record failed admission
     HTTP-->>GH: 202 with failed runner request
@@ -132,10 +132,7 @@ sequenceDiagram
 ```mermaid
 erDiagram
   RUNNER_REQUESTS ||--o{ RUNNER_EVENTS : records
-  RUNNER_PROFILES ||--o{ RUNNER_GROUP_SPECS : member
-  RUNNER_GROUPS ||--o{ RUNNER_GROUP_SPECS : contains
-  RUNNER_PROFILES ||--o{ REPOSITORY_POLICIES : grants
-  RUNNER_GROUPS ||--o{ REPOSITORY_POLICIES : grants
+  RUNNER_PROFILES o|--o{ RUNNER_REQUESTS : selected_by
   ACCOUNTS ||--o{ OAUTH_IDENTITIES : links
   ACCOUNTS ||--o{ GITHUB_INSTALLATIONS : owns
   ACCOUNTS ||--o{ AUDIT_EVENTS : acts
@@ -245,9 +242,9 @@ Admission 使用 GitHub webhook payload 中的 repository 和 labels。Runner re
 - 已启用 Runner Spec 满足 `required_labels ⊆ job_labels ⊆ labels`；
 - 匹配到的 spec 已启用。
 
-通过仓库 allowlist 检查后，所有已启用 Runner Spec 都可参与标签匹配。内部 Runner Group 和 Repository Policy 已不存在于应用模型中；其遗留数据库表仅为回滚保持原样。当 spec 包含 GitHub runner group 时，runnerd 会为 job repository owner 创建 organization runner，并传入该 group 作为 `--runnergroup`。
+通过仓库 allowlist 检查后，已解析的账户或 Organization scope 会先检查精确的 scoped custom 标签集合。已停用的精确自定义匹配会以 `profile_scope_disabled` 明确屏蔽全局目录；否则 matcher 会先应用该 scope 的 managed controls，再执行全局匹配。无法解析 scope 时，原有全局目录仍是兼容路径。内部 Runner Group 和 Repository Policy 已不存在，也不会参与匹配。当 spec 包含 GitHub runner group 时，runnerd 会为 job repository owner 创建 organization runner，并传入该 group 作为 `--runnergroup`。
 
-Capacity 在 worker 启动 queued request 时检查。超过 global 或 per-spec concurrency limits 的 requests 会保持 `queued` 并稍后重试。Transient placement/rate-limit signals 会作为 queue deferrals，而不是 hard failures。
+Capacity 在 worker 启动 queued request 时检查。Managed global spec 同时执行全局上限和附加 scope 上限，scoped custom spec 执行自己的 scope 上限，所有请求还受 `worker.max_concurrent_runners` 约束。超过上限的 request 保持 `queued` 并稍后重试。如果持久化类型在等待期间被停用或不再满足 requested labels，request 会在 `profile_validation` 失败，而不是使用过期准入状态启动。Transient placement/rate-limit signals 会作为 queue deferrals，而不是 hard failures。
 
 ## State And Recovery
 
@@ -261,6 +258,14 @@ Runner state 是 database-backed。Worker 使用 lease metadata claim runnable r
 核心路径有意使用 portable DB semantics，而不是依赖 Postgres-only locking features。SQLite 对本地和小型 single-node deployments 仍有效；Postgres 和 MySQL 可用于更 durable deployments，但 multi-process validation 仍待完成。
 
 Schema source of truth 位于 `internal/state/records.go`。Startup migration 会先在 `internal/state/db.go` 中运行窄范围 legacy compatibility pass，再运行 GORM `AutoMigrate`。这样 fresh database creation 仍保持 model-driven，并保留缺失 columns 和 obsolete OAuth constraints 的已知旧 sqlite upgrade paths。缺少 scope columns 的不兼容 legacy account preference/secret tables 会被有意删除并重建，其中的数据不会迁移。运维人员必须重新配置受影响的 Sandbox settings/API keys，相关用户还需重新通过 GitHub 认证后才能同步 installations。
+
+## 请求加载与可观测性
+
+React 应用使用 `ui/src/app-load-policy.ts` 中的纯策略，只加载当前路由需要的资源。Jobs 和动态 Admin request surfaces 可以轮询；静态或无关的 account/catalog surfaces 不会继承全局轮询。Mutation 后的刷新也只作用于当前 surface。
+
+Runner-request 列表使用有界 pagination 和 list-only database projections，不加载 raw webhook、labels 或加密 Sandbox 字段。普通用户列表会在数据库 limit 之前应用精确的 `(github_installation_id, repository_full_name)` 授权交集，再把各 installation 的有界结果合并成一个全局有序页面。
+
+成功的 repository authorization 最多缓存 30 秒。20 秒后的请求可以立即返回仍有效的 entry，同时只启动一次后台刷新；credential 过期、缺失或被拒绝时 fail closed，transient error 不会延长原 expiry。HTTP timing counters 使用 mux route patterns 而不是具体 ID，使 expvar metric cardinality 保持有界。
 
 ## Diagnostics
 

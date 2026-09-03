@@ -15,3 +15,5 @@ This directory contains project-local guidance for future agents.
 - `skills/runnerd-dev-smoke/SKILL.md`: use when validating `task dev`, Vite proxy behavior, smee forwarding, or local startup fixes.
 
 Keep user/operator docs in `README.md` and `docs/`. Put agent-only durable rules and repeatable agent workflows here.
+
+Retained implementation plans are classified in `docs/superpowers/plans/README.md`. Treat `TODO.md` as the active roadmap; an unchecked box inside a plan marked historical is not unfinished project work.

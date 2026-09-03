@@ -52,7 +52,7 @@ func (s *Server) handleCreateRunner(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "labels are required when runner_spec_name is not provided")
 			return
 		}
-		match, err := s.matchProfileForAdmission(repositoryFullName, labels)
+		match, err := s.matchProfileForAdmission(repositoryFullName, 0, labels)
 		if err != nil {
 			s.logger.Error("match manual runner profile", "id", id, "repository", repositoryFullName, "labels", labels, "error", err)
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -535,7 +535,7 @@ func (s *Server) handleMatchProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid match payload")
 		return
 	}
-	match, err := s.matchProfileForAdmission(input.RepositoryFullName, input.Labels)
+	match, err := s.matchProfileForAdmission(input.RepositoryFullName, 0, input.Labels)
 	if err != nil {
 		s.logger.Error("match profile request failed", "repository", input.RepositoryFullName, "labels", input.Labels, "error", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
