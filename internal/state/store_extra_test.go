@@ -172,6 +172,33 @@ func TestInFlightCountForProfileExcludesQueued(t *testing.T) {
 	}
 }
 
+func TestInFlightCountForProfileExcludesScopedCustomRequestsWithSameName(t *testing.T) {
+	store := New(t.TempDir())
+	requests := []RunnerRequest{
+		{ID: "legacy-global", ProfileName: "shared", Labels: []string{"global"}, RunnerName: "legacy-global"},
+		{ID: "explicit-global", ProfileName: "shared", ProfileSource: "global", Labels: []string{"global"}, RunnerName: "explicit-global"},
+		{ID: "scoped-custom", ProfileName: "shared", ProfileSource: "scoped_custom", ProfileScopeType: RunnerProfileScopeAccount, ProfileScopeID: 1, Labels: []string{"custom"}, RunnerName: "scoped-custom"},
+	}
+	for _, request := range requests {
+		_, runnerState, err := store.CreateRequest(request, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runnerState.Status = StatusRunning
+		if err := store.WriteState(runnerState); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	count, err := store.InFlightCountForProfile("shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 {
+		t.Fatalf("InFlightCountForProfile(shared) = %d, want 2 legacy/global requests", count)
+	}
+}
+
 // ---------- ReleaseLease ----------
 
 func TestReleaseLeaseClears(t *testing.T) {

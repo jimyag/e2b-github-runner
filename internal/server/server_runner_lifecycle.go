@@ -244,6 +244,8 @@ func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallatio
 		st, err := s.rejectAdmission(req, payload, "repository_not_allowed")
 		return st, false, err
 	}
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
 	match, err := s.matchProfileForAdmission(repositoryFullName, githubInstallationID, job.Labels)
 	if err != nil {
 		return state.RunnerState{}, false, err
@@ -261,7 +263,7 @@ func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallatio
 	req.Labels = append([]string(nil), match.Profile.Labels...)
 	s.logger.Info("workflow run job matched profile", "job_id", job.ID, "repository", repositoryFullName, "profile", match.Profile.Name, "runner_group", match.Profile.RunnerGroup, "labels", req.Labels)
 	metrics.RecordWorkflowQueued(repositoryFullName, workflowRunName, job.Name, match.Profile.Name)
-	return s.enqueueRunnerRequest(req, payload)
+	return s.enqueueRunnerRequestLocked(req, payload)
 }
 
 func (s *Server) matchProfileForAdmission(repository string, installationID int64, labels []string) (state.ProfileMatch, error) {
@@ -277,13 +279,16 @@ func (s *Server) matchProfileForAdmission(repository string, installationID int6
 
 func (s *Server) enqueueRunnerRequest(req state.RunnerRequest, payload []byte) (state.RunnerState, bool, error) {
 	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
+	return s.enqueueRunnerRequestLocked(req, payload)
+}
+
+func (s *Server) enqueueRunnerRequestLocked(req state.RunnerRequest, payload []byte) (state.RunnerState, bool, error) {
 	if st, err := s.store.ReadState(req.ID); err == nil {
-		s.admissionMu.Unlock()
 		s.logger.Info("runner request already exists", "id", req.ID, "status", st.Status)
 		return st, false, nil
 	}
 	created, st, err := s.store.CreateRequest(req, payload)
-	s.admissionMu.Unlock()
 	if err != nil {
 		return state.RunnerState{}, false, err
 	}

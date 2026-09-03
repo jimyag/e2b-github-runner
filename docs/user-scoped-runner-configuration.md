@@ -29,7 +29,7 @@
 - 自定义 Spec 使用精确工作流标签：持久化时 `labels` 与 `required_labels` 都等于规范化后的 `workflow_labels`。同一作用域内相同标签集合只能存在一个自定义 Spec。
 - 作用域自定义 Spec 与全局 Spec 标签相同时，作用域自定义 Spec 明确覆盖当前作用域的全局匹配；这个覆盖在自定义 Spec 停用时仍作为显式屏蔽存在，不得静默回退到同标签全局 Spec。UI 必须显示覆盖提示。名称不得与当前有效的全局 Spec 重复。
 - Admin 全局 `enabled=false` 不能被作用域控制重新启用。托管 Spec 的有效状态为 `global.enabled && scope.enabled`。
-- Admin 全局 `max_concurrency` 继续限制所有作用域的该全局 Spec；用户设置的是额外的作用域上限。两个正数上限同时存在时必须同时满足，`0` 表示该层不增加限制。
+- Admin 全局 `max_concurrency` 继续限制所有作用域中来源为 `global`（以及历史空来源）的该全局 Spec；同名 `scoped_custom` 请求不计入。用户设置的是额外的作用域上限。两个正数上限同时存在时必须同时满足，`0` 表示该层不增加限制。
 - 所有新表和 `runner_requests` 新列只能通过向后兼容的增量迁移添加。不得重建现有 SQLite `runner_profiles` 或 `runner_requests` 表，不得删除、重命名或修复历史行。
 - 新增、更新、删除和重置作用域配置必须与审计事件原子提交。校验失败或审计写入失败时不能留下部分数据。
 - Sandbox Provider I/O 必须发生在数据库事务之外；写入时使用初始 `updated_at` 做条件更新，竞争修改或删除返回 `409 runner_spec_conflict`。
@@ -432,6 +432,7 @@ s.mux.HandleFunc("DELETE /user/runner-specs/{name}/control", s.handleUserDeleteR
       "workflow_labels": ["qiniu", "ubuntu-24.04"],
       "default_template_name": "qiniu-ubuntu-24.04",
       "enabled": true,
+      "scope_enabled": true,
       "global_max_concurrency": 10,
       "scope_max_concurrency": 2,
       "effective_max_concurrency": 2,
@@ -849,6 +850,7 @@ Actor 使用现有 `github:<oauth_subject>`。Payload 只记录非敏感字段�
     default_template_name?: string
     runner_group?: string
     enabled: boolean
+    scope_enabled: boolean
     global_max_concurrency: number
     scope_max_concurrency: number
     effective_max_concurrency: number

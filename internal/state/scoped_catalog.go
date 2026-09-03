@@ -317,10 +317,12 @@ func (s *DBStore) ListEffectiveProfiles(scope RunnerProfileScope) ([]EffectiveRu
 		}
 		control := controlMap[profile.Name]
 		scopeLimit := 0
+		scopeEnabled := true
 		enabled := profile.Enabled
 		updatedAt := profile.UpdatedAt
 		if control.ProfileName != "" {
-			scopeLimit, enabled = control.MaxConcurrency, enabled && control.Enabled
+			scopeLimit, scopeEnabled = control.MaxConcurrency, control.Enabled
+			enabled = enabled && scopeEnabled
 			updatedAt = control.UpdatedAt
 		}
 		source := "platform_custom"
@@ -328,7 +330,7 @@ func (s *DBStore) ListEffectiveProfiles(scope RunnerProfileScope) ([]EffectiveRu
 			source = "managed"
 		}
 		profile.UpdatedAt = updatedAt
-		items = append(items, EffectiveRunnerProfile{Source: source, ScopeType: scope.Type, ScopeID: scope.ID, Profile: profile, WorkflowLabels: append([]string(nil), profile.Labels...), GlobalMaxConcurrency: profile.MaxConcurrency, ScopeMaxConcurrency: scopeLimit, EffectiveEnabled: enabled, Editable: profile.ManagedBy != "", ScopeControlConfigured: control.ProfileName != ""})
+		items = append(items, EffectiveRunnerProfile{Source: source, ScopeType: scope.Type, ScopeID: scope.ID, Profile: profile, WorkflowLabels: append([]string(nil), profile.Labels...), GlobalMaxConcurrency: profile.MaxConcurrency, ScopeMaxConcurrency: scopeLimit, EffectiveEnabled: enabled, ScopeEnabled: scopeEnabled, Editable: profile.ManagedBy != "", ScopeControlConfigured: control.ProfileName != ""})
 	}
 	scoped, err := s.ListScopedProfiles(scope)
 	if err != nil {
@@ -336,7 +338,7 @@ func (s *DBStore) ListEffectiveProfiles(scope RunnerProfileScope) ([]EffectiveRu
 	}
 	for _, profile := range scoped {
 		_, overridesGlobal := globalLabelKeys[profile.LabelKey]
-		items = append(items, EffectiveRunnerProfile{Source: "scoped_custom", ScopeType: scope.Type, ScopeID: scope.ID, Profile: RunnerProfile{Name: profile.Name, Labels: append([]string(nil), profile.WorkflowLabels...), RequiredLabels: append([]string(nil), profile.WorkflowLabels...), TemplateID: profile.TemplateID, RunnerGroup: profile.RunnerGroup, MaxConcurrency: profile.MaxConcurrency, Enabled: profile.Enabled, CreatedAt: profile.CreatedAt, UpdatedAt: profile.UpdatedAt}, WorkflowLabels: append([]string(nil), profile.WorkflowLabels...), ScopeMaxConcurrency: profile.MaxConcurrency, EffectiveEnabled: profile.Enabled, OverridesGlobal: overridesGlobal, Editable: true})
+		items = append(items, EffectiveRunnerProfile{Source: "scoped_custom", ScopeType: scope.Type, ScopeID: scope.ID, Profile: RunnerProfile{Name: profile.Name, Labels: append([]string(nil), profile.WorkflowLabels...), RequiredLabels: append([]string(nil), profile.WorkflowLabels...), TemplateID: profile.TemplateID, RunnerGroup: profile.RunnerGroup, MaxConcurrency: profile.MaxConcurrency, Enabled: profile.Enabled, CreatedAt: profile.CreatedAt, UpdatedAt: profile.UpdatedAt}, WorkflowLabels: append([]string(nil), profile.WorkflowLabels...), ScopeMaxConcurrency: profile.MaxConcurrency, EffectiveEnabled: profile.Enabled, ScopeEnabled: profile.Enabled, OverridesGlobal: overridesGlobal, Editable: true})
 	}
 	return items, nil
 }

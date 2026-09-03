@@ -22,6 +22,7 @@ type userRunnerSpecResponse struct {
 	DefaultTemplateName     string   `json:"default_template_name,omitempty"`
 	RunnerGroup             string   `json:"runner_group,omitempty"`
 	Enabled                 bool     `json:"enabled"`
+	ScopeEnabled            bool     `json:"scope_enabled"`
 	GlobalMaxConcurrency    int      `json:"global_max_concurrency"`
 	ScopeMaxConcurrency     int      `json:"scope_max_concurrency"`
 	EffectiveMaxConcurrency int      `json:"effective_max_concurrency"`
@@ -64,6 +65,8 @@ type userRunnerSpecControlRequest struct {
 	ExpectedUpdatedAt string `json:"expected_updated_at"`
 }
 
+var errRunnerSpecInUse = errors.New("runner spec is in use")
+
 func (s *Server) userRunnerScope(w http.ResponseWriter, r *http.Request, accountID int64) (state.RunnerProfileScope, accountPreferenceScope, bool) {
 	prefScope, err := s.accountPreferenceScopeFromRequest(accountID, r)
 	if err != nil {
@@ -79,7 +82,21 @@ func (s *Server) userRunnerScope(w http.ResponseWriter, r *http.Request, account
 		writeErrorCode(w, http.StatusForbidden, "runner_spec_scope_forbidden", "Runner types for this scope are managed by its owner")
 		return state.RunnerProfileScope{}, accountPreferenceScope{}, false
 	}
-	return state.RunnerProfileScope{Type: prefScope.Type, ID: prefScope.ID}, prefScope, true
+	profileScope := state.RunnerProfileScope{Type: prefScope.Type, ID: prefScope.ID}
+	if prefScope.Type == state.AccountScopeTypeGitHubInstall {
+		canonical, ok, err := s.runnerProfileScopeForInstallation(prefScope.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return state.RunnerProfileScope{}, accountPreferenceScope{}, false
+		}
+		if ok {
+			profileScope = canonical
+			if canonical.Type == state.RunnerProfileScopeAccount {
+				prefScope = accountPreferenceScope{Type: state.AccountScopeTypeAccount, ID: canonical.ID}
+			}
+		}
+	}
+	return profileScope, prefScope, true
 }
 
 func (s *Server) handleUserListRunnerSpecs(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +122,7 @@ func (s *Server) handleUserListRunnerSpecs(w http.ResponseWriter, r *http.Reques
 	response := userRunnerSpecListResponse{ScopeType: scope.Type, ScopeID: scope.ID, SandboxSource: sandboxSource, SandboxRegion: sandboxRegion, Items: make([]userRunnerSpecResponse, 0, len(items))}
 	for _, item := range items {
 		max := effectiveRunnerConcurrencyLimit(item.GlobalMaxConcurrency, item.ScopeMaxConcurrency)
-		responseItem := userRunnerSpecResponse{Name: item.Profile.Name, Source: item.Source, WorkflowLabels: append([]string(nil), item.WorkflowLabels...), DefaultTemplateName: item.Profile.DefaultTemplateName, Enabled: item.EffectiveEnabled, GlobalMaxConcurrency: item.GlobalMaxConcurrency, ScopeMaxConcurrency: item.ScopeMaxConcurrency, EffectiveMaxConcurrency: max, OverridesGlobal: item.OverridesGlobal, Editable: item.Editable, ScopeControlConfigured: item.ScopeControlConfigured, UpdatedAt: item.Profile.UpdatedAt.UTC().Format(time.RFC3339Nano)}
+		responseItem := userRunnerSpecResponse{Name: item.Profile.Name, Source: item.Source, WorkflowLabels: append([]string(nil), item.WorkflowLabels...), DefaultTemplateName: item.Profile.DefaultTemplateName, Enabled: item.EffectiveEnabled, ScopeEnabled: item.ScopeEnabled, GlobalMaxConcurrency: item.GlobalMaxConcurrency, ScopeMaxConcurrency: item.ScopeMaxConcurrency, EffectiveMaxConcurrency: max, OverridesGlobal: item.OverridesGlobal, Editable: item.Editable, ScopeControlConfigured: item.ScopeControlConfigured, UpdatedAt: item.Profile.UpdatedAt.UTC().Format(time.RFC3339Nano)}
 		if item.Source == "scoped_custom" {
 			responseItem.TemplateID = item.Profile.TemplateID
 			responseItem.RunnerGroup = item.Profile.RunnerGroup
@@ -317,11 +334,26 @@ func (s *Server) handleUserPatchRunnerSpec(w http.ResponseWriter, r *http.Reques
 	if input.Enabled != nil {
 		current.Enabled = *input.Enabled
 	}
+	s.admissionMu.Lock()
 	err = s.applyMutationWithAudit("github:"+session.Subject, "user_runner_spec.update", "scoped_runner_profile", fmt.Sprintf("%s:%d:%s", scope.Type, scope.ID, name), map[string]any{"template_id_changed": templateChanged, "workflow_labels_changed": labelsChanged}, func(tx state.Store) error {
+		if labelsChanged || templateChanged {
+			count, countErr := tx.ActiveCountForProfileScope("scoped_custom", scope, name)
+			if countErr != nil {
+				return countErr
+			}
+			if count > 0 {
+				return errRunnerSpecInUse
+			}
+		}
 		_, err := tx.UpsertScopedProfileIfUnchanged(current, &expected)
 		return err
 	})
+	s.admissionMu.Unlock()
 	if err != nil {
+		if errors.Is(err, errRunnerSpecInUse) {
+			writeErrorCode(w, http.StatusConflict, "runner_spec_in_use", "runner type cannot change while active requests use it")
+			return
+		}
 		if errors.Is(err, state.ErrRunnerProfileLabelsConflict) {
 			writeErrorCode(w, http.StatusConflict, "runner_spec_labels_conflict", "a runner type with these labels already exists")
 			return
@@ -386,10 +418,23 @@ func (s *Server) handleUserDeleteRunnerSpec(w http.ResponseWriter, r *http.Reque
 		writeErrorCode(w, http.StatusConflict, "runner_spec_in_use", "runner type is in use by active requests")
 		return
 	}
+	s.admissionMu.Lock()
 	err := s.applyMutationWithAudit("github:"+session.Subject, "user_runner_spec.delete", "scoped_runner_profile", fmt.Sprintf("%s:%d:%s", scope.Type, scope.ID, name), nil, func(tx state.Store) error {
+		count, countErr := tx.ActiveCountForProfileScope("scoped_custom", scope, name)
+		if countErr != nil {
+			return countErr
+		}
+		if count > 0 {
+			return errRunnerSpecInUse
+		}
 		return tx.DeleteScopedProfileIfUnchanged(scope, name, &expected)
 	})
+	s.admissionMu.Unlock()
 	if err != nil {
+		if errors.Is(err, errRunnerSpecInUse) {
+			writeErrorCode(w, http.StatusConflict, "runner_spec_in_use", "runner type is in use by active requests")
+			return
+		}
 		if errors.Is(err, state.ErrConflict) {
 			writeErrorCode(w, http.StatusConflict, "runner_spec_conflict", "Runner type changed while deleting; refresh and try again")
 			return

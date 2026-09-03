@@ -634,7 +634,7 @@ func (s *DBStore) ActiveCountForProfile(name string) (int, error) {
 }
 
 func (s *DBStore) InFlightCountForProfile(name string) (int, error) {
-	return s.countStatesForProfile(name, []string{StatusCreating, StatusRunning, StatusStopping})
+	return s.countStatesForProfileSource(name, []string{"", "global"}, []string{StatusCreating, StatusRunning, StatusStopping})
 }
 
 func (s *DBStore) ClaimNextRunnable(workerID string, now time.Time, leaseTTL time.Duration) (RunnerRequest, RunnerState, bool, error) {
@@ -867,6 +867,22 @@ func (s *DBStore) countStatesForProfile(name string, statuses []string) (int, er
 	var count int64
 	if err := db.Model(&runnerRequestRecord{}).
 		Where("profile_name = ?", strings.TrimSpace(name)).
+		Where("status IN ?", statuses).
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+func (s *DBStore) countStatesForProfileSource(name string, sources, statuses []string) (int, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	if err := db.Model(&runnerRequestRecord{}).
+		Where("profile_name = ?", strings.TrimSpace(name)).
+		Where("profile_source IN ?", sources).
 		Where("status IN ?", statuses).
 		Count(&count).Error; err != nil {
 		return 0, err

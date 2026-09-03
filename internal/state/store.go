@@ -171,6 +171,7 @@ type EffectiveRunnerProfile struct {
 	GlobalMaxConcurrency   int           `json:"global_max_concurrency"`
 	ScopeMaxConcurrency    int           `json:"scope_max_concurrency"`
 	EffectiveEnabled       bool          `json:"enabled"`
+	ScopeEnabled           bool          `json:"scope_enabled"`
 	OverridesGlobal        bool          `json:"overrides_global"`
 	Editable               bool          `json:"editable"`
 	ScopeControlConfigured bool          `json:"scope_control_configured"`

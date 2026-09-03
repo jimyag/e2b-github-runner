@@ -87,6 +87,7 @@ export type UserRunnerSpec = {
   default_template_name?: string
   runner_group?: string
   enabled: boolean
+  scope_enabled: boolean
   global_max_concurrency: number
   scope_max_concurrency: number
   effective_max_concurrency: number

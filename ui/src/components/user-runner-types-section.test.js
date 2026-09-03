@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 
 import { RunnerTypeForm, RunnerTypeItem, UserRunnerTypesSection } from "./user-runner-types-section"
-import { runnerTypeCatalogRegion, runnerTypeOverridesGlobal, runnerTypeWorkflowYAML } from "./user-runner-types-utils"
+import { runnerTypeCatalogRegion, runnerTypeOverridesGlobal, runnerTypeScopeEnabled, runnerTypeWorkflowYAML } from "./user-runner-types-utils"
 
 const window = new Window({ url: "http://localhost/" })
 const domGlobals = { window, document: window.document, navigator: window.navigator, HTMLElement: window.HTMLElement, SVGElement: window.SVGElement, Node: window.Node, DocumentFragment: window.DocumentFragment, Event: window.Event, MouseEvent: window.MouseEvent, getComputedStyle: window.getComputedStyle.bind(window), requestAnimationFrame: window.requestAnimationFrame.bind(window), cancelAnimationFrame: window.cancelAnimationFrame.bind(window), IS_REACT_ACT_ENVIRONMENT: true }
@@ -45,6 +45,7 @@ const managed = {
   template_id: "managed-template",
   default_template_name: "ubuntu-24.04-x64",
   enabled: true,
+  scope_enabled: true,
   global_max_concurrency: 8,
   scope_max_concurrency: 3,
   effective_max_concurrency: 3,
@@ -104,6 +105,11 @@ describe("UserRunnerTypesSection", () => {
 
     expect(html).toContain("gpu-template")
     expect(html).toContain("org-runners")
+  })
+
+  test("edits the raw scope toggle when the platform has disabled a managed type", () => {
+    const globallyDisabled = { ...managed, enabled: false, scope_enabled: true }
+    expect(runnerTypeScopeEnabled(globallyDisabled)).toBe(true)
   })
 
   test("keeps the form fields visible and disables submit while saving", () => {

@@ -544,17 +544,21 @@ func (s *Server) handleUserDeleteCacheConfig(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusForbidden, "Cache service for this GitHub account is managed by its owner")
 		return
 	}
-	for _, key := range []string{state.AccountSecretTypeCacheAccessKeyID, state.AccountSecretTypeCacheSecretAccessKey} {
-		if err := s.store.DeleteAccountSecret(scope.Type, scope.ID, key); err != nil && !errors.Is(err, state.ErrNotFound) {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
+	err = s.applyMutationWithAudit("github:"+session.Subject, "cache.delete", scope.Type, strconv.FormatInt(scope.ID, 10), nil, func(tx state.Store) error {
+		for _, key := range []string{state.AccountSecretTypeCacheAccessKeyID, state.AccountSecretTypeCacheSecretAccessKey} {
+			if deleteErr := tx.DeleteAccountSecret(scope.Type, scope.ID, key); deleteErr != nil && !errors.Is(deleteErr, state.ErrNotFound) {
+				return deleteErr
+			}
 		}
-	}
-	if err := s.store.DeleteAccountPreference(scope.Type, scope.ID, accountPreferenceNamespaceCache, accountPreferenceKeyCacheS3); err != nil && !errors.Is(err, state.ErrNotFound) {
+		if deleteErr := tx.DeleteAccountPreference(scope.Type, scope.ID, accountPreferenceNamespaceCache, accountPreferenceKeyCacheS3); deleteErr != nil && !errors.Is(deleteErr, state.ErrNotFound) {
+			return deleteErr
+		}
+		return nil
+	})
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	s.recordAudit("github:"+session.Subject, "cache.delete", scope.Type, strconv.FormatInt(scope.ID, 10), nil)
 	response, err := s.accountPreferencesResponse(scope, account.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

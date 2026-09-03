@@ -14,3 +14,7 @@ export function runnerTypeOverridesGlobal(labels: string[], items: UserRunnerSpe
   const key = [...new Set(labels.map((label) => label.trim()).filter(Boolean))].sort().join("\u0000")
   return key !== "" && items.some((item) => item.source !== "scoped_custom" && [...new Set(item.workflow_labels)].sort().join("\u0000") === key)
 }
+
+export function runnerTypeScopeEnabled(item: UserRunnerSpec) {
+  return item.scope_enabled
+}
