@@ -65,7 +65,7 @@ GitHub App Webhook Secret 必须与 `github.webhook_secret` 完全一致。复�
 1. 仓库 owner 的 Preferences 已保存 Cache S3，所选 Sandbox 区域配置了 S3 Endpoint。
 2. Workflow 使用 `qiniu/actions-cache@v5`，并且 `actions/setup-go` 设置了 `cache: false`。
 3. 日志包含 `The cache action detected a local S3 bucket cache.`。没有这行表示该 job 回退到了 GitHub 官方 cache。
-4. Fork PR 只能只读默认分支缓存；`Cache save skipped` 是预期行为。
+4. Fork PR 只写入自己的 `pr-N`。出现 `Cache save skipped` 表示未能验证 PR 元数据，该 job 保持默认分支只读。
 5. 并行 job 没有共用同一个 write key。
 
 完整说明见[配置并使用 Cache S3](/docs/guides/cache)。

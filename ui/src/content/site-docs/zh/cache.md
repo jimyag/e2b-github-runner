@@ -23,7 +23,7 @@
 - 数据面直连 S3，runnerd 不转发缓存字节；
 - 凭证是 runnerd 签发的短期 STS，不是长期 AK/SK；
 - 读写范围由 runnerd 按仓库和分支 / PR 注入，workflow 改环境变量也无法超出 STS 授权；
-- Fork PR 只能只读默认分支缓存，不能 save。
+- Fork PR 先读 PR，再读 base 和默认分支，只写入自己的 `pr-N`。
 
 workflow 的 `key` / `restore-keys` 写法仍接近官方 cache，但 `uses` 必须换成 `qiniu/actions-cache@v5`。
 
@@ -83,7 +83,7 @@ jobs:
 
 - 分支 job 先读当前分支，再回退默认分支，只写入当前分支。
 - 内部 PR 先读 PR，再读 base 和默认分支，只写入自己的 `pr-N`。
-- Fork PR 只能只读默认分支缓存，不能 save。日志出现 `Cache save skipped: RUNS_ON_S3_CACHE_WRITE_PREFIX is not set` 不是失败。
+- Fork PR 先读 PR，再读 base 和默认分支，只写入自己的 `pr-N`。如果 GitHub 没有给出可信 PR 元数据，该 job 会保持默认分支只读，日志出现 `Cache save skipped: RUNS_ON_S3_CACHE_WRITE_PREFIX is not set`。
 - `pull_request_target`、`workflow_run`、`issue_comment` 以及无法验证的元数据也是默认分支只读。
 
 并行 job 不要共用同一个 write key。可选方案：
@@ -103,7 +103,7 @@ Cache restored successfully
 Cache saved successfully
 ```
 
-Fork PR 的 save 行是 `Cache save skipped`。如果没有 `local S3 bucket cache`，说明该 job 未注入 Cache S3，action 已回退到 GitHub 官方 cache。
+Fork PR 无法验证时，save 行是 `Cache save skipped`。如果没有 `local S3 bucket cache`，说明该 job 未注入 Cache S3，action 已回退到 GitHub 官方 cache。
 
 ## runnerd 管理员配置
 

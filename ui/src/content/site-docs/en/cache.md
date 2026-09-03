@@ -23,7 +23,7 @@ Official `actions/cache` stores objects in GitHub Cache Service. Sandbox runners
 - cache bytes go directly to S3; runnerd does not proxy them;
 - credentials are short-lived STS tokens minted by runnerd, not long-lived access keys;
 - read and write prefixes are injected per repository and branch or PR, and workflow env changes cannot exceed the STS policy;
-- Fork PRs can only read the default-branch cache and cannot save.
+- Fork PRs read the PR, base-branch, and default-branch scopes, and write only their own `pr-N` scope.
 
 Keep the familiar `key` / `restore-keys` inputs, but change `uses` to `qiniu/actions-cache@v5`.
 
@@ -83,7 +83,7 @@ Keep `setup-go` for installing Go. Cache restore and save belong to `qiniu/actio
 
 - A trusted branch reads its own scope, then the default branch, and writes only its own scope.
 - An internal PR reads the PR scope, then the base branch and default branch, and writes only its own `pr-N` scope.
-- A Fork PR can only read the default-branch cache and cannot save. `Cache save skipped: RUNS_ON_S3_CACHE_WRITE_PREFIX is not set` is expected, not a failure.
+- A Fork PR reads the PR, base-branch, and default-branch scopes, and writes only its own `pr-N` scope. If GitHub does not expose trusted PR metadata, the job stays default-branch read-only and logs `Cache save skipped: RUNS_ON_S3_CACHE_WRITE_PREFIX is not set`.
 - `pull_request_target`, `workflow_run`, `issue_comment`, and unverified metadata are also default-branch read-only.
 
 Do not share one write key across parallel jobs. Choose one of these options:
@@ -103,7 +103,7 @@ Cache restored successfully
 Cache saved successfully
 ```
 
-A Fork PR save line is `Cache save skipped`. If `local S3 bucket cache` is missing, that job did not receive Cache S3 credentials and the action fell back to GitHub's cache.
+If a Fork PR cannot be verified, the save line is `Cache save skipped`. If `local S3 bucket cache` is missing, that job did not receive Cache S3 credentials and the action fell back to GitHub's cache.
 
 ## runnerd administrator configuration
 
