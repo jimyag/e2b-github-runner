@@ -25,6 +25,7 @@ var (
 	ErrNotFound                            = errors.New("state record not found")
 	ErrRetryNotAllowed                     = errors.New("retry not allowed for current state")
 	ErrSandboxServiceDefaultAPIKeyRequired = errors.New("sandbox service default api key is required")
+	ErrCacheServiceNotConfigured           = errors.New("cache service not configured")
 	ErrAuditEventPersistence               = errors.New("audit event persistence failed")
 	ErrRunnerProfileNameConflict           = errors.New("runner profile name conflicts with enabled global profile")
 	ErrRunnerProfileLabelsConflict         = errors.New("runner profile labels conflict")
@@ -34,6 +35,7 @@ type RunnerRequest struct {
 	ID                     string    `json:"id"`
 	Source                 string    `json:"source"`
 	JobID                  int64     `json:"job_id,omitempty"`
+	PullRequestNumber      int64     `json:"pull_request_number,omitempty"`
 	GitHubInstallationID   int64     `json:"github_installation_id,omitempty"`
 	RepositoryFullName     string    `json:"repository_full_name,omitempty"`
 	RequestedLabels        []string  `json:"requested_labels,omitempty"`
@@ -265,10 +267,12 @@ type GitHubInstallationRepositoryAccess struct {
 }
 
 const (
-	AccountSecretTypeSandboxAPIKey    = "sandbox_api_key"
-	AccountSecretTypeGitHubOAuthToken = "github_oauth_token"
-	AccountScopeTypeAccount           = "account"
-	AccountScopeTypeGitHubInstall     = "github_installation"
+	AccountSecretTypeSandboxAPIKey        = "sandbox_api_key"
+	AccountSecretTypeGitHubOAuthToken     = "github_oauth_token"
+	AccountSecretTypeCacheAccessKeyID     = "cache_access_key_id"
+	AccountSecretTypeCacheSecretAccessKey = "cache_secret_access_key"
+	AccountScopeTypeAccount               = "account"
+	AccountScopeTypeGitHubInstall         = "github_installation"
 )
 
 // AccountSecret stores an encrypted named secret for one account.
@@ -403,8 +407,10 @@ type AccountSecretStore interface {
 
 type AccountPreferenceStore interface {
 	GetAccountPreference(scopeType string, scopeID int64, namespace, key string) (AccountPreference, error)
+	DeleteAccountPreference(scopeType string, scopeID int64, namespace, key string) error
 	UpsertAccountPreference(preference AccountPreference) (AccountPreference, error)
 	UpsertAccountPreferenceAndSecret(preference AccountPreference, secret *AccountSecret) (AccountPreference, *AccountSecret, error)
+	UpsertAccountPreferenceAndSecrets(preference AccountPreference, secrets ...AccountSecret) (AccountPreference, error)
 	UpsertAccountPreferenceAndDeleteSecret(preference AccountPreference, secret AccountSecret) (AccountPreference, error)
 }
 

@@ -756,6 +756,43 @@ func (c *Client) ListWorkflowRunJobs(ctx context.Context, repositoryFullName str
 	return jobs, nil
 }
 
+func (c *Client) GetWorkflowRun(ctx context.Context, repositoryFullName string, runID int64) (WorkflowRun, error) {
+	startedAt := time.Now()
+	result := "error"
+	defer func() { metrics.RecordGitHubAPI("get_workflow_run", result, time.Since(startedAt)) }()
+	repositoryFullName = c.repositoryFullName(repositoryFullName)
+	if repositoryFullName == "" {
+		return WorkflowRun{}, fmt.Errorf("repository full name is required")
+	}
+	if runID <= 0 {
+		return WorkflowRun{}, fmt.Errorf("workflow run id is required")
+	}
+	url := fmt.Sprintf("%s/repos/%s/actions/runs/%d", c.baseURL, repositoryFullName, runID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return WorkflowRun{}, err
+	}
+	setGitHubHeaders(req)
+	resp, err := c.do(req, repositoryFullName)
+	if err != nil {
+		return WorkflowRun{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return WorkflowRun{}, fmt.Errorf("read github workflow run response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return WorkflowRun{}, fmt.Errorf("github workflow run: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var run WorkflowRun
+	if err := json.Unmarshal(body, &run); err != nil {
+		return WorkflowRun{}, err
+	}
+	result = "success"
+	return run, nil
+}
+
 func (c *Client) GetWorkflowJob(ctx context.Context, repositoryFullName string, jobID int64) (WorkflowJob, error) {
 	startedAt := time.Now()
 	result := "error"
@@ -789,6 +826,42 @@ func (c *Client) GetWorkflowJob(ctx context.Context, repositoryFullName string, 
 	}
 	result = "success"
 	return job, nil
+}
+
+func (c *Client) GetRepository(ctx context.Context, repositoryFullName string) (Repository, error) {
+	startedAt := time.Now()
+	result := "error"
+	defer func() { metrics.RecordGitHubAPI("get_repository", result, time.Since(startedAt)) }()
+	repositoryFullName = c.repositoryFullName(repositoryFullName)
+	if repositoryFullName == "" {
+		return Repository{}, fmt.Errorf("repository full name is required")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/repos/%s", c.baseURL, repositoryFullName), nil)
+	if err != nil {
+		return Repository{}, err
+	}
+	setGitHubHeaders(req)
+	resp, err := c.do(req, repositoryFullName)
+	if err != nil {
+		return Repository{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+	if err != nil {
+		return Repository{}, fmt.Errorf("read github repository response: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return Repository{}, fmt.Errorf("github repository: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var repository Repository
+	if err := json.Unmarshal(body, &repository); err != nil {
+		return Repository{}, err
+	}
+	if strings.TrimSpace(repository.FullName) == "" {
+		return Repository{}, fmt.Errorf("github repository response missing full name")
+	}
+	result = "success"
+	return repository, nil
 }
 
 func (c *Client) GetPullRequest(ctx context.Context, repositoryFullName string, number int64) (PullRequest, error) {
@@ -1223,19 +1296,27 @@ type WorkflowRunEvent struct {
 }
 
 type WorkflowJob struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	Status       string `json:"status"`
-	Conclusion   string `json:"conclusion"`
-	RunnerName   string `json:"runner_name"`
-	WorkflowName string `json:"workflow_name"`
-	HeadBranch   string `json:"head_branch"`
-	Labels       Labels `json:"labels"`
+	ID           int64         `json:"id"`
+	Name         string        `json:"name"`
+	Status       string        `json:"status"`
+	Conclusion   string        `json:"conclusion"`
+	RunnerName   string        `json:"runner_name"`
+	WorkflowName string        `json:"workflow_name"`
+	HeadBranch   string        `json:"head_branch"`
+	PullRequests []PullRequest `json:"pull_requests"`
+	Labels       Labels        `json:"labels"`
 }
 
 type PullRequest struct {
-	Number int64  `json:"number"`
-	Title  string `json:"title"`
+	Number int64          `json:"number"`
+	Title  string         `json:"title"`
+	Head   PullRequestRef `json:"head"`
+	Base   PullRequestRef `json:"base"`
+}
+
+type PullRequestRef struct {
+	Ref        string     `json:"ref"`
+	Repository Repository `json:"repo"`
 }
 
 type Issue struct {
@@ -1244,14 +1325,20 @@ type Issue struct {
 }
 
 type Repository struct {
-	FullName string `json:"full_name"`
-	Name     string `json:"name"`
+	ID            int64  `json:"id"`
+	FullName      string `json:"full_name"`
+	Name          string `json:"name"`
+	DefaultBranch string `json:"default_branch"`
 }
 
 type WorkflowRun struct {
-	ID         int64  `json:"id"`
-	Name       string `json:"name"`
-	HeadBranch string `json:"head_branch"`
+	ID             int64         `json:"id"`
+	Name           string        `json:"name"`
+	Event          string        `json:"event"`
+	HeadBranch     string        `json:"head_branch"`
+	HeadRepository Repository    `json:"head_repository"`
+	Repository     Repository    `json:"repository"`
+	PullRequests   []PullRequest `json:"pull_requests"`
 }
 
 type InstallationRef struct {

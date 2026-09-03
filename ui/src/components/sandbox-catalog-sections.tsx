@@ -8,7 +8,7 @@ import {
   formatOptionalTime,
   loadSandboxInstances,
   loadSandboxTemplates,
-  sandboxRegions,
+  useSandboxRegions,
   sandboxInstancesViewState,
   type SandboxCatalogRequest,
 } from "@/components/sandbox-catalog-utils"
@@ -39,6 +39,7 @@ function Header({
   onRefresh: () => void
   children?: ReactNode
 }) {
+  const sandboxRegions = useSandboxRegions()
   const { t } = useTranslation()
   return (
     <CardHeader className="flex flex-col gap-3 pb-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
@@ -75,7 +76,8 @@ export function SandboxTemplatesSection({
   request: SandboxCatalogRequest
   installationID?: number
 }) {
-  const [region, setRegion] = useState(sandboxRegions[0].id)
+  const sandboxRegions = useSandboxRegions()
+  const [region, setRegion] = useState("")
   const [publicItems, setPublicItems] = useState<PublicRunnerTemplate[]>([])
   const [scopedItems, setScopedItems] = useState<SandboxTemplate[]>([])
   const [publicLoading, setPublicLoading] = useState(false)
@@ -127,6 +129,12 @@ export function SandboxTemplatesSection({
   }, [installationID, region, request])
 
   useEffect(() => {
+    if (region === "" && sandboxRegions.length > 0) {
+      setRegion(sandboxRegions[0].id)
+    }
+  }, [region, sandboxRegions])
+
+  useEffect(() => {
     void loadPublic()
     return () => {
       publicLoadGeneration.current += 1
@@ -134,6 +142,7 @@ export function SandboxTemplatesSection({
   }, [loadPublic])
 
   useEffect(() => {
+    if (!region) return
     void loadScoped()
     return () => {
       scopedLoadGeneration.current += 1
@@ -163,7 +172,7 @@ export function SandboxTemplateCatalog({
   scopedTemplates,
   scopedLoading,
   scopedError,
-  region = sandboxRegions[0].id,
+  region = "",
   onRegion = () => {},
   onPublicRefresh = () => {},
   onScopedRefresh = () => {},
@@ -305,8 +314,9 @@ export function SandboxesSection({
   request: SandboxCatalogRequest
   installationID?: number
 }) {
+  const sandboxRegions = useSandboxRegions()
   const { t, i18n } = useTranslation()
-  const [region, setRegion] = useState(sandboxRegions[0].id)
+  const [region, setRegion] = useState("")
   const [template, setTemplate] = useState("all")
   const [templates, setTemplates] = useState<SandboxTemplate[]>([])
   const [items, setItems] = useState<SandboxInstance[]>([])
@@ -361,18 +371,26 @@ export function SandboxesSection({
   }, [installationID, region, request, template])
 
   useEffect(() => {
+    if (region === "" && sandboxRegions.length > 0) {
+      setRegion(sandboxRegions[0].id)
+    }
+  }, [region, sandboxRegions])
+
+  useEffect(() => {
+    if (!region) return
     void loadTemplates()
     return () => {
       templateLoadGeneration.current += 1
     }
-  }, [loadTemplates])
+  }, [loadTemplates, region])
 
   useEffect(() => {
+    if (!region) return
     void loadInstances()
     return () => {
       instanceLoadGeneration.current += 1
     }
-  }, [loadInstances])
+  }, [loadInstances, region])
 
   const { loading, error, filterDisabled } = sandboxInstancesViewState({
     templatesLoading,

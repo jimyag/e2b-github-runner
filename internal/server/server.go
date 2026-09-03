@@ -31,6 +31,8 @@ type Server struct {
 	mux         *http.ServeMux
 	slots       chan struct{}
 	oauth       *http.Client
+	diagnostics *http.Client
+	cacheSTS    *http.Client
 	terminals   *terminalHub
 	startedAt   time.Time
 
@@ -49,6 +51,10 @@ type Server struct {
 	pullTitleCache map[string]cachedPullTitle
 	pullTitleGroup singleflight.Group
 
+	workflowRunMu    sync.Mutex
+	workflowRunCache map[string]cachedWorkflowRun
+	workflowRunGroup singleflight.Group
+
 	userRepositoryAccessMu    sync.Mutex
 	userRepositoryAccessCache map[int64]cachedUserRepositoryAccess
 	userRepositoryAccessEpoch map[int64]uint64
@@ -58,6 +64,11 @@ type Server struct {
 type cachedPullTitle struct {
 	title     string
 	errorText string
+	expiresAt time.Time
+}
+
+type cachedWorkflowRun struct {
+	run       github.WorkflowRun
 	expiresAt time.Time
 }
 
@@ -116,6 +127,8 @@ type adminSession struct {
 
 const runnerJobStartedMarker = "__runner_job_started__"
 
+const maxWorkflowRunCacheItems = 1024
+
 const (
 	defaultRunnerRequestListLimit = 100
 	maxRunnerRequestListLimit     = 500
@@ -148,9 +161,12 @@ func New(cfg config.Config, store state.Store, gh *github.Client, sandbox sandbo
 		slots:                     make(chan struct{}, cfg.MaxConcurrentRunners),
 		queueNotify:               make(chan struct{}, 1),
 		oauth:                     &http.Client{Timeout: 10 * time.Second},
+		diagnostics:               &http.Client{Timeout: 5 * time.Second},
+		cacheSTS:                  &http.Client{Timeout: 30 * time.Second},
 		terminals:                 newTerminalHub(logger),
 		startedAt:                 time.Now().UTC(),
 		pullTitleCache:            map[string]cachedPullTitle{},
+		workflowRunCache:          map[string]cachedWorkflowRun{},
 		userRepositoryAccessCache: map[int64]cachedUserRepositoryAccess{},
 		userRepositoryAccessEpoch: map[int64]uint64{},
 	}
@@ -364,6 +380,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /user", s.handleUserRedirect)
 	s.mux.HandleFunc("GET /user/", s.handleUserRedirect)
 	s.mux.HandleFunc("GET /healthz", s.handleHealthz)
+	s.mux.HandleFunc("GET /sandbox/regions", s.handleSandboxRegions)
 	s.mux.HandleFunc("GET /auth/session", s.handleAuthSession)
 	s.mux.HandleFunc("GET /auth/github/login", s.handleGitHubOAuthLogin)
 	s.mux.HandleFunc("GET /auth/github/callback", s.handleGitHubOAuthCallback)
@@ -395,6 +412,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /user/preferences", s.handleUserPreferences)
 	s.mux.HandleFunc("PUT /user/preferences/sandbox", s.handleUserSaveSandboxConfig)
 	s.mux.HandleFunc("DELETE /user/preferences/sandbox-api-key", s.handleUserDeleteSandboxAPIKey)
+	s.mux.HandleFunc("PUT /user/preferences/cache", s.handleUserSaveCacheConfig)
+	s.mux.HandleFunc("DELETE /user/preferences/cache", s.handleUserDeleteCacheConfig)
 	s.mux.HandleFunc("GET /user/sandbox/templates", s.handleListSandboxTemplates)
 	s.mux.HandleFunc("GET /user/sandbox/instances", s.handleListSandboxes)
 	s.mux.HandleFunc("GET /user/runner-specs", s.handleUserListRunnerSpecs)

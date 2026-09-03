@@ -5,6 +5,7 @@ type SandboxAudienceIdentity = {
 
 type SandboxRegion = {
   apiURL: string
+  id?: string
 }
 
 function normalizeSandboxAPIURL(value: string) {
@@ -14,8 +15,18 @@ function normalizeSandboxAPIURL(value: string) {
 export function sandboxServiceDefaultAPIURL(value: string, regions: readonly SandboxRegion[]) {
   const trimmed = value.trim()
   const normalized = normalizeSandboxAPIURL(trimmed)
-  const region = regions.find((item) => normalizeSandboxAPIURL(item.apiURL) === normalized)
-  return region?.apiURL ?? trimmed
+  const exact = regions.find((item) => normalizeSandboxAPIURL(item.apiURL) === normalized)
+  if (exact) return exact.apiURL
+  try {
+    const hostname = new URL(normalized).hostname.toLowerCase()
+    const region = regions.find((item) => {
+      const configuredHostname = new URL(item.apiURL).hostname.toLowerCase()
+      return hostname === configuredHostname || (item.id && (hostname.startsWith(`${item.id}.`) || hostname.startsWith(`${item.id}-`)))
+    })
+    return region?.apiURL ?? trimmed
+  } catch {
+    return trimmed
+  }
 }
 
 export function sandboxServiceDefaultStatus(config: { enabled: boolean; configured: boolean }) {

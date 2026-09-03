@@ -1,8 +1,17 @@
+import { createContext, useContext } from "react"
 import type { SandboxInstance, SandboxTemplate } from "@/admin-types"
 
 export type SandboxCatalogRequest = (url: string, options?: RequestInit) => Promise<unknown>
 
-export const sandboxRegions = [
+export type SandboxRegion = {
+  id: string
+  label: string
+  apiURL: string
+}
+
+// Retained for compatibility with pure helpers that predate the runtime region catalog.
+// Components should use useSandboxRegions() so configured regions remain authoritative.
+export const sandboxRegions: SandboxRegion[] = [
   {
     id: "us-south-1",
     label: "United States · Dallas 1",
@@ -14,6 +23,37 @@ export const sandboxRegions = [
     apiURL: "https://cn-yangzhou-1-sandbox.qiniuapi.com",
   },
 ]
+
+/** Region catalog provided by runnerd.yaml through GET /sandbox/regions. */
+export const SandboxRegionsContext = createContext<SandboxRegion[]>([])
+
+export function useSandboxRegions(): SandboxRegion[] {
+  return useContext(SandboxRegionsContext)
+}
+
+export function findSandboxRegionByAPIURL(regions: readonly SandboxRegion[], value: string) {
+  const normalized = value.trim().replace(/\/+$/, "").toLowerCase()
+  return regions.find((region) => region.apiURL.trim().replace(/\/+$/, "").toLowerCase() === normalized)
+}
+
+/**
+ * Fetch sandbox regions from the server and return them, or null on error.
+ */
+export async function fetchSandboxRegions(): Promise<SandboxRegion[] | null> {
+  try {
+    const res = await fetch("/sandbox/regions")
+    if (!res.ok) return null
+    const data = await res.json()
+    if (!Array.isArray(data) || data.length === 0) return null
+    return data.map((item: { id: string; label?: string; api_url?: string }) => ({
+      id: item.id,
+      label: item.label ?? item.id,
+      apiURL: item.api_url ?? "",
+    }))
+  } catch {
+    return null
+  }
+}
 
 function sandboxCatalogURL(path: string, region: string, installationID?: number, templateID = "") {
   const params = new URLSearchParams({ region })

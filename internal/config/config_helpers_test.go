@@ -7,6 +7,15 @@ import (
 	"time"
 )
 
+func TestValidateSandboxRegionsRequiresRegions(t *testing.T) {
+	if err := validateSandboxRegions(nil); err == nil || err.Error() != "sandbox.regions requires at least one region" {
+		t.Fatalf("unexpected empty region validation error: %v", err)
+	}
+	if err := validateSandboxRegions([]SandboxRegionConfig{{ID: "region", Label: "Region"}}); err == nil || err.Error() != "sandbox.regions[0] requires id, label, and sandbox_api_url" {
+		t.Fatalf("unexpected missing API URL validation error: %v", err)
+	}
+}
+
 func TestDefaultStringReturnsFallbackWhenEmpty(t *testing.T) {
 	if got := defaultString("", "fallback"); got != "fallback" {
 		t.Errorf("defaultString(\"\", \"fallback\") = %q, want %q", got, "fallback")
@@ -206,6 +215,11 @@ admin:
 auth:
   session_secret: test-session-secret
   encryption_key: test-encryption-key
+sandbox:
+  regions:
+    - id: test-region
+      label: Test Region
+      sandbox_api_url: https://sandbox.example.test
 github:
   webhook_secret: webhook-secret
   token: ghp_test

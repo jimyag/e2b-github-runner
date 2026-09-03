@@ -19,6 +19,197 @@ import (
 	"github.com/qiniu/ci-runner/internal/state"
 )
 
+const workflowRunCacheTTL = 30 * time.Second
+
+func (s *Server) workflowRunForCache(ctx context.Context, repository string, runID int64) (github.WorkflowRun, error) {
+	key := fmt.Sprintf("%s#%d", repository, runID)
+	now := time.Now()
+	s.workflowRunMu.Lock()
+	if s.workflowRunCache == nil {
+		s.workflowRunCache = make(map[string]cachedWorkflowRun)
+	}
+	if cached, ok := s.workflowRunCache[key]; ok && now.Before(cached.expiresAt) {
+		s.workflowRunMu.Unlock()
+		return cached.run, nil
+	}
+	s.workflowRunMu.Unlock()
+	value, err, _ := s.workflowRunGroup.Do(key, func() (any, error) {
+		run, err := s.gh.GetWorkflowRun(ctx, repository, runID)
+		if err != nil {
+			return github.WorkflowRun{}, err
+		}
+		s.workflowRunMu.Lock()
+		now := time.Now()
+		for cachedKey, cached := range s.workflowRunCache {
+			if !now.Before(cached.expiresAt) {
+				delete(s.workflowRunCache, cachedKey)
+			}
+		}
+		if len(s.workflowRunCache) >= maxWorkflowRunCacheItems {
+			var oldestKey string
+			var oldestExpiry time.Time
+			for cachedKey, cached := range s.workflowRunCache {
+				if oldestKey == "" || cached.expiresAt.Before(oldestExpiry) {
+					oldestKey, oldestExpiry = cachedKey, cached.expiresAt
+				}
+			}
+			if oldestKey != "" {
+				delete(s.workflowRunCache, oldestKey)
+			}
+		}
+		s.workflowRunCache[key] = cachedWorkflowRun{run: run, expiresAt: now.Add(workflowRunCacheTTL)}
+		s.workflowRunMu.Unlock()
+		return run, nil
+	})
+	if err != nil {
+		return github.WorkflowRun{}, err
+	}
+	return value.(github.WorkflowRun), nil
+}
+
+type cacheScopeDecision struct {
+	WriteScope  string
+	ReadScopes  []string
+	PullRequest int64
+	Decision    string
+}
+
+func (s *Server) cacheScopesForWorkflow(ctx context.Context, repository string, st state.RunnerState) cacheScopeDecision {
+	readOnly := func(defaultScope, reason string) cacheScopeDecision {
+		return cacheScopeDecision{ReadScopes: []string{defaultScope}, Decision: reason}
+	}
+	noCache := func(reason string) cacheScopeDecision {
+		return cacheScopeDecision{Decision: reason}
+	}
+	resolveRepositoryDefaultScope := func(reason string) (string, cacheScopeDecision, bool) {
+		if s.gh == nil {
+			return "", noCache(reason), false
+		}
+		repositoryMetadata, err := s.gh.GetRepository(ctx, repository)
+		if err != nil {
+			if s.logger != nil {
+				s.logger.Warn("failed to resolve repository default branch for cache scope", "workflow_run_id", st.WorkflowRunID, "repository", repository, "error", err)
+			}
+			return "", noCache(reason), false
+		}
+		if !strings.EqualFold(strings.TrimSpace(repositoryMetadata.FullName), repository) || strings.TrimSpace(repositoryMetadata.DefaultBranch) == "" {
+			return "", noCache("no_cache_untrusted_repository_metadata"), false
+		}
+		return scopeForBranch(repositoryMetadata.DefaultBranch), cacheScopeDecision{}, true
+	}
+	if st.WorkflowRunID <= 0 {
+		defaultScope, decision, ok := resolveRepositoryDefaultScope("no_cache_repository_lookup_failed")
+		if !ok {
+			return decision
+		}
+		return readOnly(defaultScope, "read_only_missing_workflow_run")
+	}
+	run, err := s.workflowRunForCache(ctx, repository, st.WorkflowRunID)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to resolve workflow run for cache scope", "workflow_run_id", st.WorkflowRunID, "repository", repository, "error", err)
+		}
+		defaultScope, decision, ok := resolveRepositoryDefaultScope("no_cache_repository_lookup_failed")
+		if !ok {
+			return decision
+		}
+		return readOnly(defaultScope, "read_only_workflow_run_lookup_failed")
+	}
+	defaultScope := ""
+	if branch := strings.TrimSpace(run.Repository.DefaultBranch); branch != "" {
+		defaultScope = scopeForBranch(branch)
+	} else {
+		var decision cacheScopeDecision
+		var ok bool
+		defaultScope, decision, ok = resolveRepositoryDefaultScope("no_cache_repository_lookup_failed")
+		if !ok {
+			return decision
+		}
+	}
+	resolvedReadOnly := func(reason string) cacheScopeDecision {
+		return readOnly(defaultScope, reason)
+	}
+	event := strings.ToLower(strings.TrimSpace(run.Event))
+	if event == "pull_request" {
+		if len(run.PullRequests) == 0 || run.PullRequests[0].Number <= 0 {
+			return resolvedReadOnly("read_only_missing_pull_request_metadata")
+		}
+		pull, pullErr := s.gh.GetPullRequest(ctx, repository, run.PullRequests[0].Number)
+		if pullErr != nil {
+			s.logger.Warn("failed to resolve pull request for cache scope", "workflow_run_id", st.WorkflowRunID, "repository", repository, "error", pullErr)
+			return resolvedReadOnly("read_only_pull_request_lookup_failed")
+		}
+		baseRepo := strings.TrimSpace(pull.Base.Repository.FullName)
+		baseBranch := strings.TrimSpace(pull.Base.Ref)
+		headRepo := strings.TrimSpace(pull.Head.Repository.FullName)
+		if pull.Number != run.PullRequests[0].Number || baseRepo == "" || baseBranch == "" || headRepo == "" || !strings.EqualFold(baseRepo, repository) {
+			return resolvedReadOnly("read_only_untrusted_pull_request_metadata")
+		}
+		prScope := scopeForPR(pull.Number)
+		readScopes := uniqueCacheScopes(prScope, scopeForBranch(baseBranch), defaultScope)
+		decision := "internal_pull_request"
+		if !strings.EqualFold(headRepo, baseRepo) {
+			decision = "fork_pull_request"
+		}
+		return cacheScopeDecision{WriteScope: prScope, ReadScopes: readScopes, PullRequest: pull.Number, Decision: decision}
+	}
+	if event == "pull_request_target" || event == "workflow_run" || event == "issue_comment" {
+		return resolvedReadOnly("read_only_" + event)
+	}
+	headRepo := strings.TrimSpace(run.HeadRepository.FullName)
+	baseRepo := strings.TrimSpace(run.Repository.FullName)
+	branch := strings.TrimSpace(run.HeadBranch)
+	if headRepo == "" || baseRepo == "" || !strings.EqualFold(baseRepo, repository) || !strings.EqualFold(headRepo, baseRepo) {
+		return resolvedReadOnly("read_only_untrusted_repository_metadata")
+	}
+	if branch == "" {
+		return resolvedReadOnly("read_only_missing_branch")
+	}
+	if !cacheWriteTrustedEvent(event) {
+		return resolvedReadOnly("read_only_untrusted_event")
+	}
+	ownScope := scopeForBranch(branch)
+	return cacheScopeDecision{WriteScope: ownScope, ReadScopes: uniqueCacheScopes(ownScope, defaultScope), Decision: "branch"}
+}
+
+func cacheWriteTrustedEvent(event string) bool {
+	switch event {
+	case "push", "workflow_dispatch", "repository_dispatch", "delete", "registry_package", "page_build", "schedule":
+		return true
+	default:
+		return false
+	}
+}
+
+func uniqueCacheScopes(scopes ...string) []string {
+	result := make([]string, 0, len(scopes))
+	seen := make(map[string]struct{}, len(scopes))
+	for _, scope := range scopes {
+		scope = strings.Trim(strings.TrimSpace(scope), "/")
+		if scope == "" {
+			continue
+		}
+		if _, ok := seen[scope]; ok {
+			continue
+		}
+		seen[scope] = struct{}{}
+		result = append(result, scope)
+	}
+	return result
+}
+
+func cacheScopePrefixesJSON(cacheBasePrefix string, scopes []string) (string, error) {
+	prefixes := make([]string, 0, len(scopes))
+	for _, scope := range uniqueCacheScopes(scopes...) {
+		prefixes = append(prefixes, strings.TrimRight(cacheBasePrefix, "/")+"/"+scope)
+	}
+	value, err := json.Marshal(prefixes)
+	if err != nil {
+		return "", err
+	}
+	return string(value), nil
+}
+
 func (s *Server) createAndStart(w http.ResponseWriter, r *http.Request, req state.RunnerRequest, payload []byte) {
 	st, created, err := s.enqueueRunnerRequest(req, payload)
 	if err != nil {
@@ -41,6 +232,7 @@ func (s *Server) enqueueWorkflowJob(repositoryFullName string, githubInstallatio
 		ID:                   id,
 		Source:               "github_webhook",
 		JobID:                job.ID,
+		PullRequestNumber:    workflowJobPullRequestNumber(job.PullRequests),
 		GitHubInstallationID: githubInstallationID,
 		RepositoryFullName:   repositoryFullName,
 		RequestedLabels:      append([]string(nil), job.Labels...),
@@ -279,7 +471,9 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 			startStage = "github_runner_url"
 			return sandboxrunner.StartResult{}, err
 		}
-		return sandboxService.StartRunner(createCtx, sandboxrunner.StartInput{
+
+		// Generate cache STS credentials for this repository if cache is configured.
+		input := sandboxrunner.StartInput{
 			RequestID:         req.ID,
 			RunnerName:        req.RunnerName,
 			RepositoryURL:     repositoryURL,
@@ -296,7 +490,44 @@ func (s *Server) startRunner(ctx context.Context, id, workerID string) {
 				defer close(exitCh)
 				s.runnerExited(id, result, err)
 			},
-		})
+		}
+
+		if req.GitHubInstallationID > 0 {
+			storage, storageErr := s.cacheStorageForInstallation(req.GitHubInstallationID, sandboxConfig.APIURL)
+			if storageErr != nil {
+				if !errors.Is(storageErr, state.ErrCacheServiceNotConfigured) {
+					s.logger.Warn("failed to resolve cache storage", "id", id, "error", storageErr)
+				} else {
+					s.logger.Debug("cache storage is not configured", "id", id)
+				}
+			} else {
+				cacheBasePrefix := storage.prefix + "/" + req.RepositoryFullName
+				scopeDecision := s.cacheScopesForWorkflow(createCtx, req.RepositoryFullName, st)
+				s.logger.Debug("cache STS scope decision", "id", id, "decision", scopeDecision.Decision, "pull_request", scopeDecision.PullRequest, "write_scope", scopeDecision.WriteScope, "read_scopes", scopeDecision.ReadScopes)
+
+				stsCreds, stsErr := generateCacheSTS(createCtx, cacheSTSCredentialConfig{
+					Bucket: storage.bucket, AccessKeyID: storage.accessKeyID, SecretAccessKey: storage.secretKey,
+				}, cacheBasePrefix, scopeDecision.WriteScope, scopeDecision.ReadScopes, s.cfg.CacheSTSEndpoint, cacheSTSDurationSeconds(s.cfg.SandboxTimeout), s.cacheSTS)
+				if stsErr != nil {
+					s.logger.Warn("failed to generate cache STS", "id", id, "error", stsErr)
+				} else if readPrefixesJSON, marshalErr := cacheScopePrefixesJSON(cacheBasePrefix, scopeDecision.ReadScopes); marshalErr != nil {
+					s.logger.Warn("failed to encode cache read prefixes", "id", id, "error", marshalErr)
+				} else {
+					input.CacheS3Region = storage.region
+					input.CacheS3Bucket = storage.bucket
+					input.CacheS3Endpoint = storage.endpoint
+					input.CacheS3ReadPrefixes = readPrefixesJSON
+					if scopeDecision.WriteScope != "" {
+						input.CacheS3WritePrefix = cacheBasePrefix + "/" + scopeDecision.WriteScope
+					}
+					input.CacheS3AccessKeyID = stsCreds.AccessKeyID
+					input.CacheS3SecretKey = stsCreds.SecretAccessKey
+					input.CacheS3SessionToken = stsCreds.SessionToken
+				}
+			}
+		}
+
+		return sandboxService.StartRunner(createCtx, input)
 	}()
 	if err != nil {
 		s.failStart(id, st, startStage, err)

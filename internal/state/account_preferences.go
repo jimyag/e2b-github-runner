@@ -30,12 +30,57 @@ func (s *DBStore) GetAccountPreference(scopeType string, scopeID int64, namespac
 	return recordToAccountPreference(record), nil
 }
 
+func (s *DBStore) DeleteAccountPreference(scopeType string, scopeID int64, namespace, key string) error {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return err
+	}
+	scopeType = normalizeAccountScopeType(scopeType)
+	namespace = normalizeAccountPreferencePart(namespace)
+	key = normalizeAccountPreferencePart(key)
+	if scopeType == "" || scopeID <= 0 || namespace == "" || key == "" {
+		return ErrNotFound
+	}
+	result := db.Where("scope_type = ? AND scope_id = ? AND namespace = ? AND key = ?", scopeType, scopeID, namespace, key).Delete(&accountPreferenceRecord{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *DBStore) UpsertAccountPreference(preference AccountPreference) (AccountPreference, error) {
 	db, err := s.dbOrEnsure()
 	if err != nil {
 		return AccountPreference{}, err
 	}
 	return upsertAccountPreference(db, preference)
+}
+
+func (s *DBStore) UpsertAccountPreferenceAndSecrets(preference AccountPreference, secrets ...AccountSecret) (AccountPreference, error) {
+	db, err := s.dbOrEnsure()
+	if err != nil {
+		return AccountPreference{}, err
+	}
+	var saved AccountPreference
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		var err error
+		saved, err = upsertAccountPreference(tx, preference)
+		if err != nil {
+			return err
+		}
+		for _, secret := range secrets {
+			if _, err := upsertAccountSecret(tx, secret); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return AccountPreference{}, err
+	}
+	return saved, nil
 }
 
 func (s *DBStore) UpsertAccountPreferenceAndSecret(preference AccountPreference, secret *AccountSecret) (AccountPreference, *AccountSecret, error) {

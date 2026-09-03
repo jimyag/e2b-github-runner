@@ -5,6 +5,7 @@ import { toast } from "sonner"
 
 import type { SandboxTemplate, UserRunnerSpec } from "@/admin-types"
 import { runnerTypeCatalogRegion, runnerTypeOverridesGlobal, runnerTypeWorkflowYAML } from "@/components/user-runner-types-utils"
+import { useSandboxRegions } from "@/components/sandbox-catalog-utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -65,6 +66,7 @@ export function RunnerTypeForm({ mode, form, templates, saving, allowRunnerGroup
 
 export function UserRunnerTypesSection({ request, installationID }: { request: RequestFn; installationID?: number }) {
   const { t } = useTranslation()
+  const sandboxRegions = useSandboxRegions()
   const [items, setItems] = useState<UserRunnerSpec[]>([])
   const [sandboxSource, setSandboxSource] = useState("none")
   const [sandboxRegion, setSandboxRegion] = useState("us-south-1")
@@ -80,7 +82,7 @@ export function UserRunnerTypesSection({ request, installationID }: { request: R
   const currentQuery = useRef(query)
   currentQuery.current = query
 
-  const load = useCallback(async () => { const generation = ++loadGeneration.current; setLoading(true); try { const response = await request(`/user/runner-specs${query}`) as { items?: UserRunnerSpec[]; sandbox_source?: string; sandbox_region?: string }; if (generation !== loadGeneration.current || currentQuery.current !== query) return; setItems(response.items || []); setSandboxSource(response.sandbox_source || "none"); setSandboxRegion(runnerTypeCatalogRegion(response.sandbox_region || "")) } catch (error) { if (generation === loadGeneration.current && currentQuery.current === query) toast.error(error instanceof Error ? error.message : t("user.runnerTypesLoadFailed")) } finally { if (generation === loadGeneration.current && currentQuery.current === query) setLoading(false) } }, [query, request, t])
+  const load = useCallback(async () => { const generation = ++loadGeneration.current; setLoading(true); try { const response = await request(`/user/runner-specs${query}`) as { items?: UserRunnerSpec[]; sandbox_source?: string; sandbox_region?: string }; if (generation !== loadGeneration.current || currentQuery.current !== query) return; setItems(response.items || []); setSandboxSource(response.sandbox_source || "none"); setSandboxRegion(runnerTypeCatalogRegion(response.sandbox_region || "", sandboxRegions)) } catch (error) { if (generation === loadGeneration.current && currentQuery.current === query) toast.error(error instanceof Error ? error.message : t("user.runnerTypesLoadFailed")) } finally { if (generation === loadGeneration.current && currentQuery.current === query) setLoading(false) } }, [query, request, sandboxRegions, t])
   useEffect(() => { const generationRef = loadGeneration; setDialog(null); setSelected(null); setTemplates([]); setSaving(false); void load(); return () => { generationRef.current++ } }, [load])
   const openCreate = async () => { const operationQuery = query; setSelected(null); setForm(emptyForm); setDialog("create"); try { const suffix = installationID ? `&installation_id=${installationID}` : ""; const data = await request(`/user/sandbox/templates?region=${encodeURIComponent(sandboxRegion)}${suffix}`); if (currentQuery.current !== operationQuery) return; setTemplates(Array.isArray(data) ? data as SandboxTemplate[] : []) } catch (error) { if (currentQuery.current !== operationQuery) return; setTemplates([]); toast.error(error instanceof Error ? error.message : t("user.runnerTypesLoadFailed")) } }
   const openEdit = (item: UserRunnerSpec) => { setSelected(item); setForm({ name: item.name, labels: item.workflow_labels.join(", "), templateID: item.template_id || "", runnerGroup: item.runner_group || "", maxConcurrency: String(item.scope_max_concurrency), enabled: item.enabled }); setDialog("edit") }

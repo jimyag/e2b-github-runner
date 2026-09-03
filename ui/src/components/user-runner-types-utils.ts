@@ -1,8 +1,9 @@
 import type { UserRunnerSpec } from "@/admin-types"
-import { sandboxRegions } from "@/components/sandbox-catalog-utils"
+import { sandboxRegions, type SandboxRegion } from "@/components/sandbox-catalog-utils"
 
-export function runnerTypeCatalogRegion(regionID: string) {
-  return sandboxRegions.some((region) => region.id === regionID) ? regionID : sandboxRegions[0].id
+export function runnerTypeCatalogRegion(regionID: string, regions: readonly SandboxRegion[] = sandboxRegions) {
+	const catalog = regions.length > 0 ? regions : sandboxRegions
+	return catalog.some((region) => region.id === regionID) ? regionID : catalog[0].id
 }
 
 export function runnerTypeWorkflowYAML(labels: string[]) {

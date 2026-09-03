@@ -33,12 +33,23 @@ func TestSandboxRegionEndpoint(t *testing.T) {
 		"us-south-1":    "https://us-south-1-sandbox.qiniuapi.com",
 	}
 	for region, want := range tests {
-		got, ok := sandboxRegionEndpoint(region)
+		srv := &Server{cfg: config.Config{SandboxRegions: []config.SandboxRegionConfig{{ID: region, SandboxAPIURL: want}}}}
+		got, ok := srv.sandboxRegionEndpoint(region)
 		if !ok || got != want {
 			t.Fatalf("sandboxRegionEndpoint(%q) = %q, %v; want %q, true", region, got, ok, want)
 		}
 	}
-	if _, ok := sandboxRegionEndpoint("unknown"); ok {
+	server := &Server{cfg: config.Config{SandboxRegions: []config.SandboxRegionConfig{
+		{ID: "known", SandboxAPIURL: "https://known.example"},
+		{ID: "custom-region", SandboxAPIURL: "https://custom.example/"},
+	}}}
+	if got, ok := server.sandboxRegionEndpoint("custom-region"); !ok || got != "https://custom.example" {
+		t.Fatalf("custom sandbox region = %q, %v; want https://custom.example, true", got, ok)
+	}
+	if got, ok := server.supportedSandboxRegionEndpoint("HTTPS://CUSTOM.EXAMPLE/"); !ok || got != "https://custom.example" {
+		t.Fatalf("custom sandbox endpoint = %q, %v; want https://custom.example, true", got, ok)
+	}
+	if _, ok := server.sandboxRegionEndpoint("unknown"); ok {
 		t.Fatal("unknown sandbox region should be rejected")
 	}
 }

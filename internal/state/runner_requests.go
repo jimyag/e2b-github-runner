@@ -118,6 +118,9 @@ func (s *DBStore) createRequest(req RunnerRequest, payload []byte, status, failu
 	// Extract context in memory to avoid retaining raw webhook data that may be
 	// sensitive. Existing github_payload_json values remain available for backfill.
 	payloadLinks := githubLinksFromPayloadBytes(payload, req.RepositoryFullName, req.JobID)
+	if req.PullRequestNumber > 0 && payloadLinks.pullRequestNumber == 0 {
+		payloadLinks.pullRequestNumber = req.PullRequestNumber
+	}
 	var failedAt *time.Time
 	if status == StatusFailed {
 		failedAt = &now

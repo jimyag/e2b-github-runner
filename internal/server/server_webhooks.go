@@ -15,6 +15,13 @@ import (
 	"github.com/qiniu/ci-runner/internal/state"
 )
 
+func workflowJobPullRequestNumber(pulls []github.PullRequest) int64 {
+	if len(pulls) == 0 {
+		return 0
+	}
+	return pulls[0].Number
+}
+
 func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
 	if err != nil {
@@ -52,6 +59,7 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 			ID:                   id,
 			Source:               "github_webhook",
 			JobID:                event.WorkflowJob.ID,
+			PullRequestNumber:    workflowJobPullRequestNumber(event.WorkflowJob.PullRequests),
 			GitHubInstallationID: event.Installation.ID,
 			RepositoryFullName:   event.Repository.FullName,
 			RequestedLabels:      append([]string(nil), event.WorkflowJob.Labels...),

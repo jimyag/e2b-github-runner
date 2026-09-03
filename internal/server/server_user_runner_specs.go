@@ -100,7 +100,7 @@ func (s *Server) handleUserListRunnerSpecs(w http.ResponseWriter, r *http.Reques
 	sandboxRegion := ""
 	if _, snapshot, err := s.sandboxServiceForScope(prefScope); err == nil {
 		sandboxSource = snapshot.Source
-		sandboxRegion = sandboxRegionForAPIURL(snapshot.APIURL)
+		sandboxRegion = s.sandboxRegionForAPIURL(snapshot.APIURL)
 	}
 	response := userRunnerSpecListResponse{ScopeType: scope.Type, ScopeID: scope.ID, SandboxSource: sandboxSource, SandboxRegion: sandboxRegion, Items: make([]userRunnerSpecResponse, 0, len(items))}
 	for _, item := range items {
