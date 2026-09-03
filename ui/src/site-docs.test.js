@@ -14,6 +14,7 @@ describe("public site documentation catalog", () => {
       "/docs/getting-started/hosted",
       "/docs/getting-started/deploy",
       "/docs/guides/workflow",
+      "/docs/guides/cache",
       "/docs/guides/custom-templates",
       "/docs/troubleshooting",
       "/docs/reference/runner-labels",
@@ -28,6 +29,8 @@ describe("public site documentation catalog", () => {
     expect(siteDocumentForPath("/docs/guides/workflow", "zh-CN")?.title).toBe("运行第一个工作流")
     expect(siteDocumentForPath("/docs/guides/custom-templates", "en")?.title).toBe("Build and use a custom runner template")
     expect(siteDocumentForPath("/docs/guides/custom-templates", "zh-CN")?.title).toBe("构建并使用自定义 Runner 模板")
+    expect(siteDocumentForPath("/docs/guides/cache", "en")?.title).toBe("Configure and use Cache S3")
+    expect(siteDocumentForPath("/docs/guides/cache", "zh-CN")?.title).toBe("配置并使用 Cache S3")
     expect(siteDocumentForPath("/docs/not-a-guide", "en")).toBeNull()
   })
 
@@ -35,8 +38,8 @@ describe("public site documentation catalog", () => {
     const english = siteDocuments("en")
     const chinese = siteDocuments("zh")
 
-    expect(english).toHaveLength(7)
-    expect(chinese).toHaveLength(7)
+    expect(english).toHaveLength(8)
+    expect(chinese).toHaveLength(8)
     expect(english.map((document) => document.path)).toEqual(chinese.map((document) => document.path))
     expect(english.every((document) => document.title && document.summary && document.markdown.startsWith("# "))).toBe(true)
     expect(chinese.every((document) => document.title && document.summary && document.markdown.startsWith("# "))).toBe(true)
